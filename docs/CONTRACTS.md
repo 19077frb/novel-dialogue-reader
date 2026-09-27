@@ -294,3 +294,22 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
   `PROVIDER_UNAVAILABLE`/`PROVIDER_TIMEOUT`/`INVALID_MODEL_OUTPUT`）；详情脱敏截断。
 - `fake-provider` 只有设置 `NDR_ALLOW_FAKE_PROVIDER=1` 才可用，否则 422；界面会标注“测试用适配器”。
 - **连接成功只说明鉴权与 JSON 输出可解析，不代表小说标注效果**（效果评测属 T16）。
+
+## 17. 上下文窗口与预算（T08 已实现，内部契约）
+
+处理窗口是**调用边界**，不是场景边界；场景状态由 T09 管理。窗口构建不新增 HTTP 端点，
+但它的口径会进入 T10 的缓存键：
+
+- `BudgetPolicy`（PLAN 7.3 起点）：正文 `context_tokens=2500`、重叠 `overlap_tokens=200`、
+  状态 `state_tokens=300`、提示预留 `prompt_reserve_tokens=900`、输出预留 `output_reserve_tokens=800`；
+  复核策略 `RECHECK_POLICY=6000/300/600`；`gap_compression` 默认 **False**（T17 才可能开启）。
+- 证据保留层级：目标对白 → 目标之间的 Gap（必留） → 场景状态/已锁定结果 → 两端重叠 → 外层 Gap；
+  预算不足时按此顺序丢可选片段。**目标对白绝不截断**。
+- 单个目标自身超过正文预算 → 独立窗口 + 标 `oversized_quote`（保留待定，按完整长度计费）。
+- `initial` 模式只用 `visible_horizon_cp` 以内的原文；`reread` 忽略 horizon。
+  越界证据进入省略记录（`reason=beyond_visible_horizon`），不会送进模型。
+- 每条片段都有可回溯 ID（`quote_id`/`gap_id`/`node_id`/`overlap:<start>-<end>`/`state:*`），
+  窗口账本逐条记录 token，正文用量等于这些记录之和。
+- `CONTEXT_POLICY_VERSION="context-1"`；窗口/计划的 `dependency_hash` 覆盖
+  （原文版本、目标、证据、策略、提示版本、阅读模式、horizon、场景引用）。
+  **T10 的缓存键必须包含这些字段**，horizon 或阅读模式变化不得复用旧结果。
