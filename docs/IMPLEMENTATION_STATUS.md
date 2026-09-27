@@ -11,9 +11,9 @@ FakeProvider 或自造样例通过只记入 Offline。
 
 | Task | Implementation | Offline | Live | Quality | Evidence | Next action |
 | --- | --- | --- | --- | --- | --- | --- |
-| T00 | PASS | PASS | NOT_APPLICABLE | NOT_APPLICABLE | `ruff` All checks passed；`pytest backend/tests` 9 passed（当时）；`npm --prefix frontend run typecheck/test/build` 通过；真实 Chromium E2E 2 passed；`scripts/dev.ps1` 启动并经 Vite 代理访问 `/api/health` 200 后 `-Stop` 归零监听 | 已完成 |
-| T01 | PASS | PASS | NOT_APPLICABLE | NOT_APPLICABLE | `pytest backend/tests` → 41 passed（`test_schema.py`：空库迁移、重复迁移安全、模型与库列不漂移、0001→head 升级保留数据、外键违例、版本冲突、UTC 往返、枚举字符串落库、无明文密钥列、UNKNOWN/锁定/stale/队列状态独立、review_items 目标唯一）；`ruff check backend/src backend/tests backend/scripts` All checks passed；`alembic upgrade head` 可重复执行；真实运行 `dev.ps1` 后 `GET /api/health` → `{"state":"READY","revision":"0002","head_revision":"0002"}`，404 返回契约错误体且 `X-Request-ID` 一致；Playwright 2 passed（`data/run/e2e-t01.log`）；OpenAPI 与前端类型已重新生成 | 进入 T02：TXT 导入、编码与统一文档树 |
-| T02 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | TXT 导入、编码纠正与统一文档树 |
+| T00 | PASS | PASS | NOT_APPLICABLE | NOT_APPLICABLE | `ruff` All checks passed；前端 typecheck/test/build 通过；真实 Chromium E2E 2 passed；`scripts/dev.ps1` 启动并代理访问 `/api/health` 200 后 `-Stop` 归零监听 | 已完成 |
+| T01 | PASS | PASS | NOT_APPLICABLE | NOT_APPLICABLE | `pytest backend/tests`（当时 41 passed，含空库迁移、0001→head 升级保留数据、外键违例、版本冲突、UTC 往返、无明文密钥列、UNKNOWN/锁定/队列独立）；`ruff` 通过；`alembic upgrade head` 可重复执行；真实运行 health = READY/head | 已完成 |
+| T02 | PASS | PASS | NOT_APPLICABLE | NOT_APPLICABLE | `pytest backend/tests` → 76 passed（新增 `test_txt_ingest.py` 24 项、`test_book_import.py` 11 项）；`ruff` All checks passed；真实联调（本机服务、无模型调用）：用真正的 GB18030 样例经前端代理导入 → `encoding=gb18030`、`chapter_count=3`、`canonical_length_cp=143`，11 个节点与原文逐行一致，`𠮷`/`🐈` 完整保留，无 `?` 占位与 U+FFFD；错误编码 → 422 + candidates + lossy preview + FAILED job 且不建书；`data/books/<id>/{source.txt,versions/<vid>/canonical.txt}` 落盘与库内相对路径一致；OpenAPI/前端类型已重新生成 | 进入 T03：EPUB 导入与资源映射 |
 | T03 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | EPUB 导入、资源映射与节点限制 |
 | T04 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 书架、导入与无模型阅读器 |
 | T05 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 候选引语、Gap 与标注样例工具 |
@@ -36,10 +36,10 @@ FakeProvider 或自造样例通过只记入 Offline。
 
 ## 说明
 
-- T00/T01 的 Live/Quality 为 NOT_APPLICABLE：这两个任务不涉及真实模型或真实阅读器。
-- 浏览器 E2E 使用真实 Chromium 与真实后端进程，数据来自本地后端、不涉及模型效果，
-  因此记入 Offline，不构成 Live 证据。
-- T02 起才会读入真实文本；在 T16 之前，任何“准确率/覆盖率”目标都没有证据，保持 NOT_STARTED。
+- T00～T02 的 Live/Quality 为 NOT_APPLICABLE：这三个任务不涉及真实模型或真实阅读器。
+- 真实联调指“本机前后端真实进程 + 真实 TXT 文件”，仍不使用模型，因此只记入 Offline；
+  T06/T07 之后才会有 provider 相关的 live 项。
+- T02 的正文读取已可用，但**没有任何识别结果**：颜色/编号、场景、待定队列都要等 T05 起。
 - `data/run/*.log` 是本地运行产物（已忽略提交），可用账本列出的命令复现。
 - 已知命令偏差（npm `--prefix … install`、受限沙箱中的 `uv run`、GBK 编码与 alembic.ini）
   见 README“已知命令偏差”与决策 0001/0003。

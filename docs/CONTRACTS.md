@@ -51,16 +51,16 @@
 | 端点 | 契约摘要 | 实现任务 |
 | --- | --- | --- |
 | `GET /api/health` | 进程、数据库与版本状态；不调用模型 | **T00 已实现** |
-| `POST /api/books/import` | multipart file + encoding；返回 book_id 与 IMPORT job_id | T02 |
-| `GET /api/books`、`GET /api/books/{id}` | 元数据、导入状态、当前版本 | T02 |
-| `GET /api/books/{id}/chapters` | 按 ordinal 的目录与可定位范围 | T02/T03 |
+| `POST /api/books/import` | multipart file + encoding；202 返回 book_id 与 IMPORT job_id | **T02 已实现** |
+| `GET /api/books`、`GET /api/books/{id}` | 元数据、导入状态、当前版本 | **T02 已实现** |
+| `GET /api/books/{id}/chapters` | 按 ordinal 的目录与可定位范围 | **T02 已实现**（EPUB 在 T03） |
 | `PUT /api/books/{id}/reading-progress` | 保存阅读位置，不调用模型 | T04 |
-| `GET /api/books/{id}/content` | chapter/range + horizon，返回结构化节点 | T04 |
+| `GET /api/books/{id}/content` | 结构化正文节点（章节或码点范围；horizon 见 T04/T15） | **T02 已实现**（范围部分） |
 | `GET /api/books/{id}/resources/{resource_id}` | 受控登记资源 | T03 |
 | `GET/POST/PATCH/DELETE /api/model-profiles*` | 非敏感配置与 has_key；keep/replace/remove 密钥 | T06 |
 | `POST /api/model-profiles/test` | 有预算的微型连接测试 | T07 |
 | `POST /api/books/{id}/estimates` | 纯本地估算，说明依据 | T08 |
-| `POST /api/jobs`、`GET /api/jobs/{id}`、`pause`/`resume`/`reconcile` | 幂等创建、检查点、usage、恢复 | T10/T14 |
+| `GET /api/jobs/{id}` | 任务状态、进度与错误 | **T02 已实现**（最小轮询；调度/usage/恢复见 T10/T14） |
 | `GET /api/books/{id}/annotations` | 有效投影与图例，受 horizon 与阅读模式约束 | T11/T15 |
 | `GET /api/books/{id}/review-items`、`GET /api/review-items/{id}` | 待确认队列与详情 | T13 |
 | `GET /api/quotes/{id}`、`POST /api/quotes/{id}/review-items` | 普通对白详情与主动标记 | T12/T13 |
@@ -130,3 +130,22 @@ FakeProvider 的成功只证明业务/状态机；真实模型兼容性需要真
 | jobs / job_windows / inference_runs / result_cache | 任务、窗口、每次推理尝试与语义缓存 | 0001 |
 | review_items / corrections | 待确认队列与人工更正（含撤销留痕） | 0002 |
 | export_snapshots / export_artifacts | 导出快照与成品 | T15A |
+
+## 10. TXT 导入与编码（T02 已实现）
+
+- `POST /api/books/import`：multipart 字段 `file`（必填）、`encoding`（可选，留空自动检测）、
+  `title`（可选，默认文件名）。返回 202 + `{book_id, book_version_id, job_id, import_status, encoding,
+  encoding_confidence, chapter_count, canonical_length_cp, reused_book, reused_version, warnings}`。
+- 只接受 `.txt`（其它后缀 415）；空文件 422；超过 `NDR_MAX_IMPORT_BYTES`（默认 50 MiB）413。
+- 编码：`utf-8 → gb18030 → big5` 严格解码 + 可读性门槛（仅自动检测时使用）。失败返回 422，
+  `details` 含 `requested_encoding`、`candidates[]`（每项 `encoding/ok/plausibility/detail`）、
+  `preview`（有损，标注 `preview_is_lossy: true`）与失败的 `job_id`。**正文里绝不会出现 U+FFFD。**
+- 复用：同一份原始字节复用同一本书；`(canonical_sha256, parser_version, normalization_version)` 相同则复用版本；
+  换编码生成新版本并切换 `active_version_id`。
+- 正文读取：`GET /api/books/{id}/content` 支持 `chapter_id` 或 `start_cp`/`end_cp`（`[start,end)` 码点），
+  `limit`（默认 500，最大 2000）与 `cursor`；返回节点 `{node_id, node_type, ordinal, start_cp, end_cp,
+  chapter_id, chapter_ordinal, text}` 与 `next_cursor`。范围非法返回 422，章节不存在返回 404。
+- 落盘布局（数据目录内，API 不暴露路径）：`books/<book_id>/source.<ext>`（原始字节，不可变）、
+  `books/<book_id>/versions/<version_id>/canonical.txt`（规范化全文，LF）。
+- `text_mappings` 每个 canonical 行一条记录，无缝覆盖整段 canonical 文本；`synthetic=true` 表示
+  该行行尾是导入时规范化出来的（原文为 CRLF/CR）。

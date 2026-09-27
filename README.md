@@ -3,8 +3,8 @@
 为中文轻小说译本的对白添加颜色/编号，帮助读者辨认说话人；原文不可变，识别结果单独保存，
 不确定的对白交给用户确认。产品目标见 [PLAN.md](PLAN.md)，实现规格见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
-> **当前状态（2026-09-28）**：已完成 **T00 工程骨架** 与 **T01 领域模型/数据库迁移/公共契约**。
-> 导入、阅读、模型配置、预览、确认与导出功能 **尚未实现**。
+> **当前状态（2026-09-28）**：已完成 **T00 工程骨架**、**T01 领域模型/数据库迁移/公共契约**、
+> **T02 TXT 导入与无模型阅读**（EPUB 导入、模型配置、预览、确认与导出功能 **尚未实现**）。
 > 真实模型联调（live）与真实作品效果评测（quality）**均未开始**，没有任何准确率数据。
 > 进度与证据见 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)，交接见 [docs/HANDOFF.md](docs/HANDOFF.md)。
 
@@ -61,6 +61,26 @@ uv run --project backend alembic -c backend/alembic.ini current        # 查看�
 - 应用默认**不会**自动迁移（避免隐式改动用户数据）；需要时用 `NDR_AUTO_MIGRATE=1` 显式开启
   （E2E 用隔离数据目录时使用）。
 
+## 导入与阅读（T02）
+
+无模型也能跑通导入与整本阅读（`GET /api/books/{id}/content` 返回结构化节点，前端在 T04 接入）：
+
+```powershell
+# 导入 TXT（encoding 可省略：按 utf-8 → gb18030 → big5 严格检测）
+$r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8765/api/books/import -Form @{ file = Get-Item .\我的小说.txt }
+$bookId = $r.data.book_id
+
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId"                       | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId/chapters"              | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId/content?limit=200"     | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/jobs/$($r.data.job_id)"              | ConvertTo-Json -Depth 6
+```
+
+- 选错编码不会被静默接受：返回 422，`details.candidates` 列出可用编码，`details.preview` 是**有损**预演
+  （`preview_is_lossy: true`），并带上失败的 `job_id`；正文里绝不会出现替换符 U+FFFD。
+- 重复导入同一份文件复用同一本书与同一版本；换编码生成新版本并切换活动版本。
+- 落盘位置（数据目录内，API 不暴露路径）：`books/<book_id>/source.*`（原始字节，不可变）与
+  `books/<book_id>/versions/<version_id>/canonical.txt`（规范化全文，LF）。
 ## 验证
 
 ```powershell
