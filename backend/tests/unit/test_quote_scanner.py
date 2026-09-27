@@ -209,6 +209,19 @@ def test_gap_is_skipped_when_quotes_touch() -> None:
     assert gaps == ()
 
 
+def test_gap_can_cross_chapter_boundary() -> None:
+    """F12 的解析部分：Gap 允许跨章节，不能只按章节关闭。"""
+
+    text = "第一章 一\n「甲」\n\n第二章 二\n少年沉默了很久。\n「乙」"
+    result = _scan(text)
+    gaps = build_gaps(text, result.quotes, book_version_id=VERSION, scanner_version=SCANNER_VERSION)
+
+    assert len(gaps) == 1
+    narration = text[gaps[0].start_cp : gaps[0].end_cp]
+    assert "第二章 二" in narration  # 跨过了章节标题
+    assert gaps[0].decision is GapDecision.UNCERTAIN
+
+
 def test_gap_can_span_paragraph_breaks() -> None:
     text = "「一」\n少年沉默。\n「二」"
     result = _scan(text)

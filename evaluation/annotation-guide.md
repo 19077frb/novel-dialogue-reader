@@ -58,3 +58,23 @@ T05/T16 的工具还会额外校验引用完整性（`scene_id`、`quote_id`、`
 报告对白提取精确率/召回率、场景错误切断/连接率、分组准确率、同人 pairwise F1、已接受准确率与
 覆盖率、无证据强标率、新人物误建/漏建、难例分项指标、每万字 token/费用/耗时。
 样本不足时必须给出样本量与不确定性，不得宣布达标。
+
+## 7. 工具用法（T05 起）
+
+用扫描器候选生成可填写的模板，再人工补全判定：
+
+```powershell
+# 1) 生成模板（候选的 resolvable 默认为 false、group_id 为 null，kind 为 unknown）
+uv run --project backend python backend/scripts/gold_standard.py template --text .\作品.txt --out evaluation\manifests\作品.json
+
+# 2) 人工填写 group_id / resolvable / kind / evidence_refs（模板不是金标准）
+
+# 3) 校验结构与引用（可同时给出正文做范围与引号检查）
+uv run --project backend python backend/scripts/gold_standard.py validate `
+  --gold evaluation\manifests\作品.json --text .\作品.txt
+```
+
+- 校验会检查：JSON Schema、scene/quote/gap 引用存在、片段与证据范围合法（fragment ⊆ quote、must_keep ⊆ gap）、
+  `resolvable=false` 必须 `group_id=null`、`group_id` 属于同场景参与者、证据 `visible_from_cp` 不早于证据本身，
+  以及金标准对白是否被候选扫描器覆盖（覆盖率只说明“提取到了”，不代表归属正确）。
+- 离线查看候选扫描结果（不调用模型）：`... scan --text .\作品.txt`。
