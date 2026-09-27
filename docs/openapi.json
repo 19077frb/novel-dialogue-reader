@@ -392,6 +392,59 @@
         }
       }
     },
+    "/api/books/{book_id}/reading-progress": {
+      "put": {
+        "tags": [
+          "books"
+        ],
+        "summary": "保存阅读位置与阅读模式（不调用模型）",
+        "description": "保存书签：只写数据库，不触发任何模型调用。",
+        "operationId": "save_reading_progress_route_api_books__book_id__reading_progress_put",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadingProgressIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ReadingProgressOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/{job_id}": {
       "get": {
         "tags": [
@@ -508,6 +561,10 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Read Position Cp"
+          },
+          "reading_mode": {
+            "$ref": "#/components/schemas/ReadingMode",
+            "default": "initial"
           },
           "version": {
             "type": "integer",
@@ -940,6 +997,25 @@
         ],
         "title": "DataEnvelope[JobOut]"
       },
+      "DataEnvelope_ReadingProgressOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReadingProgressOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ReadingProgressOut]"
+      },
       "DataEnvelope_list_ChapterOut__": {
         "properties": {
           "data": {
@@ -1214,6 +1290,85 @@
           "NEEDS_RECONCILIATION"
         ],
         "title": "JobState"
+      },
+      "ReadingMode": {
+        "type": "string",
+        "enum": [
+          "initial",
+          "reread"
+        ],
+        "title": "ReadingMode"
+      },
+      "ReadingProgressIn": {
+        "properties": {
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "read_position_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Read Position Cp"
+          },
+          "reading_mode": {
+            "$ref": "#/components/schemas/ReadingMode",
+            "default": "initial"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_version_id",
+          "read_position_cp"
+        ],
+        "title": "ReadingProgressIn",
+        "description": "保存阅读书签：不调用模型，只写位置与模式。"
+      },
+      "ReadingProgressOut": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "read_position_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Read Position Cp"
+          },
+          "reading_mode": {
+            "$ref": "#/components/schemas/ReadingMode"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "book_version_id",
+          "read_position_cp",
+          "reading_mode",
+          "version"
+        ],
+        "title": "ReadingProgressOut"
       },
       "ValidationError": {
         "properties": {
