@@ -978,6 +978,48 @@
           }
         }
       }
+    },
+    "/api/model-profiles/test": {
+      "post": {
+        "tags": [
+          "model-profiles"
+        ],
+        "summary": "连接测试（微型结构化请求；不评估小说效果）",
+        "description": "有预算的微型请求：检查鉴权与输出可解析。\n\n网络调用**不在数据库事务里**：先写入 PREPARED 的推理尝试记录，再调用提供方，\n最后回写结果；usage 缺失时保持 unknown，不写成 0。",
+        "operationId": "test_connection_route_api_model_profiles_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionTestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ConnectionTestOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1215,6 +1257,113 @@
           "end_cp"
         ],
         "title": "ChapterOut"
+      },
+      "ConnectionTestIn": {
+        "properties": {
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelProfileCreate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ConnectionTestIn",
+        "description": "连接测试请求：已保存配置，或临时草稿（草稿不落库）。"
+      },
+      "ConnectionTestOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "protocol": {
+            "type": "string",
+            "title": "Protocol"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "adapter": {
+            "type": "string",
+            "title": "Adapter"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage"
+          },
+          "usage_unknown": {
+            "type": "boolean",
+            "title": "Usage Unknown",
+            "default": true
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ok",
+          "protocol",
+          "model",
+          "adapter",
+          "detail",
+          "run_id"
+        ],
+        "title": "ConnectionTestOut"
       },
       "ContentNodeOut": {
         "properties": {
@@ -1477,6 +1626,25 @@
           "request_id"
         ],
         "title": "DataEnvelope[BookOut]"
+      },
+      "DataEnvelope_ConnectionTestOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ConnectionTestOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ConnectionTestOut]"
       },
       "DataEnvelope_ContentResponse_": {
         "properties": {

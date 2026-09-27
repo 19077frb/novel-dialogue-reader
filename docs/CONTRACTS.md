@@ -58,7 +58,7 @@
 | `GET /api/books/{id}/content` | 结构化正文节点 + `payload`（章节或码点范围；horizon 见 T04/T15） | **T02/T03 已实现**（范围部分） |
 | `GET /api/books/{id}/resources/{resource_id}` | 受控登记资源（图片等，独立响应体） | **T03 已实现** |
 | `GET/POST/PATCH/DELETE /api/model-profiles*` | 非敏感配置与 has_key；keep/replace/remove 密钥 | **T06 已实现** |
-| `POST /api/model-profiles/test` | 有预算的微型连接测试 | T07 |
+| `POST /api/model-profiles/test` | 有预算的微型连接测试（已存配置或草稿） | **T07 已实现** |
 | `POST /api/books/{id}/estimates` | 纯本地估算，说明依据 | T08 |
 | `GET /api/jobs/{id}` | 任务状态、进度与错误 | **T02 已实现**（最小轮询；调度/usage/恢复见 T10/T14） |
 | `GET /api/books/{id}/annotations` | 有效投影与图例，受 horizon 与阅读模式约束 | T11/T15 |
@@ -255,3 +255,42 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 - `params` 中出现 `api_key/token/authorization/password/secret` 等键返回 422（密钥只能走 `api_key`）。
 - `expected_version` 不符返回 409 `VERSION_CONFLICT`；同名配置、被任务引用的删除返回 409 `RESOURCE_CONFLICT`。
 - `POST /api/model-profiles/test`（有预算的微型连接测试）属于 T07，本任务不发起任何真实调用。
+
+## 16. 模型输出契约与连接测试（T07 已实现）
+
+**输出契约**（`llm/schemas.py`，`schema_version="1.0"`，`extra` 一律禁止）：
+
+```json
+{
+  "schema_version": "1.0",
+  "scene_updates": [{"temp_ref": "scene_2", "after_gap_id": "g1", "starts_at_quote_id": "q2", "evidence_refs": ["p1"]}],
+  "gap_decisions": [{"gap_id": "g1", "decision": "BREAK", "evidence_refs": ["p1"]}],
+  "new_speakers": [{"temp_ref": "new1", "scene_ref": "scene_current", "first_quote_id": "q2", "description": "门外的声音", "evidence_refs": ["p2"]}],
+  "labels": [{"quote_id": "q1", "scene_ref": "scene_current", "kind": "speech", "assignment": "EXISTING", "speaker_ref": "speaker_a", "basis": "DIRECT", "evidence_refs": ["p1"]}],
+  "identity_proposals": [{"operation": "MERGE", "input_refs": ["s1", "s2"], "output_refs": ["s1"], "evidence_refs": ["p3"]}],
+  "needs_context": ["q3"]
+}
+```
+
+程序级校验（`llm/validation.py`）：目标对白必须全部覆盖且唯一；只能引用**程序给出的** ID；
+新场景必须由同一次输出里的 `BREAK` 触发；`NEW` 必须引用已声明的 `temp_ref` 且同场景；
+非 speech 的 `assignment`/`speaker_ref` 必须为 null；证据必须来自已发送的片段。
+解析只接受整段 JSON 或整段代码块，**不从长文本里截取**、**不执行模型输出**。
+重试策略 `RetryPolicy(max_format_retries=1)` 只对 `INVALID_MODEL_OUTPUT` 生效。
+
+**连接测试** `POST /api/model-profiles/test`：
+
+```json
+{"profile_id": "mp1"}                       // 或
+{"draft": {"name": "临时", "protocol": "chat-completions-compatible", "base_url": "https://api.example.com/v1",
+           "model": "m", "credential_mode": "session", "api_key": "..."}}
+```
+
+- 请求体是**微型结构化任务**：要求模型回显固定空结果对象；返回
+  `{ok, protocol, model, adapter, detail, latency_ms, usage, usage_unknown, error_code, run_id}`。
+- 每次调用都写入 `inference_runs`（`job_id` 为 NULL、快照含 `purpose=connection-test`）；
+  网络调用在数据库事务之外；未知用量保持 NULL 且 `usage_unknown=true`。
+- 上游错误映射为稳定错误码（`PROVIDER_AUTH_FAILED`/`MODEL_NOT_FOUND`/`RATE_LIMITED`/
+  `PROVIDER_UNAVAILABLE`/`PROVIDER_TIMEOUT`/`INVALID_MODEL_OUTPUT`）；详情脱敏截断。
+- `fake-provider` 只有设置 `NDR_ALLOW_FAKE_PROVIDER=1` 才可用，否则 422；界面会标注“测试用适配器”。
+- **连接成功只说明鉴权与 JSON 输出可解析，不代表小说标注效果**（效果评测属 T16）。
