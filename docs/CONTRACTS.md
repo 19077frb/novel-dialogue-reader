@@ -467,3 +467,50 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
   阅读页颜色、图例、待确认数量与队列同时更新。
 - 提示文案使用中文；组件测试与 E2E 通过 `data-testid` 定位（`review-item`、`quote-detail-drawer`、
   `correction-form`、`gap-decision-BREAK`、`drawer-defer`、`drawer-undo` 等）。
+
+## 23. 暂停恢复、预算到顶与故障闭环（T14 已实现）
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /api/jobs/{id}/recovery` | 只读：把任务状态翻译成**可执行动作**（含是否付费、是否缺凭据、建议退避秒数） |
+| `POST /api/jobs/{id}/pause` / `resume` / `run` | 已有端点；`resume` 复用已完成窗口，`run` 手动触发本地调度器 |
+| `POST /api/jobs/{id}/reconcile` | `retry`（显式重发，可能重复计费）/ `keep_unknown`（保留未知，转 PARTIAL） |
+| `POST /api/quotes/{id}/recheck` | 局部复核（见第 21 节） |
+
+恢复动作（`RecoveryActionOut.action`）与状态对应：
+
+| 状态 | 动作 | 付费 |
+| --- | --- | --- |
+| `QUEUED` | `pause`、`run` | `run` 付费 |
+| `RUNNING` | `pause` | 否 |
+| `PAUSING` | `wait`（当前窗口返回后生效） | 否 |
+| `PAUSED` / `PARTIAL` | `resume` | 剩余窗口会付费 |
+| `BUDGET_EXHAUSTED` | `new_job`（预算不可变：用更大预算新建任务） | 是 |
+| `NEEDS_RECONCILIATION` | `reconcile_keep`（免费）/ `reconcile_retry`（付费） | 视动作 |
+| `FAILED`（缺凭据） | `open_settings` + `run` | `run` 付费 |
+| `COMPLETED` | 无 | — |
+
+语义要点：
+
+- **任务失败不影响阅读**：恢复只改任务/尝试/窗口状态，绝不触碰原文与标注；E2E 断言失败后原文仍可读。
+- **未知付费结果不自动重发**：超时或进程中断留下的 `DISPATCHED` 尝试在超过租约后被标为
+  `UNKNOWN_OUTCOME`，任务与窗口进入 `NEEDS_RECONCILIATION`；只有显式 `retry` 才会重新排队。
+  未知用量保持 `usage_json=NULL` 并计入 `unknown_usage_runs`，不写 0。
+- **限流有上限地退避重试**：只有「确定没有被处理」的错误（`RATE_LIMITED`、`PROVIDER_UNAVAILABLE`）
+  会自动重试，最多 `NDR_RATE_LIMIT_MAX_RETRIES` 次，退避时间
+  `min(base * 2^(n-1), cap)`（默认 1s→2s，上限 30s）；每次失败尝试都单独写 `inference_runs`。
+  超时**不在**自动重试行列。
+- **启动恢复扫描**（`NDR_RECOVER_ON_STARTUP=1`，默认开）：`recover_on_startup` 在 lifespan 里执行
+  —— 超租约的 `DISPATCHED` → 未知结果；`PAUSING` → `PAUSED`；`RUNNING` → `PARTIAL`
+  （已完成窗口保持 `COMPLETED`，未完成窗口留在 `QUEUED`，等待用户显式继续）。
+- **缺凭据可解释**：协议需要密钥、用户又选择了 `session`/`system` 模式却取不到密钥时，
+  任务落到 `FAILED` 且 `last_error=PROVIDER_AUTH_FAILED: 缺少模型凭据…`，
+  `GET /recovery` 返回 `requires_credential=true` 与 `open_settings` 动作（绝不留下 RUNNING 孤儿）。
+  `credential_mode=none`（本地无鉴权网关）与 `fake-provider` 不受此限制。
+- **默认关闭自动付费重算**：没有任何自动重建任务的逻辑；预算到顶后由用户在预览页显式点
+  「用当前预算重新处理此范围」，或调整预算后再点（`data-testid="preview-recompute"`）。
+- 新增/更新的配置项：`NDR_RATE_LIMIT_MAX_RETRIES`（默认 2）、`NDR_RATE_LIMIT_BACKOFF_BASE_SECONDS`（1）、
+  `NDR_RATE_LIMIT_BACKOFF_MAX_SECONDS`（30）、`NDR_STALE_RUN_LEASE_SECONDS`（900）、
+  `NDR_RECOVER_ON_STARTUP`（true）、`NDR_FAKE_PROVIDER_SCRIPT`（仅测试）。
+  测试专用：FakeProvider 的失败脚本也可以写在模型配置的 `params.script` 里
+  （`rate_limited_once` / `unavailable_once` / `timeout_once` / `auth_failed_once`），便于按用例切换。
