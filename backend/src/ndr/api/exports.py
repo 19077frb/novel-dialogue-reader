@@ -30,7 +30,7 @@ from ..exports.service import (
 from ..exports.snapshot import freeze_snapshot
 from ..ingest.query import active_version, get_book_or_404
 from ..storage.models import BookVersion, ExportArtifact, ExportSnapshot
-from ..storage.paths import resolve_within
+from ..storage.paths import UnsafePathError, resolve_within
 from ..storage.transactions import transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
@@ -211,7 +211,11 @@ def download_export_route(
             details={"export_id": export_id, "state": artifact.state},
             status_code=409,
         )
-    path = resolve_within(settings, artifact.relative_path)
+    try:
+        path = resolve_within(settings, artifact.relative_path)
+    except UnsafePathError:
+        # 记录被篡改/越界时绝不下发文件，也不把数据目录路径回给调用方（T18 资源边界）
+        raise ApiError.not_found("导出文件路径无效", export_id=export_id) from None
     if not path.exists():
         raise ApiError.not_found("导出文件已被移除", export_id=export_id)
     return FileResponse(

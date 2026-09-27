@@ -15,7 +15,7 @@ from ..api.errors import ApiError
 from ..config import Settings
 from ..domain.enums import ErrorCode
 from ..storage.models import Book, BookVersion, Resource
-from ..storage.paths import resolve_within
+from ..storage.paths import UnsafePathError, resolve_within
 from .epub import BLOCKED_MEDIA_PREFIXES, normalize_entry_name
 
 RESOURCE_MEDIA_TYPE_FALLBACK = "application/octet-stream"
@@ -67,7 +67,16 @@ def read_resource_bytes(
             details={"book_version_id": version.id},
             status_code=409,
         )
-    source_path = resolve_within(settings, version.source_path)
+    try:
+        source_path = resolve_within(settings, version.source_path)
+    except UnsafePathError:
+        # 源文件路径越界（例如库被手动改过）：拒绝读取，不回显磁盘路径（T18 资源边界）
+        raise ApiError(
+            ErrorCode.NOT_FOUND,
+            "该版本的源文件路径无效",
+            details={"book_version_id": version.id},
+            status_code=409,
+        ) from None
     if not source_path.exists():
         raise ApiError(
             ErrorCode.NOT_FOUND,

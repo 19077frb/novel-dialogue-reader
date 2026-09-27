@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "generate:api": "openapi-typescript ../docs/openapi.json -o src/api/schema.d.ts"
+    "generate:api": "openapi-typescript ../docs/openapi.json -o src/api/schema.d.ts",
+    "check:api": "node scripts/check-api-types.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",

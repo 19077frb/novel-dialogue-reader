@@ -65,6 +65,10 @@ if (-not $SkipFrontend) {
         & npm --prefix frontend run typecheck
     }
 
+    Invoke-Check 'frontend API 类型与 docs/openapi.json 一致' {
+        & npm --prefix frontend run check:api
+    }
+
     Invoke-Check 'frontend unit tests' {
         & npm --prefix frontend run test -- --run
     }
