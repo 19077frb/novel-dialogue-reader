@@ -17,10 +17,12 @@ vi.mock('../src/api/books', () => ({
       chapter,
       cursor,
     ],
+    quotes: (id: string, chapter: string | null) => ['quotes', id, chapter],
   },
   fetchBook: vi.fn(),
   fetchChapters: vi.fn(),
   fetchContent: vi.fn(),
+  fetchQuotes: vi.fn(),
   saveReadingProgress: vi.fn(),
   resourceUrl: (bookId: string, resourceId: string) =>
     `/api/books/${bookId}/resources/${resourceId}`,
@@ -65,10 +67,36 @@ function nodesFor(chapterId: string): ContentNodeOut[] {
       end_cp: chapterId === 'c2' ? 30 : 9,
       chapter_id: chapterId,
       chapter_ordinal: chapterId === 'c2' ? 1 : 0,
-      text: chapterId === 'c2' ? '第二章的正文。' : '第一章的正文。',
+      text: chapterId === 'c2' ? '「第二章的正文。」' : '「第一章的正文。」',
       payload: {},
     },
   ] as ContentNodeOut[]
+}
+
+function quotesFor(chapterId: string) {
+  const start = chapterId === 'c2' ? 21 : 0
+  return {
+    items: [
+      {
+        quote_id: `q-${chapterId}`,
+        book_version_id: 'v1',
+        chapter_id: chapterId,
+        chapter_ordinal: chapterId === 'c2' ? 1 : 0,
+        start_cp: start,
+        end_cp: start + 9,
+        text: chapterId === 'c2' ? '第二章的正文。' : '第一章的正文。',
+        delimited_text: chapterId === 'c2' ? '「第二章的正文。」' : '「第一章的正文。」',
+        delimiter: 'corner_bracket',
+        opening: '「',
+        closing: '」',
+        nesting_depth: 0,
+        parent_quote_id: null,
+        kind_hint: null,
+        scanner_version: 'quote-scan-1',
+      },
+    ],
+    next_cursor: null,
+  }
 }
 
 describe('ReaderPage', () => {
@@ -76,6 +104,7 @@ describe('ReaderPage', () => {
     vi.mocked(booksApi.fetchBook).mockReset()
     vi.mocked(booksApi.fetchChapters).mockReset()
     vi.mocked(booksApi.fetchContent).mockReset()
+    vi.mocked(booksApi.fetchQuotes).mockReset()
     vi.mocked(booksApi.saveReadingProgress).mockReset()
 
     vi.mocked(booksApi.fetchBook).mockResolvedValue(BOOK)
@@ -90,6 +119,9 @@ describe('ReaderPage', () => {
       nodes: nodesFor(query?.chapterId ?? 'c1'),
       next_cursor: null,
     }))
+    vi.mocked(booksApi.fetchQuotes).mockImplementation(async (_bookId, query) =>
+      quotesFor(query?.chapterId ?? 'c1'),
+    )
     vi.mocked(booksApi.saveReadingProgress).mockResolvedValue({
       book_id: 'b1',
       book_version_id: 'v1',
@@ -102,14 +134,14 @@ describe('ReaderPage', () => {
   it('按书签位置打开对应章节并渲染正文', async () => {
     renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
 
-    expect(await screen.findByText('第二章的正文。')).toBeInTheDocument()
+    expect(await screen.findByText(/第二章的正文/)).toBeInTheDocument()
     const active = screen.getByRole('button', { current: true })
     expect(active).toHaveTextContent('第二章')
   })
 
   it('切换章节时保存阅读位置', async () => {
     renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
-    await screen.findByText('第二章的正文。')
+    await screen.findByText(/第二章的正文/)
 
     await userEvent.click(screen.getByRole('button', { name: /第一章/ }))
 
@@ -120,7 +152,19 @@ describe('ReaderPage', () => {
       readingMode: 'initial',
       expectedVersion: 3,
     })
-    expect(await screen.findByText('第一章的正文。')).toBeInTheDocument()
+    expect(await screen.findByText(/第一章的正文/)).toBeInTheDocument()
+  })
+
+  it('显示候选引语覆盖，并可关闭（覆盖不等于识别结果）', async () => {
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
+
+    const marks = await screen.findAllByTestId('candidate-quote')
+    expect(marks).toHaveLength(1)
+    expect(marks[0]).toHaveTextContent('「第二章的正文。」')
+    expect(screen.getByText(/候选引语 1 条/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByTestId('toggle-candidates'))
+    await waitFor(() => expect(screen.queryAllByTestId('candidate-quote')).toHaveLength(0))
   })
 
   it('findCurrentStartCp 取第一个进入视口的节点', () => {

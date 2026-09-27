@@ -163,6 +163,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 候选引语列表（不含说话人判断） */
+        get: operations["list_quotes_route_api_books__book_id__quotes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/gaps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Gap（相邻外层候选之间的叙述） */
+        get: operations["list_gaps_route_api_books__book_id__gaps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/locate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 按码点范围定位原文（章节/节点/源文档） */
+        get: operations["locate_route_api_books__book_id__locate_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/quotes/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重新扫描候选引语与 Gap（有用户标注时拒绝） */
+        post: operations["scan_quotes_route_api_books__book_id__quotes_scan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{quote_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 候选对白详情（含上下文与前置 Gap） */
+        get: operations["get_quote_route_api_quotes__quote_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -313,6 +398,20 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /** CursorPage[GapOut] */
+        CursorPage_GapOut_: {
+            /** Items */
+            items: components["schemas"]["GapOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** CursorPage[QuoteOut] */
+        CursorPage_QuoteOut_: {
+            /** Items */
+            items: components["schemas"]["QuoteOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
         /** DataEnvelope[BookOut] */
         DataEnvelope_BookOut_: {
             data: components["schemas"]["BookOut"];
@@ -340,6 +439,24 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[CursorPage[GapOut]] */
+        DataEnvelope_CursorPage_GapOut__: {
+            data: components["schemas"]["CursorPage_GapOut_"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[CursorPage[QuoteOut]] */
+        DataEnvelope_CursorPage_QuoteOut__: {
+            data: components["schemas"]["CursorPage_QuoteOut_"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[ImportResult] */
         DataEnvelope_ImportResult_: {
             data: components["schemas"]["ImportResult"];
@@ -358,9 +475,36 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[LocateOut] */
+        DataEnvelope_LocateOut_: {
+            data: components["schemas"]["LocateOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[QuoteDetailOut] */
+        DataEnvelope_QuoteDetailOut_: {
+            data: components["schemas"]["QuoteDetailOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[ReadingProgressOut] */
         DataEnvelope_ReadingProgressOut_: {
             data: components["schemas"]["ReadingProgressOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[ScanResultOut] */
+        DataEnvelope_ScanResultOut_: {
+            data: components["schemas"]["ScanResultOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -376,6 +520,31 @@ export interface components {
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
              */
             request_id: string;
+        };
+        /**
+         * GapDecision
+         * @enum {string}
+         */
+        GapDecision: "CONTINUE" | "UPDATE" | "BREAK" | "UNCERTAIN";
+        /** GapOut */
+        GapOut: {
+            /** Gap Id */
+            gap_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Left Quote Id */
+            left_quote_id?: string | null;
+            /** Right Quote Id */
+            right_quote_id?: string | null;
+            /** Start Cp */
+            start_cp: number;
+            /** End Cp */
+            end_cp: number;
+            /** Narration */
+            narration: string;
+            /** Paragraph Count */
+            paragraph_count: number;
+            decision: components["schemas"]["GapDecision"];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -471,6 +640,109 @@ export interface components {
          * @enum {string}
          */
         JobState: "QUEUED" | "RUNNING" | "PAUSING" | "PAUSED" | "PARTIAL" | "COMPLETED" | "FAILED" | "BUDGET_EXHAUSTED" | "NEEDS_RECONCILIATION";
+        /** LocateOut */
+        LocateOut: {
+            /** Book Id */
+            book_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Start Cp */
+            start_cp: number;
+            /** End Cp */
+            end_cp: number;
+            /** Text */
+            text: string;
+            /** Spans */
+            spans: components["schemas"]["LocateSpanOut"][];
+        };
+        /** LocateSpanOut */
+        LocateSpanOut: {
+            /** Mapping Ordinal */
+            mapping_ordinal: number;
+            /** Chapter Id */
+            chapter_id?: string | null;
+            /** Chapter Ordinal */
+            chapter_ordinal?: number | null;
+            /** Node Id */
+            node_id?: string | null;
+            node_type?: components["schemas"]["ContentNodeType"] | null;
+            /** Canonical Start Cp */
+            canonical_start_cp: number;
+            /** Canonical End Cp */
+            canonical_end_cp: number;
+            /** Source Href */
+            source_href?: string | null;
+            /** Source Text Start Cp */
+            source_text_start_cp: number;
+            /** Source Text End Cp */
+            source_text_end_cp: number;
+            /** Synthetic */
+            synthetic: boolean;
+            /** Text */
+            text: string;
+        };
+        /** QuoteDetailOut */
+        QuoteDetailOut: {
+            quote: components["schemas"]["QuoteOut"];
+            /** Previous Quote Id */
+            previous_quote_id?: string | null;
+            /** Next Quote Id */
+            next_quote_id?: string | null;
+            gap_before?: components["schemas"]["GapOut"] | null;
+            /**
+             * Context Before
+             * @default
+             */
+            context_before: string;
+            /**
+             * Context After
+             * @default
+             */
+            context_after: string;
+        };
+        /**
+         * QuoteKind
+         * @enum {string}
+         */
+        QuoteKind: "speech" | "thought" | "quotation" | "group" | "other" | "unknown";
+        /** QuoteOut */
+        QuoteOut: {
+            /** Quote Id */
+            quote_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Chapter Id */
+            chapter_id?: string | null;
+            /** Chapter Ordinal */
+            chapter_ordinal?: number | null;
+            /** Start Cp */
+            start_cp: number;
+            /** End Cp */
+            end_cp: number;
+            /**
+             * Text
+             * @description 引号内的文字（不含引号本身）。
+             */
+            text: string;
+            /**
+             * Delimited Text
+             * @description 包含引号的原文片段。
+             */
+            delimited_text: string;
+            /** Delimiter */
+            delimiter: string;
+            /** Opening */
+            opening: string;
+            /** Closing */
+            closing: string;
+            /** Nesting Depth */
+            nesting_depth: number;
+            /** Parent Quote Id */
+            parent_quote_id?: string | null;
+            kind_hint?: components["schemas"]["QuoteKind"] | null;
+            /** Scanner Version */
+            scanner_version: string;
+        };
         /**
          * ReadingMode
          * @enum {string}
@@ -501,6 +773,40 @@ export interface components {
             reading_mode: components["schemas"]["ReadingMode"];
             /** Version */
             version: number;
+        };
+        /** ScanResultOut */
+        ScanResultOut: {
+            /** Book Id */
+            book_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Job Id */
+            job_id: string;
+            /** Scanner Version */
+            scanner_version: string;
+            /** Quote Count */
+            quote_count: number;
+            /** Top Level Quote Count */
+            top_level_quote_count: number;
+            /** Gap Count */
+            gap_count: number;
+            /** Warnings */
+            warnings?: components["schemas"]["ScanWarningOut"][];
+            /** Stats */
+            stats?: {
+                [key: string]: number;
+            };
+        };
+        /** ScanWarningOut */
+        ScanWarningOut: {
+            /** Code */
+            code: string;
+            /** Position Cp */
+            position_cp: number;
+            /** Delimiter */
+            delimiter: string;
+            /** Detail */
+            detail: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -833,6 +1139,173 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_JobOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_quotes_route_api_books__book_id__quotes_get: {
+        parameters: {
+            query?: {
+                chapter_id?: string | null;
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CursorPage_QuoteOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_gaps_route_api_books__book_id__gaps_get: {
+        parameters: {
+            query?: {
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CursorPage_GapOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    locate_route_api_books__book_id__locate_get: {
+        parameters: {
+            query: {
+                start_cp: number;
+                end_cp: number;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_LocateOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scan_quotes_route_api_books__book_id__quotes_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ScanResultOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quote_route_api_quotes__quote_id__get: {
+        parameters: {
+            query?: {
+                context_window_cp?: number;
+            };
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_QuoteDetailOut_"];
                 };
             };
             /** @description Validation Error */

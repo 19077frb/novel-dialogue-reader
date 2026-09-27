@@ -395,3 +395,24 @@ a {
     min-width: 0;
   }
 }
+
+/* 候选引语覆盖：只是扫描器提出的候选，用虚线提示；不表示说话人。 */
+.ndr-candidate {
+  border-bottom: 1px dashed var(--ndr-muted);
+  background: rgba(127, 127, 127, 0.08);
+  cursor: default;
+}
+
+.ndr-candidate:hover {
+  border-bottom-color: var(--ndr-accent);
+}
+
+.ndr-quote-legend {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: var(--ndr-muted);
+  margin: 0 0 8px;
+}

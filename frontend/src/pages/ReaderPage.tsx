@@ -2,10 +2,18 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { fetchBook, fetchChapters, fetchContent, queryKeys, saveReadingProgress } from '../api/books'
+import {
+  fetchBook,
+  fetchChapters,
+  fetchContent,
+  fetchQuotes,
+  queryKeys,
+  saveReadingProgress,
+} from '../api/books'
 import { ApiError } from '../api/client'
 import type { ChapterOut, ContentNodeOut, ReadingMode } from '../api/types'
 import { ChapterNavigation } from '../components/ChapterNavigation'
+import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
 
 /** 找到视口内第一个节点对应的起点；用于保存阅读位置（纯函数，便于测试）。 */
@@ -28,6 +36,7 @@ export default function ReaderPage() {
   const [cursor, setCursor] = useState<string | null>(null)
   const [pages, setPages] = useState<ContentNodeOut[][]>([])
   const [notice, setNotice] = useState<string | null>(null)
+  const [showCandidates, setShowCandidates] = useState(true)
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -45,6 +54,13 @@ export default function ReaderPage() {
     queryKey: queryKeys.content(bookId ?? '', chapterId, cursor),
     queryFn: ({ signal }) =>
       fetchContent(bookId as string, { chapterId, cursor, limit: 500 }, signal),
+    enabled: Boolean(bookId) && chapterId !== null,
+  })
+
+  // 候选引语（扫描器结果，不含说话人判断）
+  const quotes = useQuery({
+    queryKey: queryKeys.quotes(bookId ?? '', chapterId),
+    queryFn: ({ signal }) => fetchQuotes(bookId as string, { chapterId, limit: 500 }, signal),
     enabled: Boolean(bookId) && chapterId !== null,
   })
 
@@ -70,6 +86,16 @@ export default function ReaderPage() {
   }, [content.data, cursor])
 
   const nodes = useMemo(() => pages.flat(), [pages])
+  const candidates = useMemo<CandidateRange[]>(
+    () =>
+      (quotes.data?.items ?? []).map((quote) => ({
+        quoteId: quote.quote_id,
+        startCp: quote.start_cp,
+        endCp: quote.end_cp,
+        nestingDepth: quote.nesting_depth,
+      })),
+    [quotes.data],
+  )
   const activeChapter = chapters.data?.find((chapter) => chapter.id === chapterId) ?? null
 
   const progress = useMutation({
@@ -183,7 +209,21 @@ export default function ReaderPage() {
           {nodes.length > 0 && (
             <>
               <h1 className="ndr-chapter-heading">{activeChapter?.title ?? '正文'}</h1>
-              <DocumentRenderer bookId={bookId} nodes={nodes} />
+              <label className="ndr-quote-legend">
+                <input
+                  type="checkbox"
+                  checked={showCandidates}
+                  onChange={(event) => setShowCandidates(event.target.checked)}
+                  data-testid="toggle-candidates"
+                />
+                候选引语 {candidates.length} 条（扫描器结果，尚未判定说话人）
+                {quotes.data?.next_cursor ? '（本章还有更多候选未加载）' : ''}
+              </label>
+              <DocumentRenderer
+                bookId={bookId}
+                nodes={nodes}
+                candidates={showCandidates ? candidates : []}
+              />
             </>
           )}
           {content.data?.next_cursor && (

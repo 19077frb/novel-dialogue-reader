@@ -1,10 +1,12 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { ContentNodeOut } from '../src/api/types'
 import { DocumentRenderer } from '../src/components/DocumentRenderer'
 
-function node(partial: Partial<ContentNodeOut> & Pick<ContentNodeOut, 'node_id' | 'node_type'>): ContentNodeOut {
+function node(
+  partial: Partial<ContentNodeOut> & Pick<ContentNodeOut, 'node_id' | 'node_type'>,
+): ContentNodeOut {
   return {
     ordinal: 0,
     start_cp: 0,
@@ -31,14 +33,12 @@ describe('DocumentRenderer', () => {
     )
 
     expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('第一章')
-    const paragraph = screen.getByText('「你好。」')
-    expect(paragraph).toBeInTheDocument()
+    expect(screen.getByText('「你好。」')).toBeInTheDocument()
 
     const first = screen.getAllByTestId('ndr-node')[0]
     expect(first).toHaveAttribute('data-node-id', 'n0')
     expect(first).toHaveAttribute('data-start-cp', '0')
     expect(first).toHaveAttribute('data-end-cp', '5')
-
     expect(document.querySelector('hr.ndr-separator')).not.toBeNull()
   })
 
@@ -59,10 +59,8 @@ describe('DocumentRenderer', () => {
       />,
     )
 
-    const rt = document.querySelector('rt')
-    expect(rt?.textContent).toBe('かん')
-    const ruby = document.querySelector('ruby')
-    expect(ruby?.textContent?.startsWith('漢')).toBe(true)
+    expect(document.querySelector('rt')?.textContent).toBe('かん')
+    expect(document.querySelector('ruby')?.textContent?.startsWith('漢')).toBe(true)
   })
 
   it('图片节点通过受控资源地址加载，并使用 alt', () => {
@@ -87,6 +85,71 @@ describe('DocumentRenderer', () => {
     expect(image.getAttribute('alt')).toBe('插图')
   })
 
+  it('候选引语只画虚线标记，不带任何说话人信息', () => {
+    render(
+      <DocumentRenderer
+        bookId="b1"
+        nodes={[
+          node({
+            node_id: 'n0',
+            node_type: 'paragraph',
+            start_cp: 100,
+            end_cp: 110,
+            text: '「雨停了。」少女说。',
+          }),
+        ]}
+        candidates={[{ quoteId: 'q1', startCp: 100, endCp: 106, nestingDepth: 0 }]}
+      />,
+    )
+
+    const mark = screen.getByTestId('candidate-quote')
+    expect(mark).toHaveTextContent('「雨停了。」')
+    expect(mark).toHaveAttribute('data-quote-id', 'q1')
+    expect(mark.className).toContain('ndr-candidate')
+    // 覆盖显示不等于识别：没有颜色/编号/人物名
+    expect(mark.getAttribute('data-speaker')).toBeNull()
+    expect(screen.getByText(/少女说/)).toBeInTheDocument()
+  })
+
+  it('嵌套候选渲染为嵌套标记', () => {
+    render(
+      <DocumentRenderer
+        bookId="b1"
+        nodes={[
+          node({
+            node_id: 'n0',
+            node_type: 'paragraph',
+            start_cp: 0,
+            end_cp: 13,
+            text: '「他说『明天见』。」',
+          }),
+        ]}
+        candidates={[
+          { quoteId: 'outer', startCp: 0, endCp: 11, nestingDepth: 0 },
+          { quoteId: 'inner', startCp: 3, endCp: 8, nestingDepth: 1 },
+        ]}
+      />,
+    )
+
+    const marks = screen.getAllByTestId('candidate-quote')
+    expect(marks).toHaveLength(2)
+    const outer = screen.getAllByTestId('candidate-quote')[0]
+    const inner = within(outer).getAllByTestId('candidate-quote')[0]
+    expect(outer).toHaveAttribute('data-quote-id', 'outer')
+    expect(inner).toHaveAttribute('data-quote-id', 'inner')
+    expect(inner).toHaveTextContent('『明天见』')
+  })
+
+  it('没有候选时不产生任何标记', () => {
+    render(
+      <DocumentRenderer
+        bookId="b1"
+        nodes={[node({ node_id: 'n0', node_type: 'paragraph', start_cp: 0, end_cp: 3, text: '正文。' })]}
+      />,
+    )
+    expect(screen.queryAllByTestId('candidate-quote')).toHaveLength(0)
+  })
+
   it('没有标注时不渲染任何着色或编号（AnnotationLayer 只是占位）', () => {
     render(
       <DocumentRenderer
@@ -97,7 +160,6 @@ describe('DocumentRenderer', () => {
 
     const layer = screen.getByTestId('annotation-layer')
     expect(layer).toHaveAttribute('data-annotation-count', '0')
-    // 没有识别结果：不能出现人物编号或颜色类名。
     expect(layer.querySelectorAll('[class*="speaker"]')).toHaveLength(0)
     expect(layer.querySelectorAll('[class*="quote"]')).toHaveLength(0)
   })

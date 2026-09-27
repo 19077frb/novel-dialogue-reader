@@ -1,12 +1,14 @@
-/** 书籍/导入/阅读相关的查询与写操作封装（TanStack Query 使用）。 */
+/** 书籍/导入/阅读/候选引语相关的查询与写操作封装（TanStack Query 使用）。 */
 import { apiData, apiUpload } from './client'
 import type {
   BookOut,
   ChapterOut,
   ContentResponse,
   CursorPageBook,
+  CursorPageQuote,
   ImportResult,
   JobOut,
+  QuoteDetailOut,
   ReadingMode,
   ReadingProgressOut,
 } from './types'
@@ -18,6 +20,7 @@ export const queryKeys = {
   chapters: (bookId: string) => ['chapters', bookId] as const,
   content: (bookId: string, chapterId: string | null, cursor: string | null) =>
     ['content', bookId, chapterId, cursor] as const,
+  quotes: (bookId: string, chapterId: string | null) => ['quotes', bookId, chapterId] as const,
   job: (jobId: string) => ['job', jobId] as const,
 }
 
@@ -49,6 +52,30 @@ export function fetchContent(
   if (query.cursor) params.set('cursor', query.cursor)
   params.set('limit', String(query.limit ?? 500))
   return apiData<ContentResponse>(`/api/books/${bookId}/content?${params.toString()}`, { signal })
+}
+
+export interface QuoteQuery {
+  chapterId?: string | null
+  limit?: number
+}
+
+/**
+ * 候选引语（扫描器结果）。
+ * 注意：这只是**候选**，不含任何说话人判断；着色/编号要等 T05 之后的标注投影。
+ */
+export function fetchQuotes(
+  bookId: string,
+  query: QuoteQuery = {},
+  signal?: AbortSignal,
+): Promise<CursorPageQuote> {
+  const params = new URLSearchParams()
+  if (query.chapterId) params.set('chapter_id', query.chapterId)
+  params.set('limit', String(query.limit ?? 500))
+  return apiData<CursorPageQuote>(`/api/books/${bookId}/quotes?${params.toString()}`, { signal })
+}
+
+export function fetchQuoteDetail(quoteId: string, signal?: AbortSignal): Promise<QuoteDetailOut> {
+  return apiData<QuoteDetailOut>(`/api/quotes/${quoteId}`, { signal })
 }
 
 export interface ImportInput {

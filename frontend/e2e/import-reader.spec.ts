@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * T04：不填写任何 API 配置，也能导入 TXT/EPUB 并阅读原文。
+ * T04/T05：不填写任何 API 配置，也能导入 TXT/EPUB、阅读原文并看到候选引语覆盖。
  * 使用真实后端（隔离数据目录 + 自动迁移）与真实浏览器；不涉及任何模型调用。
  */
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -25,7 +25,7 @@ async function importFile(page: Page, fileName: string, encoding?: string) {
 }
 
 test.describe('导入与阅读', () => {
-  test('导入 UTF-8 TXT 并阅读原文、保存阅读位置', async ({ page }) => {
+  test('导入 UTF-8 TXT 并阅读原文、保存阅读位置、显示候选覆盖', async ({ page }) => {
     await page.goto('/library')
     await importFile(page, 'sample-utf8.txt')
 
@@ -38,6 +38,18 @@ test.describe('导入与阅读', () => {
     await expect(page).toHaveURL(/\/books\/[^/]+\/read/)
     await expect(page.locator('.ndr-chapter-heading')).toHaveText('序章 雨夜')
     await expect(page.getByText('「雨停了。」少女合上伞。')).toBeVisible()
+
+    // 候选引语覆盖（扫描器结果，不含说话人判断）
+    const candidate = page.getByTestId('candidate-quote').first()
+    await expect(candidate).toHaveText('「雨停了。」')
+    await expect(candidate).toHaveAttribute('data-quote-id', /^q/)
+    await expect(page.getByText(/候选引语 \d+ 条/)).toBeVisible()
+
+    await page.getByTestId('toggle-candidates').uncheck()
+    await expect(page.getByTestId('candidate-quote')).toHaveCount(0)
+    await page.getByTestId('toggle-candidates').check()
+    await expect(page.getByTestId('candidate-quote').first()).toBeVisible()
+
     // 节点带有码点定位属性，供后续标注层使用。
     const node = page.locator('[data-node-id]').nth(1)
     await expect(node).toHaveAttribute('data-start-cp', /\d+/)
@@ -71,6 +83,12 @@ test.describe('导入与阅读', () => {
     await expect
       .poll(async () => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))
       .toBeGreaterThan(0)
+
+    // EPUB 的对白同样能被扫描成候选
+    await expect(page.getByTestId('candidate-quote').first()).toBeVisible()
+    await expect(
+      page.getByTestId('candidate-quote').filter({ hasText: '「跨块的同一句发言，」' }),
+    ).toHaveCount(1)
   })
 
   test('编码选错时给出候选与预演，换编码后可恢复', async ({ page }) => {
