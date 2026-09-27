@@ -33,6 +33,8 @@ class FakeProviderAdapter:
     protocol: str = FAKE_PROVIDER_PROTOCOL
     model: str = "fake-model"
     script: list[ScriptedResponse] = field(default_factory=list)
+    # 可控 usage：默认 None（未知，不写 0）；测试可注入 {"input_tokens": ...} 验证结算
+    usage: Mapping[str, Any] | None = None
     capabilities: AdapterCapabilities = field(
         default_factory=lambda: PROTOCOL_CAPABILITIES[FAKE_PROVIDER_PROTOCOL]
     )
@@ -112,5 +114,13 @@ class FakeProviderAdapter:
         return TokenEstimate(tokens=max(1, len(text) // 2), method="fake", confidence="low")
 
     def normalize_usage(self, raw: Mapping[str, Any] | None) -> UsageRecord:
-        # FakeProvider 没有真实 usage：如实标记未知，而不是伪造 0。
-        return UsageRecord(unknown=True)
+        payload = raw or self.usage
+        if not payload:
+            # 没有真实 usage 时如实标记未知，而不是伪造 0。
+            return UsageRecord(unknown=True)
+        return UsageRecord(
+            input_tokens=payload.get("input_tokens"),
+            output_tokens=payload.get("output_tokens"),
+            total_tokens=payload.get("total_tokens"),
+            unknown=False,
+        )
