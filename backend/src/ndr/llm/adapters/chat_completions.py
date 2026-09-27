@@ -9,13 +9,14 @@
 from __future__ import annotations
 
 import json
-import math
 import time
 from collections.abc import Mapping
 from typing import Any
 
 import httpx
 
+from ...context.budget import DEFAULT_ESTIMATOR
+from ...context.budget import estimate_tokens as estimate_tokens_with_policy
 from ...domain.enums import ErrorCode
 from ..adapter import (
     CHAT_COMPLETIONS_COMPATIBLE,
@@ -266,12 +267,12 @@ class ChatCompletionsAdapter:
     def estimate_tokens(self, text: str) -> TokenEstimate:
         """保守估算：CJK 约 1 token/字，其它字符约 1 token/4 字符（依据为启发式，置信度低）。"""
 
-        cjk = sum(1 for char in text if _is_cjk_like(char))
-        other = max(0, len(text) - cjk)
+        # 与上下文预算共用同一口径（见 context/budget.py），避免两处估算漂移。
+        tokens = estimate_tokens_with_policy(text)
         return TokenEstimate(
-            tokens=int(math.ceil(cjk * 1.0 + other / 4.0)),
-            method="heuristic-cjk",
-            confidence="low",
+            tokens=tokens,
+            method=DEFAULT_ESTIMATOR.method,
+            confidence=DEFAULT_ESTIMATOR.confidence,
         )
 
     def normalize_usage(self, raw: Mapping[str, Any] | None) -> UsageRecord:
