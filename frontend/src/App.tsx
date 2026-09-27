@@ -6,6 +6,7 @@ import { fetchHealth } from './api/client'
 import LibraryPage from './pages/LibraryPage'
 import ModelSettingsPage from './pages/ModelSettingsPage'
 import PreviewPage from './pages/PreviewPage'
+import ReviewPage from './pages/ReviewPage'
 import ReaderPage from './pages/ReaderPage'
 
 /** 后端连接状态：显示真实 /api/health 结果（不调用模型）。 */
@@ -66,7 +67,9 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/library" element={<LibraryPage />} />
-          <Route path="/books/:bookId/read" element={<ReaderPage />} />`n          <Route path="/books/:bookId/preview" element={<PreviewPage />} />
+          <Route path="/books/:bookId/read" element={<ReaderPage />} />
+          <Route path="/books/:bookId/preview" element={<PreviewPage />} />
+          <Route path="/books/:bookId/review" element={<ReviewPage />} />
           <Route path="/settings/models" element={<ModelSettingsPage />} />
           <Route path="*" element={<p className="status-error">页面不存在。</p>} />
         </Routes>

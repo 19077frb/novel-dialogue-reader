@@ -641,3 +641,149 @@ a {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- 待确认队列与确认抽屉（T13） ---------- */
+
+.ndr-review-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.ndr-review-filters label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: var(--ndr-muted);
+}
+
+.ndr-review-filters select {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ndr-border);
+  background: transparent;
+  color: inherit;
+  width: 100%;
+}
+
+.ndr-review-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.ndr-review-list li {
+  border: 1px solid var(--ndr-border);
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.ndr-review-item-main {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.ndr-review-text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.ndr-review-item-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ndr-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(560px, 100vw);
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--ndr-card);
+  border-left: 1px solid var(--ndr-border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+  padding: 16px;
+  z-index: 20;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.ndr-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.ndr-drawer-quote {
+  font-size: 1.05rem;
+  line-height: 1.8;
+  margin: 0;
+  border-left: 3px solid var(--ndr-accent);
+  padding-left: 10px;
+}
+
+.ndr-drawer-annotation {
+  font-size: 0.9rem;
+  grid-template-columns: max-content 1fr;
+}
+
+.ndr-drawer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ndr-correction-form,
+.ndr-recheck,
+.ndr-gap-decision,
+.ndr-quote-context {
+  border: 1px solid var(--ndr-border);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.ndr-correction-form label,
+.ndr-recheck label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: var(--ndr-muted);
+}
+
+.ndr-correction-form select,
+.ndr-correction-form input,
+.ndr-recheck select,
+.ndr-recheck input {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ndr-border);
+  background: transparent;
+  color: inherit;
+  width: 100%;
+}
+
+.ndr-context-line {
+  margin: 0;
+  line-height: 1.9;
+  white-space: pre-wrap;
+}
+
+.ndr-context-target {
+  background: rgba(47, 111, 235, 0.18);
+  color: inherit;
+}

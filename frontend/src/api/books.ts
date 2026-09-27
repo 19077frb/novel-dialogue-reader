@@ -5,6 +5,7 @@ import type {
   ChapterOut,
   ContentResponse,
   CursorPageBook,
+  CursorPageGap,
   CursorPageQuote,
   ImportResult,
   JobDetailOut,
@@ -59,6 +60,11 @@ export interface QuoteQuery {
   limit?: number
 }
 
+export interface GapQuery {
+  limit?: number
+  cursor?: string | null
+}
+
 /**
  * 候选引语（扫描器结果）。
  * 注意：这只是**候选**，不含任何说话人判断；着色/编号要等 T05 之后的标注投影。
@@ -74,8 +80,36 @@ export function fetchQuotes(
   return apiData<CursorPageQuote>(`/api/books/${bookId}/quotes?${params.toString()}`, { signal })
 }
 
-export function fetchQuoteDetail(quoteId: string, signal?: AbortSignal): Promise<QuoteDetailOut> {
-  return apiData<QuoteDetailOut>(`/api/quotes/${quoteId}`, { signal })
+export interface QuoteDetailOptions {
+  /** 前后各取多少码点的原文（只读本地原文，不调用模型）。 */
+  contextWindowCp?: number
+  signal?: AbortSignal
+}
+
+/** 候选之间的叙述间隔（Gap）；只读，不调用模型。 */
+export function fetchGaps(
+  bookId: string,
+  query: GapQuery = {},
+  signal?: AbortSignal,
+): Promise<CursorPageGap> {
+  const params = new URLSearchParams()
+  params.set('limit', String(query.limit ?? 200))
+  if (query.cursor) params.set('cursor', query.cursor)
+  return apiData<CursorPageGap>(`/api/books/${bookId}/gaps?${params.toString()}`, { signal })
+}
+
+export function fetchQuoteDetail(
+  quoteId: string,
+  options: QuoteDetailOptions = {},
+): Promise<QuoteDetailOut> {
+  const params = new URLSearchParams()
+  if (options.contextWindowCp !== undefined) {
+    params.set('context_window_cp', String(options.contextWindowCp))
+  }
+  const query = params.toString()
+  return apiData<QuoteDetailOut>(`/api/quotes/${quoteId}${query ? `?${query}` : ''}`, {
+    signal: options.signal,
+  })
 }
 
 export interface ImportInput {

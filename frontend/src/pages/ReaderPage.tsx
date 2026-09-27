@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { annotationKeys, fetchAnnotations } from '../api/annotations'
+import { fetchReviewQueue } from '../api/review'
 import {
   fetchBook,
   fetchChapters,
@@ -16,6 +17,7 @@ import type { ChapterOut, ContentNodeOut, ReadingMode } from '../api/types'
 import { ChapterNavigation } from '../components/ChapterNavigation'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
+import { QuoteDetailDrawer } from '../components/QuoteDetailDrawer'
 import { SpeakerLegend } from '../components/SpeakerLegend'
 
 /** 找到视口内第一个节点对应的起点；用于保存阅读位置（纯函数，便于测试）。 */
@@ -45,6 +47,7 @@ export default function ReaderPage() {
   const [showCandidates, setShowCandidates] = useState(true)
   const [showAnnotations, setShowAnnotations] = useState(true)
   const [readingModeOverride, setReadingModeOverride] = useState<ReadingMode | null>(null)
+  const [selectedQuote, setSelectedQuote] = useState<{ quoteId: string; reviewItemId: string | null } | null>(null)
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -135,6 +138,14 @@ export default function ReaderPage() {
   })
   const annotationItems = showAnnotations ? annotations.data?.items ?? [] : []
 
+  // 待确认数量（只读）：阅读页顶部提示，点击进入队列页。
+  const pending = useQuery({
+    queryKey: ['review-items', bookId ?? '', 'pending-count'],
+    queryFn: ({ signal }) =>
+      fetchReviewQueue(bookId as string, { queueStatus: 'PENDING', limit: 1 }, signal),
+    enabled: Boolean(bookId),
+  })
+
   const progress = useMutation({
     mutationFn: (input: {
       readPositionCp: number
@@ -224,6 +235,9 @@ export default function ReaderPage() {
           </p>
         </div>
         <nav className="ndr-preview-nav">
+          <Link to={`/books/${bookId}/review`} data-testid="reader-review-link">
+            待确认 {pending.data?.counts.by_status?.PENDING ?? 0} 项
+          </Link>
           <Link to={`/books/${bookId}/preview`}>预览与处理</Link>
           <Link to="/library">返回书架</Link>
         </nav>
@@ -305,6 +319,7 @@ export default function ReaderPage() {
                 nodes={nodes}
                 candidates={showCandidates ? candidates : []}
                 annotations={annotationItems}
+                onQuoteClick={(quoteId) => setSelectedQuote({ quoteId, reviewItemId: null })}
               />
             </>
           )}
@@ -319,6 +334,13 @@ export default function ReaderPage() {
           )}
         </section>
       </div>
+
+      <QuoteDetailDrawer
+        quoteId={selectedQuote?.quoteId ?? null}
+        reviewItemId={selectedQuote?.reviewItemId ?? null}
+        onClose={() => setSelectedQuote(null)}
+        onCorrected={() => void pending.refetch()}
+      />
     </div>
   )
 }

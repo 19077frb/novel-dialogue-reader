@@ -23,8 +23,10 @@ export interface DocumentRendererProps {
    * 只有这里的颜色/编号才会显示；`withheld` 不下发颜色与编号（不提前泄漏后文证据）。
    */
   annotations?: AnnotationItemOut[]
-  /** 点击节点时的回调：T13 的普通对白详情入口，现在只用于定位。 */
+  /** 点击节点时的回调：用于定位（保存阅读位置）。 */
   onNodeClick?: (node: ContentNodeOut) => void
+  /** 点击某段引语：T13 的普通对白详情入口（打开确认抽屉）。 */
+  onQuoteClick?: (quoteId: string) => void
 }
 
 function nodeKey(node: ContentNodeOut): string {
@@ -119,6 +121,7 @@ function renderAnnotatedText(
   annotations: AnnotationItemOut[],
   from: number,
   to: number,
+  onQuoteClick?: (quoteId: string) => void,
 ): ReactNode[] {
   const parts: ReactNode[] = []
   for (const slice of sliceByAnnotations(annotations, from, to)) {
@@ -142,6 +145,14 @@ function renderAnnotatedText(
         data-stale={annotation.stale ? 'true' : 'false'}
         data-label={label ?? ''}
         style={color ? { color } : undefined}
+        onClick={
+          onQuoteClick
+            ? (event) => {
+                event.stopPropagation()
+                onQuoteClick(annotation.quote_id)
+              }
+            : undefined
+        }
         title={
           annotation.status === 'UNKNOWN'
             ? '证据不足：不指定说话人（无色无编号）'
@@ -195,6 +206,7 @@ function renderNodes(
   annotations: AnnotationItemOut[],
   from: number,
   to: number,
+  onQuoteClick?: (quoteId: string) => void,
 ): ReactNode[] {
   const parts: ReactNode[] = []
   let cursor = from
@@ -202,7 +214,9 @@ function renderNodes(
     if (node.end <= cursor || node.start >= to) continue
     const start = Math.max(cursor, node.start)
     if (start > cursor) {
-      parts.push(...renderAnnotatedText(text, baseCp, ruby, annotations, cursor, start))
+      parts.push(
+        ...renderAnnotatedText(text, baseCp, ruby, annotations, cursor, start, onQuoteClick),
+      )
     }
     const end = Math.min(to, node.end)
     parts.push(
@@ -214,14 +228,22 @@ function renderNodes(
         data-start-cp={node.start}
         data-end-cp={node.end}
         title="扫描器提出的候选引语（尚未判定说话人）"
+        onClick={
+          onQuoteClick
+            ? (event) => {
+                event.stopPropagation()
+                onQuoteClick(node.range.quoteId)
+              }
+            : undefined
+        }
       >
-        {renderNodes(node.children, text, baseCp, ruby, annotations, start, end)}
+        {renderNodes(node.children, text, baseCp, ruby, annotations, start, end, onQuoteClick)}
       </span>,
     )
     cursor = end
   }
   if (cursor < to) {
-    parts.push(...renderAnnotatedText(text, baseCp, ruby, annotations, cursor, to))
+    parts.push(...renderAnnotatedText(text, baseCp, ruby, annotations, cursor, to, onQuoteClick))
   }
   return parts
 }
@@ -232,12 +254,14 @@ function NodeView({
   candidates,
   annotations,
   onNodeClick,
+  onQuoteClick,
 }: {
   node: ContentNodeOut
   bookId: string
   candidates: CandidateRange[]
   annotations: AnnotationItemOut[]
   onNodeClick?: (node: ContentNodeOut) => void
+  onQuoteClick?: (quoteId: string) => void
 }) {
   const payload = nodePayload(node)
   const common = {
@@ -296,6 +320,7 @@ function NodeView({
           relevantAnnotations,
           node.start_cp,
           nodeEnd,
+          onQuoteClick,
         )
       : renderAnnotatedText(
           node.text,
@@ -304,6 +329,7 @@ function NodeView({
           relevantAnnotations,
           node.start_cp,
           nodeEnd,
+          onQuoteClick,
         )
 
   if (node.node_type === 'heading') {
@@ -334,6 +360,7 @@ export function DocumentRenderer({
   candidates = [],
   annotations = [],
   onNodeClick,
+  onQuoteClick,
 }: DocumentRendererProps) {
   return (
     <AnnotationLayer annotations={annotations}>
@@ -346,6 +373,7 @@ export function DocumentRenderer({
             candidates={candidates}
             annotations={annotations}
             onNodeClick={onNodeClick}
+            onQuoteClick={onQuoteClick}
           />
         ))}
       </div>

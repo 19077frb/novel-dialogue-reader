@@ -21,6 +21,7 @@ from ..domain.corrections import (
     ReviewItemDetailOut,
     ReviewItemOut,
     SceneGroupRefOut,
+    SceneRefOut,
 )
 from ..domain.enums import ErrorCode, ReviewQueueStatus, ReviewReason
 from ..domain.quotes import QuoteDetailOut
@@ -267,7 +268,9 @@ def build_quote_detail(
         ).scalars()
     )
     detail.annotation = annotation_out(annotation, label_map) if annotation is not None else None
-    detail.scene = scene_ref_out(scene) if scene is not None else None
+    detail.scene = (
+        SceneRefOut(**scene_ref_out(scene)) if scene is not None else None
+    )
     detail.review_items = [review_item_out(item) for item in items]
     detail.can_correct = True
     detail.scene_groups = [
