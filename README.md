@@ -340,12 +340,17 @@ uv run --project backend ruff check backend/src backend/tests backend/scripts
 uv run --project backend pytest backend/tests
 uv run --project backend python backend/scripts/export_openapi.py --output docs/openapi.json --check
 npm --prefix frontend run typecheck
+npm --prefix frontend run check:api     # 前端 API 类型与 docs/openapi.json 逐字节一致（T18）
 npm --prefix frontend run test -- --run
 npm --prefix frontend run build
 npm --prefix frontend run test:e2e      # Playwright：独立数据目录/端口，真实浏览器
 uv run --project backend python backend/scripts/export_openapi.py --output docs/openapi.json
 npm --prefix frontend run generate:api
 ```
+
+发布前的四类结果（功能 / 稳定性 / live / 质量）、报告索引、已修问题与残余阻塞见
+`docs/verification-report.md`；验证口径见 `docs/decisions/0022-release-verification-scope.md`。
+**当前 live 与 quality 都是 BLOCKED**：本机没有真实提供方凭据、网络受限、也没有人工确认的真实作品样本。
 
 ## 配置
 

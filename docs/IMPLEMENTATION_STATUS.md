@@ -31,7 +31,7 @@ FakeProvider 或自造样例通过只记入 Offline。
 | T15B | PASS | PASS | BLOCKED | NOT_APPLICABLE | 前端 `vitest` → **70 passed**（新增 `ExportDialog` 5 项：冻结+覆盖/警告/沙箱样张、样式切换只改显示、指定章节传参、快照过期提示、失败不给下载）；Playwright → **28 passed**（新增 `export.spec.ts` 5 项：TXT→HTML 下载且**无 http(s)/无 script/含 〔S1〕**（断网可读）、EPUB→EPUB 结构+资源闭合+重复下载一致、指定章节标「节选」且不含未选正文、未处理章节保持原样且统计/警告如实、并发纠正提示旧快照）。Live=BLOCKED：**EPUBCheck 未运行**（无 jar）且**独立 EPUB 阅读器试读未做**（本机未安装任何阅读器，无法联网安装）——两项保留未完成，不用浏览器样张代替 | 进入 T16：真实样本评测与可复现实验（需要真实模型凭据与人工确认样本） |
 | T16 | PASS | PASS | BLOCKED | BLOCKED | `pytest backend/tests` → **346 passed**（新增 `test_evaluation_metrics.py` 9 项 + `test_evaluation_manifest.py` 5 项 + `test_evaluation_run.py` 4 项）：手算样例覆盖匿名标签置换、错误分场/连接、全拒答、全合并、漏提取、未知强标与样本不足（`targets_met=null`）；新增 `python -m ndr.evaluation validate/run`（清单与作品级划分校验、B0 规则基线、B1/B2 需 `--allow-live --profile-id`、配置指纹与版本记录）。真实生成报告：`evaluation/reports/dev-b0-offline.json`（`accepted_accuracy=1.0`（2/2）、`coverage=0.4`、`sample_sufficient=false`、`targets_met=null`、`quality_evidence=false`、`calls=0`）与 `dev-b1/b2-notrun.json`（`NOT_RUN` + 原因）。Live/Quality=BLOCKED：**没有真实模型凭据、预算与人工确认的真实作品样本**，B0/B1/B2 真实对比与 97%/70% 结论均未产出；`quality_evidence` 一律 false，不伪造达标 | 进入 T17：上下文压缩、局部复核与成本路由（前置为 T16 评测工具，已就绪；启用默认策略前需真实对比证据） |
 | T17 | PASS | PASS | BLOCKED | BLOCKED | `pytest backend/tests` → **370 passed**（T16 时 346；新增 `test_context_compression.py` 10 项 + `test_recheck_routing.py` 10 项 + `test_recheck_routing_jobs.py` 3 项 + `test_evaluation_loss.py` 2 项，并更新 `test_budget.py` 的策略字段断言）：短 Gap 不压缩；长 Gap 只丢纯叙述、保留「少女低声说」这类线索句与前后各一句；全线索 Gap 省不下来 → 不压缩 + `gap_compression_skipped` warning；丢弃片段有 `OmittedRecord` 且「保留 + 丢弃」逐段首尾相接、拼回原文；`context-1`/`context-2` 的窗口 ID、依赖哈希与缓存键**都不同**。集成测试（离线）：`range.context_policy=context-2` 时首次派发确实压缩（纯叙述不在上下文里）→ 全 UNKNOWN → 只复核未解决目标且**复核上下文把丢掉的文句补回**（同一句出现在复核请求里）；两次尝试各记一条 SUCCEEDED 的 `inference_runs`；`strong_model_share=1.0` + `strong_profile_id` 时困难窗口走强模型（尝试快照与 `by_model` 都是 `strong-model`），`share=0.4`（1 窗口 → 上限 0）时不路由。离线证据账：`python -m ndr.evaluation loss` → `evaluation/reports/dev-context-loss.json`（`gaps_scanned=2`、`compressed_gaps=0`、`must_keep_violations=0`——仓库样例 Gap 都短于 80 码点，压缩未触发，如实记录，不当成效果证据）。`ruff` 全绿；`scripts/verify.ps1` 退出码 0（OpenAPI 与 `docs/openapi.json` 一致、前端 70 项单测与 build 通过）。Live/Quality=BLOCKED：**没有真实凭据、预算与人工确认样本**，B3/B4 的真实准确率—覆盖率—总费用对比（含复核成本）未产出，因此默认仍是 `context-1`（`gap_compression=False`、`recheck_max_targets=0`、`strong_model_share=0.0`），优化如实标注未验证 | 进入 T18：完整联调、体验与发布检查（T17 前置已完成；优化关闭即可交付） |
-| T18 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | 待填写 | 完整联调、体验与发布检查 |
+| T18 | PASS | PASS | BLOCKED | BLOCKED | `scripts/verify.ps1` 退出码 0：`ruff` 全绿、`pytest backend/tests` → **373 passed**（新增 `test_boundaries.py` 3 项：越界资源 id、被篡改的源文件路径、被篡改的导出产物路径一律走契约错误且不回显磁盘路径）、OpenAPI 与 `docs/openapi.json` 一致、前端 typecheck、**前端 API 类型与 OpenAPI 一致**（新增 `npm run check:api`：重新生成 `schema.d.ts` 后逐字节比对，已验证篡改时会失败）、前端单测 → **72 passed**（新增对话框/抽屉可访问性 2 项）、前端 build。全量 E2E → **33 passed**（T15B 时 28；新增 `e2e/full-flow.spec.ts` 2 项：TXT 与 EPUB 各自走通「导入→估算/处理→导出 EPUB+HTML→下载件离线可读」，`e2e/a11y-layout.spec.ts` 3 项：语言/标题/可访问名称/图片 alt/跳转链接/导航 `aria-current`、导出对话框与确认抽屉的 `role`/`aria-modal`/Escape/焦点归还、360×740 与 1280×900 五个页面无横向溢出且关键控件可点）。真实缺陷已修：对话框语义与键盘行为、异步状态 live 区域、越界路径 500→404/409、前端类型漂移。产物 `docs/verification-report.md`（功能/稳定性/live/质量四类结果 + 报告索引 + 复现命令）。Live=BLOCKED：**真实提供方试用未做**（环境无任何提供方密钥、仓库无数据目录、网络 6 秒超时）；Quality=BLOCKED：**无人工确认样本**，B1–B4 全 `NOT_RUN`、`quality_evidence=false`、`targets_met=null`；EPUBCheck（无 jar）与独立阅读器试读（本机无阅读器）仍未完成 | 进入 T19：启动交付、操作文档与最终交接 |
 | T19 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | 待填写 | 启动交付、操作文档与最终交接 |
 
 ## 说明
@@ -62,6 +62,10 @@ FakeProvider 或自造样例通过只记入 Offline。
 - T16 的 Live/Quality = BLOCKED：评测**工具**已实现并用手算样例与真实离线报告验证，
   但**没有真实凭据、预算与人工确认作品**，因此 B0/B1/B2 的真实对比与 97%/70% 结论无法产出；
   报告里 `quality_evidence=false`，`targets_met=null`，未达标与否都未宣布。
+- T18 的 Live/Quality = BLOCKED：完整联调（真实后端 + 真实 Chromium + 真实 TXT/EPUB）已完成并可复现，
+  但**真实提供方试用**缺凭据（环境变量无密钥、仓库无数据目录、网络受限）与预算，
+  **质量评测**缺人工确认样本；EPUBCheck（无 jar）与独立阅读器试读（本机无阅读器）也没有完成。
+  四类结果与残余阻塞逐条写在 `docs/verification-report.md`。
 - T17 的 Live/Quality = BLOCKED：压缩、有限复核与成本路由的**实现与离线回归**都已通过
   （含「保留 + 丢弃 = 原文」「复核把丢掉的文句补回」「share 上限不超发」），
   但「有没有收益」必须用真实数据判定：B3/B4 配置与 `loss` 离线证据账已就绪，
@@ -70,10 +74,11 @@ FakeProvider 或自造样例通过只记入 Offline。
 - 导入、阅读、候选覆盖、模型配置、任务与用量、颜色/编号投影均已可用：预览页可做范围估算、小范围试运行、
   原文/标注对比与按章处理，结果直接复用到正式阅读。
   仍缺：真实作品效果评测（T16 live，需凭据与人工样本）、EPUBCheck/独立阅读器验证（环境受限）、
-  上下文压缩与成本路由的**真实收益证据**（T17 实现已就绪但未验证，需跑 B3/B4）、发布前完整联调（T18/T19）。
+  上下文压缩与成本路由的**真实收益证据**（T17 实现已就绪但未验证，需跑 B3/B4）、
+  真实提供方试用（T18 live，本机无凭据且网络受限）。T18 的完整联调（真实前后端/浏览器/文件）已完成。
 - `data/run/*.log` 是本地运行产物（已忽略提交），可用账本列出的命令复现。
 - 已知命令偏差见 README“已知命令偏差”与决策 0001/0003；EPUB 表示见 0005；前端结构见 0006；
   扫描与金标准见 0007；凭据处理见 0008；适配器与输出契约见 0009；上下文与预算见 0010；
   场景/接受/身份修订见 0011；任务/缓存/用量见 0012；标注投影与预览见 0013；人工更正与撤销见 0014；
   确认抽屉与复核边界见 0015；暂停/预算与故障恢复见 0016；初读身份还原与码点定位见 0017；
-  导出快照与校验见 0018；导出界面与验证状态见 0019；评测工具与达标口径见 0020；上下文压缩、局部复核与成本路由见 0021。
+  导出快照与校验见 0018；导出界面与验证状态见 0019；评测工具与达标口径见 0020；上下文压缩、局部复核与成本路由见 0021；发布前验证口径见 0022。
