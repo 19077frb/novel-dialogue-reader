@@ -1429,6 +1429,497 @@
           }
         }
       }
+    },
+    "/api/books/{book_id}/review-items": {
+      "get": {
+        "tags": [
+          "corrections"
+        ],
+        "summary": "待确认队列（按章节/场景/原因/状态过滤）",
+        "operationId": "list_review_items_route_api_books__book_id__review_items_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "chapter_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Chapter Id"
+            }
+          },
+          {
+            "name": "scene_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scene Id"
+            }
+          },
+          {
+            "name": "reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReviewReason"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason"
+            }
+          },
+          {
+            "name": "queue_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReviewQueueStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Queue Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 200,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ReviewQueueResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/review-items/{item_id}": {
+      "get": {
+        "tags": [
+          "corrections"
+        ],
+        "summary": "待确认项详情（目标、上下文、候选、版本）",
+        "operationId": "get_review_item_route_api_review_items__item_id__get",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ReviewItemDetailOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/review-items/{item_id}/defer": {
+      "post": {
+        "tags": [
+          "corrections"
+        ],
+        "summary": "延后处理（只改队列状态，不增加确认计数）",
+        "operationId": "defer_review_item_route_api_review_items__item_id__defer_post",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReviewDeferIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ReviewItemOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/quotes/{quote_id}/review-items": {
+      "post": {
+        "tags": [
+          "corrections"
+        ],
+        "summary": "用户主动标记问题（幂等：同一目标 + 原因只有一条当前项）",
+        "operationId": "flag_quote_review_item_route_api_quotes__quote_id__review_items_post",
+        "parameters": [
+          {
+            "name": "quote_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Quote Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewFlagIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ReviewItemOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/quotes/{quote_id}/corrections": {
+      "post": {
+        "tags": [
+          "corrections"
+        ],
+        "summary": "当前发言人工更正（不调用模型）",
+        "operationId": "quote_correction_route_api_quotes__quote_id__corrections_post",
+        "parameters": [
+          {
+            "name": "quote_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Quote Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteCorrectionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_CorrectionOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gaps/{gap_id}/corrections": {
+      "post": {
+        "tags": [
+          "corrections"
+        ],
+        "summary": "确认 Gap 的 CONTINUE/UPDATE/BREAK/UNCERTAIN，返回场景修订影响",
+        "operationId": "gap_correction_route_api_gaps__gap_id__corrections_post",
+        "parameters": [
+          {
+            "name": "gap_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Gap Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GapCorrectionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_GapCorrectionOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/corrections/{correction_id}/undo": {
+      "post": {
+        "tags": [
+          "corrections"
+        ],
+        "summary": "撤销一次人工更正（版本校验；历史只追加不删除）",
+        "operationId": "undo_correction_route_api_corrections__correction_id__undo_post",
+        "parameters": [
+          {
+            "name": "correction_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Correction Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_UndoOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scenes/{scene_id}/speaker-revisions": {
+      "post": {
+        "tags": [
+          "corrections"
+        ],
+        "summary": "场景内说话人分组 merge / split",
+        "operationId": "speaker_revision_route_api_scenes__scene_id__speaker_revisions_post",
+        "parameters": [
+          {
+            "name": "scene_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scene Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeakerRevisionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_SpeakerRevisionOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1616,6 +2107,134 @@
           "source"
         ],
         "title": "AnnotationItemOut"
+      },
+      "AnnotationSource": {
+        "type": "string",
+        "enum": [
+          "MODEL",
+          "RULE",
+          "USER"
+        ],
+        "title": "AnnotationSource"
+      },
+      "AnnotationStateOut": {
+        "properties": {
+          "quote_id": {
+            "type": "string",
+            "title": "Quote Id"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/QuoteKind"
+          },
+          "assignment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Assignment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "basis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpeakerBasis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "speaker_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker Group Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label",
+            "description": "场景内展示编号，如 S1"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AnnotationStatus"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AnnotationSource"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "default": false
+          },
+          "user_locked": {
+            "type": "boolean",
+            "title": "User Locked",
+            "default": false
+          },
+          "visible_from_cp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible From Cp"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quote_id",
+          "kind",
+          "status",
+          "source",
+          "version"
+        ],
+        "title": "AnnotationStateOut",
+        "description": "当前有效标注（前端展示与版本校验都需要它）。"
       },
       "AnnotationStatus": {
         "type": "string",
@@ -2237,6 +2856,150 @@
         ],
         "title": "ContentResponse"
       },
+      "CorrectionAction": {
+        "type": "string",
+        "enum": [
+          "assign_existing",
+          "create_speaker",
+          "set_kind",
+          "mark_unknown",
+          "set_gap_decision",
+          "merge_speakers",
+          "split_speakers",
+          "undo"
+        ],
+        "title": "CorrectionAction",
+        "description": "人工更正动作（DEVELOPMENT.md 5.3）。"
+      },
+      "CorrectionOut": {
+        "properties": {
+          "correction_id": {
+            "type": "string",
+            "title": "Correction Id",
+            "description": "主目标的更正记录 ID"
+          },
+          "correction_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Correction Ids",
+            "description": "本次写入的全部更正记录"
+          },
+          "action": {
+            "$ref": "#/components/schemas/CorrectionAction"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/CorrectionTargetType"
+          },
+          "target_id": {
+            "type": "string",
+            "title": "Target Id"
+          },
+          "affected_quote_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Affected Quote Ids"
+          },
+          "stale_quote_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stale Quote Ids"
+          },
+          "stale_window_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stale Window Ids"
+          },
+          "created_group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Created Group Ids"
+          },
+          "resolved_review_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Resolved Review Item Ids"
+          },
+          "annotation_versions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Annotation Versions"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Id"
+          },
+          "scene_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Version"
+          },
+          "updated_review_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Updated Review Counts"
+          },
+          "undone_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undone By"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "correction_id",
+          "action",
+          "target_type",
+          "target_id"
+        ],
+        "title": "CorrectionOut",
+        "description": "人工更正的结果；前端不得自己推算权威计数（DEVELOPMENT.md 5.3）。"
+      },
+      "CorrectionTargetType": {
+        "type": "string",
+        "enum": [
+          "quote",
+          "gap",
+          "scene",
+          "annotation"
+        ],
+        "title": "CorrectionTargetType"
+      },
       "CredentialMode": {
         "type": "string",
         "enum": [
@@ -2406,6 +3169,25 @@
         ],
         "title": "DataEnvelope[ContentResponse]"
       },
+      "DataEnvelope_CorrectionOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CorrectionOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[CorrectionOut]"
+      },
       "DataEnvelope_CursorPage_BookOut__": {
         "properties": {
           "data": {
@@ -2481,6 +3263,25 @@
           "request_id"
         ],
         "title": "DataEnvelope[EstimateOut]"
+      },
+      "DataEnvelope_GapCorrectionOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GapCorrectionOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[GapCorrectionOut]"
       },
       "DataEnvelope_ImportResult_": {
         "properties": {
@@ -2615,6 +3416,63 @@
         ],
         "title": "DataEnvelope[ReadingProgressOut]"
       },
+      "DataEnvelope_ReviewItemDetailOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReviewItemDetailOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ReviewItemDetailOut]"
+      },
+      "DataEnvelope_ReviewItemOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReviewItemOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ReviewItemOut]"
+      },
+      "DataEnvelope_ReviewQueueResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReviewQueueResponse"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ReviewQueueResponse]"
+      },
       "DataEnvelope_ScanResultOut_": {
         "properties": {
           "data": {
@@ -2633,6 +3491,44 @@
           "request_id"
         ],
         "title": "DataEnvelope[ScanResultOut]"
+      },
+      "DataEnvelope_SpeakerRevisionOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SpeakerRevisionOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[SpeakerRevisionOut]"
+      },
+      "DataEnvelope_UndoOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UndoOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[UndoOut]"
       },
       "DataEnvelope_UsageOut_": {
         "properties": {
@@ -2851,6 +3747,117 @@
         ],
         "title": "EstimateOut"
       },
+      "GapCorrectionIn": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/GapDecision"
+          },
+          "expected_scene_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Scene Version"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "title": "GapCorrectionIn"
+      },
+      "GapCorrectionOut": {
+        "properties": {
+          "correction_id": {
+            "type": "string",
+            "title": "Correction Id"
+          },
+          "gap_id": {
+            "type": "string",
+            "title": "Gap Id"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/GapDecision"
+          },
+          "previous_decision": {
+            "$ref": "#/components/schemas/GapDecision"
+          },
+          "affected_quote_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Affected Quote Ids"
+          },
+          "stale_quote_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stale Quote Ids"
+          },
+          "closed_scene_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Closed Scene Ids"
+          },
+          "opened_scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opened Scene Id"
+          },
+          "resolved_review_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Resolved Review Item Ids"
+          },
+          "created_review_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Created Review Item Ids"
+          },
+          "updated_review_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Updated Review Counts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "correction_id",
+          "gap_id",
+          "decision",
+          "previous_decision"
+        ],
+        "title": "GapCorrectionOut"
+      },
       "GapDecision": {
         "type": "string",
         "enum": [
@@ -2941,6 +3948,14 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "IdentityOperation": {
+        "type": "string",
+        "enum": [
+          "MERGE",
+          "SPLIT"
+        ],
+        "title": "IdentityOperation"
       },
       "ImportResult": {
         "properties": {
@@ -3837,6 +4852,103 @@
         ],
         "title": "ProtocolCapabilitiesOut"
       },
+      "QuoteCorrectionIn": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "assign_existing",
+              "create_speaker",
+              "set_kind",
+              "mark_unknown"
+            ],
+            "title": "Action"
+          },
+          "speaker_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker Ref",
+            "description": "已有分组：可以是 group_id，也可以是场景内编号（S1、S2…）"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "set_kind 必填"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512,
+            "title": "Description",
+            "description": "create_speaker 的说明，可空",
+            "default": ""
+          },
+          "quote_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Ids",
+            "description": "显式多目标范围；省略时只改当前 utterance。跨场景会被拒绝。"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version",
+            "description": "目标标注的期望版本；并发旧版本返回 409"
+          },
+          "expected_scene_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Scene Version"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "QuoteCorrectionIn",
+        "description": "`POST /api/quotes/{id}/corrections` 的请求体。"
+      },
       "QuoteDetailOut": {
         "properties": {
           "quote": {
@@ -3883,6 +4995,48 @@
             "type": "string",
             "title": "Context After",
             "default": ""
+          },
+          "annotation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnnotationStateOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "当前有效标注；未处理过则为 null"
+          },
+          "scene": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SceneRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewItemOut"
+            },
+            "type": "array",
+            "title": "Review Items"
+          },
+          "scene_groups": {
+            "items": {
+              "$ref": "#/components/schemas/SceneGroupRefOut"
+            },
+            "type": "array",
+            "title": "Scene Groups",
+            "description": "同场景内可指定的已有分组（编号 + group_id）"
+          },
+          "can_correct": {
+            "type": "boolean",
+            "title": "Can Correct",
+            "description": "是否可通过更正接口人工修改",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -3890,7 +5044,8 @@
         "required": [
           "quote"
         ],
-        "title": "QuoteDetailOut"
+        "title": "QuoteDetailOut",
+        "description": "普通对白详情；**不要求**该对白已经在待确认队列里（T12）。"
       },
       "QuoteKind": {
         "type": "string",
@@ -4111,6 +5266,269 @@
         "type": "object",
         "title": "ReconcileIn"
       },
+      "ReviewDeferIn": {
+        "properties": {
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ReviewDeferIn"
+      },
+      "ReviewFlagIn": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/ReviewReason",
+            "default": "USER_FLAGGED"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ReviewFlagIn",
+        "description": "`POST /api/quotes/{id}/review-items`：用户主动标记问题（幂等）。"
+      },
+      "ReviewItemCountsOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Status"
+          },
+          "by_reason": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "ReviewItemCountsOut"
+      },
+      "ReviewItemDetailOut": {
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/ReviewItemOut"
+          },
+          "annotation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnnotationStateOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scene": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SceneRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "context_before": {
+            "type": "string",
+            "title": "Context Before",
+            "default": ""
+          },
+          "context_after": {
+            "type": "string",
+            "title": "Context After",
+            "default": ""
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "item"
+        ],
+        "title": "ReviewItemDetailOut"
+      },
+      "ReviewItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/ReviewTargetType"
+          },
+          "quote_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Id"
+          },
+          "gap_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gap Id"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ReviewReason"
+          },
+          "queue_status": {
+            "$ref": "#/components/schemas/ReviewQueueStatus"
+          },
+          "candidates": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Candidates"
+          },
+          "annotation_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annotation Version"
+          },
+          "resolved_by_correction_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By Correction Id"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "target_type",
+          "reason",
+          "queue_status",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ReviewItemOut"
+      },
+      "ReviewQueueResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ReviewItemCountsOut"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "counts"
+        ],
+        "title": "ReviewQueueResponse"
+      },
+      "ReviewQueueStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "DEFERRED",
+          "RESOLVED"
+        ],
+        "title": "ReviewQueueStatus"
+      },
+      "ReviewReason": {
+        "type": "string",
+        "enum": [
+          "LOW_CONFIDENCE",
+          "AMBIGUOUS_SPEAKER",
+          "UNKNOWN_SPEAKER",
+          "POSSIBLE_NEW_SPEAKER",
+          "SCENE_BOUNDARY",
+          "STALE_DEPENDENCY",
+          "USER_FLAGGED",
+          "OTHER"
+        ],
+        "title": "ReviewReason"
+      },
+      "ReviewTargetType": {
+        "type": "string",
+        "enum": [
+          "quote",
+          "gap"
+        ],
+        "title": "ReviewTargetType"
+      },
       "ScanResultOut": {
         "properties": {
           "book_id": {
@@ -4199,6 +5617,68 @@
         ],
         "title": "ScanWarningOut"
       },
+      "SceneGroupRefOut": {
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_id",
+          "label"
+        ],
+        "title": "SceneGroupRefOut",
+        "description": "场景内可指定的已有分组（人工更正时按编号或 ID 指定）。"
+      },
+      "SceneRefOut": {
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "title": "Scene Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "start_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start Cp"
+          },
+          "end_cp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Cp"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scene_id",
+          "status",
+          "start_cp",
+          "version"
+        ],
+        "title": "SceneRefOut"
+      },
       "SpeakerBasis": {
         "type": "string",
         "enum": [
@@ -4274,6 +5754,188 @@
           "color_index"
         ],
         "title": "SpeakerLegendItemOut"
+      },
+      "SpeakerRevisionIn": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/IdentityOperation"
+          },
+          "source_group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Group Ids",
+            "description": "merge：至少两个分组"
+          },
+          "buckets": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Buckets",
+            "description": "split：至少两个桶，每桶是若干 quote_id"
+          },
+          "expected_scene_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Scene Version"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "operation"
+        ],
+        "title": "SpeakerRevisionIn",
+        "description": "`POST /api/scenes/{id}/speaker-revisions`：merge / split。"
+      },
+      "SpeakerRevisionOut": {
+        "properties": {
+          "revision_id": {
+            "type": "string",
+            "title": "Revision Id"
+          },
+          "correction_id": {
+            "type": "string",
+            "title": "Correction Id"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/IdentityOperation"
+          },
+          "scene_id": {
+            "type": "string",
+            "title": "Scene Id"
+          },
+          "scene_version": {
+            "type": "integer",
+            "title": "Scene Version"
+          },
+          "group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Group Ids"
+          },
+          "created_group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Created Group Ids"
+          },
+          "empty_group_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Empty Group Ids",
+            "description": "合并/拆分后不再被引用的分组"
+          },
+          "affected_quote_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Affected Quote Ids"
+          },
+          "stale_quote_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stale Quote Ids"
+          },
+          "updated_review_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Updated Review Counts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision_id",
+          "correction_id",
+          "operation",
+          "scene_id",
+          "scene_version"
+        ],
+        "title": "SpeakerRevisionOut"
+      },
+      "UndoOut": {
+        "properties": {
+          "correction_id": {
+            "type": "string",
+            "title": "Correction Id",
+            "description": "被撤销的更正记录 ID"
+          },
+          "undo_correction_id": {
+            "type": "string",
+            "title": "Undo Correction Id"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/CorrectionTargetType"
+          },
+          "target_id": {
+            "type": "string",
+            "title": "Target Id"
+          },
+          "restored": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Restored"
+          },
+          "affected_quote_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Affected Quote Ids"
+          },
+          "stale_quote_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stale Quote Ids"
+          },
+          "updated_review_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Updated Review Counts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "correction_id",
+          "undo_correction_id",
+          "target_type",
+          "target_id"
+        ],
+        "title": "UndoOut"
       },
       "UsageOut": {
         "properties": {

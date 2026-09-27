@@ -460,6 +460,142 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/review-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 待确认队列（按章节/场景/原因/状态过滤） */
+        get: operations["list_review_items_route_api_books__book_id__review_items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/review-items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 待确认项详情（目标、上下文、候选、版本） */
+        get: operations["get_review_item_route_api_review_items__item_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/review-items/{item_id}/defer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 延后处理（只改队列状态，不增加确认计数） */
+        post: operations["defer_review_item_route_api_review_items__item_id__defer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{quote_id}/review-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 用户主动标记问题（幂等：同一目标 + 原因只有一条当前项） */
+        post: operations["flag_quote_review_item_route_api_quotes__quote_id__review_items_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{quote_id}/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 当前发言人工更正（不调用模型） */
+        post: operations["quote_correction_route_api_quotes__quote_id__corrections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gaps/{gap_id}/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认 Gap 的 CONTINUE/UPDATE/BREAK/UNCERTAIN，返回场景修订影响 */
+        post: operations["gap_correction_route_api_gaps__gap_id__corrections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/corrections/{correction_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 撤销一次人工更正（版本校验；历史只追加不删除） */
+        post: operations["undo_correction_route_api_corrections__correction_id__undo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scenes/{scene_id}/speaker-revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 场景内说话人分组 merge / split */
+        post: operations["speaker_revision_route_api_scenes__scene_id__speaker_revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -527,6 +663,49 @@ export interface components {
              * @default false
              */
             withheld: boolean;
+        };
+        /**
+         * AnnotationSource
+         * @enum {string}
+         */
+        AnnotationSource: "MODEL" | "RULE" | "USER";
+        /**
+         * AnnotationStateOut
+         * @description 当前有效标注（前端展示与版本校验都需要它）。
+         */
+        AnnotationStateOut: {
+            /** Quote Id */
+            quote_id: string;
+            /** Scene Id */
+            scene_id?: string | null;
+            kind: components["schemas"]["QuoteKind"];
+            assignment?: components["schemas"]["Assignment"] | null;
+            basis?: components["schemas"]["SpeakerBasis"] | null;
+            /** Speaker Group Id */
+            speaker_group_id?: string | null;
+            /**
+             * Label
+             * @description 场景内展示编号，如 S1
+             */
+            label?: string | null;
+            status: components["schemas"]["AnnotationStatus"];
+            source: components["schemas"]["AnnotationSource"];
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /**
+             * User Locked
+             * @default false
+             */
+            user_locked: boolean;
+            /** Visible From Cp */
+            visible_from_cp?: number | null;
+            /** Version */
+            version: number;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /**
          * AnnotationStatus
@@ -751,6 +930,61 @@ export interface components {
             next_cursor?: string | null;
         };
         /**
+         * CorrectionAction
+         * @description 人工更正动作（DEVELOPMENT.md 5.3）。
+         * @enum {string}
+         */
+        CorrectionAction: "assign_existing" | "create_speaker" | "set_kind" | "mark_unknown" | "set_gap_decision" | "merge_speakers" | "split_speakers" | "undo";
+        /**
+         * CorrectionOut
+         * @description 人工更正的结果；前端不得自己推算权威计数（DEVELOPMENT.md 5.3）。
+         */
+        CorrectionOut: {
+            /**
+             * Correction Id
+             * @description 主目标的更正记录 ID
+             */
+            correction_id: string;
+            /**
+             * Correction Ids
+             * @description 本次写入的全部更正记录
+             */
+            correction_ids?: string[];
+            action: components["schemas"]["CorrectionAction"];
+            target_type: components["schemas"]["CorrectionTargetType"];
+            /** Target Id */
+            target_id: string;
+            /** Affected Quote Ids */
+            affected_quote_ids?: string[];
+            /** Stale Quote Ids */
+            stale_quote_ids?: string[];
+            /** Stale Window Ids */
+            stale_window_ids?: string[];
+            /** Created Group Ids */
+            created_group_ids?: string[];
+            /** Resolved Review Item Ids */
+            resolved_review_item_ids?: string[];
+            /** Annotation Versions */
+            annotation_versions?: {
+                [key: string]: number;
+            };
+            /** Scene Id */
+            scene_id?: string | null;
+            /** Scene Version */
+            scene_version?: number | null;
+            /** Updated Review Counts */
+            updated_review_counts?: {
+                [key: string]: number;
+            };
+            /** Undone By */
+            undone_by?: string | null;
+        };
+        /**
+         * CorrectionTargetType
+         * @enum {string}
+         */
+        CorrectionTargetType: "quote" | "gap" | "scene" | "annotation";
+        /**
          * CredentialMode
          * @enum {string}
          */
@@ -812,6 +1046,15 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[CorrectionOut] */
+        DataEnvelope_CorrectionOut_: {
+            data: components["schemas"]["CorrectionOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[CursorPage[BookOut]] */
         DataEnvelope_CursorPage_BookOut__: {
             data: components["schemas"]["CursorPage_BookOut_"];
@@ -842,6 +1085,15 @@ export interface components {
         /** DataEnvelope[EstimateOut] */
         DataEnvelope_EstimateOut_: {
             data: components["schemas"]["EstimateOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[GapCorrectionOut] */
+        DataEnvelope_GapCorrectionOut_: {
+            data: components["schemas"]["GapCorrectionOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -911,9 +1163,54 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[ReviewItemDetailOut] */
+        DataEnvelope_ReviewItemDetailOut_: {
+            data: components["schemas"]["ReviewItemDetailOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[ReviewItemOut] */
+        DataEnvelope_ReviewItemOut_: {
+            data: components["schemas"]["ReviewItemOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[ReviewQueueResponse] */
+        DataEnvelope_ReviewQueueResponse_: {
+            data: components["schemas"]["ReviewQueueResponse"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[ScanResultOut] */
         DataEnvelope_ScanResultOut_: {
             data: components["schemas"]["ScanResultOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[SpeakerRevisionOut] */
+        DataEnvelope_SpeakerRevisionOut_: {
+            data: components["schemas"]["SpeakerRevisionOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[UndoOut] */
+        DataEnvelope_UndoOut_: {
+            data: components["schemas"]["UndoOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -1012,6 +1309,42 @@ export interface components {
             /** Notes */
             notes?: string[];
         };
+        /** GapCorrectionIn */
+        GapCorrectionIn: {
+            decision: components["schemas"]["GapDecision"];
+            /** Expected Scene Version */
+            expected_scene_version?: number | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** GapCorrectionOut */
+        GapCorrectionOut: {
+            /** Correction Id */
+            correction_id: string;
+            /** Gap Id */
+            gap_id: string;
+            decision: components["schemas"]["GapDecision"];
+            previous_decision: components["schemas"]["GapDecision"];
+            /** Affected Quote Ids */
+            affected_quote_ids?: string[];
+            /** Stale Quote Ids */
+            stale_quote_ids?: string[];
+            /** Closed Scene Ids */
+            closed_scene_ids?: string[];
+            /** Opened Scene Id */
+            opened_scene_id?: string | null;
+            /** Resolved Review Item Ids */
+            resolved_review_item_ids?: string[];
+            /** Created Review Item Ids */
+            created_review_item_ids?: string[];
+            /** Updated Review Counts */
+            updated_review_counts?: {
+                [key: string]: number;
+            };
+        };
         /**
          * GapDecision
          * @enum {string}
@@ -1042,6 +1375,11 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * IdentityOperation
+         * @enum {string}
+         */
+        IdentityOperation: "MERGE" | "SPLIT";
         /** ImportResult */
         ImportResult: {
             /** Book Id */
@@ -1407,7 +1745,51 @@ export interface components {
              */
             notes: string;
         };
-        /** QuoteDetailOut */
+        /**
+         * QuoteCorrectionIn
+         * @description `POST /api/quotes/{id}/corrections` 的请求体。
+         */
+        QuoteCorrectionIn: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "assign_existing" | "create_speaker" | "set_kind" | "mark_unknown";
+            /**
+             * Speaker Ref
+             * @description 已有分组：可以是 group_id，也可以是场景内编号（S1、S2…）
+             */
+            speaker_ref?: string | null;
+            /** @description set_kind 必填 */
+            kind?: components["schemas"]["QuoteKind"] | null;
+            /**
+             * Description
+             * @description create_speaker 的说明，可空
+             * @default
+             */
+            description: string;
+            /**
+             * Quote Ids
+             * @description 显式多目标范围；省略时只改当前 utterance。跨场景会被拒绝。
+             */
+            quote_ids?: string[] | null;
+            /**
+             * Expected Version
+             * @description 目标标注的期望版本；并发旧版本返回 409
+             */
+            expected_version?: number | null;
+            /** Expected Scene Version */
+            expected_scene_version?: number | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /**
+         * QuoteDetailOut
+         * @description 普通对白详情；**不要求**该对白已经在待确认队列里（T12）。
+         */
         QuoteDetailOut: {
             quote: components["schemas"]["QuoteOut"];
             /** Previous Quote Id */
@@ -1425,6 +1807,22 @@ export interface components {
              * @default
              */
             context_after: string;
+            /** @description 当前有效标注；未处理过则为 null */
+            annotation?: components["schemas"]["AnnotationStateOut"] | null;
+            scene?: components["schemas"]["SceneRefOut"] | null;
+            /** Review Items */
+            review_items?: components["schemas"]["ReviewItemOut"][];
+            /**
+             * Scene Groups
+             * @description 同场景内可指定的已有分组（编号 + group_id）
+             */
+            scene_groups?: components["schemas"]["SceneGroupRefOut"][];
+            /**
+             * Can Correct
+             * @description 是否可通过更正接口人工修改
+             * @default false
+             */
+            can_correct: boolean;
         };
         /**
          * QuoteKind
@@ -1509,6 +1907,107 @@ export interface components {
              */
             action: "retry" | "keep_unknown";
         };
+        /** ReviewDeferIn */
+        ReviewDeferIn: {
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /**
+         * ReviewFlagIn
+         * @description `POST /api/quotes/{id}/review-items`：用户主动标记问题（幂等）。
+         */
+        ReviewFlagIn: {
+            /** @default USER_FLAGGED */
+            reason: components["schemas"]["ReviewReason"];
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** ReviewItemCountsOut */
+        ReviewItemCountsOut: {
+            /** Total */
+            total: number;
+            /** By Status */
+            by_status?: {
+                [key: string]: number;
+            };
+            /** By Reason */
+            by_reason?: {
+                [key: string]: number;
+            };
+        };
+        /** ReviewItemDetailOut */
+        ReviewItemDetailOut: {
+            item: components["schemas"]["ReviewItemOut"];
+            annotation?: components["schemas"]["AnnotationStateOut"] | null;
+            scene?: components["schemas"]["SceneRefOut"] | null;
+            /**
+             * Context Before
+             * @default
+             */
+            context_before: string;
+            /**
+             * Context After
+             * @default
+             */
+            context_after: string;
+            /** Allowed Actions */
+            allowed_actions?: string[];
+        };
+        /** ReviewItemOut */
+        ReviewItemOut: {
+            /** Id */
+            id: string;
+            target_type: components["schemas"]["ReviewTargetType"];
+            /** Quote Id */
+            quote_id?: string | null;
+            /** Gap Id */
+            gap_id?: string | null;
+            reason: components["schemas"]["ReviewReason"];
+            queue_status: components["schemas"]["ReviewQueueStatus"];
+            /** Candidates */
+            candidates?: {
+                [key: string]: unknown;
+            };
+            /** Annotation Version */
+            annotation_version?: number | null;
+            /** Resolved By Correction Id */
+            resolved_by_correction_id?: string | null;
+            /** Version */
+            version: number;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /** ReviewQueueResponse */
+        ReviewQueueResponse: {
+            /** Items */
+            items?: components["schemas"]["ReviewItemOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            counts: components["schemas"]["ReviewItemCountsOut"];
+        };
+        /**
+         * ReviewQueueStatus
+         * @enum {string}
+         */
+        ReviewQueueStatus: "PENDING" | "DEFERRED" | "RESOLVED";
+        /**
+         * ReviewReason
+         * @enum {string}
+         */
+        ReviewReason: "LOW_CONFIDENCE" | "AMBIGUOUS_SPEAKER" | "UNKNOWN_SPEAKER" | "POSSIBLE_NEW_SPEAKER" | "SCENE_BOUNDARY" | "STALE_DEPENDENCY" | "USER_FLAGGED" | "OTHER";
+        /**
+         * ReviewTargetType
+         * @enum {string}
+         */
+        ReviewTargetType: "quote" | "gap";
         /** ScanResultOut */
         ScanResultOut: {
             /** Book Id */
@@ -1544,6 +2043,29 @@ export interface components {
             detail: string;
         };
         /**
+         * SceneGroupRefOut
+         * @description 场景内可指定的已有分组（人工更正时按编号或 ID 指定）。
+         */
+        SceneGroupRefOut: {
+            /** Group Id */
+            group_id: string;
+            /** Label */
+            label: string;
+        };
+        /** SceneRefOut */
+        SceneRefOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Status */
+            status: string;
+            /** Start Cp */
+            start_cp: number;
+            /** End Cp */
+            end_cp?: number | null;
+            /** Version */
+            version: number;
+        };
+        /**
          * SpeakerBasis
          * @description 证据类型，不是校准后的置信概率（DEVELOPMENT.md 4.4）。
          * @enum {string}
@@ -1576,6 +2098,84 @@ export interface components {
              * @default 0
              */
             quote_count: number;
+        };
+        /**
+         * SpeakerRevisionIn
+         * @description `POST /api/scenes/{id}/speaker-revisions`：merge / split。
+         */
+        SpeakerRevisionIn: {
+            operation: components["schemas"]["IdentityOperation"];
+            /**
+             * Source Group Ids
+             * @description merge：至少两个分组
+             */
+            source_group_ids?: string[];
+            /**
+             * Buckets
+             * @description split：至少两个桶，每桶是若干 quote_id
+             */
+            buckets?: string[][];
+            /** Expected Scene Version */
+            expected_scene_version?: number | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** SpeakerRevisionOut */
+        SpeakerRevisionOut: {
+            /** Revision Id */
+            revision_id: string;
+            /** Correction Id */
+            correction_id: string;
+            operation: components["schemas"]["IdentityOperation"];
+            /** Scene Id */
+            scene_id: string;
+            /** Scene Version */
+            scene_version: number;
+            /** Group Ids */
+            group_ids?: string[];
+            /** Created Group Ids */
+            created_group_ids?: string[];
+            /**
+             * Empty Group Ids
+             * @description 合并/拆分后不再被引用的分组
+             */
+            empty_group_ids?: string[];
+            /** Affected Quote Ids */
+            affected_quote_ids?: string[];
+            /** Stale Quote Ids */
+            stale_quote_ids?: string[];
+            /** Updated Review Counts */
+            updated_review_counts?: {
+                [key: string]: number;
+            };
+        };
+        /** UndoOut */
+        UndoOut: {
+            /**
+             * Correction Id
+             * @description 被撤销的更正记录 ID
+             */
+            correction_id: string;
+            /** Undo Correction Id */
+            undo_correction_id: string;
+            target_type: components["schemas"]["CorrectionTargetType"];
+            /** Target Id */
+            target_id: string;
+            /** Restored */
+            restored?: {
+                [key: string]: unknown;
+            };
+            /** Affected Quote Ids */
+            affected_quote_ids?: string[];
+            /** Stale Quote Ids */
+            stale_quote_ids?: string[];
+            /** Updated Review Counts */
+            updated_review_counts?: {
+                [key: string]: number;
+            };
         };
         /** UsageOut */
         UsageOut: {
@@ -2535,6 +3135,281 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_AnnotationsResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_review_items_route_api_books__book_id__review_items_get: {
+        parameters: {
+            query?: {
+                chapter_id?: string | null;
+                scene_id?: string | null;
+                reason?: components["schemas"]["ReviewReason"] | null;
+                queue_status?: components["schemas"]["ReviewQueueStatus"] | null;
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ReviewQueueResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_review_item_route_api_review_items__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ReviewItemDetailOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    defer_review_item_route_api_review_items__item_id__defer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ReviewDeferIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ReviewItemOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    flag_quote_review_item_route_api_quotes__quote_id__review_items_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewFlagIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ReviewItemOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quote_correction_route_api_quotes__quote_id__corrections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteCorrectionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CorrectionOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gap_correction_route_api_gaps__gap_id__corrections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gap_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GapCorrectionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_GapCorrectionOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    undo_correction_route_api_corrections__correction_id__undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                correction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_UndoOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    speaker_revision_route_api_scenes__scene_id__speaker_revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpeakerRevisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_SpeakerRevisionOut_"];
                 };
             };
             /** @description Validation Error */
