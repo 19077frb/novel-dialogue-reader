@@ -109,6 +109,32 @@ npm --prefix frontend run dev -- --host 127.0.0.1           # 前端 http://127.
   `GET /api/review-items/{id}`、`POST /api/quotes/{id}/review-items`（主动标记，幂等）、
   `POST /api/review-items/{id}/defer`（只延后）。
 
+## 导出 EPUB / HTML（T15A）
+
+命令行与界面之外的导出能力（T15B 会把界面接上）：
+
+- `POST /api/books/{id}/exports/preview` 冻结一次快照并返回**后端样张**（不调用模型）：
+  可看到覆盖统计（未知/暂定/过期/未处理）与警告，再决定是否生成。
+- `POST /api/books/{id}/exports` 生成 `epub` 或 `html`：**幂等**（同一快照+格式+样式复用已有产物），
+  文件写在 `data/exports/<artifact_id>/`，**从不覆盖原书**。
+- 样式：`color_and_label` / `color_only` / `label_only`。未知、未处理、过期与初读遮断的对白保持原样，
+  不加颜色也不加编号；编号是真实文本 `〔S1〕`，灰度打印也能读。
+- 成品可离线打开：EPUB 带 `mimetype`（第一项、不压缩）、container/OPF/nav/图片，无远程引用、无脚本；
+  HTML 是单文件（CSS 内联、图片内联为 `data:` URL）。
+- 校验分两层：内部检查（结构、mimetype、资源闭合、外部引用、正文逐段一致性）永远运行；
+  EPUBCheck 需要本地 jar，缺席时如实报 `NOT_RUN`，不会伪装成 PASS。
+- 命令行：
+
+  ```powershell
+  uv run --project backend python backend/scripts/validate_exports.py `
+    --epub evaluation/examples/exports/minimal-txt-001-annotated.epub `
+    --html evaluation/examples/exports/minimal-txt-001-annotated.html `
+    --expected-text-file evaluation/examples/minimal-txt-001/text.txt `
+    --epubcheck-jar tools/epubcheck/epubcheck.jar
+  ```
+
+  原创样例与校验清单见 `evaluation/examples/exports/`。
+
 ## 初读与后文证据（T15）
 
 - 阅读页在初读模式下按「本章末端」提交 `visible_horizon_cp`，页面上会写明

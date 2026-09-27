@@ -553,3 +553,62 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 
 测试专用：FakeProvider 的 `params.script="split_then_merge"` 会“先判成两个声音、再用窗口末尾证据合并”，
 用于离线验证 F17；真实提供方不会走到这条分支。
+
+## 25. EPUB/HTML 导出与标准校验（T15A 已实现）
+
+| 端点 | 说明 |
+| --- | --- |
+| `POST /api/books/{id}/exports/preview` | 冻结一次导出快照并返回后端样张、覆盖统计与警告（**不调用模型**） |
+| `POST /api/books/{id}/exports` | 按快照生成 EPUB/HTML（201；幂等，本地执行，不走网络） |
+| `GET /api/exports/{id}` | 状态、校验结果与下载可用性 |
+| `GET /api/exports/{id}/download` | 受控下载（EPUB `application/epub+zip`；HTML `text/html; charset=utf-8`；安全的附件文件名） |
+
+快照（`export_snapshots`）：
+
+- 冻结内容：标注投影（含颜色/编号/`withheld`/`stale`）、身份投影、可见性策略、样式、所选章节、
+  `source_revision`（原文版本 + 标注版本/计数的指纹）、`snapshot_hash`、警告清单。
+- `visibility_policy`：`position_safe` 取当前阅读位置作为初读 horizon（不提前暴露后文证据）；
+  `reread` 使用完整投影。
+- `selected_chapter_ids` 为空数组表示**整本**；非空表示节选（文件名会带「（节选）」）。
+- 快照不可变：生成期间发生的人工更正不会改变已经冻结的导出（F24 后端部分）。
+
+渲染（`ndr/exports/render.py`）：
+
+- 样式预设 `color_and_label` / `color_only` / `label_only`；颜色来自固定的 8 色板，
+  超出时靠编号辨认（编号是真实文本 `〔S1〕`，灰度打印或颜色被覆盖时仍然有效）。
+- **未知（UNKNOWN）、未处理、`stale`、`withheld` 的对白保持原样**：不加颜色、不加编号。
+- HTML 与 EPUB 共用同一份渲染器与 CSS（样张与实际文件一致）。
+
+产物与安全：
+
+- HTML：单文件，CSS 内联、图片内联为 `data:` URL，无脚本、无 `http(s)` 引用、无 `localhost`（断网可打开）。
+- EPUB：`mimetype` 为第一项且**不压缩**，`META-INF/container.xml` + `OEBPS/content.opf`
+  + `nav.xhtml` + 每章 XHTML + 共享 CSS + 仅被选中章节引用的图片；zip 时间戳固定，
+  相同输入重复导出字节一致。
+- 文件写入 `data/exports/<artifact_id>/`，**从不覆盖原书**；重复请求命中相同
+  `snapshot_hash + format + style + exporter_version` 指纹时直接复用已有产物。
+- 导出只读已存数据与本地资源（EPUB 资源从**源包**里读取），不导入任何 LLM 适配器。
+
+校验（`ndr/exports/validation.py` + `backend/scripts/validate_exports.py`）：
+
+- 内部检查：`non_empty`、`mimetype_first`、`mimetype_stored`、`mimetype_value`、`has_container`、
+  `has_opf`、`has_nav`、`readable_zip`、`resource_closure`、`no_external_references`、`no_localhost`、
+  `text_consistency`（逐段检查正文是否都出现在导出文本里，缺失片段会列出）。
+- 标准检查：EPUBCheck 用**参数数组**调用 `java -jar`；jar 或 java 缺失时状态为 `NOT_RUN` 并说明原因，
+  **绝不伪装 PASS**；未提供 jar 生成的产物 `state=COMPLETED`，但报告里如实记录 `standard=NOT_RUN`。
+- 命令行：
+
+  ```powershell
+  uv run --project backend python backend/scripts/validate_exports.py \
+    --epub evaluation/examples/exports/minimal-txt-001-annotated.epub \
+    --html evaluation/examples/exports/minimal-txt-001-annotated.html \
+    --expected-text-file evaluation/examples/minimal-txt-001/text.txt \
+    --epubcheck-jar tools/epubcheck/epubcheck.jar
+  ```
+
+  退出码：全部通过 0；内部检查失败或文件缺失 1；用法错误 2。
+  `--expected-text-file` 省略时正文一致性记为 `SKIPPED`（仍不假装通过）。
+
+原创样例（`evaluation/examples/exports/`）：由 `minimal-txt-001/text.txt` + 离线确定性 FakeProvider 生成，
+含 EPUB/HTML 与 `manifest.json`（快照哈希、大小、sha256、内部检查结果、标准检查状态）。
+本机没有 EPUBCheck jar，样例的标准检查如实记录为 `NOT_RUN`。
