@@ -3,10 +3,16 @@
 为中文轻小说译本的对白添加颜色/编号，帮助读者辨认说话人；原文不可变，识别结果单独保存，
 不确定的对白交给用户确认。产品目标见 [PLAN.md](PLAN.md)，实现规格见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
-> **当前状态（2026-09-28）**：已完成 **T00 工程骨架**、**T01 领域模型/数据库迁移/公共契约**、
-> **T02 TXT 导入**、**T03 EPUB 导入与资源**、**T04 书架与无模型阅读器**、**T05 候选引语/Gap 与金标准工具**、**T06 模型配置与凭据**、**T07 适配器与连接测试**（识别预览、待确认与导出 **尚未实现**）。
-> 真实模型联调（live）与真实作品效果评测（quality）**均未开始**，没有任何准确率数据。
-> 进度与证据见 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)，交接见 [docs/HANDOFF.md](docs/HANDOFF.md)。
+> **当前状态（2026-09-28）**：**T00–T19 全部完成**（骨架 → TXT/EPUB 导入 → 阅读器 → 候选/Gap →
+> 模型配置与适配器 → 上下文预算 → 场景与匿名分组 → 任务/缓存/用量 → 标注投影与预览 → 人工更正与撤销 →
+> 确认队列 → 暂停/预算/故障恢复 → 初读身份与码点定位 → 导出后端与导出界面 → 评测工具 →
+> 上下文压缩/局部复核/成本路由 → 完整联调与发布检查 → 启动交付）。
+>
+> 结论口径：**工程交付完成，真实验证（live / quality）待完成**——本机没有真实提供方凭据、网络受限，
+> 也没有人工确认的真实作品样本，因此**没有任何准确率数字**：B1–B4 全部 `NOT_RUN`，
+> `quality_evidence=false`、`targets_met=null`；功能与稳定性有可复现证据。
+> 进度见 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)，发布前四类结果见
+> [docs/verification-report.md](docs/verification-report.md)，交接见 [docs/HANDOFF.md](docs/HANDOFF.md)。
 
 ## 运行前提
 
@@ -25,6 +31,60 @@ uv run --project backend alembic -c backend/alembic.ini upgrade head   # 初始�
 
 首次安装（尚无 `package-lock.json`）时用 `npm install` 代替 `npm ci`；两者都必须在 `frontend`
 目录内执行，原因见“已知命令偏差”。
+
+## 依赖检查（T19）
+
+`scripts/dev.ps1` 与 `scripts/serve.ps1` 启动前会检查依赖，缺什么就给出可执行提示：
+
+| 依赖 | 要求 | 检查方式 |
+| --- | --- | --- |
+| Python | 3.11+（本机 3.11.4） | `uv run --project backend python -c "import sys"` 或 `backend\.venv` 存在 |
+| uv | 0.9.0（`backend/uv.lock`） | `Get-Command uv`；缺失/不可用时回退 `backend\.venv\Scripts\python.exe` |
+| Node.js / npm | 22.14.0 / 10.9.2 | `Get-Command node`、`Get-Command npm` |
+| 前端依赖 | `frontend/node_modules` | 缺失时脚本自动 `npm install`（有 lockfile 时可用 `npm ci`） |
+| EPUBCheck（可选） | `tools/epubcheck/epubcheck.jar` | 缺失时导出仍可用，标准检查状态如实为 `NOT_RUN` |
+
+## 初始化与迁移（T19）
+
+```powershell
+# 1) 依赖
+uv sync --project backend --all-groups
+Push-Location frontend; npm ci; Pop-Location      # 首次无 lockfile 时用 npm install
+
+# 2) 数据库（默认 data\ndr.sqlite3；也可先设置 NDR_DATA_DIR 指向别处）
+uv run --project backend alembic -c backend/alembic.ini upgrade head
+uv run --project backend alembic -c backend/alembic.ini current      # 应为 0005
+
+# 3) 启动（开发：后端 8765 + 前端 5173）
+pwsh -File scripts/dev.ps1
+```
+
+`GET /api/health` 返回 `database.state`（`READY` = 已迁移到 head）与 `revision`/`head_revision`，可用来确认初始化成功。
+
+## 生产（同源单端口）启动（T19）
+
+```powershell
+pwsh -File scripts/serve.ps1                 # 迁移 → 构建前端 → 单端口 127.0.0.1:8765 同时提供 API 与页面
+pwsh -File scripts/serve.ps1 -SkipBuild      # 复用已有 frontend/dist
+pwsh -File scripts/serve.ps1 -Port 8800 -DataDir D:\ndr-data
+pwsh -File scripts/serve.ps1 -Stop
+```
+
+- 后端设置 `NDR_STATIC_DIR=frontend/dist` 后把前端构建产物挂在 `/`；深链接（如 `/books/<id>/read`）
+  回退到 `index.html` 交给前端路由，`/api/**` 始终是 JSON 契约（未知路径仍是契约 404）。
+- 单端口部署不需要 CORS，也不会额外暴露端口。
+- 仅离线演示/验收时可加 `-AllowFakeProvider`（不联网的假提供方）：**它不代表真实模型能力**，报告与界面都会如实标注。
+
+## 示例配置（不含密钥）（T19）
+
+```powershell
+Copy-Item .env.example .env      # 可选；不复制也能跑（全部有默认值）
+```
+
+- [`.env.example`](.env.example) 列出全部 `NDR_*` 开关（数据目录、端口、CORS、凭据后端、模型超时与限流退避、
+  导入/EPUB 限制等），**不含任何密钥**，`.env` 已被 `.gitignore` 忽略。
+- 模型密钥只从界面「模型配置」填写，由后端写入系统凭据库或会话内存；数据库、日志、导出件里都没有密钥明文
+  （`test_model_profiles.py` 有断言）。
 
 ## 启动
 
@@ -53,8 +113,12 @@ npm --prefix frontend run dev -- --host 127.0.0.1           # 前端 http://127.
   ruby 注音用 `<ruby>/<rt>` 显示、插图通过受控资源端点加载；切换章节或滚动会保存阅读位置，
   重新打开会回到书签所在章节。**不需要填写任何 API 配置**。
 
-界面现在**不会**显示任何识别结果（颜色/编号/人物名）——那是 T05 起接入的标注层，
-`AnnotationLayer` 目前只是带节点定位属性的占位容器。
+- **识别结果**：预览页或正式处理完成后，对白按说话人着色并带编号（如 `〔S1〕`）；颜色被覆盖时靠编号辨认，
+  编号是真实文本节点，不依赖颜色。未处理或未解决的对白保持原样，并进入待确认队列。
+- **确认与人工更正**：阅读页点击已着色对白打开抽屉（原文/上下文/当前标注/候选说话人），可确认、改判、
+  标记未知、拆分/合并说话人并撤销；更正不调用模型，也不会被后续自动结果覆盖（`user_locked`）。
+- **导出**：阅读页/预览页右上角「导出」可在界面内完成范围、样式、初读策略、样张、生成与下载（EPUB/HTML）。
+- 「导入 + 阅读」不需要任何 API 配置；识别相关功能需要至少一个可用的模型配置。
 
 ## 上下文与预算（T08）
 
@@ -304,6 +368,19 @@ uv run --project backend alembic -c backend/alembic.ini current        # 查看�
 - 应用默认**不会**自动迁移（避免隐式改动用户数据）；需要时用 `NDR_AUTO_MIGRATE=1` 显式开启
   （E2E 用隔离数据目录时使用）。
 
+### 数据与版本升级（T19）
+
+1. **先备份数据目录**（默认 `data\`：原文、SQLite、导出成品都在里面）：
+   `Copy-Item -Recurse -Force data ("data-backup-" + (Get-Date -Format yyyyMMdd-HHmmss))`。
+2. 同步依赖（`uv sync --project backend --all-groups`）；生产用 `scripts/serve.ps1` 会自动重建前端。
+3. 执行迁移（可重复运行，只追加）：`uv run --project backend alembic -c backend/alembic.ini upgrade head`。
+4. 校验：`GET /api/health` 的 `database.state=READY` 且 `revision=head_revision`；打开书架确认书籍与人工确认仍在。
+5. 回滚：若必须回退版本，先停服务，再用备份目录替换 `data\`（不要手工改表）。
+
+自动化升级测试：`backend/tests/integration/test_upgrade_preserves_data.py` 验证「导入的书 + `user_locked` 人工确认 +
+标注历史 + 待确认队列」在重跑/升级迁移后原样保留且接口仍可用；`test_schema.py::test_existing_database_upgrades_without_data_loss`
+覆盖 `0001 → head` 的真实升级路径。
+
 ## 导入与阅读（T02/T03）
 
 无模型也能跑通导入与整本阅读（`GET /api/books/{id}/content` 返回结构化节点，前端在 T04 接入）：
@@ -351,6 +428,35 @@ npm --prefix frontend run generate:api
 发布前的四类结果（功能 / 稳定性 / live / 质量）、报告索引、已修问题与残余阻塞见
 `docs/verification-report.md`；验证口径见 `docs/decisions/0022-release-verification-scope.md`。
 **当前 live 与 quality 都是 BLOCKED**：本机没有真实提供方凭据、网络受限、也没有人工确认的真实作品样本。
+
+## 未完成项与复现步骤（T19）
+
+**工程交付完成；真实联调（live）与效果评测（quality）未完成**——缺的不是代码，而是外部条件：
+
+| 未完成项 | 原因（有证据） | 补齐方式 |
+| --- | --- | --- |
+| 真实提供方端到端试用 | 环境无任何提供方密钥、仓库无凭据、网络 6 秒超时 | 配置真实模型后：`python -m ndr.evaluation run --manifest evaluation/manifests/dev.json --config evaluation/configs/b2.json --profile-id <id> --allow-live` |
+| 真实作品效果评测（B1–B4） | 无人工确认样本；报告全部 `NOT_RUN` | 按 `evaluation/annotation-guide.md` 标注真实作品并建清单后跑 B1–B4 |
+| 上下文压缩/复核/路由收益 | 需要真实对比数据 | 按 `evaluation/ablations.md` 跑 B2/B3/B4，并用 `python -m ndr.evaluation loss` 记录压缩丢失 |
+| EPUBCheck 标准检查 | 无 jar 且网络受限；导出状态如实 `NOT_RUN` | 放入 `tools/epubcheck/epubcheck.jar` 后重新导出 |
+| ≥2 款独立 EPUB 阅读器试读 | 本机未安装任何独立阅读器 | 安装后按 `evaluation/examples/exports/README.md` 试读并记录版本/设置 |
+| 真实提供方限流与超时 | 只用 MockTransport/FakeProvider 验证过 | 真实联调时按 `docs/CONTRACTS.md` 第 23 节核对错误码与恢复动作 |
+
+从零复现（本机已实测，命令与断言见 `docs/verification-report.md` 第 9 节）：
+
+```powershell
+# 1) 全新数据目录 + 同源启动（含迁移；-AllowFakeProvider 仅用于离线演示）
+$tmp = Join-Path $env:TEMP ("ndr-demo-" + (Get-Date -Format yyyyMMddHHmmss))
+pwsh -File scripts/serve.ps1 -DataDir $tmp -Port 8899 -SkipBuild -AllowFakeProvider
+
+# 2) 浏览器全流程（导入 → 处理 → 确认 → 导出 EPUB/HTML → 下载件离线可读）
+cd frontend
+$env:NDR_E2E_BACKEND_CMD = '..\backend\.venv\Scripts\python.exe -m ndr'
+npx playwright test
+
+# 3) 全量检查
+pwsh -File scripts/verify.ps1
+```
 
 ## 配置
 
