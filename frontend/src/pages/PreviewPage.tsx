@@ -18,6 +18,7 @@ import { BudgetForm } from '../components/BudgetForm'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
 import { EstimateSummary } from '../components/EstimateSummary'
+import { ExportDialog } from '../components/ExportDialog'
 import { JobPanel } from '../components/JobPanel'
 import { RangePicker, type RangeValue } from '../components/RangePicker'
 import { SpeakerLegend } from '../components/SpeakerLegend'
@@ -52,6 +53,7 @@ export default function PreviewPage() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -224,6 +226,9 @@ export default function PreviewPage() {
         </div>
         <nav className="ndr-preview-nav">
           <Link to={`/books/${bookId}/read`}>去阅读</Link>
+          <button type="button" onClick={() => setExportOpen(true)} data-testid="open-export">
+            导出
+          </button>
           <Link to="/library">返回书架</Link>
         </nav>
       </header>
@@ -419,6 +424,13 @@ export default function PreviewPage() {
           )}
         </div>
       </section>
+      <ExportDialog
+        bookId={bookId}
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        chapters={chapters.data ?? []}
+        readPositionCp={book.data?.read_position_cp ?? 0}
+      />
     </div>
   )
 }

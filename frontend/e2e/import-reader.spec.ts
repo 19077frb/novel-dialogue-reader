@@ -41,7 +41,8 @@ test.describe('导入与阅读', () => {
 
     // 候选引语覆盖（扫描器结果，不含说话人判断）
     const candidate = page.getByTestId('candidate-quote').first()
-    await expect(candidate).toHaveText('「雨停了。」')
+    // 候选层只标「这里有引语」；如果这本书已被处理过，span 里还会包含编号文本
+    await expect(candidate).toContainText('「雨停了。」')
     await expect(candidate).toHaveAttribute('data-quote-id', /^q/)
     await expect(page.getByText(/候选引语 \d+ 条/)).toBeVisible()
 

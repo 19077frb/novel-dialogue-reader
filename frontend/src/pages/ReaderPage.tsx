@@ -17,6 +17,7 @@ import type { ChapterOut, ContentNodeOut, ReadingMode } from '../api/types'
 import { ChapterNavigation } from '../components/ChapterNavigation'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
+import { ExportDialog } from '../components/ExportDialog'
 import { QuoteDetailDrawer } from '../components/QuoteDetailDrawer'
 import { SpeakerLegend } from '../components/SpeakerLegend'
 
@@ -48,6 +49,7 @@ export default function ReaderPage() {
   const [showAnnotations, setShowAnnotations] = useState(true)
   const [readingModeOverride, setReadingModeOverride] = useState<ReadingMode | null>(null)
   const [selectedQuote, setSelectedQuote] = useState<{ quoteId: string; reviewItemId: string | null } | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -242,6 +244,9 @@ export default function ReaderPage() {
             待确认 {pending.data?.counts.by_status?.PENDING ?? 0} 项
           </Link>
           <Link to={`/books/${bookId}/preview`}>预览与处理</Link>
+          <button type="button" onClick={() => setExportOpen(true)} data-testid="open-export">
+            导出
+          </button>
           <Link to="/library">返回书架</Link>
         </nav>
       </header>
@@ -348,6 +353,14 @@ export default function ReaderPage() {
           )}
         </section>
       </div>
+
+      <ExportDialog
+        bookId={bookId}
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        chapters={chapters.data ?? []}
+        readPositionCp={book.data?.read_position_cp ?? 0}
+      />
 
       <QuoteDetailDrawer
         quoteId={selectedQuote?.quoteId ?? null}
