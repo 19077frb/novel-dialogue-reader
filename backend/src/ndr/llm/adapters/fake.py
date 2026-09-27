@@ -89,6 +89,8 @@ class FakeProviderAdapter:
                 },
                 ensure_ascii=False,
             )
+        if self.script_mode == "split_then_merge":
+            return self._split_then_merge_labels(payload)
         if self.labeling_mode == "deterministic":
             return self._deterministic_labels(payload)
         # 标注：把请求里的目标对白都标成 UNKNOWN（不假装知道说话人）
@@ -107,6 +109,87 @@ class FakeProviderAdapter:
                 }
                 for quote_id in targets
             ],
+        }
+
+    def _split_then_merge_labels(self, payload: Mapping[str, Any] | None) -> dict[str, Any]:
+        """仅测试（F17）：先判成两个声音，再用**窗口末尾的证据**提议合并。
+
+        证据在窗口最后一句上，所以 `visible_from_cp` 落在窗口末端：初读 horizon 在此之前时，
+        投影会把合并还原成两个分组；读到证据之后（或重读）才显示为同一个人。
+        """
+
+        targets = [str(item) for item in (payload or {}).get("target_quote_ids", [])]
+        if len(targets) < 3:
+            return self._deterministic_labels(payload)
+        labels = []
+        for index, quote_id in enumerate(targets):
+            if index == 0:
+                labels.append(
+                    {
+                        "quote_id": quote_id,
+                        "scene_ref": "scene_current",
+                        "kind": "speech",
+                        "assignment": "NEW",
+                        "speaker_ref": "new1",
+                        "basis": "DIRECT",
+                        "evidence_refs": [],
+                    }
+                )
+            elif index == 1:
+                labels.append(
+                    {
+                        "quote_id": quote_id,
+                        "scene_ref": "scene_current",
+                        "kind": "speech",
+                        "assignment": "NEW",
+                        "speaker_ref": "new2",
+                        "basis": "DIRECT",
+                        "evidence_refs": [],
+                    }
+                )
+            else:
+                labels.append(
+                    {
+                        "quote_id": quote_id,
+                        "scene_ref": "scene_current",
+                        "kind": "speech",
+                        "assignment": "EXISTING",
+                        "speaker_ref": "new1",
+                        "basis": "DIRECT",
+                        "evidence_refs": [],
+                    }
+                )
+        evidence_quote_id = targets[-1]  # 末尾的一句：可见时点落在窗口末端
+        return {
+            "schema_version": OUTPUT_SCHEMA_VERSION,
+            "scene_updates": [],
+            "gap_decisions": [],
+            "new_speakers": [
+                {
+                    "temp_ref": "new1",
+                    "scene_ref": "scene_current",
+                    "first_quote_id": targets[0],
+                    "description": "第一个声音",
+                    "evidence_refs": [],
+                },
+                {
+                    "temp_ref": "new2",
+                    "scene_ref": "scene_current",
+                    "first_quote_id": targets[1],
+                    "description": "第二个声音",
+                    "evidence_refs": [],
+                },
+            ],
+            "labels": labels,
+            "identity_proposals": [
+                {
+                    "operation": "MERGE",
+                    "input_refs": ["new1", "new2"],
+                    "output_refs": ["new1"],
+                    "evidence_refs": [evidence_quote_id],
+                }
+            ],
+            "needs_context": [],
         }
 
     def _deterministic_labels(self, payload: Mapping[str, Any] | None) -> dict[str, Any]:

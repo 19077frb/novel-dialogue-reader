@@ -107,6 +107,7 @@ const NODES = [
 ] as ContentNodeOut[]
 
 const ANNOTATIONS = {
+  identity_reverts: 0,
   book_id: 'b1',
   book_version_id: 'v1',
   reading_mode: 'initial',

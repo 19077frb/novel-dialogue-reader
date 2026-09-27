@@ -770,6 +770,12 @@ export interface components {
             end_cp: number;
             /** Items */
             items?: components["schemas"]["AnnotationItemOut"][];
+            /**
+             * Identity Reverts
+             * @description 初读 horizon 之下被还原（不提前合并/拆分）的身份修订条数
+             * @default 0
+             */
+            identity_reverts: number;
             /** Legend */
             legend?: components["schemas"]["SpeakerLegendItemOut"][];
             counts: components["schemas"]["AnnotationCountsOut"];

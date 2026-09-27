@@ -65,6 +65,11 @@ class AnnotationsResponse(ApiModel):
     start_cp: int = Field(ge=0)
     end_cp: int = Field(ge=0)
     items: list[AnnotationItemOut] = Field(default_factory=list)
+    identity_reverts: int = Field(
+        default=0,
+        ge=0,
+        description="初读 horizon 之下被还原（不提前合并/拆分）的身份修订条数",
+    )
     legend: list[SpeakerLegendItemOut] = Field(default_factory=list)
     counts: AnnotationCountsOut
     scenes: list[dict[str, object]] = Field(default_factory=list)

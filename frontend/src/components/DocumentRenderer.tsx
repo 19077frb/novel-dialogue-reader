@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { resourceUrl } from '../api/books'
 import type { AnnotationItemOut, ContentNodeOut, RubyAnnotation } from '../api/types'
 import { nodePayload } from '../api/types'
+import { cpLength, sliceByCodepoints, utf16IndexForCp } from '../text/codepoints'
 import { annotationColor, AnnotationLayer, labelText } from './AnnotationLayer'
 
 /** 候选引语范围（来自扫描器，只表示“这里有一段引号内容”，不含说话人）。 */
@@ -45,8 +46,9 @@ function renderTextWithRuby(
   let cursor = 0
   const sorted = [...ruby].sort((a, b) => a.start_cp - b.start_cp)
   for (const annotation of sorted) {
-    const start = Math.max(0, Math.min(text.length, annotation.start_cp - baseCp))
-    const end = Math.max(start, Math.min(text.length, annotation.end_cp - baseCp))
+    // 码点 → UTF-16 下标：astral 字符（emoji/扩展汉字）不能被当成 2 个码点
+    const start = utf16IndexForCp(text, baseCp, annotation.start_cp)
+    const end = Math.max(start, utf16IndexForCp(text, baseCp, annotation.end_cp))
     if (start > cursor) parts.push(text.slice(cursor, start))
     const base = text.slice(start, end)
     if (base) {
@@ -125,7 +127,7 @@ function renderAnnotatedText(
 ): ReactNode[] {
   const parts: ReactNode[] = []
   for (const slice of sliceByAnnotations(annotations, from, to)) {
-    const segment = text.slice(slice.start - baseCp, slice.end - baseCp)
+    const segment = sliceByCodepoints(text, baseCp, slice.start, slice.end)
     const inner = renderTextWithRuby(segment, slice.start, ruby)
     const annotation = slice.annotation
     if (annotation === null || annotation.withheld) {
@@ -303,7 +305,9 @@ function NodeView({
     )
   }
 
-  const nodeEnd = node.start_cp + node.text.length
+  // 节点范围以后端为准（`end_cp` 是码点）；没有可信范围时才退回按码点计数
+  const nodeEnd =
+    node.end_cp > node.start_cp ? node.end_cp : node.start_cp + cpLength(node.text)
   const relevant = candidates.filter(
     (range) => range.startCp < nodeEnd && range.endCp > node.start_cp,
   )

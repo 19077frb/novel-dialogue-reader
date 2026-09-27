@@ -319,3 +319,80 @@ describe('DocumentRenderer 标注投影（T11）', () => {
     expect(screen.getByTestId('candidate-quote')).toHaveTextContent('「雨停了。」')
   })
 })
+
+
+describe('DocumentRenderer 码点定位（T15 / F11）', () => {
+  const astralText = '𠮷野家的猫🐈跳上窗台。' // 11 码点 / 13 UTF-16 单元
+  const base = 500
+
+  function astralNode(): ContentNodeOut {
+    return {
+      node_id: 'a0',
+      node_type: 'paragraph',
+      ordinal: 0,
+      start_cp: base,
+      end_cp: base + 11,
+      chapter_id: 'ch1',
+      chapter_ordinal: 0,
+      text: astralText,
+      payload: {},
+    } as ContentNodeOut
+  }
+
+  function annotation(partial: Partial<AnnotationItemOut>): AnnotationItemOut {
+    return {
+      quote_id: 'qa',
+      scene_id: 's1',
+      start_cp: base,
+      end_cp: base + 1,
+      kind: 'speech',
+      assignment: 'EXISTING',
+      basis: 'DIRECT',
+      status: 'ACCEPTED',
+      source: 'MODEL',
+      speaker_group_id: 'g1',
+      label: 'S1',
+      color_index: 0,
+      stale: false,
+      user_locked: false,
+      withheld: false,
+      ...partial,
+    } as AnnotationItemOut
+  }
+
+  it('扩展汉字（U+20BB7）按码点着色，不会切到半个代理对', () => {
+    render(<DocumentRenderer bookId="b1" nodes={[astralNode()]} annotations={[annotation({})]} />)
+
+    const span = screen.getByTestId('annotation-span')
+    expect(span).toHaveTextContent('𠮷')
+    expect(span.textContent).toBe('〔S1〕𠮷')
+  })
+
+  it('emoji 在码点 5 上：着色范围正好覆盖 🐈 而不含相邻汉字', () => {
+    render(
+      <DocumentRenderer
+        bookId="b1"
+        nodes={[astralNode()]}
+        annotations={[annotation({ start_cp: base + 5, end_cp: base + 6, label: 'S2', color_index: 1 })]}
+      />,
+    )
+
+    const span = screen.getByTestId('annotation-span')
+    expect(span.textContent).toBe('〔S2〕🐈')
+    // 前后文字仍然完整（没有把代理对切坏）：去掉编号后应逐字等于原文
+    const rendered = screen.getByTestId('document-renderer').textContent ?? ''
+    expect(rendered.replace('〔S2〕', '')).toBe(astralText)
+  })
+
+  it('候选覆盖用码点定位（跨 astral 字符也不会错位）', () => {
+    render(
+      <DocumentRenderer
+        bookId="b1"
+        nodes={[astralNode()]}
+        candidates={[{ quoteId: 'q-cross', startCp: base + 1, endCp: base + 6 }]}
+      />,
+    )
+
+    expect(screen.getByTestId('candidate-quote')).toHaveTextContent('野家的猫🐈')
+  })
+})

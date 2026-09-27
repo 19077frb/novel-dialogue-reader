@@ -571,6 +571,8 @@ def _apply_identity_proposal(
     if scene_id is None:
         return None, True
 
+    # T15：记录「哪一句原本属于哪个分组」，初读投影才能在证据出现之前还原旧分组（F17）
+    absorbed_quote_map: dict[str, str] = {}
     if proposal.operation is IdentityOperation.MERGE and len(proposal.input_refs) >= 2:
         survivor = state.find(proposal.input_refs[0])
         for ref in proposal.input_refs[1:]:
@@ -589,7 +591,16 @@ def _apply_identity_proposal(
                     _write_history(session, annotation)
                     annotation.speaker_id = survivor.group_id
                     annotation.version += 1
+                    absorbed_quote_map[annotation.quote_id] = victim_key
             state.participants.remove(victim)
+    snapshot["revert"] = {
+        "quotes": absorbed_quote_map,
+        "groups": {
+            output: input_ref
+            for input_ref in proposal.input_refs
+            for output in proposal.output_refs
+        },
+    }
 
     row = IdentityRevision(
         scene_id=scene_id,

@@ -138,6 +138,7 @@ describe('ReaderPage', () => {
       quotesFor(query?.chapterId ?? 'c1'),
     )
     vi.mocked(annotationsApi.fetchAnnotations).mockResolvedValue({
+      identity_reverts: 0,
       book_id: 'b1',
       book_version_id: 'v1',
       reading_mode: 'initial',

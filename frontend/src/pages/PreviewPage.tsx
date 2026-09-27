@@ -194,9 +194,9 @@ export default function PreviewPage() {
           ? '任务完成：结果已写入与正式阅读相同的标注投影（没有另一套临时存储）。'
           : `任务结束于 ${job.state}，请在任务面板查看原因。`,
       )
-      void queryClient.invalidateQueries({
-        queryKey: annotationKeys.range(bookId ?? '', range.startCp, resolvedEnd, readingMode, null),
-      })
+      // 失效**整族**投影查询：阅读页用的是「初读 horizon = 本章末端」的另一个键，
+      // 只失效 horizon=null 那一个会让阅读页继续用旧（可能是空）的结果。
+      void queryClient.invalidateQueries({ queryKey: ['annotations'] })
       void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId ?? '') })
     },
     [bookId, queryClient, range.startCp, readingMode, resolvedEnd],

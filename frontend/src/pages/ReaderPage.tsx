@@ -110,15 +110,18 @@ export default function ReaderPage() {
   const activeChapter = chapters.data?.find((chapter) => chapter.id === chapterId) ?? null
   const readingMode: ReadingMode = readingModeOverride ?? book.data?.reading_mode ?? 'initial'
 
-  // 标注投影：只读查询（不写库、不调用模型）。初读模式下 horizon 默认取本范围末端，
-  // 后文才出现的证据不会提前着色；重读模式显示全部有效投影。
+  // 初读 horizon：本章末端（DEVELOPMENT 6.5 的「可见阅读块」）。
+  // 后文才出现的证据不会提前着色，也不会提前把两个声音合成同一个颜色（F17）。
+  const visibleHorizonCp = readingMode === 'initial' ? activeChapter?.end_cp ?? null : null
+
+  // 标注投影：只读查询（不写库、不调用模型）。
   const annotations = useQuery({
     queryKey: annotationKeys.range(
       bookId ?? '',
       activeChapter?.start_cp ?? 0,
       activeChapter?.end_cp ?? 0,
       readingMode,
-      null,
+      visibleHorizonCp,
     ),
     queryFn: ({ signal }) =>
       fetchAnnotations(
@@ -127,7 +130,7 @@ export default function ReaderPage() {
           startCp: activeChapter?.start_cp ?? 0,
           endCp: activeChapter?.end_cp ?? 0,
           readingMode,
-          visibleHorizonCp: null,
+          visibleHorizonCp,
         },
         signal,
       ),
@@ -303,6 +306,17 @@ export default function ReaderPage() {
                   </select>
                 </label>
               </div>
+              {readingMode === 'initial' && annotations.data && (
+                <p className="hint" data-testid="reader-horizon">
+                  初读：只显示到位置 {annotations.data.visible_horizon_cp ?? '—'} 为止的证据
+                  {annotations.data.counts.withheld > 0
+                    ? `（${annotations.data.counts.withheld} 条后文证据暂不显示）`
+                    : ''}
+                  {annotations.data.identity_reverts > 0
+                    ? `；${annotations.data.identity_reverts} 处身份合并在后文才揭示`
+                    : ''}
+                </p>
+              )}
               {annotations.isError && (
                 <p className="hint" data-testid="annotations-error">
                   标注投影读取失败（原文不受影响）。

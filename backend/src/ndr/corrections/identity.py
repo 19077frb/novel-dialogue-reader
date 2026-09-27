@@ -132,6 +132,8 @@ def apply_speaker_revision(
             "input_group_ids": list(payload.source_group_ids),
             "survivor_group_id": survivor_id,
             "absorbed_group_ids": absorbed,
+            # 人工合并是用户当下的决定：可见时点为空 → 始终生效（不参与初读还原）
+            "revert": {"quotes": before_map, "groups": {}},
         }
     else:
         # 拆分：桶里的引语必须当前都属于同一个分组
@@ -184,6 +186,10 @@ def apply_speaker_revision(
             "source_group_id": source_group_id,
             "output_group_ids": created,
             "bucket_sizes": [len(bucket) for bucket in buckets],
+            "revert": {
+                "quotes": before_map,
+                "groups": {group_id: source_group_id for group_id in created},
+            },
         }
 
     revision = IdentityRevision(

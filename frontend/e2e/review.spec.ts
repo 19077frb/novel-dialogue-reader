@@ -22,15 +22,19 @@ async function createFakeProfile(page: Page, name: string) {
   await expect(page.getByTestId('profile-card').filter({ hasText: name })).toBeVisible()
 }
 
-async function importSample(page: Page) {
+async function importFile(page: Page, fileName: string) {
   await page.goto('/library')
-  await page.setInputFiles('[data-testid=import-file-input]', fixture('sample-utf8.txt'))
+  await page.setInputFiles('[data-testid=import-file-input]', fixture(fileName))
   await page.click('[data-testid=import-submit]')
   await expect(page.getByTestId('import-result')).toContainText('导入完成：TXT')
 }
 
+async function importSample(page: Page) {
+  await importFile(page, 'sample-utf8.txt')
+}
+
 /** 打开阅读页并显式回到第一章（书签可能被其它用例改到未处理的章节）。 */
-async function openReader(page: Page) {
+async function openReader(page: Page, title = 'sample-utf8') {
   const onReader = page.url().includes('/read')
   if (!onReader) {
     if (page.url().includes('/review')) {
@@ -38,7 +42,7 @@ async function openReader(page: Page) {
     } else {
       await page.goto('/library')
       await page
-        .locator('[data-testid=book-card]', { hasText: 'sample-utf8' })
+        .locator('[data-testid=book-card]', { hasText: title })
         .getByRole('link', { name: '开始阅读' })
         .click()
     }
@@ -126,9 +130,20 @@ test.describe('待确认队列与确认抽屉', () => {
     await page.getByTestId('review-status').selectOption('DEFERRED')
     await expect(page.getByTestId('review-item').first()).toContainText('DEFERRED')
 
-    // 未处理对白（第二章）也能确认：空候选 → 只能新建说话人
-    await page.goto(page.url().replace(/\/review\/?$/, '/read'))
-    await page.locator('.ndr-chapter').nth(2).click()
+  })
+
+  test('未处理章节的空候选：只能新建说话人（不依赖其它用例是否处理过本书）', async ({
+    page,
+  }) => {
+    // 专用夹具 + 只处理第一章，保证第二章确实没有标注
+    const profileName = 'T13 空候选提供方'
+    await createFakeProfile(page, profileName)
+    await importFile(page, 'sample-review.txt')
+    await openReader(page, 'sample-review')
+    await processFirstChapter(page, `${profileName} · fake-provider · fake-model`)
+    await page.getByRole('link', { name: '去阅读' }).click()
+    await page.locator('.ndr-chapter').nth(1).click()
+
     const candidate = page.getByTestId('candidate-quote').first()
     await expect(candidate).toBeVisible()
     await candidate.click()

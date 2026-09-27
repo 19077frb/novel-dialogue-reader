@@ -58,6 +58,22 @@ test.describe('模型配置', () => {
     await expect(page.getByTestId('settings-error')).toContainText('API 根路径')
   })
 
+  test('本地无鉴权服务可以显式选择「不需要密钥」', async ({ page }) => {
+    const name = `本地网关 ${Date.now()}`
+    await page.goto('/settings/models')
+    await page.getByTestId('profile-name').fill(name)
+    await page.getByTestId('profile-base-url').fill('http://127.0.0.1:11434/v1')
+    await page.getByTestId('profile-model').fill('local-model')
+    await page.getByTestId('credential-mode-none').check()
+    await page.getByTestId('profile-save').click()
+
+    const card = page.getByTestId('profile-card').filter({ hasText: name })
+    await expect(card).toContainText('未保存密钥')
+    await expect(card).toContainText('none')
+    await card.getByRole('button', { name: '删除' }).click()
+    await expect(card).toHaveCount(0)
+  })
+
   test('连接测试：FakeProvider 明确标注为测试适配器', async ({ page }) => {
     const name = `测试提供方 ${Date.now()}`
     await page.goto('/settings/models')

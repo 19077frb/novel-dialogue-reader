@@ -2383,6 +2383,13 @@
             "type": "array",
             "title": "Items"
           },
+          "identity_reverts": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Identity Reverts",
+            "description": "初读 horizon 之下被还原（不提前合并/拆分）的身份修订条数",
+            "default": 0
+          },
           "legend": {
             "items": {
               "$ref": "#/components/schemas/SpeakerLegendItemOut"

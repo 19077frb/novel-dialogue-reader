@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,7 +25,65 @@ from ..domain.annotations import (
     SpeakerLegendItemOut,
 )
 from ..domain.enums import AnnotationStatus, ReadingMode
-from ..storage.models import Annotation, Quote, Scene, SpeakerGroup
+from ..storage.models import (
+    Annotation,
+    IdentityRevision,
+    Quote,
+    Scene,
+    SpeakerGroup,
+)
+
+
+def horizon_identity_reverts(
+    session: Session,
+    *,
+    book_version_id: str,
+    horizon: int | None,
+) -> tuple[dict[str, str], dict[str, str], int]:
+    """初读 horizon 之前的身份修订要还原（F17）。
+
+    返回 ``(quote_id→旧分组, 新分组→旧分组, 还原条数)``。只读：不写数据库、不调用模型。
+    合并/拆分的快照里记录了 `revert`（哪一句原本属于哪个分组），按**最新优先**应用，
+    这样后文才出现的“两个声音其实是一个人”不会在初读时提前同色。
+    """
+
+    if horizon is None:
+        return {}, {}, 0
+    rows = list(
+        session.execute(
+            select(IdentityRevision)
+            .join(Scene, IdentityRevision.scene_id == Scene.id)
+            .where(
+                Scene.book_version_id == book_version_id,
+                IdentityRevision.visible_from_cp.is_not(None),
+                IdentityRevision.visible_from_cp > horizon,
+            )
+            .order_by(IdentityRevision.visible_from_cp.desc())
+        ).scalars()
+    )
+    quotes: dict[str, str] = {}
+    groups: dict[str, str] = {}
+    applied = 0
+    for row in rows:
+        try:
+            snapshot = json.loads(row.snapshot_json or "{}")
+        except json.JSONDecodeError:
+            continue
+        revert = snapshot.get("revert") if isinstance(snapshot, dict) else None
+        if not isinstance(revert, dict):
+            continue
+        touched = False
+        for quote_id, old_group in (revert.get("quotes") or {}).items():
+            if old_group:
+                quotes.setdefault(str(quote_id), str(old_group))
+                touched = True
+        for new_group, old_group in (revert.get("groups") or {}).items():
+            if old_group and str(new_group) != str(old_group):
+                groups.setdefault(str(new_group), str(old_group))
+                touched = True
+        if touched:
+            applied += 1
+    return quotes, groups, applied
 
 
 @dataclass
@@ -54,6 +113,9 @@ def build_projection(
     """按范围返回有效投影（颜色/编号/图例/统计）。"""
 
     horizon = visible_horizon_cp if reading_mode is ReadingMode.INITIAL else None
+    revert_quotes, revert_groups, reverted_revisions = horizon_identity_reverts(
+        session, book_version_id=book_version_id, horizon=horizon
+    )
 
     quote_rows = {
         row.id: row
@@ -125,6 +187,11 @@ def build_projection(
             if annotation.status is not AnnotationStatus.UNKNOWN
             else None
         )
+        if group_id:
+            # 初读：后文才揭示的身份修订在这里被还原（只影响展示，不改数据库）
+            reverted = revert_quotes.get(annotation.quote_id) or revert_groups.get(group_id)
+            if reverted:
+                group_id = reverted
         withheld = bool(
             horizon is not None
             and annotation.visible_from_cp is not None
@@ -186,6 +253,7 @@ def build_projection(
         book_version_id=book_version_id,
         reading_mode=reading_mode,
         visible_horizon_cp=horizon,
+        identity_reverts=reverted_revisions,
         start_cp=start_cp,
         end_cp=end_cp,
         items=items,

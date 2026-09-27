@@ -301,6 +301,7 @@ export default function ModelSettingsPage() {
                     [
                       ['session', '仅本会话'],
                       ['system', '系统凭据库'],
+                      ['none', '不需要密钥（本地服务）'],
                     ] as const
                   ).map(([value, label]) => (
                     <label key={value}>
