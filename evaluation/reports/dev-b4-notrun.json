@@ -1,0 +1,68 @@
+{
+  "report_version": "evaluation-1",
+  "generated_at": "2026-09-27T21:43:57.251757+00:00",
+  "manifest": "evaluation/manifests/dev.json",
+  "manifest_version": "1.0",
+  "config": {
+    "config_version": "1.0",
+    "config_id": "b4-compressed-recheck",
+    "label": "B4 B3 + 有限局部复核（recheck_max_targets=3）",
+    "strategy": "llm",
+    "scene_state": true,
+    "prompt_version": "labeling-1",
+    "context_policy": "context-2",
+    "reading_mode": "reread",
+    "budget": {
+      "max_input_tokens": 200000,
+      "max_output_tokens": 20000,
+      "max_rechecks": 3
+    },
+    "model": null,
+    "notes": "T17 B4：只复核首次仍未解决的目标（每个窗口最多 3 条），复核回到保守策略把压缩丢掉的文句补回。复核是额外一次调用，报告里的 usage 必须包含它，不能只统计最后一次调用。强模型路由默认关闭，本配置不启用。"
+  },
+  "config_fingerprint": "43e0467097c69b02e624a80df7845f68c9481b02a029c723011a92a3ef5fd9d1",
+  "versions": {
+    "evaluation": "evaluation-1",
+    "app": "0.1.0",
+    "engine": "attribution-engine-1",
+    "prompt": "labeling-1",
+    "scanner": "quote-scan-1",
+    "context_policy": "context-1",
+    "context_policy_versions": [
+      "context-1",
+      "context-2"
+    ],
+    "gold_schema": "1.0",
+    "rule_baseline": "b0-rule-1"
+  },
+  "splits": [
+    "dev"
+  ],
+  "quality_evidence": false,
+  "blocks": [
+    "ex-minimal-txt-001: NOT_RUN（真实运行需要显式 --allow-live（并确保已配置凭据与预算））"
+  ],
+  "books": [
+    {
+      "book_id": "ex-minimal-txt-001",
+      "work_id": "ex-original-minimal",
+      "state": "NOT_RUN",
+      "reason": "真实运行需要显式 --allow-live（并确保已配置凭据与预算）",
+      "provider": null,
+      "usage": {},
+      "hard_cases": {},
+      "metrics": null
+    }
+  ],
+  "overall": null,
+  "usage_total": {
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0
+  },
+  "usage_unknown_books": 0,
+  "targets": null,
+  "targets_met": null,
+  "notes": "指标由 ndr.evaluation.metrics 计算，不是前端模拟数据；样本不足或未达目标时报告如实给出 null/false。"
+}

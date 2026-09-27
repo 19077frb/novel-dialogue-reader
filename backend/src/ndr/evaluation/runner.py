@@ -18,6 +18,7 @@ from typing import Any
 
 from .. import __version__
 from ..config import Settings, get_settings
+from ..context.budget import CONTEXT_POLICY_COMPRESSED, CONTEXT_POLICY_CONSERVATIVE
 from ..context.window_builder import CONTEXT_POLICY_VERSION
 from ..llm.prompts.labeling import LABELING_PROMPT_VERSION
 from ..quotes.scanner import SCANNER_VERSION
@@ -68,7 +69,9 @@ def versions() -> dict[str, Any]:
         "engine": ENGINE_VERSION,
         "prompt": LABELING_PROMPT_VERSION,
         "scanner": SCANNER_VERSION,
+        # 默认（保守）策略版本 + 本次评测可选的两版策略（B3/B4 消融用）
         "context_policy": CONTEXT_POLICY_VERSION,
+        "context_policy_versions": [CONTEXT_POLICY_CONSERVATIVE, CONTEXT_POLICY_COMPRESSED],
         "gold_schema": "1.0",
         "rule_baseline": RULE_BASELINE_VERSION,
     }
@@ -205,6 +208,8 @@ def build_report(options: RunOptions) -> dict[str, Any]:
                 profile_id=options.profile_id or "",
                 config_id=config.config_id,
                 reading_mode=config.reading_mode,
+                context_policy=config.context_policy,
+                recheck_max_targets=int((config.budget or {}).get("max_rechecks", 0) or 0),
                 allow_live=options.allow_live,
             )
         else:

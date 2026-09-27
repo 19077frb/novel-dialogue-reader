@@ -1,0 +1,68 @@
+{
+  "report_version": "evaluation-1",
+  "generated_at": "2026-09-27T21:43:55.757679+00:00",
+  "manifest": "evaluation/manifests/dev.json",
+  "manifest_version": "1.0",
+  "config": {
+    "config_version": "1.0",
+    "config_id": "b3-compressed-context",
+    "label": "B3 长 Gap 保守筛选（context-2，无复核）",
+    "strategy": "llm",
+    "scene_state": true,
+    "prompt_version": "labeling-1",
+    "context_policy": "context-2",
+    "reading_mode": "reread",
+    "budget": {
+      "max_input_tokens": 200000,
+      "max_output_tokens": 20000,
+      "max_rechecks": 0
+    },
+    "model": null,
+    "notes": "T17 B3：相对 B2 只改上下文策略（长 Gap 只留线索句 + 前后各一句，省不下来就整体保留）。必须与 B2 使用同一清单、同一模型配置、同一提示版本，否则数字不可比；没有对比证据前默认策略仍是 context-1。"
+  },
+  "config_fingerprint": "e1179612d208c92e408c536d8ee4ac5da1ad2898567ae728cdf9bbf621567ed2",
+  "versions": {
+    "evaluation": "evaluation-1",
+    "app": "0.1.0",
+    "engine": "attribution-engine-1",
+    "prompt": "labeling-1",
+    "scanner": "quote-scan-1",
+    "context_policy": "context-1",
+    "context_policy_versions": [
+      "context-1",
+      "context-2"
+    ],
+    "gold_schema": "1.0",
+    "rule_baseline": "b0-rule-1"
+  },
+  "splits": [
+    "dev"
+  ],
+  "quality_evidence": false,
+  "blocks": [
+    "ex-minimal-txt-001: NOT_RUN（真实运行需要显式 --allow-live（并确保已配置凭据与预算））"
+  ],
+  "books": [
+    {
+      "book_id": "ex-minimal-txt-001",
+      "work_id": "ex-original-minimal",
+      "state": "NOT_RUN",
+      "reason": "真实运行需要显式 --allow-live（并确保已配置凭据与预算）",
+      "provider": null,
+      "usage": {},
+      "hard_cases": {},
+      "metrics": null
+    }
+  ],
+  "overall": null,
+  "usage_total": {
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0
+  },
+  "usage_unknown_books": 0,
+  "targets": null,
+  "targets_met": null,
+  "notes": "指标由 ndr.evaluation.metrics 计算，不是前端模拟数据；样本不足或未达目标时报告如实给出 null/false。"
+}

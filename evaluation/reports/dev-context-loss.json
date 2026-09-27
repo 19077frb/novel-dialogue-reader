@@ -1,0 +1,40 @@
+{
+  "report_version": "context-loss-1",
+  "manifest": "evaluation/manifests/dev.json",
+  "context_policy": "context-2",
+  "policy": {
+    "context_tokens": 2500,
+    "overlap_tokens": 200,
+    "state_tokens": 300,
+    "prompt_reserve_tokens": 900,
+    "output_reserve_tokens": 800,
+    "gap_compression": true,
+    "gap_compression_threshold_cp": 80,
+    "gap_compression_margin_sentences": 1,
+    "gap_compression_max_ratio": 0.6,
+    "recheck_max_targets": 3,
+    "strong_model_share": 0.0
+  },
+  "gap_compression": true,
+  "books": [
+    {
+      "book_id": "ex-minimal-txt-001",
+      "work_id": "ex-original-minimal",
+      "gap_source": "gold",
+      "gaps_scanned": 2,
+      "compressed_gaps": 0,
+      "dropped_spans": 0,
+      "dropped_cp": 0,
+      "must_keep_violations": 0,
+      "drops": []
+    }
+  ],
+  "summary": {
+    "gaps_scanned": 2,
+    "compressed_gaps": 0,
+    "dropped_spans": 0,
+    "dropped_cp": 0,
+    "must_keep_violations": 0
+  },
+  "notes": "这是离线证据账：只说明压缩删了什么、是否删到金标准 must_keep，不能替代真实准确率/覆盖率/费用对比。"
+}

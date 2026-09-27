@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from ..config import Settings
+from ..context.budget import policy_for_version
 from ..domain.enums import JobKind, JobPurpose, JobState, ReadingMode
 from ..ingest.service import import_epub, import_txt
 from ..jobs.scheduler import run_job
@@ -33,9 +35,20 @@ def run_live_predictions(
     profile_id: str,
     config_id: str,
     reading_mode: ReadingMode = ReadingMode.REREAD,
+    context_policy: str | None = None,
+    recheck_max_targets: int = 0,
     allow_live: bool = False,
 ) -> tuple[dict[str, Any] | None, str, str]:
-    """返回 ``(prediction, state, reason)``；state 为 COMPLETED / NOT_RUN / LIVE_FAILED。"""
+    """返回 ``(prediction, state, reason)``；state 为 COMPLETED / NOT_RUN / LIVE_FAILED。
+
+    ``context_policy`` 与 ``recheck_max_targets`` 来自评测配置（B3 = 只有压缩；
+    B4 = 压缩 + 有限复核）。同一次消融里除这几项之外必须完全一致，否则数字不可比。
+    """
+
+    policy = replace(
+        policy_for_version(context_policy),
+        recheck_max_targets=max(0, int(recheck_max_targets)),
+    )
 
     if not allow_live:
         return None, "NOT_RUN", LIVE_BLOCKED_NO_ALLOW
@@ -70,7 +83,12 @@ def run_live_predictions(
                 version=version,
                 profile=profile,
                 purpose=JobPurpose.PROCESS,
-                range_payload={"start_cp": 0, "end_cp": version.canonical_length_cp},
+                range_payload={
+                    "start_cp": 0,
+                    "end_cp": version.canonical_length_cp,
+                    "context_policy": context_policy,
+                    "recheck_max_targets": policy.recheck_max_targets,
+                },
                 budget={"max_input_tokens": None, "max_output_tokens": None, "max_rechecks": 0},
                 idempotency_key=f"evaluation:{config_id}:{book_id}",
                 reading_mode=reading_mode,
@@ -79,7 +97,13 @@ def run_live_predictions(
             )
             job_id = job.id
 
-        job_outcome = run_job(factory, settings, job_id=job_id, credentials=credentials)
+        job_outcome = run_job(
+            factory,
+            settings,
+            job_id=job_id,
+            credentials=credentials,
+            policy=policy,
+        )
         if job_outcome.state is not JobState.COMPLETED:
             return None, "LIVE_FAILED", f"任务结束于 {job_outcome.state.value}"
 
