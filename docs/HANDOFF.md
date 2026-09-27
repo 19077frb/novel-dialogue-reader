@@ -1,78 +1,78 @@
 # 开发交接
 
 更新时间：2026-09-28
-当前任务：T15B 导出对话框、样张与下载闭环（implementation / offline_verification 完成；live = BLOCKED）
-最近完成任务：T15B（此前 T00～T15A：骨架→迁移→TXT→EPUB→阅读器→候选与金标准→配置页→适配器→上下文预算→场景引擎→任务缓存用量→标注投影与预览→人工更正与撤销→确认队列与抽屉→暂停预算与故障恢复→初读身份与码点定位→导出后端与标准校验）
-下一任务与理由：**T16 真实样本评测与可复现实验**。T16 需要真实模型凭据、预算与人工确认的作品样本，
-这些当前都不具备，因此 T16 必须先交付**离线可运行的评测工具与数据校验**
-（annotation-guide、作品级划分、不可判定标签、指标脚本、只校验数据的离线命令），
-真实调用与效果数字留到有凭据时再跑，状态保持未完成。
+当前任务：T16 真实样本评测与可复现实验（implementation / offline_verification 完成；live = BLOCKED，quality = BLOCKED）
+最近完成任务：T16（此前 T00～T15B：骨架→迁移→TXT→EPUB→阅读器→候选与金标准→配置页→适配器→上下文预算→场景引擎→任务缓存用量→标注投影与预览→人工更正与撤销→确认队列与抽屉→暂停预算与故障恢复→初读身份与码点定位→导出后端与标准校验→导出界面与下载闭环）
+下一任务与理由：T17 上下文压缩、局部复核与成本路由。前置是「T16 的评测工具」，现在已经就绪
+（清单校验、B0 规则基线、指标、报告、显式 `--allow-live`）；T17 可以做长 Gap 保守筛选、证据补回、
+有限局部复核与可选强模型路由，但**启用为默认配置前必须有真实对比证据**，没有数据就保留保守策略并标注未验证。
 
 ## 实际运行方式
 
 - 前置环境与已锁定版本：CPython 3.11.4；uv 0.9.0（`backend/uv.lock`）；Node.js 22.14.0 / npm 10.9.2；
   React 18.3 / Vite 5.4 / Vitest 2.1 / Playwright 1.63 + Chromium。
 - 启动命令与访问地址：`pwsh -File scripts/dev.ps1` → 后端 `http://127.0.0.1:8765`、前端 `http://127.0.0.1:5173`。
-- 页面：`/library`、`/books/:id/read`、`/books/:id/preview`、`/books/:id/review`、`/settings/models`；
-  阅读页与预览页右上角的「导出」打开导出对话框。
+- 评测命令：`python -m ndr.evaluation validate|run ...`（清单在 `evaluation/manifests/`，配置在 `evaluation/configs/`）。
 - 数据目录与迁移：`data/`（`NDR_DATA_DIR` 可覆盖），数据库 revision `0005`（= head）。
-  测试/E2E：`NDR_CREDENTIAL_BACKEND=session`；E2E 另开 `NDR_ALLOW_FAKE_PROVIDER=1` 与
+- 测试/E2E：`NDR_CREDENTIAL_BACKEND=session`；E2E 另开 `NDR_ALLOW_FAKE_PROVIDER=1` 与
   `NDR_FAKE_PROVIDER_LABELS=deterministic`。
 - 验证命令：`pwsh -File scripts/verify.ps1`；E2E：`cd frontend; $env:NDR_E2E_BACKEND_CMD='..\backend\.venv\Scripts\python.exe -m ndr'; npx playwright test`。
 
 ## 本次改动
 
-- 前端新增：`api/exports.ts`；`ExportDialog`（范围/样式/初读策略/格式 → 冻结样张 → 生成 → 校验 → 下载）、
-  `ExportScopePicker`、`ExportStylePreview`、`ExportProgress`、`ExportDownload`；阅读页与预览页各加「导出」入口。
-- 样张放在 `sandbox=""` 的 iframe（后端渲染器输出，不执行脚本）；
-  快照过期用**内容哈希**比较（`snapshot_hash`），只有标注真变了才提示；
-  失败（内部检查不通过）不提供下载；点开时显式重新冻结（组件不会因关闭而卸载）。
-- 文档：决策 0019；CONTRACTS 第 26/27 节；README 增加「导出界面（T15B）」。
+- `ndr/evaluation/`：
+  - `metrics.py`：纯函数指标（一对一 IoU 匹配、场景错误切断/连接、匹配后分组准确率、同人 pairwise F1、
+    覆盖率/拒答率/未知强标率、新人物误建漏建、退化标记、Wilson 区间、目标判定）。
+  - `manifest.py`：清单加载 + 校验（作品级划分不重叠、book_id 唯一、金标准结构与引用、work_id 一致）。
+  - `configs.py`：B0/B1/B2 配置加载 + 配置指纹（与缓存键同一套规范化哈希）。
+  - `baselines.py`：**B0 规则基线**（显式归属表面形式 + 叙述长度切场景；找不到就拒答）。
+  - `live.py`：显式真实运行（导入 → 建任务 → 引擎 → 读投影 → 预测），需 `--allow-live` + `--profile-id`。
+  - `runner.py` / `__main__.py`：`validate` 与 `run` 子命令、按作品/难例/总体聚合、报告写出。
+- `evaluation/`：`manifests/dev.json`（含 README）、`configs/b0|b1|b2.json`（含 README）、
+  `reports/dev-b0-offline.json` 与 `dev-b1/b2-notrun.json`（含 README 复现说明）。
+- 文档：决策 0020；CONTRACTS 第 28 节；README 增加「评测工具（T16）」。
 
 ## 验证证据
 
-- 前端：`typecheck` 通过；`vitest` → **70 passed**（T15A 时 65；新增 `ExportDialog` 5 项）；`vite build` 通过。
-- 后端：`pytest backend/tests` → **328 passed**（未改动后端逻辑，回归确认）；`ruff` 全绿。
-- E2E：**28 passed**（T15A 时 23；新增 `export.spec.ts` 5 项）：
-  - TXT→HTML：样张在沙箱 iframe、校验报告（`text_consistency` ✓ / 标准 `NOT_APPLICABLE`）、
-    下载文件名含「标注版」、成品**无 `http(s)`、无 `<script>`、含 `〔S1〕`**；
-  - EPUB→EPUB：`mimetype_first`/`mimetype_stored`/`resource_closure` ✓、标准检查显示 `NOT_RUN`、
-    重复下载文件名与字节数一致；
-  - 指定章节 → 文件名含「节选」、成品不含未选章节正文；
-  - 未处理章节 → 统计「未处理 1」+ 警告「还没有标注」，成品里该对白无颜色 span（保持原样）；
-  - 并发纠正 → 重新打开提示「旧快照」，已生成文件不受影响。
-- 门槛逐条核对：**用户不运行脚本即可选择、预览、生成、下载**✓（E2E 全程走界面）；
-  **关闭应用后仍可阅读**✓（HTML 无外部依赖、EPUB 自带资源，均由断言覆盖）；
-  **颜色被覆盖时编号仍起作用**✓（成品含真实文本 `〔S1〕`，样式预设含「仅编号」）。
-- 本轮修复的问题：①对话框只靠 `refetchOnMount` 不会在重新打开时刷新（组件未卸载）→ 改为打开时显式重新冻结；
-  ②`import-reader.spec` 的候选文本断言假设“该书从未被处理过”，而新用例会先处理同一本书 → 改为包含匹配；
-  ③导出测试原夹具与 `sample-review.txt` 内容相同，被 sha256 去重成同一本书导致卡片找不到 → 换独立夹具。
-- **未验证（保留，BLOCKED）**：
-  - **EPUBCheck 标准检查未运行**：本机没有 `tools/epubcheck/epubcheck.jar`（有 Java，但不能联网安装）；
-  - **独立 EPUB 阅读器试读未做**：本机未安装任何独立阅读器（无 Calibre / SumatraPDF / Thorium 等），
-    也不能联网安装。**没有用浏览器样张或自研校验替代这两项。**
+- 后端：`pytest backend/tests` → **346 passed**（T15B 时 328；新增 9 + 5 + 4）；`ruff` 全绿。
+- 手算样例（`test_evaluation_metrics.py`）：完美预测各指标 1.0；**标签置换不变**；错误分场 `wrong_split=2`
+  （场景准确率 0.5）；错误连接 `wrong_join=1`；**全拒答** → coverage 0、`accepted_accuracy=null`、
+  `degenerate.all_refusal=true`、`targets_met=null`；**全合并** → pairwise F1 0.5、`missing_groups=1`、
+  `targets_met=false`；**漏提取** → recall 0.8、coverage 0.6；**未知强标** → `unknown_force_rate=1.0`
+  且不计入已接受准确率；`min_sample=30` 时 `targets_met=null`。
+- 清单/配置：仓库清单 `validate` 通过（1 作品 / 1 书 / dev）；坏清单（跨 split + 重复 book_id + 缺金标准）
+  三类 error 全部命中；B0 规则基线不再把「少年没有回答」误判成归属。
+- 真实生成的报告：`dev-b0-offline.json` → `state=OFFLINE_BASELINE`、`accepted_accuracy=1.0`（2/2）、
+  `coverage=0.4`、`pairwise_f1=null`、`sample_sufficient=false`、`targets_met=null`、
+  `quality_evidence=false`、`usage_total.calls=0`；`dev-b1/b2-notrun.json` → `NOT_RUN` + 原因。
+- 真实运行链路（离线验证）：`--allow-live` + FakeProvider 时评测命令真的跑完「导入 → 任务 → 引擎 → 投影」，
+  并因提供方是测试用假提供方而保持 `quality_evidence=false`（全 UNKNOWN → coverage 0、`all_refusal=true`）。
+- 门槛逐条核对：**算法指标不是前端模拟数据**✓（纯函数 + 手算用例 + 真实报告）；
+  **未达标/样本不足如实报告**✓（`targets_met=null`、`quality_evidence=false`）；
+  **不把脚本完成当成质量达标**✓（账本 Quality 列写 BLOCKED，报告里没有任何效果结论）。
+- **未验证（BLOCKED）**：真实模型上的 B0/B1/B2 对比、真实作品的 97%/70% 结论——没有凭据、预算与人工样本。
 
 ## 未完成与已知问题
 
-1. **Live 仍未打通**：T07/T09～T15B 的 Live 都是 BLOCKED；T16 效果评测未开始。
-2. **导出对话框一次只生成一个文件**：需要同时要 EPUB 与 HTML 时要点两次（后端已支持复用快照）。
-3. **快照过期只提示不自动重生成**：符合「不静默混合」的要求，但用户需要手动点一次「生成」。
-4. **`export_artifacts` 只增不减**：产物保留在 `data/exports/`；清理策略留待 T18。
-5. **导出同步执行**：大书的打包在请求内完成（本地 IO，无网络）。
+1. **真实效果数字为零**：`evaluation/reports/` 里只有离线基线；B1/B2 需要真实凭据与预算。
+2. **B0 是粗糙基线**：表面形式规则会把「少女/她」拆成两组；它只用于低成本参照，不代表任何产品能力。
+3. **`live.py` 的真实提供方路径未在真实环境跑过**：只验证了「导入→任务→引擎→投影」的链路与守卫
+   （FakeProvider + 缺 `--profile-id` 两种情形）；真实提供方失败映射依赖 T07/T14 的错误映射。
+4. **名单/划分仍只有一个原创样例**：`test` 划分为空；真实作品要另建清单并保证同一作品不跨 split。
+5. **按难例类别的报告只有样本量**：类别级的准确率/覆盖率需要在有真实预测后再聚合（避免用假数据填表）。
 6. 其余既有事项：`uv run` 在受限沙箱失败（回退 venv）；`npm --prefix frontend install/ci` 需在包目录内执行；
    `alembic.ini` 保持 ASCII；脚本设置 `PYTHONUTF8=1`；`apply_patch` 失效时用 `.tools/newfile.ps1` / `.tools/append.ps1`；
-   **编辑多行文本前先统一换行符**；E2E 数据目录在同一次运行里共享——**新夹具的内容必须与既有夹具不同**
-   （sha256 相同的导入会被去重成同一本书），且新用例不要依赖别的用例是否处理过某本书。
+   **编辑多行文本前先统一换行符**；E2E 数据目录共享（新夹具内容必须与既有夹具不同，否则被 sha256 去重）。
 
 ## 后续约束
 
 - 必须保留的用户修改：`PLAN.md`、`DEVELOPMENT.md` 未改动；不得为通过检查而删减 TXT/EPUB、API 配置、
   真实预览、待定确认或导出功能。
 - 不可覆盖的内容：`evaluation/examples/**`、`frontend/e2e/fixtures/**` 的原始字节；已发布迁移 `0001`～`0005`；
-  **`user_locked` 标注与用户密钥**；`corrections` / `annotation_history` / `identity_revisions` / `inference_runs` 只追加；
-  `export_snapshots` 不可变，`export_artifacts` 只追加（同指纹才复用）。
+  **`user_locked` 标注与用户密钥**；审计类表只追加；**已有的评测报告不要改写**（要保留历史结论）。
 - 当前版本号（进入缓存键/依赖哈希）：API 契约 `1`；数据库 `0005`；输出契约 `1.0`；
   提示词 `labeling-1`/`connection-1`；上下文 `context-1`；场景状态 `scene-state-1`；接受策略 `acceptance-1`；
   引擎 `attribution-engine-1`；调度器 `scheduler-1`；缓存 `cache-1`；扫描器 `quote-scan-1`；
-  更正服务 `correction-1`、恢复服务 `recovery-1`、导出快照 `export-snapshot-1`、导出器 `exporter-1`。
+  更正服务 `correction-1`、恢复服务 `recovery-1`、导出快照 `export-snapshot-1`、导出器 `exporter-1`、
+  评测 `evaluation-1`、B0 基线 `b0-rule-1`。
 - 提交习惯：每完成一部分功能即用 git 提交。

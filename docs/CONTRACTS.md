@@ -647,3 +647,49 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 | EPUBCheck 标准检查 | NOT_RUN | 本机没有 `tools/epubcheck/epubcheck.jar`，也没有联网安装；CLI/接口都如实报 `NOT_RUN` |
 | HTML 断网打开 | PASS（离线可读） | E2E 下载成品后断言：无 `http(s)` 引用、无 `<script>`、含正文与 `〔S1〕` |
 | 独立 EPUB 阅读器试读 ≥ 2 款 | NOT_RUN | 本机未安装任何独立阅读器（无 Calibre / SumatraPDF / Thorium 等），也没有联网安装；**不用浏览器样张代替** |
+
+## 28. 评测工具（T16 已实现，效果数字未产出）
+
+命令（在仓库根目录，`uv run` 或 `backend\.venv` 皆可）：
+
+```powershell
+python -m ndr.evaluation validate --manifest evaluation/manifests/dev.json
+python -m ndr.evaluation run --manifest evaluation/manifests/dev.json `
+    --config evaluation/configs/b0.json --output evaluation/reports/dev-b0-offline.json
+python -m ndr.evaluation run --manifest evaluation/manifests/dev.json `
+    --config evaluation/configs/b2.json --profile-id <id> --allow-live `
+    --output evaluation/reports/dev-b2-live.json
+```
+
+| 部件 | 说明 |
+| --- | --- |
+| `ndr.evaluation.manifest` | 清单加载/校验：作品级划分（同一作品只能在一个 split）、金标准结构与引用、作品一致性 |
+| `ndr.evaluation.configs` | 配置加载 + 配置指纹（与缓存键同一套规范化哈希） |
+| `ndr.evaluation.baselines` | **B0 规则基线**（无 LLM）：显式归属表面形式 + 叙述长度切场景；找不到就拒答 |
+| `ndr.evaluation.metrics` | 指标计算（纯函数，手算样例可验证） |
+| `ndr.evaluation.live` | 显式允许的真实运行：导入正文 → 建任务 → 引擎 → 读投影（需 `--allow-live` + `--profile-id`） |
+| `ndr.evaluation.runner` | 编排、按作品/难例/总体聚合、写报告 |
+| `evaluation/manifests`、`configs`、`reports` | 清单、B0/B1/B2 配置、报告与复现说明 |
+
+指标（DEVELOPMENT 7.3）：
+
+- `extraction.precision/recall/f1`：提取质量（按码点重叠 IoU ≥ 0.5 一对一匹配）。
+- `scenes.wrong_split` / `wrong_join` / `accuracy`：错误切断 / 错误连接（相邻金标准对白之间比较）。
+- `grouping.accepted_accuracy`：**已接受准确率**（匹配到 + 已接受 + 金标准可确定；拒答不计入分子分母），
+  标签映射按金标准场景内最大票数贪心配对（标签置换不变）。
+- `grouping.pairwise_precision/recall/f1`：同人 pairwise（只看“是否同组”）。
+- `grouping.extra_groups` / `missing_groups`：新人物误建 / 漏建。
+- `coverage.coverage` / `refusal_rate`：覆盖率（分母是全部金标准对白，拒答会拉低）。
+- `coverage.unknown_force_rate`：**未知强标率**（金标准说不可确定、预测却给了分组）。
+- `degenerate`：`all_refusal` / `all_merge` / `single_group` / `forced_all_unresolvable` 显式标记。
+- `sample.sample_sufficient`：可确定样本 < `--min-sample`（默认 30）时为 false。
+- `targets_met`：样本不足或没有已接受样本时为 `null`（**不宣布达标**）；目标为已接受准确率 ≥97%、覆盖率 ≥70%。
+- 报告还记录 `versions`（应用/引擎/提示词/扫描器/上下文策略/金标准 schema）、`config_fingerprint`、
+  `usage_total` 与 `usage_unknown_books`（未知用量单独计数）。
+
+真实性边界：
+
+- `quality_evidence` 只有在「真实模型运行 + 每个 book 都 COMPLETED + 提供方不是测试用 FakeProvider +
+  样本足够」时才为 true；B0 基线、FakeProvider、外部假预测一律 false，并在 `blocks` 里写明原因。
+- `--allow-live` 是**显式开关**；不加就只写 `NOT_RUN` 与原因，绝不偷偷调用模型。
+- 真实运行失败（凭据缺失、限流、超时）会记 `LIVE_FAILED` 与错误原因，不回退到假数据。

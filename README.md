@@ -109,6 +109,32 @@ npm --prefix frontend run dev -- --host 127.0.0.1           # 前端 http://127.
   `GET /api/review-items/{id}`、`POST /api/quotes/{id}/review-items`（主动标记，幂等）、
   `POST /api/review-items/{id}/defer`（只延后）。
 
+## 评测工具（T16）
+
+效果数字必须来自真实调用与人工标注，因此当前**没有**效果结论；但评测工具已经就绪：
+
+```powershell
+# 只校验清单与金标准（不加载模型、不联网）
+uv run --project backend python -m ndr.evaluation validate --manifest evaluation/manifests/dev.json
+
+# B0 规则基线（离线）：真实指标，但不是效果数字
+uv run --project backend python -m ndr.evaluation run `
+  --manifest evaluation/manifests/dev.json --config evaluation/configs/b0.json `
+  --output evaluation/reports/dev-b0-offline.json
+
+# B1/B2 需要真实模型：必须显式允许并指定配置
+uv run --project backend python -m ndr.evaluation run `
+  --manifest evaluation/manifests/dev.json --config evaluation/configs/b2.json `
+  --profile-id <model-profile-id> --allow-live --output evaluation/reports/dev-b2-live.json
+```
+
+- 指标：提取 precision/recall/F1、错误切断/连接、**已接受准确率**、**覆盖率**、同人 pairwise F1、
+  未知强标率、新人物误建/漏建、每万字用量，并按作品与难例类别分组；退化预测（全拒答/全合并）会被标记。
+- 目标（PLAN）：已接受准确率 ≥97%、覆盖率 ≥70%；**样本不足或没有已接受样本时报告 `targets_met=null`**，
+  不宣布达标。测试用 FakeProvider 的结果一律 `quality_evidence=false`。
+- 口径、清单格式与复现说明见 `evaluation/manifests/README.md`、`evaluation/configs/README.md`、
+  `evaluation/reports/README.md`。
+
 ## 导出界面（T15B）
 
 阅读页与预览页右上角都有「导出」按钮，打开的对话框里可以完成全流程（不需要命令行）：
