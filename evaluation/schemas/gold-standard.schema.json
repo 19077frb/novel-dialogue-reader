@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ndr.local/schemas/gold-standard.schema.json",
+  "title": "NDR 金标准标注样本",
+  "description": "用于评价对白提取、场景边界与场景内匿名分组的人工标注。坐标为规范化全文的 Unicode 码点区间 [start_cp, end_cp)。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "book", "annotator", "scenes", "quotes", "gaps"],
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "description": "本文件结构的版本；结构变更时必须递增。"
+    },
+    "book": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "book_id",
+        "work_id",
+        "title",
+        "format",
+        "language",
+        "canonical_sha256",
+        "canonical_length_cp"
+      ],
+      "properties": {
+        "book_id": { "type": "string", "minLength": 1 },
+        "work_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "作品分组键；同一作品的不同版本共用它，用于按作品划分数据集。"
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "format": { "enum": ["TXT", "EPUB"] },
+        "language": { "type": "string", "minLength": 2 },
+        "canonical_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "canonical_length_cp": { "type": "integer", "minimum": 0 },
+        "parser_version": { "type": "string" },
+        "normalization_version": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
+    "annotator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["annotator_id", "annotated_at", "guideline_version"],
+      "properties": {
+        "annotator_id": { "type": "string", "minLength": 1 },
+        "annotated_at": { "type": "string", "format": "date-time" },
+        "guideline_version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scene_id", "start_cp", "end_cp", "participants"],
+        "properties": {
+          "scene_id": { "type": "string", "minLength": 1 },
+          "start_cp": { "type": "integer", "minimum": 0 },
+          "end_cp": { "type": "integer", "minimum": 1 },
+          "boundary_uncertain": {
+            "type": "array",
+            "description": "允许的边界不确定区间；匹配时不对这些位置计错。",
+            "items": { "$ref": "#/$defs/cp_range" }
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["participant_id", "label"],
+              "properties": {
+                "participant_id": { "type": "string", "minLength": 1 },
+                "label": { "type": "string", "description": "场景内匿名标签，如 S1、S2。" },
+                "description": { "type": "string" },
+                "speaks": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "false 表示仅被提及、未发言的参与者。"
+                }
+              }
+            }
+          },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "quotes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["quote_id", "scene_id", "start_cp", "end_cp", "kind", "resolvable", "evidence_refs"],
+        "properties": {
+          "quote_id": { "type": "string", "minLength": 1 },
+          "scene_id": { "type": "string", "minLength": 1 },
+          "start_cp": { "type": "integer", "minimum": 0 },
+          "end_cp": { "type": "integer", "minimum": 1 },
+          "kind": { "enum": ["speech", "thought", "quotation", "group", "other", "unknown"] },
+          "utterance_id": {
+            "type": ["string", "null"],
+            "description": "同一发言被叙述打断时，多个 quote 共用同一值；独立发言为 null。"
+          },
+          "group_id": {
+            "type": ["string", "null"],
+            "description": "场景内匿名分组；resolvable 为 false 时必须为 null。"
+          },
+          "resolvable": {
+            "type": "boolean",
+            "description": "false 表示金标准判定为不可确定；计入覆盖率分母，不计入已接受准确率。"
+          },
+          "fragments": {
+            "type": "array",
+            "description": "被叙述分隔的同一发言片段（可选，范围需落在 start_cp…end_cp 内）。",
+            "items": { "$ref": "#/$defs/cp_range" }
+          },
+          "evidence_refs": {
+            "type": "array",
+            "description": "支持该判断的证据位置；无证据时必须为空数组且 resolvable 为 false。",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["ref_id", "start_cp", "end_cp", "visible_from_cp"],
+              "properties": {
+                "ref_id": { "type": "string", "minLength": 1 },
+                "start_cp": { "type": "integer", "minimum": 0 },
+                "end_cp": { "type": "integer", "minimum": 1 },
+                "visible_from_cp": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "从该位置起才可向读者展示此身份/证据（初读安全）。"
+                },
+                "note": { "type": "string" }
+              }
+            }
+          },
+          "notes": { "type": "string" }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "resolvable": { "const": false } },
+              "required": ["resolvable"]
+            },
+            "then": { "properties": { "group_id": { "type": "null" } } }
+          }
+        ]
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["gap_id", "left_quote_id", "right_quote_id", "decision", "must_keep"],
+        "properties": {
+          "gap_id": { "type": "string", "minLength": 1 },
+          "left_quote_id": { "type": ["string", "null"] },
+          "right_quote_id": { "type": ["string", "null"] },
+          "decision": { "enum": ["CONTINUE", "UPDATE", "BREAK", "UNCERTAIN"] },
+          "must_keep": {
+            "type": "array",
+            "description": "上下文筛选必须保留的证据片段；用于检查压缩是否删错。",
+            "items": { "$ref": "#/$defs/cp_range" }
+          },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "second_annotator_id": { "type": "string" },
+        "disagreements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["target_id", "resolution"],
+            "properties": {
+              "target_id": { "type": "string" },
+              "resolution": { "type": "string" },
+              "note": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  },
+  "$defs": {
+    "cp_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_cp", "end_cp"],
+      "properties": {
+        "start_cp": { "type": "integer", "minimum": 0 },
+        "end_cp": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

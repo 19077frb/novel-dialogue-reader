@@ -1,0 +1,161 @@
+{
+  "schema_version": "1.0",
+  "book": {
+    "book_id": "ex-minimal-txt-001",
+    "work_id": "ex-original-minimal",
+    "title": "原创最小样例：雨停（T00）",
+    "format": "TXT",
+    "language": "zh",
+    "canonical_sha256": "05837374a2446c85fdef4638ab14ab5ad4d617bc500186918c322d59af2ec879",
+    "canonical_length_cp": 97,
+    "parser_version": "t00-example",
+    "normalization_version": "t00-example-raw-utf8-lf",
+    "notes": "canonical text 就是同目录 text.txt 的 UTF-8 解码结果（已使用 LF 换行，未做其他规范化），因此所有码点偏移可直接复算。"
+  },
+  "annotator": {
+    "annotator_id": "t00-author",
+    "annotated_at": "2026-09-28T00:00:00+00:00",
+    "guideline_version": "1.0"
+  },
+  "scenes": [
+    {
+      "scene_id": "scene_1",
+      "start_cp": 0,
+      "end_cp": 97,
+      "participants": [
+        {
+          "participant_id": "p1",
+          "label": "S1",
+          "description": "少女：合上伞、低声道谢、最后点头"
+        },
+        {
+          "participant_id": "p2",
+          "label": "S2",
+          "description": "少年：没有回答，把外套递过去，随后提议明天再来"
+        }
+      ],
+      "notes": "示例只包含一个连续场景；环境描写（钟声）不结束场景。"
+    }
+  ],
+  "quotes": [
+    {
+      "quote_id": "q1",
+      "scene_id": "scene_1",
+      "start_cp": 0,
+      "end_cp": 6,
+      "kind": "speech",
+      "utterance_id": "u1",
+      "group_id": "S1",
+      "resolvable": true,
+      "evidence_refs": [
+        {
+          "ref_id": "e1",
+          "start_cp": 6,
+          "end_cp": 12,
+          "visible_from_cp": 12,
+          "note": "叙述「少女合上伞」紧随该对白，属直接归属。"
+        }
+      ]
+    },
+    {
+      "quote_id": "q2",
+      "scene_id": "scene_1",
+      "start_cp": 31,
+      "end_cp": 38,
+      "kind": "speech",
+      "utterance_id": "u2",
+      "group_id": "S1",
+      "resolvable": true,
+      "evidence_refs": [
+        {
+          "ref_id": "e2",
+          "start_cp": 38,
+          "end_cp": 43,
+          "visible_from_cp": 43,
+          "note": "「她低声说」直接指向 S1。"
+        }
+      ]
+    },
+    {
+      "quote_id": "q3",
+      "scene_id": "scene_1",
+      "start_cp": 44,
+      "end_cp": 50,
+      "kind": "speech",
+      "utterance_id": "u3",
+      "group_id": null,
+      "resolvable": false,
+      "evidence_refs": [],
+      "notes": "「不用谢。」没有归属叙述；按轮流推断只能是猜测，因此标为不可确定。"
+    },
+    {
+      "quote_id": "q4",
+      "scene_id": "scene_1",
+      "start_cp": 68,
+      "end_cp": 78,
+      "kind": "speech",
+      "utterance_id": "u4",
+      "group_id": "S2",
+      "resolvable": true,
+      "evidence_refs": [
+        {
+          "ref_id": "e4",
+          "start_cp": 78,
+          "end_cp": 84,
+          "visible_from_cp": 84,
+          "note": "「少年忽然说」直接指向 S2。"
+        }
+      ]
+    },
+    {
+      "quote_id": "q5",
+      "scene_id": "scene_1",
+      "start_cp": 85,
+      "end_cp": 89,
+      "kind": "speech",
+      "utterance_id": "u5",
+      "group_id": "S1",
+      "resolvable": true,
+      "evidence_refs": [
+        {
+          "ref_id": "e5",
+          "start_cp": 89,
+          "end_cp": 96,
+          "visible_from_cp": 96,
+          "note": "「少女点了点头」直接指向 S1。"
+        }
+      ]
+    }
+  ],
+  "gaps": [
+    {
+      "gap_id": "g1",
+      "left_quote_id": "q1",
+      "right_quote_id": "q2",
+      "decision": "CONTINUE",
+      "must_keep": [
+        { "start_cp": 6, "end_cp": 12 },
+        { "start_cp": 13, "end_cp": 31 }
+      ],
+      "notes": "两段叙述都必须在上下文筛选中保留：它们既标注了说话人，也维持场景连续。"
+    },
+    {
+      "gap_id": "g2",
+      "left_quote_id": "q3",
+      "right_quote_id": "q4",
+      "decision": "CONTINUE",
+      "must_keep": [{ "start_cp": 51, "end_cp": 68 }],
+      "notes": "环境描写不结束场景；这是反「固定字数即场景断开」的样例。"
+    }
+  ],
+  "review": {
+    "disagreements": [
+      {
+        "target_id": "q3",
+        "resolution": "resolvable=false，group_id=null",
+        "note": "若按轮流发言推断会得到 S2，但标注指南第 3.2 条禁止仅凭轮次确定归属。"
+      }
+    ]
+  },
+  "notes": "原创最小样例，只用于校验金标准格式与坐标约定（决策 0002）；不能作为真实作品效果证据。"
+}
