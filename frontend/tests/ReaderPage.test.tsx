@@ -2,10 +2,24 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import * as annotationsApi from '../src/api/annotations'
 import * as booksApi from '../src/api/books'
 import type { BookOut, ChapterOut, ContentNodeOut } from '../src/api/types'
 import ReaderPage, { findCurrentStartCp } from '../src/pages/ReaderPage'
 import { renderRoute } from './helpers'
+
+vi.mock('../src/api/annotations', () => ({
+  annotationKeys: {
+    range: (
+      bookId: string,
+      startCp: number,
+      endCp: number,
+      mode: string,
+      horizon: number | null,
+    ) => ['annotations', bookId, startCp, endCp, mode, horizon],
+  },
+  fetchAnnotations: vi.fn(),
+}))
 
 vi.mock('../src/api/books', () => ({
   queryKeys: {
@@ -105,6 +119,7 @@ describe('ReaderPage', () => {
     vi.mocked(booksApi.fetchChapters).mockReset()
     vi.mocked(booksApi.fetchContent).mockReset()
     vi.mocked(booksApi.fetchQuotes).mockReset()
+    vi.mocked(annotationsApi.fetchAnnotations).mockReset()
     vi.mocked(booksApi.saveReadingProgress).mockReset()
 
     vi.mocked(booksApi.fetchBook).mockResolvedValue(BOOK)
@@ -122,6 +137,54 @@ describe('ReaderPage', () => {
     vi.mocked(booksApi.fetchQuotes).mockImplementation(async (_bookId, query) =>
       quotesFor(query?.chapterId ?? 'c1'),
     )
+    vi.mocked(annotationsApi.fetchAnnotations).mockResolvedValue({
+      book_id: 'b1',
+      book_version_id: 'v1',
+      reading_mode: 'initial',
+      visible_horizon_cp: 30,
+      start_cp: 21,
+      end_cp: 60,
+      items: [
+        {
+          quote_id: 'q-c2',
+          scene_id: 's1',
+          start_cp: 21,
+          end_cp: 30,
+          kind: 'speech',
+          assignment: 'EXISTING',
+          basis: 'DIRECT',
+          status: 'ACCEPTED',
+          source: 'MODEL',
+          speaker_group_id: 'g1',
+          label: 'S1',
+          color_index: 0,
+          stale: false,
+          user_locked: false,
+          withheld: false,
+        },
+      ],
+      legend: [
+        {
+          group_id: 'g1',
+          label: 'S1',
+          scene_id: 's1',
+          color_index: 0,
+          first_quote_id: 'q-c2',
+          description: '',
+          quote_count: 1,
+        },
+      ],
+      counts: {
+        total: 1,
+        accepted: 1,
+        provisional: 0,
+        unknown: 0,
+        stale: 0,
+        withheld: 0,
+        unprocessed_quotes: 0,
+      },
+      scenes: [],
+    })
     vi.mocked(booksApi.saveReadingProgress).mockResolvedValue({
       book_id: 'b1',
       book_version_id: 'v1',
@@ -165,6 +228,38 @@ describe('ReaderPage', () => {
 
     await userEvent.click(screen.getByTestId('toggle-candidates'))
     await waitFor(() => expect(screen.queryAllByTestId('candidate-quote')).toHaveLength(0))
+  })
+
+  it('显示后端投影的颜色/编号，并可关闭标注（原文不变）', async () => {
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
+    await screen.findByText(/第二章的正文/)
+
+    const span = screen.getByTestId('annotation-span')
+    expect(span).toHaveTextContent('「第二章的正文。」')
+    expect(screen.getAllByTestId('annotation-label')[0]).toHaveTextContent('〔S1〕')
+    expect(screen.getByTestId('speaker-legend')).toHaveTextContent('S1')
+    expect(screen.getByText(/标注 1 条/)).toBeInTheDocument()
+
+    const callsBefore = vi.mocked(annotationsApi.fetchAnnotations).mock.calls.length
+    await userEvent.click(screen.getByTestId('toggle-annotations'))
+    await waitFor(() => expect(screen.queryByTestId('annotation-span')).toBeNull())
+    expect(screen.getByText(/第二章的正文/)).toBeInTheDocument()
+    // 只改显示：不会重新拉取投影，也不会有任何模型调用
+    expect(vi.mocked(annotationsApi.fetchAnnotations).mock.calls.length).toBe(callsBefore)
+  })
+
+  it('切到重读模式会按新阅读模式重新取投影', async () => {
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
+    await screen.findByText(/第二章的正文/)
+
+    await userEvent.selectOptions(screen.getByTestId('reader-reading-mode'), 'reread')
+    await waitFor(() =>
+      expect(
+        vi.mocked(annotationsApi.fetchAnnotations).mock.calls.some(
+          (call) => (call[1] as { readingMode?: string } | undefined)?.readingMode === 'reread',
+        ),
+      ).toBe(true),
+    )
   })
 
   it('findCurrentStartCp 取第一个进入视口的节点', () => {

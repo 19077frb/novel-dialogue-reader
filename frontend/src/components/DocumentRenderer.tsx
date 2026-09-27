@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react'
 
 import { resourceUrl } from '../api/books'
-import type { ContentNodeOut, RubyAnnotation } from '../api/types'
+import type { AnnotationItemOut, ContentNodeOut, RubyAnnotation } from '../api/types'
 import { nodePayload } from '../api/types'
-import { AnnotationLayer } from './AnnotationLayer'
+import { annotationColor, AnnotationLayer, labelText } from './AnnotationLayer'
 
 /** 候选引语范围（来自扫描器，只表示“这里有一段引号内容”，不含说话人）。 */
 export interface CandidateRange {
@@ -18,6 +18,11 @@ export interface DocumentRendererProps {
   nodes: ContentNodeOut[]
   /** 候选引语覆盖：只做提示性标记，不表示任何识别结果。 */
   candidates?: CandidateRange[]
+  /**
+   * 有效标注投影（来自 `GET /api/books/{id}/annotations`）。
+   * 只有这里的颜色/编号才会显示；`withheld` 不下发颜色与编号（不提前泄漏后文证据）。
+   */
+  annotations?: AnnotationItemOut[]
   /** 点击节点时的回调：T13 的普通对白详情入口，现在只用于定位。 */
   onNodeClick?: (node: ContentNodeOut) => void
 }
@@ -58,6 +63,103 @@ function renderTextWithRuby(
   return parts
 }
 
+export interface AnnotationSlice {
+  annotation: AnnotationItemOut | null
+  start: number
+  end: number
+}
+
+/**
+ * 按标注边界把绝对码点区间 `[from, to)` 切成不重叠的小块。
+ * 同一位置多层嵌套时取跨度最小者（最内层标注）着色。纯函数，便于测试。
+ */
+export function sliceByAnnotations(
+  annotations: AnnotationItemOut[],
+  from: number,
+  to: number,
+): AnnotationSlice[] {
+  const relevant = annotations.filter(
+    (item) => item.start_cp < to && item.end_cp > from && item.end_cp > item.start_cp,
+  )
+  if (relevant.length === 0) return [{ annotation: null, start: from, end: to }]
+
+  const points = new Set<number>([from, to])
+  for (const item of relevant) {
+    points.add(Math.max(from, item.start_cp))
+    points.add(Math.min(to, item.end_cp))
+  }
+  const ordered = [...points].sort((a, b) => a - b)
+  const slices: AnnotationSlice[] = []
+  for (let index = 0; index < ordered.length - 1; index += 1) {
+    const start = ordered[index]
+    const end = ordered[index + 1]
+    if (end <= start) continue
+    let chosen: AnnotationItemOut | null = null
+    for (const item of relevant) {
+      if (item.start_cp <= start && item.end_cp >= end) {
+        if (chosen === null || item.end_cp - item.start_cp < chosen.end_cp - chosen.start_cp) {
+          chosen = item
+        }
+      }
+    }
+    slices.push({ annotation: chosen, start, end })
+  }
+  return slices
+}
+
+/**
+ * 渲染一段纯文本，按标注边界分片着色。
+ * 编号是真实文本节点（`〔S1〕`），只在标注起点出现一次；跨节点的同一引语会分成多个 span，
+ * 但共享同一 `data-quote-id`。
+ */
+function renderAnnotatedText(
+  text: string,
+  baseCp: number,
+  ruby: RubyAnnotation[] | undefined,
+  annotations: AnnotationItemOut[],
+  from: number,
+  to: number,
+): ReactNode[] {
+  const parts: ReactNode[] = []
+  for (const slice of sliceByAnnotations(annotations, from, to)) {
+    const segment = text.slice(slice.start - baseCp, slice.end - baseCp)
+    const inner = renderTextWithRuby(segment, slice.start, ruby)
+    const annotation = slice.annotation
+    if (annotation === null || annotation.withheld) {
+      parts.push(inner)
+      continue
+    }
+    const color = annotationColor(annotation)
+    const label = annotation.label
+    const showLabel = Boolean(label) && slice.start === annotation.start_cp
+    parts.push(
+      <span
+        key={`${annotation.quote_id}-${slice.start}`}
+        className={color ? 'ndr-annotation' : 'ndr-annotation ndr-annotation-unknown'}
+        data-testid="annotation-span"
+        data-quote-id={annotation.quote_id}
+        data-status={annotation.status}
+        data-stale={annotation.stale ? 'true' : 'false'}
+        data-label={label ?? ''}
+        style={color ? { color } : undefined}
+        title={
+          annotation.status === 'UNKNOWN'
+            ? '证据不足：不指定说话人（无色无编号）'
+            : `说话人分组 ${label ?? ''}（${annotation.status}）`
+        }
+      >
+        {showLabel ? (
+          <span className="ndr-annotation-label" data-testid="annotation-label">
+            {labelText(label)}
+          </span>
+        ) : null}
+        {inner}
+      </span>,
+    )
+  }
+  return parts
+}
+
 interface CandidateNode {
   range: CandidateRange
   start: number
@@ -90,6 +192,7 @@ function renderNodes(
   text: string,
   baseCp: number,
   ruby: RubyAnnotation[] | undefined,
+  annotations: AnnotationItemOut[],
   from: number,
   to: number,
 ): ReactNode[] {
@@ -99,7 +202,7 @@ function renderNodes(
     if (node.end <= cursor || node.start >= to) continue
     const start = Math.max(cursor, node.start)
     if (start > cursor) {
-      parts.push(renderTextWithRuby(text.slice(cursor - baseCp, start - baseCp), cursor, ruby))
+      parts.push(...renderAnnotatedText(text, baseCp, ruby, annotations, cursor, start))
     }
     const end = Math.min(to, node.end)
     parts.push(
@@ -112,13 +215,13 @@ function renderNodes(
         data-end-cp={node.end}
         title="扫描器提出的候选引语（尚未判定说话人）"
       >
-        {renderNodes(node.children, text, baseCp, ruby, start, end)}
+        {renderNodes(node.children, text, baseCp, ruby, annotations, start, end)}
       </span>,
     )
     cursor = end
   }
   if (cursor < to) {
-    parts.push(renderTextWithRuby(text.slice(cursor - baseCp, to - baseCp), cursor, ruby))
+    parts.push(...renderAnnotatedText(text, baseCp, ruby, annotations, cursor, to))
   }
   return parts
 }
@@ -127,11 +230,13 @@ function NodeView({
   node,
   bookId,
   candidates,
+  annotations,
   onNodeClick,
 }: {
   node: ContentNodeOut
   bookId: string
   candidates: CandidateRange[]
+  annotations: AnnotationItemOut[]
   onNodeClick?: (node: ContentNodeOut) => void
 }) {
   const payload = nodePayload(node)
@@ -178,6 +283,9 @@ function NodeView({
   const relevant = candidates.filter(
     (range) => range.startCp < nodeEnd && range.endCp > node.start_cp,
   )
+  const relevantAnnotations = annotations.filter(
+    (item) => item.start_cp < nodeEnd && item.end_cp > node.start_cp,
+  )
   const text =
     relevant.length > 0
       ? renderNodes(
@@ -185,10 +293,18 @@ function NodeView({
           node.text,
           node.start_cp,
           payload.ruby,
+          relevantAnnotations,
           node.start_cp,
           nodeEnd,
         )
-      : renderTextWithRuby(node.text, node.start_cp, payload.ruby)
+      : renderAnnotatedText(
+          node.text,
+          node.start_cp,
+          payload.ruby,
+          relevantAnnotations,
+          node.start_cp,
+          nodeEnd,
+        )
 
   if (node.node_type === 'heading') {
     const level = Math.min(Math.max(payload.level ?? 1, 1), 3)
@@ -210,16 +326,17 @@ function NodeView({
 /**
  * 结构化正文渲染：后端给节点与码点范围，前端只负责排版。
  * `candidates` 只画出扫描器找到的引号范围（虚线标记），不表示任何说话人判断；
- * 颜色/编号属于 T05 之后的标注投影（`AnnotationLayer`）。
+ * `annotations` 才是后端下发的有效投影：颜色与编号只来自它，`withheld` 的不着色。
  */
 export function DocumentRenderer({
   bookId,
   nodes,
   candidates = [],
+  annotations = [],
   onNodeClick,
 }: DocumentRendererProps) {
   return (
-    <AnnotationLayer>
+    <AnnotationLayer annotations={annotations}>
       <div className="ndr-document" data-testid="document-renderer">
         {nodes.map((node) => (
           <NodeView
@@ -227,6 +344,7 @@ export function DocumentRenderer({
             node={node}
             bookId={bookId}
             candidates={candidates}
+            annotations={annotations}
             onNodeClick={onNodeClick}
           />
         ))}

@@ -1,8 +1,8 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import type { ContentNodeOut } from '../src/api/types'
-import { DocumentRenderer } from '../src/components/DocumentRenderer'
+import type { AnnotationItemOut, ContentNodeOut } from '../src/api/types'
+import { DocumentRenderer, sliceByAnnotations } from '../src/components/DocumentRenderer'
 
 function node(
   partial: Partial<ContentNodeOut> & Pick<ContentNodeOut, 'node_id' | 'node_type'>,
@@ -162,5 +162,160 @@ describe('DocumentRenderer', () => {
     expect(layer).toHaveAttribute('data-annotation-count', '0')
     expect(layer.querySelectorAll('[class*="speaker"]')).toHaveLength(0)
     expect(layer.querySelectorAll('[class*="quote"]')).toHaveLength(0)
+  })
+})
+
+describe('DocumentRenderer 标注投影（T11）', () => {
+  const node = {
+    node_id: 'n0',
+    node_type: 'paragraph' as const,
+    ordinal: 0,
+    start_cp: 100,
+    end_cp: 116,
+    chapter_id: 'ch1',
+    chapter_ordinal: 0,
+    text: '「雨停了。」少女合上伞。',
+    payload: {},
+  }
+
+  function annotation(partial: Partial<AnnotationItemOut>): AnnotationItemOut {
+    return {
+      quote_id: 'q1',
+      scene_id: 's1',
+      start_cp: 100,
+      end_cp: 106,
+      kind: 'speech',
+      assignment: 'EXISTING',
+      basis: 'DIRECT',
+      status: 'ACCEPTED',
+      source: 'MODEL',
+      speaker_group_id: 'g1',
+      label: 'S1',
+      color_index: 0,
+      stale: false,
+      user_locked: false,
+      withheld: false,
+      ...partial,
+    } as AnnotationItemOut
+  }
+
+  it('可见标注按范围着色，并把编号渲染成真实文本节点', () => {
+    render(
+      <DocumentRenderer
+        bookId="b1"
+        nodes={[node]}
+        annotations={[annotation({})]}
+      />,
+    )
+
+    const span = screen.getByTestId('annotation-span')
+    expect(span).toHaveAttribute('data-quote-id', 'q1')
+    expect(span).toHaveAttribute('data-status', 'ACCEPTED')
+    expect(span.style.color).toBeTruthy()
+    // 编号是真实文本节点，不是 CSS 伪元素
+    expect(within(span).getByTestId('annotation-label')).toHaveTextContent('〔S1〕')
+    // 着色不改变原文
+    expect(screen.getByTestId('document-renderer')).toHaveTextContent('「雨停了。」少女合上伞。')
+    // 只给引语着色，引语外的叙述不受影响
+    expect(span).toHaveTextContent('「雨停了。」')
+  })
+
+  it('withheld 的标注既不着色也不下发编号', () => {
+    render(
+      <DocumentRenderer
+        bookId="b1"
+        nodes={[node]}
+        annotations={[annotation({ withheld: true, label: null, color_index: null })]}
+      />,
+    )
+
+    expect(screen.queryByTestId('annotation-span')).toBeNull()
+    expect(screen.queryByTestId('annotation-label')).toBeNull()
+    expect(screen.getByTestId('document-renderer')).toHaveTextContent('「雨停了。」少女合上伞。')
+  })
+
+  it('UNKNOWN 标注不给颜色也不给编号', () => {
+    render(
+      <DocumentRenderer
+        bookId="b1"
+        nodes={[node]}
+        annotations={[
+          annotation({
+            status: 'UNKNOWN',
+            assignment: 'UNKNOWN',
+            basis: 'INSUFFICIENT',
+            speaker_group_id: null,
+            label: null,
+            color_index: null,
+          }),
+        ]}
+      />,
+    )
+
+    const span = screen.getByTestId('annotation-span')
+    expect(span.className).toContain('ndr-annotation-unknown')
+    expect(span.style.color).toBe('')
+    expect(screen.queryByTestId('annotation-label')).toBeNull()
+  })
+
+  it('跨节点的同一引语分成多个 span，但只在起点出现一次编号', () => {
+    render(
+      <DocumentRenderer
+        bookId="b1"
+        nodes={[
+          {
+            ...node,
+            node_id: 'n0',
+            start_cp: 0,
+            end_cp: 4,
+            text: '「跨块',
+          },
+          {
+            ...node,
+            node_id: 'n1',
+            start_cp: 4,
+            end_cp: 10,
+            text: '的同一句。」',
+          },
+        ]}
+        annotations={[annotation({ start_cp: 0, end_cp: 10 })]}
+      />,
+    )
+
+    const spans = screen.getAllByTestId('annotation-span')
+    expect(spans).toHaveLength(2)
+    expect(spans[0]).toHaveAttribute('data-quote-id', 'q1')
+    expect(spans[1]).toHaveAttribute('data-quote-id', 'q1')
+    expect(screen.getAllByTestId('annotation-label')).toHaveLength(1)
+    expect(spans[0]).toHaveTextContent('〔S1〕')
+    expect(spans[1]).toHaveTextContent('的同一句。」')
+  })
+
+  it('sliceByAnnotations 在嵌套时取最内层标注', () => {
+    const outer = annotation({ quote_id: 'outer', start_cp: 0, end_cp: 20, label: 'S1' })
+    const inner = annotation({
+      quote_id: 'inner',
+      start_cp: 5,
+      end_cp: 10,
+      label: 'S2',
+      color_index: 1,
+    })
+
+    const slices = sliceByAnnotations([outer, inner], 0, 20)
+
+    expect(slices.map((slice) => [slice.start, slice.end, slice.annotation?.quote_id])).toEqual([
+      [0, 5, 'outer'],
+      [5, 10, 'inner'],
+      [10, 20, 'outer'],
+    ])
+  })
+
+  it('没有标注时不着色（原文与候选覆盖行为不变）', () => {
+    render(<DocumentRenderer bookId="b1" nodes={[node]} candidates={[
+      { quoteId: 'q1', startCp: 100, endCp: 106 },
+    ]} />)
+
+    expect(screen.queryByTestId('annotation-span')).toBeNull()
+    expect(screen.getByTestId('candidate-quote')).toHaveTextContent('「雨停了。」')
   })
 })

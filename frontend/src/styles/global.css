@@ -504,3 +504,140 @@ a {
   padding: 10px 12px;
   margin-top: 10px;
 }
+/* ---------- 标注投影（T11） ---------- */
+
+.ndr-annotation {
+  /* 颜色由内联 style 提供（来自后端投影）；这里只做可读性增强 */
+  font-weight: 600;
+}
+
+.ndr-annotation-label {
+  font-size: 0.75em;
+  vertical-align: super;
+  opacity: 0.85;
+  margin-right: 1px;
+}
+
+.ndr-annotation-unknown {
+  /* 未知：明确不给颜色、不给编号，只用点线提示尚无结论 */
+  border-bottom: 1px dotted var(--ndr-muted);
+}
+
+.ndr-speaker-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 8px 0;
+}
+
+.ndr-legend-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ndr-legend-button:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.ndr-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--ndr-border);
+  display: inline-block;
+}
+
+.ndr-legend-label {
+  font-weight: 600;
+}
+
+.ndr-annotation-counts {
+  font-size: 0.85rem;
+  grid-template-columns: max-content 1fr max-content 1fr;
+}
+
+/* ---------- 预览与按章处理页（T11） ---------- */
+
+.ndr-preview-nav a {
+  margin-left: 12px;
+}
+
+.ndr-preview-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.ndr-range-picker,
+.ndr-budget-form,
+.ndr-preview-model {
+  border: 1px solid var(--ndr-border);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.ndr-range-picker label,
+.ndr-budget-form label,
+.ndr-preview-model label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: var(--ndr-muted);
+}
+
+.ndr-range-cp {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.ndr-range-picker input,
+.ndr-budget-form input,
+.ndr-preview-model select {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ndr-border);
+  background: transparent;
+  color: inherit;
+  width: 100%;
+}
+
+.ndr-preview-viewbar {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ndr-preview-side {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+
+.ndr-preview-document {
+  border-top: 1px solid var(--ndr-border);
+  padding-top: 8px;
+}
+
+.ndr-estimate,
+.ndr-usage {
+  margin-top: 8px;
+}
+
+@media (max-width: 900px) {
+  .ndr-preview-side {
+    grid-template-columns: 1fr;
+  }
+
+  .ndr-range-cp {
+    grid-template-columns: 1fr;
+  }
+}

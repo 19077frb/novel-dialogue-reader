@@ -2,6 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
+import { annotationKeys, fetchAnnotations } from '../api/annotations'
 import {
   fetchBook,
   fetchChapters,
@@ -15,6 +16,7 @@ import type { ChapterOut, ContentNodeOut, ReadingMode } from '../api/types'
 import { ChapterNavigation } from '../components/ChapterNavigation'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
+import { SpeakerLegend } from '../components/SpeakerLegend'
 
 /** 找到视口内第一个节点对应的起点；用于保存阅读位置（纯函数，便于测试）。 */
 export function findCurrentStartCp(nodes: HTMLElement[]): number | null {
@@ -28,6 +30,10 @@ export function findCurrentStartCp(nodes: HTMLElement[]): number | null {
   return last !== undefined ? Number(last) : null
 }
 
+/**
+ * 阅读页：导入后即可阅读原文；T11 起接入**同一套标注投影**
+ * （`GET /api/books/{id}/annotations`）。翻页只查投影，不触发任何推理。
+ */
 export default function ReaderPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const documentRef = useRef<HTMLDivElement>(null)
@@ -37,6 +43,8 @@ export default function ReaderPage() {
   const [pages, setPages] = useState<ContentNodeOut[][]>([])
   const [notice, setNotice] = useState<string | null>(null)
   const [showCandidates, setShowCandidates] = useState(true)
+  const [showAnnotations, setShowAnnotations] = useState(true)
+  const [readingModeOverride, setReadingModeOverride] = useState<ReadingMode | null>(null)
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -97,6 +105,35 @@ export default function ReaderPage() {
     [quotes.data],
   )
   const activeChapter = chapters.data?.find((chapter) => chapter.id === chapterId) ?? null
+  const readingMode: ReadingMode = readingModeOverride ?? book.data?.reading_mode ?? 'initial'
+
+  // 标注投影：只读查询（不写库、不调用模型）。初读模式下 horizon 默认取本范围末端，
+  // 后文才出现的证据不会提前着色；重读模式显示全部有效投影。
+  const annotations = useQuery({
+    queryKey: annotationKeys.range(
+      bookId ?? '',
+      activeChapter?.start_cp ?? 0,
+      activeChapter?.end_cp ?? 0,
+      readingMode,
+      null,
+    ),
+    queryFn: ({ signal }) =>
+      fetchAnnotations(
+        bookId as string,
+        {
+          startCp: activeChapter?.start_cp ?? 0,
+          endCp: activeChapter?.end_cp ?? 0,
+          readingMode,
+          visibleHorizonCp: null,
+        },
+        signal,
+      ),
+    enabled:
+      Boolean(bookId) &&
+      activeChapter !== null &&
+      activeChapter.end_cp > activeChapter.start_cp,
+  })
+  const annotationItems = showAnnotations ? annotations.data?.items ?? [] : []
 
   const progress = useMutation({
     mutationFn: (input: {
@@ -161,6 +198,12 @@ export default function ReaderPage() {
     [persistPosition],
   )
 
+  const focusQuote = useCallback((quoteId: string | null | undefined) => {
+    if (!quoteId) return
+    const target = documentRef.current?.querySelector(`[data-quote-id="${quoteId}"]`)
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [])
+
   if (!bookId) return <p className="status-error">缺少书籍 ID。</p>
 
   const encodingLabel = book.data?.active_version
@@ -180,7 +223,10 @@ export default function ReaderPage() {
             {book.data ? ` · 书签位置 ${book.data.read_position_cp}` : ''}
           </p>
         </div>
-        <Link to="/library">返回书架</Link>
+        <nav className="ndr-preview-nav">
+          <Link to={`/books/${bookId}/preview`}>预览与处理</Link>
+          <Link to="/library">返回书架</Link>
+        </nav>
       </header>
 
       {notice && (
@@ -209,20 +255,56 @@ export default function ReaderPage() {
           {nodes.length > 0 && (
             <>
               <h1 className="ndr-chapter-heading">{activeChapter?.title ?? '正文'}</h1>
-              <label className="ndr-quote-legend">
-                <input
-                  type="checkbox"
-                  checked={showCandidates}
-                  onChange={(event) => setShowCandidates(event.target.checked)}
-                  data-testid="toggle-candidates"
+              <div className="ndr-quote-legend">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={showCandidates}
+                    onChange={(event) => setShowCandidates(event.target.checked)}
+                    data-testid="toggle-candidates"
+                  />
+                  候选引语 {candidates.length} 条（扫描器结果，尚未判定说话人）
+                  {quotes.data?.next_cursor ? '（本章还有更多候选未加载）' : ''}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={showAnnotations}
+                    onChange={(event) => setShowAnnotations(event.target.checked)}
+                    data-testid="toggle-annotations"
+                  />
+                  标注 {annotations.data?.items?.length ?? 0} 条（颜色/编号来自后端投影）
+                </label>
+                <label>
+                  阅读模式
+                  <select
+                    value={readingMode}
+                    onChange={(event) =>
+                      setReadingModeOverride(event.target.value as ReadingMode)
+                    }
+                    data-testid="reader-reading-mode"
+                  >
+                    <option value="initial">初读</option>
+                    <option value="reread">重读</option>
+                  </select>
+                </label>
+              </div>
+              {annotations.isError && (
+                <p className="hint" data-testid="annotations-error">
+                  标注投影读取失败（原文不受影响）。
+                </p>
+              )}
+              {showAnnotations && (annotations.data?.legend?.length ?? 0) > 0 && (
+                <SpeakerLegend
+                  legend={annotations.data?.legend ?? []}
+                  onFocus={(item) => focusQuote(item.first_quote_id)}
                 />
-                候选引语 {candidates.length} 条（扫描器结果，尚未判定说话人）
-                {quotes.data?.next_cursor ? '（本章还有更多候选未加载）' : ''}
-              </label>
+              )}
               <DocumentRenderer
                 bookId={bookId}
                 nodes={nodes}
                 candidates={showCandidates ? candidates : []}
+                annotations={annotationItems}
               />
             </>
           )}

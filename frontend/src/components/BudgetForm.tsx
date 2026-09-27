@@ -1,0 +1,58 @@
+import type { BudgetInput } from '../api/jobs'
+
+/**
+ * 预算表单（T11）：把上限直接交给后端；留空表示不设该上限。
+ * 这里不做任何估算/调用，改动只在提交估算或创建任务时生效。
+ */
+export interface BudgetFormProps {
+  value: BudgetInput
+  onChange: (value: BudgetInput) => void
+}
+
+function numberOrNull(raw: string): number | null {
+  if (raw.trim() === '') return null
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
+}
+
+export function BudgetForm({ value, onChange }: BudgetFormProps) {
+  return (
+    <fieldset className="ndr-budget-form" data-testid="budget-form">
+      <legend>预算与复核上限</legend>
+      <label>
+        输入 token 上限（留空=不限）
+        <input
+          type="number"
+          min={1}
+          value={value.maxInputTokens ?? ''}
+          onChange={(event) => onChange({ ...value, maxInputTokens: numberOrNull(event.target.value) })}
+          data-testid="budget-max-input"
+        />
+      </label>
+      <label>
+        输出 token 上限（留空=不限）
+        <input
+          type="number"
+          min={1}
+          value={value.maxOutputTokens ?? ''}
+          onChange={(event) =>
+            onChange({ ...value, maxOutputTokens: numberOrNull(event.target.value) })
+          }
+          data-testid="budget-max-output"
+        />
+      </label>
+      <label>
+        最多复核次数
+        <input
+          type="number"
+          min={0}
+          value={value.maxRechecks}
+          onChange={(event) =>
+            onChange({ ...value, maxRechecks: Math.max(0, Number(event.target.value) || 0) })
+          }
+          data-testid="budget-max-rechecks"
+        />
+      </label>
+    </fieldset>
+  )
+}

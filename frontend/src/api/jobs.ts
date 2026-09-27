@@ -1,0 +1,110 @@
+/**
+ * 任务、估算与用量（T10 契约，T11 预览页使用）。
+ *
+ * 预览与正式处理共用同一套 `POST /api/jobs`（`mode: preview | process`），
+ * 结果直接落进同一份标注投影，不创建第二套临时识别存储。
+ */
+import { apiData } from './client'
+import type { EstimateOut, JobDetailOut, ReadingMode, UsageOut } from './types'
+
+export const jobKeys = {
+  usage: (bookId: string) => ['usage', bookId] as const,
+}
+
+export interface RangeInput {
+  startCp: number
+  endCp: number | null
+}
+
+export interface BudgetInput {
+  maxInputTokens: number | null
+  maxOutputTokens: number | null
+  maxRechecks: number
+}
+
+export function budgetPayload(budget: BudgetInput) {
+  return {
+    max_input_tokens: budget.maxInputTokens,
+    max_output_tokens: budget.maxOutputTokens,
+    max_rechecks: budget.maxRechecks,
+  }
+}
+
+export interface EstimateInput {
+  bookVersionId?: string | null
+  range: RangeInput
+  readingMode: ReadingMode
+  visibleHorizonCp?: number | null
+  budget: BudgetInput
+}
+
+/** 纯本地估算：不调用模型、不写数据库。 */
+/**
+ * 稳定的短摘要（FNV-1a 32 位 → base36）。
+ *
+ * 幂等键有 128 字符上限：直接把范围/预算/配置 JSON 拼进键会超限（422），
+ * 这里用短摘要保证同输入同键、不同输入不同键（碰撞概率足够低，且摘要不同只会多跑一次）。
+ */
+export function shortHash(value: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(36)
+}
+
+export function estimateRange(
+  bookId: string,
+  input: EstimateInput,
+  signal?: AbortSignal,
+): Promise<EstimateOut> {
+  return apiData<EstimateOut>(`/api/books/${bookId}/estimates`, {
+    method: 'POST',
+    signal,
+    body: {
+      book_version_id: input.bookVersionId ?? null,
+      range: { start_cp: input.range.startCp, end_cp: input.range.endCp },
+      reading_mode: input.readingMode,
+      visible_horizon_cp: input.visibleHorizonCp ?? null,
+      budget: budgetPayload(input.budget),
+    },
+  })
+}
+
+export interface CreateJobInput {
+  bookId: string
+  mode: 'preview' | 'process'
+  bookVersionId?: string | null
+  range: RangeInput
+  profileId?: string | null
+  readingMode: ReadingMode
+  visibleHorizonCp?: number | null
+  budget: BudgetInput
+  idempotencyKey: string
+  runNow?: boolean
+}
+
+export function createJob(input: CreateJobInput, signal?: AbortSignal): Promise<JobDetailOut> {
+  return apiData<JobDetailOut>('/api/jobs', {
+    method: 'POST',
+    signal,
+    body: {
+      book_id: input.bookId,
+      kind: 'INFERENCE',
+      mode: input.mode,
+      book_version_id: input.bookVersionId ?? null,
+      range: { start_cp: input.range.startCp, end_cp: input.range.endCp },
+      profile_id: input.profileId ?? null,
+      reading_mode: input.readingMode,
+      visible_horizon_cp: input.visibleHorizonCp ?? null,
+      budget: budgetPayload(input.budget),
+      idempotency_key: input.idempotencyKey,
+      run_now: input.runNow ?? true,
+    },
+  })
+}
+
+export function fetchUsage(bookId: string, signal?: AbortSignal): Promise<UsageOut> {
+  return apiData<UsageOut>(`/api/books/${bookId}/usage`, { signal })
+}
