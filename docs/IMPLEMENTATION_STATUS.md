@@ -28,7 +28,7 @@ FakeProvider 或自造样例通过只记入 Offline。
 | T14 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **309 passed**（新增 `test_recovery.py` 6 项）：进程重启扫描（超租约 DISPATCHED→未知结果、RUNNING→PARTIAL、PAUSING→PAUSED、已完成窗口保留）、**未知结果不自动重发**（F15）、预算到顶不发调用且恢复动作为 `new_job`（F20）、限流有上限退避重试（默认上限成功 / 上限 0 失败并给 `run`）、提供方超时→`NEEDS_RECONCILIATION` 且未知用量不写 0、缺凭据→`FAILED`+`requires_credential`+`open_settings` 且原文可读；新增 `GET /api/jobs/{id}/recovery`。前端 `vitest` → **59 passed**（新增 `JobPanel` 4 项）、typecheck/build 通过；Playwright → **18 passed**（新增 `recovery.spec.ts` 3 项：预算到顶→提高预算后显式重算成功；缺 Key→明确失败+指向模型配置+原文可读；超时→保留未知转 PARTIAL）。Live=BLOCKED：真实提供方的限流/超时行为无凭据可测（T16/T18） | 进入 T15：证据时点、阅读投影与最终定位回归 |
 | T15 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **314 passed**（新增 `test_visibility.py` 4 项：F17 初读 horizon 还原「文末才合并」的身份（两种编号/颜色 + 图例两条，越过时点才合并，reread 直接合并，投影只读且行数不变）；F17 端到端离线（FakeProvider `split_then_merge`）；F11 重复对白 ID 不同 + astral 按码点计数（11 码点/13 UTF-16）且每段可 `locate` 回原文；F04 ruby 不进正文、插图成资源、脚本样式不渲染、跨块引语两节点且 synthetic 换行）。前端 `vitest` → **65 passed**（新增 `codepoints` 3 项 + `DocumentRenderer` astral 3 项）、typecheck/build 通过；Playwright → **23 passed**（新增 `reading-visibility.spec.ts` 3 项 + 空候选独立用例 + 无需密钥用例）。本轮修复 3 个真实缺陷：任务完成后阅读页可能显示旧的空投影（改按前缀失效整族查询）、前端按 UTF-16 下标切片导致 emoji/扩展汉字错位、设置页缺少 `credential_mode=none` 选项使本地无鉴权网关无路可走 | 进入 T15A：EPUB/HTML 导出后端与标准校验 |
 | T15A | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **328 passed**（新增 `test_export_render.py` 8 项 + `test_exports.py` 7 项；迁移 0005）。覆盖：F21 TXT→EPUB/HTML（正文完整、真实文本编号、下载 MIME/中文文件名、**导出零模型调用**）；F22 EPUB→EPUB/HTML（资源闭合、注音不进正文、EPUB→HTML 图片内联 data URL）；F26 节选只带必要资源；F27 坏 zip/未完成产物如实失败且不可下载；F30 同指纹复用产物 + 重复下载一致；快照隔离（冻结后更正不改变已生成文件）；CLI 退出码与 `NOT_RUN` 语义。`ruff` 全绿。Live=BLOCKED：**EPUBCheck 未运行**（本机无 jar、未联网安装），如实记 `NOT_RUN`；真实阅读器试读属 T15B。原创样例在 `evaluation/examples/exports/`（含 manifest 与实跑校验输出） | 进入 T15B：导出对话框、样张与下载闭环（前端） |
-| T15B | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 导出对话框、样张与下载闭环 |
+| T15B | PASS | PASS | BLOCKED | NOT_APPLICABLE | 前端 `vitest` → **70 passed**（新增 `ExportDialog` 5 项：冻结+覆盖/警告/沙箱样张、样式切换只改显示、指定章节传参、快照过期提示、失败不给下载）；Playwright → **28 passed**（新增 `export.spec.ts` 5 项：TXT→HTML 下载且**无 http(s)/无 script/含 〔S1〕**（断网可读）、EPUB→EPUB 结构+资源闭合+重复下载一致、指定章节标「节选」且不含未选正文、未处理章节保持原样且统计/警告如实、并发纠正提示旧快照）。Live=BLOCKED：**EPUBCheck 未运行**（无 jar）且**独立 EPUB 阅读器试读未做**（本机未安装任何阅读器，无法联网安装）——两项保留未完成，不用浏览器样张代替 | 进入 T16：真实样本评测与可复现实验（需要真实模型凭据与人工确认样本） |
 | T16 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | 待填写 | 真实样本评测与可复现实验 |
 | T17 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | 待填写 | 上下文压缩、局部复核与成本路由 |
 | T18 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | 待填写 | 完整联调、体验与发布检查 |
@@ -56,12 +56,16 @@ FakeProvider 或自造样例通过只记入 Offline。
   （本机没有 `tools/epubcheck/epubcheck.jar`，也没有联网安装），状态如实为 `NOT_RUN`；
   真实 EPUB 阅读器试读与完整联调属 T15B/T18。
 - T15A 的 Quality = NOT_APPLICABLE：导出的“效果”取决于识别质量，本身不做识别（效果评测属 T16）。
+- T15B 的 Live = BLOCKED：界面与下载闭环已用真实前后端 + 真实浏览器验证，但
+  **EPUBCheck 标准检查（无 jar）与 ≥2 款独立 EPUB 阅读器试读（本机无阅读器、无法联网安装）都未完成**；
+  这两项如实保留为未完成，不用浏览器样张或自研校验代替。
 - 导入、阅读、候选覆盖、模型配置、任务与用量、颜色/编号投影均已可用：预览页可做范围估算、小范围试运行、
   原文/标注对比与按章处理，结果直接复用到正式阅读。
-  仍缺：导出界面与阅读器试读（T15B）、真实作品效果评测（T16）、发布前完整联调（T18/T19）。
+  仍缺：真实作品效果评测（T16，需凭据与人工样本）、EPUBCheck/独立阅读器验证（环境受限）、
+  发布前完整联调（T18/T19）。
 - `data/run/*.log` 是本地运行产物（已忽略提交），可用账本列出的命令复现。
 - 已知命令偏差见 README“已知命令偏差”与决策 0001/0003；EPUB 表示见 0005；前端结构见 0006；
   扫描与金标准见 0007；凭据处理见 0008；适配器与输出契约见 0009；上下文与预算见 0010；
   场景/接受/身份修订见 0011；任务/缓存/用量见 0012；标注投影与预览见 0013；人工更正与撤销见 0014；
   确认抽屉与复核边界见 0015；暂停/预算与故障恢复见 0016；初读身份还原与码点定位见 0017；
-  导出快照与校验见 0018。
+  导出快照与校验见 0018；导出界面与验证状态见 0019。

@@ -612,3 +612,38 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 原创样例（`evaluation/examples/exports/`）：由 `minimal-txt-001/text.txt` + 离线确定性 FakeProvider 生成，
 含 EPUB/HTML 与 `manifest.json`（快照哈希、大小、sha256、内部检查结果、标准检查状态）。
 本机没有 EPUBCheck jar，样例的标准检查如实记录为 `NOT_RUN`。
+
+## 26. 导出界面（T15B 已实现）
+
+入口：阅读页与预览页头部的「导出」按钮（`data-testid="open-export"`）都会打开同一个 `ExportDialog`。
+
+组件：
+
+| 组件 | 职责 |
+| --- | --- |
+| `ExportDialog` | 编排：范围 → 样式 → 初读策略 → 格式 → 冻结样张 → 生成 → 校验 → 下载 |
+| `ExportScopePicker` | 整本 / 指定章节（章节多选；至少选一章才允许预览） |
+| `ExportStylePreview` | 颜色 + 编号 / 仅颜色 / 仅编号，并给出内联小样 |
+| `ExportProgress` | 任务状态、内部检查逐项（✓/✗）、标准检查状态与缺失片段/资源 |
+| `ExportDownload` | 受控下载链接（服务端文件名/MIME）+ sha256 摘要 + 「重复下载不重新生成」 |
+
+界面契约要点：
+
+- **样张来自后端渲染器**：`POST /api/books/{id}/exports/preview` 返回的 `sample_html` 放在
+  `sandbox=""` 的 iframe 里展示（不执行脚本），不是阅读页截图。
+- **快照过期提示**：对话框在每次打开时**重新冻结**快照；若 `snapshot_hash` 与生成时不同
+  （期间有人做了更正），显示「标注已经更新：已生成的文件仍使用旧快照」。
+  比较的是**内容哈希**，不是快照行 ID，所以没有变化时不会误报。
+- **生成幂等**：同一快照 + 格式 + 样式直接复用后端已有产物；重复点击/重复下载都不会重新打包。
+- **失败不提供下载**：`state != COMPLETED` 或内部检查失败时只展示原因（缺失片段/资源），下载入口隐藏。
+- **校验状态如实**：EPUBCheck 缺失时显示 `NOT_RUN` 与原因；HTML 显示 `NOT_APPLICABLE`。
+- 样式与范围切换会重新冻结快照（样张随之更新），但**不会**触发任何模型调用；导出本身也不调用模型。
+
+## 27. 导出与阅读器的验证状态（T15B）
+
+| 项目 | 状态 | 证据 / 说明 |
+| --- | --- | --- |
+| 内部结构检查（zip/mimetype/资源闭合/外部引用/正文一致） | PASS | `pytest backend/tests/integration/test_exports.py` + CLI 实跑（样例 `internal=ok`） |
+| EPUBCheck 标准检查 | NOT_RUN | 本机没有 `tools/epubcheck/epubcheck.jar`，也没有联网安装；CLI/接口都如实报 `NOT_RUN` |
+| HTML 断网打开 | PASS（离线可读） | E2E 下载成品后断言：无 `http(s)` 引用、无 `<script>`、含正文与 `〔S1〕` |
+| 独立 EPUB 阅读器试读 ≥ 2 款 | NOT_RUN | 本机未安装任何独立阅读器（无 Calibre / SumatraPDF / Thorium 等），也没有联网安装；**不用浏览器样张代替** |
