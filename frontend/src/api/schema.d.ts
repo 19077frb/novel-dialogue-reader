@@ -443,10 +443,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 有效标注投影（范围内颜色/编号/图例/统计） */
+        get: operations["annotations_route_api_books__book_id__annotations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AnnotationCountsOut */
+        AnnotationCountsOut: {
+            /** Total */
+            total: number;
+            /** Accepted */
+            accepted: number;
+            /** Provisional */
+            provisional: number;
+            /** Unknown */
+            unknown: number;
+            /** Stale */
+            stale: number;
+            /** Withheld */
+            withheld: number;
+            /**
+             * Unprocessed Quotes
+             * @description 候选里还没有标注的对白数
+             */
+            unprocessed_quotes: number;
+        };
+        /** AnnotationItemOut */
+        AnnotationItemOut: {
+            /** Quote Id */
+            quote_id: string;
+            /** Scene Id */
+            scene_id?: string | null;
+            /** Start Cp */
+            start_cp: number;
+            /** End Cp */
+            end_cp: number;
+            kind: components["schemas"]["QuoteKind"];
+            assignment?: components["schemas"]["Assignment"] | null;
+            basis?: components["schemas"]["SpeakerBasis"] | null;
+            status: components["schemas"]["AnnotationStatus"];
+            /** Source */
+            source: string;
+            /** Speaker Group Id */
+            speaker_group_id?: string | null;
+            /**
+             * Label
+             * @description 展示编号（S1/S2…），仅在可见时有值
+             */
+            label?: string | null;
+            /** Color Index */
+            color_index?: number | null;
+            /** Visible From Cp */
+            visible_from_cp?: number | null;
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /**
+             * User Locked
+             * @default false
+             */
+            user_locked: boolean;
+            /**
+             * Withheld
+             * @description 初读 horizon 之下证据尚未出现：不显示颜色/编号
+             * @default false
+             */
+            withheld: boolean;
+        };
+        /**
+         * AnnotationStatus
+         * @enum {string}
+         */
+        AnnotationStatus: "PROVISIONAL" | "ACCEPTED" | "USER_CONFIRMED" | "UNKNOWN";
+        /** AnnotationsResponse */
+        AnnotationsResponse: {
+            /** Book Id */
+            book_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            reading_mode: components["schemas"]["ReadingMode"];
+            /** Visible Horizon Cp */
+            visible_horizon_cp?: number | null;
+            /** Start Cp */
+            start_cp: number;
+            /** End Cp */
+            end_cp: number;
+            /** Items */
+            items?: components["schemas"]["AnnotationItemOut"][];
+            /** Legend */
+            legend?: components["schemas"]["SpeakerLegendItemOut"][];
+            counts: components["schemas"]["AnnotationCountsOut"];
+            /** Scenes */
+            scenes?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * Assignment
+         * @description 普通 speech 的归属结论；其他类型 conclusion 为 None，不强行指定说话人。
+         * @enum {string}
+         */
+        Assignment: "EXISTING" | "NEW" | "UNKNOWN";
         /** Body_import_book_api_books_import_post */
         Body_import_book_api_books_import_post: {
             /**
@@ -660,6 +775,15 @@ export interface components {
             items: components["schemas"]["QuoteOut"][];
             /** Next Cursor */
             next_cursor?: string | null;
+        };
+        /** DataEnvelope[AnnotationsResponse] */
+        DataEnvelope_AnnotationsResponse_: {
+            data: components["schemas"]["AnnotationsResponse"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
         };
         /** DataEnvelope[BookOut] */
         DataEnvelope_BookOut_: {
@@ -1418,6 +1542,40 @@ export interface components {
             delimiter: string;
             /** Detail */
             detail: string;
+        };
+        /**
+         * SpeakerBasis
+         * @description 证据类型，不是校准后的置信概率（DEVELOPMENT.md 4.4）。
+         * @enum {string}
+         */
+        SpeakerBasis: "DIRECT" | "COREFERENCE" | "RESPONSE_LINK" | "STYLE_ONLY" | "INSUFFICIENT";
+        /** SpeakerLegendItemOut */
+        SpeakerLegendItemOut: {
+            /** Group Id */
+            group_id: string;
+            /** Label */
+            label: string;
+            /** Scene Id */
+            scene_id: string;
+            /** Scene Ref */
+            scene_ref?: string | null;
+            /**
+             * Color Index
+             * @description 场景内稳定色号（0..N-1）
+             */
+            color_index: number;
+            /** First Quote Id */
+            first_quote_id?: string | null;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Quote Count
+             * @default 0
+             */
+            quote_count: number;
         };
         /** UsageOut */
         UsageOut: {
@@ -2341,6 +2499,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_UsageOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    annotations_route_api_books__book_id__annotations_get: {
+        parameters: {
+            query?: {
+                start_cp?: number;
+                end_cp?: number | null;
+                reading_mode?: components["schemas"]["ReadingMode"];
+                visible_horizon_cp?: number | null;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_AnnotationsResponse_"];
                 };
             };
             /** @description Validation Error */

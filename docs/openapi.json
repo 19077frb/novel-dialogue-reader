@@ -1333,10 +1333,382 @@
           }
         }
       }
+    },
+    "/api/books/{book_id}/annotations": {
+      "get": {
+        "tags": [
+          "annotations"
+        ],
+        "summary": "有效标注投影（范围内颜色/编号/图例/统计）",
+        "operationId": "annotations_route_api_books__book_id__annotations_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "start_cp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Start Cp"
+            }
+          },
+          {
+            "name": "end_cp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Cp"
+            }
+          },
+          {
+            "name": "reading_mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ReadingMode",
+              "default": "initial"
+            }
+          },
+          {
+            "name": "visible_horizon_cp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Visible Horizon Cp"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_AnnotationsResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AnnotationCountsOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total"
+          },
+          "accepted": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Accepted"
+          },
+          "provisional": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Provisional"
+          },
+          "unknown": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unknown"
+          },
+          "stale": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Stale"
+          },
+          "withheld": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Withheld"
+          },
+          "unprocessed_quotes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unprocessed Quotes",
+            "description": "候选里还没有标注的对白数"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "accepted",
+          "provisional",
+          "unknown",
+          "stale",
+          "withheld",
+          "unprocessed_quotes"
+        ],
+        "title": "AnnotationCountsOut"
+      },
+      "AnnotationItemOut": {
+        "properties": {
+          "quote_id": {
+            "type": "string",
+            "title": "Quote Id"
+          },
+          "scene_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Id"
+          },
+          "start_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start Cp"
+          },
+          "end_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "End Cp"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/QuoteKind"
+          },
+          "assignment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Assignment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "basis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpeakerBasis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/AnnotationStatus"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "speaker_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker Group Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label",
+            "description": "展示编号（S1/S2…），仅在可见时有值"
+          },
+          "color_index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Index"
+          },
+          "visible_from_cp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible From Cp"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "default": false
+          },
+          "user_locked": {
+            "type": "boolean",
+            "title": "User Locked",
+            "default": false
+          },
+          "withheld": {
+            "type": "boolean",
+            "title": "Withheld",
+            "description": "初读 horizon 之下证据尚未出现：不显示颜色/编号",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quote_id",
+          "start_cp",
+          "end_cp",
+          "kind",
+          "status",
+          "source"
+        ],
+        "title": "AnnotationItemOut"
+      },
+      "AnnotationStatus": {
+        "type": "string",
+        "enum": [
+          "PROVISIONAL",
+          "ACCEPTED",
+          "USER_CONFIRMED",
+          "UNKNOWN"
+        ],
+        "title": "AnnotationStatus"
+      },
+      "AnnotationsResponse": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "reading_mode": {
+            "$ref": "#/components/schemas/ReadingMode"
+          },
+          "visible_horizon_cp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible Horizon Cp"
+          },
+          "start_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start Cp"
+          },
+          "end_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "End Cp"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AnnotationItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "legend": {
+            "items": {
+              "$ref": "#/components/schemas/SpeakerLegendItemOut"
+            },
+            "type": "array",
+            "title": "Legend"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/AnnotationCountsOut"
+          },
+          "scenes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Scenes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "book_version_id",
+          "reading_mode",
+          "start_cp",
+          "end_cp",
+          "counts"
+        ],
+        "title": "AnnotationsResponse"
+      },
+      "Assignment": {
+        "type": "string",
+        "enum": [
+          "EXISTING",
+          "NEW",
+          "UNKNOWN"
+        ],
+        "title": "Assignment",
+        "description": "普通 speech 的归属结论；其他类型 conclusion 为 None，不强行指定说话人。"
+      },
       "Body_import_book_api_books_import_post": {
         "properties": {
           "file": {
@@ -1957,6 +2329,25 @@
           "items"
         ],
         "title": "CursorPage[QuoteOut]"
+      },
+      "DataEnvelope_AnnotationsResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AnnotationsResponse"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[AnnotationsResponse]"
       },
       "DataEnvelope_BookOut_": {
         "properties": {
@@ -3807,6 +4198,82 @@
           "detail"
         ],
         "title": "ScanWarningOut"
+      },
+      "SpeakerBasis": {
+        "type": "string",
+        "enum": [
+          "DIRECT",
+          "COREFERENCE",
+          "RESPONSE_LINK",
+          "STYLE_ONLY",
+          "INSUFFICIENT"
+        ],
+        "title": "SpeakerBasis",
+        "description": "证据类型，不是校准后的置信概率（DEVELOPMENT.md 4.4）。"
+      },
+      "SpeakerLegendItemOut": {
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "title": "Group Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "scene_id": {
+            "type": "string",
+            "title": "Scene Id"
+          },
+          "scene_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Ref"
+          },
+          "color_index": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Color Index",
+            "description": "场景内稳定色号（0..N-1）"
+          },
+          "first_quote_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Quote Id"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "quote_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Quote Count",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group_id",
+          "label",
+          "scene_id",
+          "color_index"
+        ],
+        "title": "SpeakerLegendItemOut"
       },
       "UsageOut": {
         "properties": {

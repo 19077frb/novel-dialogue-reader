@@ -1,0 +1,79 @@
+"""标注投影的 API schema（T11；T15 会加入历史与身份修订投影）。"""
+
+from __future__ import annotations
+
+from pydantic import Field
+
+from .common import ApiModel
+from .enums import (
+    AnnotationStatus,
+    Assignment,
+    QuoteKind,
+    ReadingMode,
+    SceneStatus,
+    SpeakerBasis,
+)
+
+
+class SpeakerLegendItemOut(ApiModel):
+    group_id: str
+    label: str
+    scene_id: str
+    scene_ref: str | None = None
+    color_index: int = Field(ge=0, description="场景内稳定色号（0..N-1）")
+    first_quote_id: str | None = None
+    description: str = ""
+    quote_count: int = Field(ge=0, default=0)
+
+
+class AnnotationItemOut(ApiModel):
+    quote_id: str
+    scene_id: str | None = None
+    start_cp: int = Field(ge=0)
+    end_cp: int = Field(ge=0)
+    kind: QuoteKind
+    assignment: Assignment | None = None
+    basis: SpeakerBasis | None = None
+    status: AnnotationStatus
+    source: str
+    speaker_group_id: str | None = None
+    label: str | None = Field(default=None, description="展示编号（S1/S2…），仅在可见时有值")
+    color_index: int | None = Field(default=None, ge=0)
+    visible_from_cp: int | None = None
+    stale: bool = False
+    user_locked: bool = False
+    withheld: bool = Field(
+        default=False, description="初读 horizon 之下证据尚未出现：不显示颜色/编号"
+    )
+
+
+class AnnotationCountsOut(ApiModel):
+    total: int = Field(ge=0)
+    accepted: int = Field(ge=0)
+    provisional: int = Field(ge=0)
+    unknown: int = Field(ge=0)
+    stale: int = Field(ge=0)
+    withheld: int = Field(ge=0)
+    unprocessed_quotes: int = Field(ge=0, description="候选里还没有标注的对白数")
+
+
+class AnnotationsResponse(ApiModel):
+    book_id: str
+    book_version_id: str
+    reading_mode: ReadingMode
+    visible_horizon_cp: int | None = None
+    start_cp: int = Field(ge=0)
+    end_cp: int = Field(ge=0)
+    items: list[AnnotationItemOut] = Field(default_factory=list)
+    legend: list[SpeakerLegendItemOut] = Field(default_factory=list)
+    counts: AnnotationCountsOut
+    scenes: list[dict[str, object]] = Field(default_factory=list)
+
+
+class SceneSummaryOut(ApiModel):
+    scene_id: str
+    scene_ref: str | None = None
+    status: SceneStatus
+    start_cp: int = Field(ge=0)
+    end_cp: int | None = None
+    participants: list[SpeakerLegendItemOut] = Field(default_factory=list)
