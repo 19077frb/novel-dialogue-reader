@@ -1,11 +1,11 @@
 # 开发交接
 
 更新时间：2026-09-28
-当前任务：T14 暂停恢复、预算到顶与故障闭环（implementation / offline_verification 完成；live = BLOCKED）
-最近完成任务：T14（此前 T00～T13：骨架→迁移→TXT→EPUB→阅读器→候选与金标准→配置页→适配器→上下文预算→场景引擎→任务缓存用量→标注投影与预览→人工更正与撤销→确认队列与抽屉）
-下一任务与理由：T15 证据时点、阅读投影与最终定位回归。T13/T14 已经把可见性（initial/reread + horizon）、
-标注历史、身份修订与恢复动作都接好了，T15 要做跨这些能力的回归：整章预计算 + 初读受限展示、
-跨节点 quote、ruby、特殊字符、页面重排后的定位一致性。
+当前任务：T15 证据时点、阅读投影与最终定位回归（implementation / offline_verification 完成；live = BLOCKED）
+最近完成任务：T15（此前 T00～T14：骨架→迁移→TXT→EPUB→阅读器→候选与金标准→配置页→适配器→上下文预算→场景引擎→任务缓存用量→标注投影与预览→人工更正与撤销→确认队列与抽屉→暂停预算与故障恢复）
+下一任务与理由：T15A EPUB/HTML 导出后端与标准校验。T15 已经把「按时点展示的有效投影」、
+身份还原、码点定位与阅读进度 API 打通，导出要在此基础上冻结快照（`export_snapshots`/`export_artifacts`）、
+按 `position_safe`/`reread` 渲染统一文本样式、打包 EPUB、生成单文件 HTML，并做内部校验 + EPUBCheck 包装。
 
 ## 实际运行方式
 
@@ -20,56 +20,56 @@
 
 ## 本次改动
 
-- `ndr/recovery/service.py`（新）：`job_recovery()`（动作 + 说明 + 付费标记 + 退避秒数 + 是否缺凭据）、
-  `recover_on_startup()`（超租约尝试→未知结果、PAUSING→PAUSED、RUNNING→PARTIAL）、`recovery_actions()`。
-- `ndr/domain/recovery.py`（新）+ `GET /api/jobs/{id}/recovery`；lifespan 里执行启动扫描
-  （失败只记警告，不阻止启动）。
-- `jobs/scheduler.py`：`_dispatch_with_bounded_retry()`（只有 RATE_LIMITED/UNAVAILABLE 按
-  `min(base·2^(n-1), cap)` 有上限退避，超时不自动重试，每次失败尝试单独写 `inference_runs`）；
-  `_build_adapter()` 增加缺凭据判定（非 FakeProvider + 用户选了密钥模式 + 取不到密钥）；
-  `run_job` 在适配器构建失败时落到可解释的 `FAILED`（此前会抛异常并把任务留在 RUNNING）。
-- 配置：`NDR_RATE_LIMIT_MAX_RETRIES`、`NDR_RATE_LIMIT_BACKOFF_BASE_SECONDS`、
-  `NDR_RATE_LIMIT_BACKOFF_MAX_SECONDS`、`NDR_STALE_RUN_LEASE_SECONDS`、`NDR_RECOVER_ON_STARTUP`、
-  `NDR_FAKE_PROVIDER_SCRIPT`；FakeProvider 失败脚本也可写在模型配置的 `params.script` 里（按用例切换）。
-- 前端：`JobPanel` 渲染后端给的恢复动作（暂停/继续/立即执行/保留未知/确认重发/去补凭据），
-  显示真实 `calls`/`cached_windows`/`unknown_usage_runs` 与退避建议；预览页新增
-  `preview-recompute`（显式重算入口）与「不会自动重算」说明；`api/jobs.ts` 增加恢复相关调用。
-- 文档：决策 0016；CONTRACTS 第 23 节；README 增加「暂停、预算与故障恢复（T14）」。
+- 后端：
+  - `scenes/engine.py` 与 `corrections/identity.py` 在写 `identity_revisions` 时记录
+    `snapshot.revert`（`quotes`: 哪一句原本属于哪个分组；`groups`: 新分组来自哪个旧分组）。
+  - `scenes/projection.py` 新增 `horizon_identity_reverts()`：初读且 `visible_from_cp > horizon` 的身份修订
+    在**读时**被反向应用（最新优先）；响应新增 `identity_reverts` 计数；投影仍然只读。
+  - `llm/adapters/fake.py` 增加仅测试用的 `params.script="split_then_merge"`（先判两个声音、再用窗口末尾证据合并）。
+- 前端：
+  - 新增 `src/text/codepoints.ts`（`cpLength`/`utf16IndexForCp`/`sliceByCodepoints`）；
+    `DocumentRenderer` 的候选、标注、ruby 切片全部改走码点换算，节点范围改用后端权威 `end_cp`。
+  - `ReaderPage` 初读时提交 `visible_horizon_cp = 本章末端`，并显示
+    `data-testid="reader-horizon"`（含 withheld 数量与身份还原数量）；重读不提交 horizon。
+  - `PreviewPage` 任务终态改为按前缀失效 `['annotations']`（此前只失效 horizon=null 的键）。
+  - `ModelSettingsPage` 增加「不需要密钥（本地服务）」（`credential_mode=none`）选项。
+- 文档：决策 0017；CONTRACTS 第 24 节；README 增加「初读与后文证据（T15）」。
 
 ## 验证证据
 
-- 后端：`pytest backend/tests` → **309 passed**（T13 时 303；新增 `test_recovery.py` 6 项）；`ruff` 全绿；
+- 后端：`pytest backend/tests` → **314 passed**（T14 时 309；新增 `test_visibility.py` 4 项）；`ruff` 全绿；
   OpenAPI 与 `docs/openapi.json` 一致。
-- 前端：`typecheck` 通过；`vitest` → **59 passed**（T13 时 55；新增 `JobPanel` 4 项）；`vite build` 通过。
-- E2E：**18 passed**（T13 时 15）。新增 `recovery.spec.ts` 3 项覆盖 T14 的门槛：
-  - 预算到顶：`BUDGET_EXHAUSTED`、`calls=0`、恢复动作 `new_job` + 「不会自动重算」文案；
-    调整预算后点显式重算 → `COMPLETED` 且着色出现。
-  - 缺 Key：`FAILED` + 恢复摘要 + 「去补充模型凭据」链接；跳回阅读页仍能读到原文与候选。
-  - 提供方超时：`NEEDS_RECONCILIATION` + 未知用量计数为 1（不写 0）+ 保留未知（免费）与确认重发（可能计费）；
-    点「保留未知结果」后转 `PARTIAL`。
+- 前端：`typecheck` 通过；`vitest` → **65 passed**（T14 时 59）；`vite build` 通过。
+- E2E：**23 passed**（T14 时 18）。新增覆盖：
+  - `reading-visibility.spec.ts` 3 项：F17（初读第一章两个声音两种颜色/编号 + 提示「身份合并」，
+    切重读后合并为同一编号）；F11（`「😀𠮷！」` 与下一句的着色文本逐字正确）；F04（ruby 仍在 `<rt>`，
+    「对白」着色正确，跨块发言只出一个编号）。
+  - `review.spec.ts` 新增「未处理章节的空候选」独立用例（专用夹具，不再依赖其它用例是否处理过本书）。
+  - `settings.spec.ts` 新增「本地无鉴权服务可以显式选择不需要密钥」。
 - 门槛逐条核对：
-  - **任务失败不会让原文不可读**：E2E 在 `FAILED` 与 `NEEDS_RECONCILIATION` 状态下都回到阅读页验证原文。
-  - **未知付费结果不自动重发**：后端 F15 用例断言重跑任务不产生新尝试；只有显式 reconcile retry 才回队列。
-  - **每种非完成状态都有可理解的恢复动作**：`GET /recovery` 覆盖 QUEUED/RUNNING/PAUSING/PAUSED/PARTIAL/
-    BUDGET_EXHAUSTED/NEEDS_RECONCILIATION/FAILED（含缺凭据）并有组件测试。
-- 本轮修复的**真实缺陷**：适配器构建异常导致任务卡在 `RUNNING`（现在落到可解释的 `FAILED`）；
-  缺凭据判定最初会误伤不需要密钥的协议（改为「非 FakeProvider + 密钥模式 + 取不到密钥」）。
-- 未验证（BLOCKED）：真实提供方的限流/超时行为（无凭据，属 T16/T18）。
+  - **后文身份揭示前不因颜色/图例/候选说明泄露合并关系**：初读 horizon 之下两个分组分开着色与编号，
+    图例两条；`identity_reverts` 只用于说明，不泄露分组关系。
+  - **投影查询只读、不暗中重新推理**：`test_visibility.py` 断言查询前后标注/历史/身份修订行数不变，
+    且投影路径不导入任何适配器。
+- 本轮修复的**真实缺陷**（都是用户可见的）：
+  1. 任务完成后阅读页可能继续显示旧的空投影（只失效了 horizon=null 的查询键）；
+  2. 前端按 UTF-16 下标切片导致 emoji/扩展汉字处颜色与编号错位；
+  3. 设置页没有 `credential_mode=none`，使 T14 的「缺凭据」规则对本地无鉴权网关变成死路。
+- 未验证（BLOCKED）：真实模型在长文中揭示身份的时点行为（无凭据，属 T16）。
 
 ## 未完成与已知问题
 
-1. **Live 仍未打通**：T07/T09/T10/T11/T12/T13/T14 的 Live 都是 BLOCKED；T16 效果评测未开始。
-2. **后台执行仍是 FastAPI BackgroundTasks**：单进程、无多进程 worker；启动扫描只在进程启动时跑一次，
-   运行期间不会周期性对账（T18 可加入定时扫描）。
-3. **限流退避是「同步小睡」**：上限 30 秒，任务在后台线程里等待；真实提供方的 `Retry-After` 头尚未采用。
-4. **预算不可变**：预算到顶后只能新建任务（缓存复用已完成窗口）；T17 若要支持「改预算续跑」需新增端点。
-5. **E2E 无法重启 webServer**：进程重启场景由 `backend/tests/integration/test_recovery.py` 覆盖，
-   E2E 只覆盖界面可见的状态与动作。
-6. **恢复动作的中文文案由后端下发**：前端不翻译，改动文案属于契约变更（会体现在 OpenAPI 里）。
+1. **Live 仍未打通**：T07/T09～T15 的 Live 都是 BLOCKED；T16 效果评测未开始。
+2. **身份还原只覆盖有点（`visible_from_cp`）的修订**：没有时点的旧数据按“已生效”处理（保守，不猜）。
+3. **horizon 取「本章末端」**：跨章长场景里，读者滚动到下一章前不会解除该章的遮断；逐屏 horizon（T15 之后的体验优化）可再细化。
+4. **`identity_reverts` 只给数量**：界面不展示“哪些合并被隐藏”，避免间接泄露分组关系（需要时可在评审抽屉里单独说明）。
+5. **前端码点换算按码点迭代**：对超长文本是 O(n) 线性扫描（每段引语一次），必要时可建索引缓存。
+6. **测试夹具新增两个文件**：`frontend/e2e/fixtures/sample-astral.txt`（astral 定位）与
+   `sample-review.txt`（未处理章节的空候选）——都是新增，未改动既有夹具字节。
 7. 其余既有事项：`uv run` 在受限沙箱失败（回退 venv）；`npm --prefix frontend install/ci` 需在包目录内执行；
    `alembic.ini` 保持 ASCII；脚本设置 `PYTHONUTF8=1`；`apply_patch` 失效时用 `.tools/newfile.ps1` / `.tools/append.ps1`；
-   **编辑多行文本前先统一换行符**（CRLF/LF 混用会让替换模式失配）；**测试窗口的目标必须全部被标注**；
-   E2E 数据目录在同一次运行里共享（新用例要显式选章节/配置）；`pytest -q` 因 `addopts=-q` 双 `-q` 不打印统计行。
+   **编辑多行文本前先统一换行符**；E2E 数据目录在同一次运行里共享（新用例要自带夹具/显式选章节/独立 profile）；
+   中断的 Playwright 可能留下占用 8795 的进程，重跑前先确认端口空闲。
 
 ## 后续约束
 

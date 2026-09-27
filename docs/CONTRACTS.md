@@ -514,3 +514,42 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
   `NDR_RECOVER_ON_STARTUP`（true）、`NDR_FAKE_PROVIDER_SCRIPT`（仅测试）。
   测试专用：FakeProvider 的失败脚本也可以写在模型配置的 `params.script` 里
   （`rate_limited_once` / `unavailable_once` / `timeout_once` / `auth_failed_once`），便于按用例切换。
+
+## 24. 证据时点、初读身份还原与码点定位（T15 已实现）
+
+投影（`GET /api/books/{id}/annotations`）在 T11 的基础上补齐 **身份时点**：
+
+- 新增字段 `identity_reverts`：本次投影因为「证据还没出现」而**还原**的身份修订条数（初读专用）。
+- 合并/拆分在写入 `identity_revisions` 时一并保存 `snapshot.revert`
+  （`quotes`: 哪一句原本属于哪个分组；`groups`: 哪个新分组来自哪个旧分组），
+  模型路径（引擎）与人工路径（更正服务）都写。
+- 初读（`reading_mode=initial`）且 `visible_from_cp > visible_horizon_cp` 的身份修订**不生效**：
+  被合并的对白仍按旧分组着色与编号，图例也分别列出两个分组（F17）。
+  重读（`reread`）不做还原；没有时点的旧数据（例如 T09 之前写入的修订）按“已生效”处理。
+- 还原只发生在**读**路径：不写数据库、不调用模型；`test_visibility.py` 对标注/历史/修订行数做了断言。
+
+阅读端 horizon：
+
+- 阅读页在初读模式下提交 `visible_horizon_cp = 本章末端`（`reread` 时不提交），
+  并用 `data-testid="reader-horizon"` 显示「只显示到位置 X 为止的证据（N 条后文证据暂不显示；
+  M 处身份合并在后文才揭示）」。
+- 任务进入终态后必须失效**整族** `['annotations']` 查询：阅读页用的是带 horizon 的另一个键，
+  只失效 horizon=null 那一个会让阅读页继续显示旧的（可能为空的）投影。
+
+码点定位（DEVELOPMENT 4.1）：
+
+- 前端新增 `src/text/codepoints.ts`：`cpLength` / `utf16IndexForCp` / `sliceByCodepoints`。
+  **JavaScript 字符串下标是 UTF-16 单元**，`'😀'.length === 2`、`'𠮷'.length === 2`；
+  直接 `text.slice(cp, cp)` 会在含 emoji / 扩展汉字时错位。
+- `DocumentRenderer` 的候选、标注、ruby 三类切片全部改走码点换算；节点范围改用后端给的权威 `end_cp`
+  （缺失时才退回 `start_cp + cpLength(text)`）。
+- 回归：`frontend/tests/codepoints.test.ts` 3 项 + `DocumentRenderer` 的 3 项 astral 用例
+  + E2E 里 `「😀𠮷！」` 的着色与原文完整性。
+
+验证命令（T15）：
+
+- `pytest backend/tests/integration/test_visibility.py`（F04 / F11 / F17 + 投影只读）；
+- `npm --prefix frontend run test:e2e -- reading-visibility.spec.ts`（初读 vs 重读、astral 定位、EPUB ruby）。
+
+测试专用：FakeProvider 的 `params.script="split_then_merge"` 会“先判成两个声音、再用窗口末尾证据合并”，
+用于离线验证 F17；真实提供方不会走到这条分支。

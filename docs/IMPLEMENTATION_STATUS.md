@@ -26,7 +26,7 @@ FakeProvider 或自造样例通过只记入 Offline。
 | T12 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **302 passed**（新增 `test_corrections.py` 9 项 + `test_identity_revisions.py` 6 项）：四种说话人更正（含**未处理对白**与主动标记幂等）、跨场景误关联 422、并发旧版本 409 且不改数据（F18）、**撤销越过新修订 409 且保留较新修改**（F18）、`mark_unknown` 不新建分组、模型结果**不覆盖人工锁定**（F14，换模型名绕过缓存后真实调用适配器）、下游 `stale` + `STALE_DEPENDENCY`、Gap `BREAK` 拆场景与撤销、merge/split 与撤销、历史只追加（行数断言）、更正/撤销**零模型调用**（`inference_runs` 行数不变）；`ruff` 全绿 | 进入 T13：待确认队列与阅读页确认抽屉（前端） |
 | T13 | PASS | PASS | BLOCKED | NOT_APPLICABLE | 前端 `vitest` → **55 passed**（新增 `CorrectionForm` 5 + `QuoteDetailDrawer` 5 + `ReviewPage` 4）、typecheck/build 通过；Playwright → **15 passed**（新增 `review.spec.ts` 3 项：阅读页入口「标记待确认→锁定未知→撤销」且阅读页仍着色；队列入口「延后→已跳过找回」+ **未处理对白空候选只能新建说话人**；旧版本提交 409 并提示刷新）。新增 `POST /api/quotes/{id}/recheck`（RECHECK 任务、显式配置+预算，后端 `pytest` → **303 passed**）。Live=BLOCKED：复核走的是确定性 FakeProvider（离线），真实提供方复核效果属 T16 | 进入 T14：暂停恢复、预算到顶与故障闭环 |
 | T14 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **309 passed**（新增 `test_recovery.py` 6 项）：进程重启扫描（超租约 DISPATCHED→未知结果、RUNNING→PARTIAL、PAUSING→PAUSED、已完成窗口保留）、**未知结果不自动重发**（F15）、预算到顶不发调用且恢复动作为 `new_job`（F20）、限流有上限退避重试（默认上限成功 / 上限 0 失败并给 `run`）、提供方超时→`NEEDS_RECONCILIATION` 且未知用量不写 0、缺凭据→`FAILED`+`requires_credential`+`open_settings` 且原文可读；新增 `GET /api/jobs/{id}/recovery`。前端 `vitest` → **59 passed**（新增 `JobPanel` 4 项）、typecheck/build 通过；Playwright → **18 passed**（新增 `recovery.spec.ts` 3 项：预算到顶→提高预算后显式重算成功；缺 Key→明确失败+指向模型配置+原文可读；超时→保留未知转 PARTIAL）。Live=BLOCKED：真实提供方的限流/超时行为无凭据可测（T16/T18） | 进入 T15：证据时点、阅读投影与最终定位回归 |
-| T15 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 证据时点、阅读投影与最终定位回归 |
+| T15 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **314 passed**（新增 `test_visibility.py` 4 项：F17 初读 horizon 还原「文末才合并」的身份（两种编号/颜色 + 图例两条，越过时点才合并，reread 直接合并，投影只读且行数不变）；F17 端到端离线（FakeProvider `split_then_merge`）；F11 重复对白 ID 不同 + astral 按码点计数（11 码点/13 UTF-16）且每段可 `locate` 回原文；F04 ruby 不进正文、插图成资源、脚本样式不渲染、跨块引语两节点且 synthetic 换行）。前端 `vitest` → **65 passed**（新增 `codepoints` 3 项 + `DocumentRenderer` astral 3 项）、typecheck/build 通过；Playwright → **23 passed**（新增 `reading-visibility.spec.ts` 3 项 + 空候选独立用例 + 无需密钥用例）。本轮修复 3 个真实缺陷：任务完成后阅读页可能显示旧的空投影（改按前缀失效整族查询）、前端按 UTF-16 下标切片导致 emoji/扩展汉字错位、设置页缺少 `credential_mode=none` 选项使本地无鉴权网关无路可走 | 进入 T15A：EPUB/HTML 导出后端与标准校验 |
 | T15A | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | EPUB/HTML 导出后端与标准校验 |
 | T15B | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 导出对话框、样张与下载闭环 |
 | T16 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | 待填写 | 真实样本评测与可复现实验 |
@@ -50,12 +50,13 @@ FakeProvider 或自造样例通过只记入 Offline。
   「局部复核」是真实任务，但模型侧仍是确定性 FakeProvider（离线），真实复核质量属 T16。
 - T14 的 Live = BLOCKED：暂停/恢复/预算/恢复动作都是本地状态机（不需要真实模型），
   故障注入用 FakeProvider 的失败脚本站住；“真实提供方的限流与超时行为”仍无凭据可测（属 T16/T18）。
+- T15 的 Live = BLOCKED：初读还原、码点定位与定位回归都用真实前后端 + 真实浏览器 + 离线假提供方验证；
+  “真实模型在长文中何时揭示身份”仍无凭据可测（属 T16）。
 - 导入、阅读、候选覆盖、模型配置、任务与用量、颜色/编号投影均已可用：预览页可做范围估算、小范围试运行、
   原文/标注对比与按章处理，结果直接复用到正式阅读。
-  仍缺：证据时点整合与定位回归（T15）、导出（T15A/T15B）、真实作品效果评测（T16）、
-  发布前完整联调（T18/T19）。
+  仍缺：导出（T15A/T15B）、真实作品效果评测（T16）、发布前完整联调（T18/T19）。
 - `data/run/*.log` 是本地运行产物（已忽略提交），可用账本列出的命令复现。
 - 已知命令偏差见 README“已知命令偏差”与决策 0001/0003；EPUB 表示见 0005；前端结构见 0006；
   扫描与金标准见 0007；凭据处理见 0008；适配器与输出契约见 0009；上下文与预算见 0010；
   场景/接受/身份修订见 0011；任务/缓存/用量见 0012；标注投影与预览见 0013；人工更正与撤销见 0014；
-  确认抽屉与复核边界见 0015；暂停/预算与故障恢复见 0016。
+  确认抽屉与复核边界见 0015；暂停/预算与故障恢复见 0016；初读身份还原与码点定位见 0017。
