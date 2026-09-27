@@ -29,8 +29,9 @@ class AdapterSpec:
     credential_mode: CredentialMode = CredentialMode.NONE
     credential_ref: str | None = None
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
-    # 仅测试：FakeProvider 的标注脚本模式（'unknown' / 'deterministic'）。
+    # 仅测试：FakeProvider 的标注脚本模式（'unknown' / 'deterministic'）与失败脚本。
     fake_labeling_mode: str = "unknown"
+    fake_script_mode: str = ""
 
 
 def build_adapter(
@@ -54,7 +55,11 @@ def build_adapter(
                 details={"protocol": spec.protocol},
                 retryable=False,
             )
-        return FakeProviderAdapter(model=spec.model, labeling_mode=spec.fake_labeling_mode)
+        return FakeProviderAdapter(
+            model=spec.model,
+            labeling_mode=spec.fake_labeling_mode,
+            script_mode=spec.fake_script_mode,
+        )
 
     if spec.protocol == "chat-completions-compatible":
         return ChatCompletionsAdapter(

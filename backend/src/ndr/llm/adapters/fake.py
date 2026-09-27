@@ -20,7 +20,7 @@ from ..adapter import (
     TokenEstimate,
     UsageRecord,
 )
-from ..errors import ProviderError
+from ..errors import ProviderError, ProviderErrorKind
 from ..prompts.connection import build_connection_messages
 from ..schemas import OUTPUT_SCHEMA_VERSION
 
@@ -37,13 +37,40 @@ class FakeProviderAdapter:
     usage: Mapping[str, Any] | None = None
     # 仅测试：'unknown'（默认，全部标为 UNKNOWN）或 'deterministic'（确定性建立新分组）
     labeling_mode: str = "unknown"
+    # 仅测试：让第一次标注调用失败，用于验证限流退避/超时未知/缺 Key 的恢复路径
+    script_mode: str = ""
+    _script_consumed: bool = field(default=False, repr=False)
     capabilities: AdapterCapabilities = field(
         default_factory=lambda: PROTOCOL_CAPABILITIES[FAKE_PROVIDER_PROTOCOL]
     )
     calls: list[dict[str, Any]] = field(default_factory=list)
 
+    def _maybe_scripted_failure(self, kind: str) -> None:
+        """仅测试：按脚本让第一次标注调用失败（真实提供方永远不会走到这里）。"""
+
+        if kind != "labels" or not self.script_mode or self._script_consumed:
+            return
+        failures = {
+            "rate_limited_once": ProviderError(
+                ProviderErrorKind.RATE_LIMITED, "测试用：提供方限流一次"
+            ),
+            "unavailable_once": ProviderError(
+                ProviderErrorKind.UNAVAILABLE, "测试用：提供方暂时不可用一次"
+            ),
+            "timeout_once": ProviderError(ProviderErrorKind.TIMEOUT, "测试用：请求超时一次"),
+            "auth_failed_once": ProviderError(
+                ProviderErrorKind.AUTH, "测试用：鉴权失败一次", retryable=False
+            ),
+        }
+        error = failures.get(self.script_mode)
+        if error is None:
+            return
+        self._script_consumed = True
+        raise error
+
     def _next(self, *, kind: str, payload: Mapping[str, Any] | None = None) -> Any:
         self.calls.append({"kind": kind, "payload": dict(payload or {})})
+        self._maybe_scripted_failure(kind)
         if self.script:
             response = self.script.pop(0)
             if isinstance(response, ProviderError):

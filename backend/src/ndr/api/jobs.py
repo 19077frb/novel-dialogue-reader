@@ -13,19 +13,22 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlalchemy.orm import Session
 
 from ..domain.common import DataEnvelope
-from ..domain.enums import JobKind, JobState
+from ..domain.enums import CredentialMode, JobKind, JobState
 from ..domain.jobs import (
     JobCreate,
     JobDetailOut,
     JobRunOut,
     ReconcileIn,
 )
+from ..domain.recovery import JobRecoveryOut
 from ..jobs.scheduler import reconcile_job, run_job
 from ..jobs.service import (
     create_inference_job,
+    credential_reference,
     job_detail,
     job_windows,
 )
+from ..recovery.service import job_recovery, profile_snapshot_of
 from ..storage.models import Book, BookVersion, Job, ModelProfile
 from ..storage.transactions import transaction
 from .deps import get_session
@@ -168,3 +171,32 @@ def reconcile_job_route(
             raise ApiError.not_found("任务不存在", job_id=job_id)
         result = reconcile_job(session, job, action=payload.action)
     return DataEnvelope(data=result, request_id=current_request_id(request))
+
+
+@router.get(
+    "/{job_id}/recovery",
+    response_model=DataEnvelope[JobRecoveryOut],
+    summary="非完成状态的恢复动作（含是否付费与是否缺凭据）",
+)
+def job_recovery_route(
+    request: Request,
+    job_id: str,
+    session: Session = Depends(get_session),
+) -> DataEnvelope[JobRecoveryOut]:
+    """把任务状态翻译成可执行动作：读接口，不调用模型、不改任务。"""
+
+    job = session.get(Job, job_id)
+    if job is None:
+        raise ApiError.not_found("任务不存在", job_id=job_id)
+    credentials = request.app.state.credentials
+    snapshot = profile_snapshot_of(job)
+    mode = str(snapshot.get("credential_mode", CredentialMode.NONE.value))
+    has_credential: bool | None = None
+    if mode != CredentialMode.NONE.value:
+        profile_id = snapshot.get("profile_id")
+        profile = session.get(ModelProfile, profile_id) if profile_id else None
+        ref = credential_reference(profile) if profile is not None else None
+        if ref:
+            has_credential = credentials.has(mode=CredentialMode(mode), ref=ref)
+    data = job_recovery(session, job, has_credential=has_credential)
+    return DataEnvelope(data=data, request_id=current_request_id(request))

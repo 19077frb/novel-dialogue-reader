@@ -706,6 +706,49 @@
         }
       }
     },
+    "/api/jobs/{job_id}/recovery": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "非完成状态的恢复动作（含是否付费与是否缺凭据）",
+        "description": "把任务状态翻译成可执行动作：读接口，不调用模型、不改任务。",
+        "operationId": "job_recovery_route_api_jobs__job_id__recovery_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_JobRecoveryOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/books/{book_id}/quotes": {
       "get": {
         "tags": [
@@ -3374,6 +3417,25 @@
         ],
         "title": "DataEnvelope[JobDetailOut]"
       },
+      "DataEnvelope_JobRecoveryOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/JobRecoveryOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[JobRecoveryOut]"
+      },
       "DataEnvelope_JobRunOut_": {
         "properties": {
           "data": {
@@ -4356,6 +4418,101 @@
         ],
         "title": "JobPurpose",
         "description": "INFERENCE 的目的；preview/process 共用同一识别引擎与缓存。"
+      },
+      "JobRecoveryOut": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/RecoveryActionOut"
+            },
+            "type": "array",
+            "title": "Actions"
+          },
+          "windows_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Windows Total",
+            "default": 0
+          },
+          "windows_done": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Windows Done",
+            "default": 0
+          },
+          "remaining_windows": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Remaining Windows",
+            "default": 0
+          },
+          "unknown_runs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unknown Runs",
+            "default": 0
+          },
+          "unknown_usage_runs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unknown Usage Runs",
+            "default": 0
+          },
+          "retry_in_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry In Seconds",
+            "description": "限流退避的建议等待时间（0 表示可立即继续）"
+          },
+          "requires_credential": {
+            "type": "boolean",
+            "title": "Requires Credential",
+            "description": "是否因为缺少模型凭据而失败（需要先去补充密钥）",
+            "default": false
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "state",
+          "summary",
+          "updated_at"
+        ],
+        "title": "JobRecoveryOut"
       },
       "JobRunOut": {
         "properties": {
@@ -5372,6 +5529,49 @@
         "additionalProperties": false,
         "type": "object",
         "title": "ReconcileIn"
+      },
+      "RecoveryActionOut": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "description": "pause/resume/run/reconcile_retry/reconcile_keep/open_settings/wait"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "paid": {
+            "type": "boolean",
+            "title": "Paid",
+            "description": "是否可能产生模型调用费用",
+            "default": false
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint",
+            "description": "前端可直接调用的端点模板"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action",
+          "label",
+          "detail"
+        ],
+        "title": "RecoveryActionOut"
       },
       "ReviewDeferIn": {
         "properties": {

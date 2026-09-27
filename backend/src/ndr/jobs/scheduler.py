@@ -50,6 +50,9 @@ from .service import (
 )
 
 SCHEDULER_VERSION = "scheduler-1"
+
+# 只有「确定没有被处理」的错误才允许自动重试；超时属于结果未知，必须人工对账。
+AUTO_RETRY_KINDS = {ProviderErrorKind.RATE_LIMITED, ProviderErrorKind.UNAVAILABLE}
 DEFAULT_LEASE_SECONDS = 900
 LABELING_MAX_TOKENS = 800
 OUTPUT_TOKENS_PER_TARGET = 20
@@ -284,6 +287,20 @@ def _build_adapter(
     credential_ref: str | None,
 ) -> ProviderAdapter:
     snapshot = snapshot or {}
+    if (
+        credential_mode is not CredentialMode.NONE
+        and credential_ref
+        and not credentials.has(mode=credential_mode, ref=credential_ref)
+    ):
+        raise ProviderError(
+            ProviderErrorKind.MISSING_CREDENTIAL,
+            "缺少模型凭据：请在「模型配置」里补充密钥后再继续",
+            details={
+                "profile_id": snapshot.get("profile_id"),
+                "credential_mode": credential_mode.value,
+            },
+            retryable=False,
+        )
     return build_adapter(
         AdapterSpec(
             protocol=str(snapshot.get("protocol", "chat-completions-compatible")),
@@ -294,10 +311,99 @@ def _build_adapter(
             credential_ref=credential_ref,
             timeout_seconds=settings.llm_timeout_seconds,
             fake_labeling_mode=settings.fake_provider_labels,
+            fake_script_mode=settings.fake_provider_script,
         ),
         credentials,
         allow_fake_provider=settings.allow_fake_provider,
     )
+
+
+def backoff_seconds(attempt: int, settings: Settings) -> int:
+    """限流退避：指数增长但**有上限**（上限来自配置，测试里可设为 0 不等待）。"""
+
+    base = max(0, int(settings.rate_limit_backoff_base_seconds))
+    cap = max(0, int(settings.rate_limit_backoff_max_seconds))
+    return min(base * (2 ** max(0, attempt - 1)), cap)
+
+
+def _dispatch_with_bounded_retry(
+    session_factory: sessionmaker[Session],
+    adapter: ProviderAdapter,
+    *,
+    job_id: str,
+    window,  # noqa: ANN001 - ProcessingWindow
+    state: SceneState,
+    snapshot: dict[str, Any] | None,
+    settings: Settings,
+) -> tuple[Any, ProviderError | None, str, int]:
+    """调用适配器；限流/暂时不可用按**有上限**的退避重试。
+
+    返回最后一次尝试的 ``(raw, error, run_id, elapsed_ms)``。最后一条 `inference_runs`
+    保持 DISPATCHED，由调用方按原有逻辑置为 SUCCEEDED/FAILED/UNKNOWN_OUTCOME；
+    中间被退避重试的失败尝试在这里就写成 FAILED，保证每次尝试都可追溯。
+
+    超时**不**自动重试：结果未知必须交人工对账（F15）。
+    """
+
+    allowed = max(1, int(settings.rate_limit_max_retries) + 1)
+    raw: Any = None
+    error: ProviderError | None = None
+    run_id = ""
+    elapsed_ms = 0
+    for index in range(allowed):
+        with session_factory() as session:
+            run = InferenceRun(
+                job_id=job_id,
+                window_id=window.window_id,
+                profile_snapshot_json=json.dumps(snapshot or {}, ensure_ascii=False),
+                request_fingerprint=window.dependency_hash,
+                state=InferenceRunState.PREPARED,
+            )
+            session.add(run)
+            session.flush()
+            run.state = InferenceRunState.DISPATCHED
+            run_id = run.id
+            session.commit()
+
+        started = time.perf_counter()
+        raw = None
+        error = None
+        try:
+            raw = _dispatch(adapter, window=window, state=state)
+        except ProviderError as exc:
+            error = exc
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+        if (
+            error is None
+            or error.kind not in AUTO_RETRY_KINDS
+            or index + 1 >= allowed
+        ):
+            return raw, error, run_id, elapsed_ms
+
+        backoff = backoff_seconds(index + 1, settings)
+        with session_factory() as session:
+            failed_run = session.get(InferenceRun, run_id)
+            if failed_run is not None:
+                failed_run.state = InferenceRunState.FAILED
+                failed_run.error_code = error.code.value
+                failed_run.elapsed_ms = elapsed_ms
+                failed_run.usage_json = None
+            job = session.get(Job, job_id)
+            if job is not None:
+                job.progress_json = json.dumps(
+                    {
+                        "stage": "rate_limit_backoff",
+                        "attempts": index + 1,
+                        "retry_in_seconds": backoff,
+                        "error_code": error.code.value,
+                    },
+                    ensure_ascii=False,
+                )
+            session.commit()
+        if backoff > 0:
+            time.sleep(backoff)
+    return raw, error, run_id, elapsed_ms
 
 
 def run_job(
@@ -364,13 +470,29 @@ def run_job(
     if adapter_factory is not None:
         adapter = adapter_factory(job, snapshot)
     elif credentials is not None:
-        adapter = _build_adapter(
-            settings,
-            credentials,
-            snapshot=snapshot,
-            credential_mode=credential_mode,
-            credential_ref=credential_ref,
-        )
+        try:
+            adapter = _build_adapter(
+                settings,
+                credentials,
+                snapshot=snapshot,
+                credential_mode=credential_mode,
+                credential_ref=credential_ref,
+            )
+        except ProviderError as exc:
+            # 缺 Key / 配置不可用：任务必须落到可解释的失败状态，并给出恢复动作
+            with session_factory() as session:
+                failed_job = session.get(Job, job_id)
+                if failed_job is not None:
+                    failed_job.state = JobState.FAILED
+                    failed_job.last_error = f"{exc.code.value}: {exc.message}"
+                    failed_job.progress_json = json.dumps(
+                        {"stage": "adapter_unavailable", "error_code": exc.code.value},
+                        ensure_ascii=False,
+                    )
+                    session.commit()
+            outcome.state = JobState.FAILED
+            outcome.errors.append(exc.code.value)
+            return outcome
 
     # ---------- 阶段 2：逐窗口 ----------
     for window in plan.windows:
@@ -487,29 +609,17 @@ def run_job(
             outcome.state = JobState.FAILED
             return outcome
 
-        # 一次尝试：PREPARED → DISPATCHED（提交）→ 调用（无事务）→ 应用 + 结算（新事务）
-        with session_factory() as session:
-            run = InferenceRun(
-                job_id=job_id,
-                window_id=window.window_id,
-                profile_snapshot_json=json.dumps(snapshot or {}, ensure_ascii=False),
-                request_fingerprint=window.dependency_hash,
-                state=InferenceRunState.PREPARED,
-            )
-            session.add(run)
-            session.flush()
-            run.state = InferenceRunState.DISPATCHED
-            run_id = run.id
-            session.commit()
-
-        started = time.perf_counter()
-        error: ProviderError | None = None
-        raw: Any = None
-        try:
-            raw = _dispatch(adapter, window=window, state=state)
-        except ProviderError as exc:
-            error = exc
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        # 一次（或有限次退避重试的）尝试：
+        # PREPARED → DISPATCHED（提交）→ 调用（无事务）→ 应用 + 结算（新事务）
+        raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
+            session_factory,
+            adapter,
+            job_id=job_id,
+            window=window,
+            state=state,
+            snapshot=snapshot,
+            settings=settings,
+        )
 
         with session_factory() as session:
             job = session.get(Job, job_id)

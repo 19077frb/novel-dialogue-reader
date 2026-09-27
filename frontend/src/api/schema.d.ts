@@ -248,6 +248,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/{job_id}/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 非完成状态的恢复动作（含是否付费与是否缺凭据）
+         * @description 把任务状态翻译成可执行动作：读接口，不调用模型、不改任务。
+         */
+        get: operations["job_recovery_route_api_jobs__job_id__recovery_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/quotes": {
         parameters: {
             query?: never;
@@ -1141,6 +1161,15 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[JobRecoveryOut] */
+        DataEnvelope_JobRecoveryOut_: {
+            data: components["schemas"]["JobRecoveryOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[JobRunOut] */
         DataEnvelope_JobRunOut_: {
             data: components["schemas"]["JobRunOut"];
@@ -1548,6 +1577,56 @@ export interface components {
          * @enum {string}
          */
         JobPurpose: "preview" | "process" | "none";
+        /** JobRecoveryOut */
+        JobRecoveryOut: {
+            /** Job Id */
+            job_id: string;
+            state: components["schemas"]["JobState"];
+            /** Summary */
+            summary: string;
+            /** Actions */
+            actions?: components["schemas"]["RecoveryActionOut"][];
+            /**
+             * Windows Total
+             * @default 0
+             */
+            windows_total: number;
+            /**
+             * Windows Done
+             * @default 0
+             */
+            windows_done: number;
+            /**
+             * Remaining Windows
+             * @default 0
+             */
+            remaining_windows: number;
+            /**
+             * Unknown Runs
+             * @default 0
+             */
+            unknown_runs: number;
+            /**
+             * Unknown Usage Runs
+             * @default 0
+             */
+            unknown_usage_runs: number;
+            /**
+             * Retry In Seconds
+             * @description 限流退避的建议等待时间（0 表示可立即继续）
+             */
+            retry_in_seconds?: number | null;
+            /**
+             * Requires Credential
+             * @description 是否因为缺少模型凭据而失败（需要先去补充密钥）
+             * @default false
+             */
+            requires_credential: boolean;
+            /** Last Error */
+            last_error?: string | null;
+            /** Updated At */
+            updated_at: string;
+        };
         /** JobRunOut */
         JobRunOut: {
             /** Job Id */
@@ -1958,6 +2037,29 @@ export interface components {
              * @enum {string}
              */
             action: "retry" | "keep_unknown";
+        };
+        /** RecoveryActionOut */
+        RecoveryActionOut: {
+            /**
+             * Action
+             * @description pause/resume/run/reconcile_retry/reconcile_keep/open_settings/wait
+             */
+            action: string;
+            /** Label */
+            label: string;
+            /** Detail */
+            detail: string;
+            /**
+             * Paid
+             * @description 是否可能产生模型调用费用
+             * @default false
+             */
+            paid: boolean;
+            /**
+             * Endpoint
+             * @description 前端可直接调用的端点模板
+             */
+            endpoint?: string | null;
         };
         /** ReviewDeferIn */
         ReviewDeferIn: {
@@ -2748,6 +2850,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_dict_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_recovery_route_api_jobs__job_id__recovery_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_JobRecoveryOut_"];
                 };
             };
             /** @description Validation Error */

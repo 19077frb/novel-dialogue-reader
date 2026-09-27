@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -37,8 +38,11 @@ from .api.quotes import quote_router
 from .api.quotes import router as quotes_router
 from .config import Settings, get_settings
 from .llm.credentials import CredentialService, SystemCredentialStore
+from .recovery.service import recover_on_startup
 from .storage.engine import create_db_engine, create_session_factory
 from .storage.migrate import run_migrations
+
+logger = logging.getLogger("ndr.app")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -54,6 +58,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if resolved.auto_migrate:
             # 显式 opt-in（NDR_AUTO_MIGRATE=1）才会在启动时迁移；默认由用户/脚本显式执行。
             run_migrations(resolved)
+        if resolved.recover_on_startup:
+            # T14：进程重启后修复任务可见状态（超租约的尝试 → 未知结果；不留 RUNNING 孤儿）。
+            try:
+                app.state.recovery = recover_on_startup(
+                    session_factory, lease_seconds=resolved.stale_run_lease_seconds
+                ).as_dict()
+            except Exception as exc:  # noqa: BLE001 - 恢复失败不能阻止服务启动
+                app.state.recovery = {"error": type(exc).__name__}
+                logger.warning("启动恢复扫描失败：%s", type(exc).__name__)
         yield
         engine.dispose()
 
