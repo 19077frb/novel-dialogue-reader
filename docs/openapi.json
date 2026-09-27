@@ -812,6 +812,172 @@
           }
         }
       }
+    },
+    "/api/model-profiles/protocols": {
+      "get": {
+        "tags": [
+          "model-profiles"
+        ],
+        "summary": "支持的模型协议与能力声明",
+        "operationId": "list_protocols_route_api_model_profiles_protocols_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_list_ProtocolCapabilitiesOut__"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/model-profiles": {
+      "get": {
+        "tags": [
+          "model-profiles"
+        ],
+        "summary": "模型配置列表（不含密钥）",
+        "operationId": "list_profiles_route_api_model_profiles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_list_ModelProfileOut__"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "model-profiles"
+        ],
+        "summary": "新建模型配置",
+        "operationId": "create_profile_route_api_model_profiles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelProfileCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ModelProfileOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/model-profiles/{profile_id}": {
+      "patch": {
+        "tags": [
+          "model-profiles"
+        ],
+        "summary": "更新配置（含密钥 keep/replace/remove）",
+        "operationId": "update_profile_route_api_model_profiles__profile_id__patch",
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelProfilePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ModelProfileOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "model-profiles"
+        ],
+        "summary": "删除配置与凭据引用",
+        "operationId": "delete_profile_route_api_model_profiles__profile_id__delete",
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1200,6 +1366,15 @@
         ],
         "title": "ContentResponse"
       },
+      "CredentialMode": {
+        "type": "string",
+        "enum": [
+          "session",
+          "system",
+          "none"
+        ],
+        "title": "CredentialMode"
+      },
       "CursorPage_BookOut_": {
         "properties": {
           "items": {
@@ -1436,6 +1611,25 @@
         ],
         "title": "DataEnvelope[LocateOut]"
       },
+      "DataEnvelope_ModelProfileOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ModelProfileOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ModelProfileOut]"
+      },
       "DataEnvelope_QuoteDetailOut_": {
         "properties": {
           "data": {
@@ -1515,6 +1709,52 @@
           "request_id"
         ],
         "title": "DataEnvelope[list[ChapterOut]]"
+      },
+      "DataEnvelope_list_ModelProfileOut__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ModelProfileOut"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[list[ModelProfileOut]]"
+      },
+      "DataEnvelope_list_ProtocolCapabilitiesOut__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ProtocolCapabilitiesOut"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[list[ProtocolCapabilitiesOut]]"
       },
       "GapDecision": {
         "type": "string",
@@ -1991,6 +2231,287 @@
           "text"
         ],
         "title": "LocateSpanOut"
+      },
+      "ModelProfileCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "protocol": {
+            "type": "string",
+            "title": "Protocol",
+            "default": "chat-completions-compatible"
+          },
+          "base_url": {
+            "type": "string",
+            "title": "Base Url",
+            "description": "API 根路径，例如 https://api.example.com/v1"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params",
+            "description": "生成参数（不能含密钥字段）"
+          },
+          "credential_mode": {
+            "$ref": "#/components/schemas/CredentialMode",
+            "default": "session"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key",
+            "description": "只在请求里出现，绝不回传"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "base_url",
+          "model"
+        ],
+        "title": "ModelProfileCreate"
+      },
+      "ModelProfileOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "protocol": {
+            "type": "string",
+            "title": "Protocol"
+          },
+          "base_url": {
+            "type": "string",
+            "title": "Base Url"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          },
+          "credential_mode": {
+            "$ref": "#/components/schemas/CredentialMode"
+          },
+          "has_key": {
+            "type": "boolean",
+            "title": "Has Key"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "credential_warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Warning",
+            "description": "例如系统凭据库不可用、已降级为会话密钥"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "protocol",
+          "base_url",
+          "model",
+          "credential_mode",
+          "has_key",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ModelProfileOut"
+      },
+      "ModelProfilePatch": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "credential_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CredentialMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key",
+            "description": "提供则视为替换密钥"
+          },
+          "remove_api_key": {
+            "type": "boolean",
+            "title": "Remove Api Key",
+            "description": "清除该配置的密钥",
+            "default": false
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ModelProfilePatch"
+      },
+      "ProtocolCapabilitiesOut": {
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "title": "Protocol"
+          },
+          "supports_json_schema": {
+            "type": "boolean",
+            "title": "Supports Json Schema"
+          },
+          "supports_json_object": {
+            "type": "boolean",
+            "title": "Supports Json Object"
+          },
+          "supports_temperature": {
+            "type": "boolean",
+            "title": "Supports Temperature"
+          },
+          "supports_max_tokens": {
+            "type": "boolean",
+            "title": "Supports Max Tokens"
+          },
+          "requires_api_key": {
+            "type": "boolean",
+            "title": "Requires Api Key"
+          },
+          "notes": {
+            "type": "string",
+            "title": "Notes",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "protocol",
+          "supports_json_schema",
+          "supports_json_object",
+          "supports_temperature",
+          "supports_max_tokens",
+          "requires_api_key"
+        ],
+        "title": "ProtocolCapabilitiesOut"
       },
       "QuoteDetailOut": {
         "properties": {

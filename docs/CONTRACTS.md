@@ -57,7 +57,7 @@
 | `PUT /api/books/{id}/reading-progress` | 保存阅读位置与阅读模式，不调用模型 | **T04 已实现** |
 | `GET /api/books/{id}/content` | 结构化正文节点 + `payload`（章节或码点范围；horizon 见 T04/T15） | **T02/T03 已实现**（范围部分） |
 | `GET /api/books/{id}/resources/{resource_id}` | 受控登记资源（图片等，独立响应体） | **T03 已实现** |
-| `GET/POST/PATCH/DELETE /api/model-profiles*` | 非敏感配置与 has_key；keep/replace/remove 密钥 | T06 |
+| `GET/POST/PATCH/DELETE /api/model-profiles*` | 非敏感配置与 has_key；keep/replace/remove 密钥 | **T06 已实现** |
 | `POST /api/model-profiles/test` | 有预算的微型连接测试 | T07 |
 | `POST /api/books/{id}/estimates` | 纯本地估算，说明依据 | T08 |
 | `GET /api/jobs/{id}` | 任务状态、进度与错误 | **T02 已实现**（最小轮询；调度/usage/恢复见 T10/T14） |
@@ -234,3 +234,24 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 范围合法性与包含关系（fragment ⊆ quote、must_keep ⊆ gap）、`resolvable=false ⇒ group_id=null`、
 `group_id` 属于同场景参与者、证据 `visible_from_cp` 不早于证据本身、以及“金标准对白是否被候选扫描器覆盖”。
 退出码非零表示存在 error。
+
+## 15. 模型配置与凭据（T06 已实现）
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /api/model-profiles` | 配置列表（**不含任何密钥字段**，只有 `has_key` 与 `credential_mode`） |
+| `GET /api/model-profiles/protocols` | 协议能力声明（页面据此说明实际能力） |
+| `POST /api/model-profiles` | 新建；可选 `api_key` 与 `credential_mode`（201） |
+| `PATCH /api/model-profiles/{id}` | 字段变更 + `api_key`（替换）/`remove_api_key`（清除）/都不给（保持）+ `expected_version` |
+| `DELETE /api/model-profiles/{id}` | 删除配置与其凭据引用；被任务引用时 409 |
+
+契约要点：
+
+- `credential_mode` 取值 `session`（进程内存）/`system`（系统凭据库）/`none`。
+  系统凭据库不可用或写入失败时**降级为 `session`** 并返回 `credential_warning`；
+  响应里的 `credential_mode` 是**实际生效**的模式，不是请求里写的模式。
+- 数据库只保存 `credential_ref`（`model-profile/<id>`），API 不返回该字段；密钥绝不进入响应、缓存键或日志。
+- `base_url` 必须是 API 根路径：填成 `.../chat/completions` 之类完整端点返回 422。
+- `params` 中出现 `api_key/token/authorization/password/secret` 等键返回 422（密钥只能走 `api_key`）。
+- `expected_version` 不符返回 409 `VERSION_CONFLICT`；同名配置、被任务引用的删除返回 409 `RESOURCE_CONFLICT`。
+- `POST /api/model-profiles/test`（有预算的微型连接测试）属于 T07，本任务不发起任何真实调用。
