@@ -33,7 +33,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 导入 TXT（202 + IMPORT 任务） */
+        /** 导入 TXT/EPUB（202 + IMPORT 任务） */
         post: operations["import_book_api_books_import_post"];
         delete?: never;
         options?: never;
@@ -82,7 +82,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 目录（按 ordinal） */
+        /** 目录（按 ordinal，EPUB 为 spine 顺序） */
         get: operations["list_chapters_route_api_books__book_id__chapters_get"];
         put?: never;
         post?: never;
@@ -101,6 +101,23 @@ export interface paths {
         };
         /** 结构化正文节点（章节或码点范围） */
         get: operations["content_route_api_books__book_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/resources/{resource_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 受控资源（图片等，独立响应体） */
+        get: operations["get_resource_route_api_books__book_id__resources__resource_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -134,17 +151,17 @@ export interface components {
         Body_import_book_api_books_import_post: {
             /**
              * File
-             * @description TXT 文件；EPUB 在 T03 支持
+             * @description TXT 或 EPUB 文件
              */
             file: string;
             /**
              * Encoding
-             * @description 显式编码；留空自动检测
+             * @description 显式编码；留空自动检测（仅 TXT）
              */
             encoding?: string | null;
             /**
              * Title
-             * @description 书名；留空用文件名
+             * @description 书名；留空用文件内元数据或文件名
              */
             title?: string | null;
         };
@@ -235,6 +252,10 @@ export interface components {
             chapter_ordinal?: number | null;
             /** Text */
             text: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
         };
         /**
          * ContentNodeType
@@ -338,13 +359,24 @@ export interface components {
             book_version_id: string;
             /** Job Id */
             job_id: string;
+            format: components["schemas"]["BookFormat"];
             import_status: components["schemas"]["ImportStatus"];
             /** Encoding */
-            encoding: string;
+            encoding?: string | null;
             /** Encoding Confidence */
-            encoding_confidence: string;
+            encoding_confidence?: string | null;
             /** Chapter Count */
             chapter_count: number;
+            /**
+             * Node Count
+             * @default 0
+             */
+            node_count: number;
+            /**
+             * Resource Count
+             * @default 0
+             */
+            resource_count: number;
             /** Canonical Length Cp */
             canonical_length_cp: number;
             /** Reused Book */
@@ -644,6 +676,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_ContentResponse_"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_resource_route_api_books__book_id__resources__resource_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                resource_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

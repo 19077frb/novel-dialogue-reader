@@ -35,7 +35,7 @@
         "tags": [
           "books"
         ],
-        "summary": "导入 TXT（202 + IMPORT 任务）",
+        "summary": "导入 TXT/EPUB（202 + IMPORT 任务）",
         "operationId": "import_book_api_books_import_post",
         "requestBody": {
           "content": {
@@ -185,7 +185,7 @@
         "tags": [
           "books"
         ],
-        "summary": "目录（按 ordinal）",
+        "summary": "目录（按 ordinal，EPUB 为 spine 顺序）",
         "operationId": "list_chapters_route_api_books__book_id__chapters_get",
         "parameters": [
           {
@@ -348,6 +348,50 @@
         }
       }
     },
+    "/api/books/{book_id}/resources/{resource_id}": {
+      "get": {
+        "tags": [
+          "books"
+        ],
+        "summary": "受控资源（图片等，独立响应体）",
+        "operationId": "get_resource_route_api_books__book_id__resources__resource_id__get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "resource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/{job_id}": {
       "get": {
         "tags": [
@@ -399,7 +443,7 @@
             "type": "string",
             "contentMediaType": "application/octet-stream",
             "title": "File",
-            "description": "TXT 文件；EPUB 在 T03 支持"
+            "description": "TXT 或 EPUB 文件"
           },
           "encoding": {
             "anyOf": [
@@ -411,7 +455,7 @@
               }
             ],
             "title": "Encoding",
-            "description": "显式编码；留空自动检测"
+            "description": "显式编码；留空自动检测（仅 TXT）"
           },
           "title": {
             "anyOf": [
@@ -423,7 +467,7 @@
               }
             ],
             "title": "Title",
-            "description": "书名；留空用文件名"
+            "description": "书名；留空用文件内元数据或文件名"
           }
         },
         "type": "object",
@@ -671,6 +715,11 @@
           "text": {
             "type": "string",
             "title": "Text"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
           }
         },
         "additionalProperties": false,
@@ -941,20 +990,47 @@
             "type": "string",
             "title": "Job Id"
           },
+          "format": {
+            "$ref": "#/components/schemas/BookFormat"
+          },
           "import_status": {
             "$ref": "#/components/schemas/ImportStatus"
           },
           "encoding": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Encoding"
           },
           "encoding_confidence": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Encoding Confidence"
           },
           "chapter_count": {
             "type": "integer",
             "title": "Chapter Count"
+          },
+          "node_count": {
+            "type": "integer",
+            "title": "Node Count",
+            "default": 0
+          },
+          "resource_count": {
+            "type": "integer",
+            "title": "Resource Count",
+            "default": 0
           },
           "canonical_length_cp": {
             "type": "integer",
@@ -982,9 +1058,8 @@
           "book_id",
           "book_version_id",
           "job_id",
+          "format",
           "import_status",
-          "encoding",
-          "encoding_confidence",
           "chapter_count",
           "canonical_length_cp",
           "reused_book",
