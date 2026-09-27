@@ -1,0 +1,225 @@
+{
+  "report_version": "evaluation-1",
+  "generated_at": "2026-09-27T21:23:38.609642+00:00",
+  "manifest": "evaluation/manifests/dev.json",
+  "manifest_version": "1.0",
+  "config": {
+    "config_version": "1.0",
+    "config_id": "b0-rule-baseline",
+    "label": "B0 仅明确归属规则（无 LLM）",
+    "strategy": "rule_baseline",
+    "scene_state": false,
+    "prompt_version": "n/a",
+    "context_policy": "n/a",
+    "reading_mode": "reread",
+    "budget": {
+      "max_input_tokens": 0,
+      "max_output_tokens": 0,
+      "max_rechecks": 0
+    },
+    "model": null,
+    "notes": "PLAN B0：不调用模型的最低成本基线。用表面形式规则找显式归属，找不到就拒答；弱点（同人不同称会被拆成两组）由指标如实暴露。"
+  },
+  "config_fingerprint": "8b7d7bdc321eb75ae58ea36aff9f6f8bf4eca1f6fc657e7144ba219f123cd2e5",
+  "versions": {
+    "evaluation": "evaluation-1",
+    "app": "0.1.0",
+    "engine": "attribution-engine-1",
+    "prompt": "labeling-1",
+    "scanner": "quote-scan-1",
+    "context_policy": "context-1",
+    "gold_schema": "1.0",
+    "rule_baseline": "b0-rule-1"
+  },
+  "splits": [
+    "dev"
+  ],
+  "quality_evidence": false,
+  "blocks": [
+    "ex-minimal-txt-001: 预测来自 b0-rule-1，不是真实模型效果（quality_evidence=false）"
+  ],
+  "books": [
+    {
+      "book_id": "ex-minimal-txt-001",
+      "work_id": "ex-original-minimal",
+      "state": "OFFLINE_BASELINE",
+      "reason": "B0 规则基线（无 LLM）：结果不能作为效果数字",
+      "provider": "b0-rule-1",
+      "usage": {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "provider": "none"
+      },
+      "hard_cases": {},
+      "metrics": {
+        "counts": {
+          "gold_quotes": 5,
+          "gold_resolvable": 4,
+          "gold_unresolvable": 1,
+          "gold_works": 1,
+          "predicted_quotes": 5,
+          "matched": 5,
+          "missed": 0,
+          "extra": 0,
+          "min_sample": 30,
+          "sample_sufficient": false
+        },
+        "extraction": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "scenes": {
+          "compared_pairs": 4,
+          "wrong_split": 0,
+          "wrong_join": 0,
+          "accuracy": 1.0,
+          "errors": []
+        },
+        "grouping": {
+          "accepted_accuracy": 1.0,
+          "accepted_correct": 2,
+          "accepted_total": 2,
+          "group_mapping": {
+            "scene_1|S1": "她",
+            "scene_1|S2": "少年"
+          },
+          "pairwise_precision": null,
+          "pairwise_recall": null,
+          "pairwise_f1": null,
+          "pairwise_tp": 0,
+          "pairwise_fp": 0,
+          "pairwise_fn": 0,
+          "extra_groups": 0,
+          "missing_groups": 0
+        },
+        "coverage": {
+          "coverage": 0.4,
+          "refusal_rate": 0.6,
+          "unknown_force_rate": 0.0,
+          "forced_unresolvable": 0,
+          "gold_unresolvable": 1
+        },
+        "degenerate": {
+          "all_refusal": false,
+          "single_group": false,
+          "all_merge": false,
+          "forced_all_unresolvable": false
+        },
+        "sample": {
+          "gold_quotes": 5,
+          "gold_resolvable": 4,
+          "gold_unresolvable": 1,
+          "gold_works": 1,
+          "predicted_quotes": 5,
+          "matched": 5,
+          "missed": 0,
+          "extra": 0,
+          "min_sample": 30,
+          "sample_sufficient": false
+        },
+        "accepted_accuracy_ci": {
+          "low": 0.34237195288961925,
+          "high": 1.0,
+          "n": 2
+        },
+        "targets": {
+          "accepted_accuracy": 0.97,
+          "coverage": 0.7
+        }
+      }
+    }
+  ],
+  "overall": {
+    "counts": {
+      "gold_quotes": 5,
+      "gold_resolvable": 4,
+      "gold_unresolvable": 1,
+      "gold_works": 1,
+      "predicted_quotes": 5,
+      "matched": 5,
+      "missed": 0,
+      "extra": 0,
+      "min_sample": 30,
+      "sample_sufficient": false
+    },
+    "extraction": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "scenes": {
+      "compared_pairs": 4,
+      "wrong_split": 0,
+      "wrong_join": 0,
+      "accuracy": 1.0,
+      "errors": []
+    },
+    "grouping": {
+      "accepted_accuracy": 1.0,
+      "accepted_correct": 2,
+      "accepted_total": 2,
+      "group_mapping": {
+        "ex-minimal-txt-001:scene_1|S1": "她",
+        "ex-minimal-txt-001:scene_1|S2": "少年"
+      },
+      "pairwise_precision": null,
+      "pairwise_recall": null,
+      "pairwise_f1": null,
+      "pairwise_tp": 0,
+      "pairwise_fp": 0,
+      "pairwise_fn": 0,
+      "extra_groups": 0,
+      "missing_groups": 0
+    },
+    "coverage": {
+      "coverage": 0.4,
+      "refusal_rate": 0.6,
+      "unknown_force_rate": 0.0,
+      "forced_unresolvable": 0,
+      "gold_unresolvable": 1
+    },
+    "degenerate": {
+      "all_refusal": false,
+      "single_group": false,
+      "all_merge": false,
+      "forced_all_unresolvable": false
+    },
+    "sample": {
+      "gold_quotes": 5,
+      "gold_resolvable": 4,
+      "gold_unresolvable": 1,
+      "gold_works": 1,
+      "predicted_quotes": 5,
+      "matched": 5,
+      "missed": 0,
+      "extra": 0,
+      "min_sample": 30,
+      "sample_sufficient": false
+    },
+    "accepted_accuracy_ci": {
+      "low": 0.34237195288961925,
+      "high": 1.0,
+      "n": 2
+    },
+    "targets": {
+      "accepted_accuracy": 0.97,
+      "coverage": 0.7
+    }
+  },
+  "usage_total": {
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0
+  },
+  "usage_unknown_books": 0,
+  "targets": {
+    "accepted_accuracy": 0.97,
+    "coverage": 0.7
+  },
+  "targets_met": null,
+  "notes": "指标由 ndr.evaluation.metrics 计算，不是前端模拟数据；样本不足或未达目标时报告如实给出 null/false。"
+}

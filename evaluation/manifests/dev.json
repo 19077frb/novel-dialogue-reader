@@ -1,0 +1,24 @@
+{
+  "manifest_version": "1.0",
+  "description": "T16 评测清单：目前只有仓库自带的原创最小样例，用于验证工具链与坐标约定",
+  "works": [
+    {
+      "work_id": "ex-original-minimal",
+      "title": "原创最小样例：雨停",
+      "split": "dev",
+      "license": "本仓库作者原创（仅用于格式与坐标校验，不是真实作品）",
+      "notes": "只有一个短场景；样本量远低于宣布达标所需，因此报告的 targets_met 必然是 null。",
+      "books": [
+        {
+          "book_id": "ex-minimal-txt-001",
+          "text": "evaluation/examples/minimal-txt-001/text.txt",
+          "gold": "evaluation/examples/minimal-txt-001/gold.json",
+          "format": "TXT",
+          "hard_cases": ["no_explicit_attribution"],
+          "notes": "q3「不用谢。」没有显式归属，属于『无显式归属』难例。"
+        }
+      ]
+    }
+  ],
+  "notes": "test 划分为空：在拿到真实凭据与人工确认的作品样本之前，不宣布任何效果达标。真实作品请新建 evaluation/manifests/<name>.json 并按 works[].split 做作品级划分。"
+}

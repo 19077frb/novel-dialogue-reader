@@ -1,0 +1,12 @@
+{
+  "config_id": "b2-scene-state",
+  "label": "B2 B1 + 持续场景状态与边界判断",
+  "strategy": "llm",
+  "scene_state": true,
+  "prompt_version": "labeling-1",
+  "context_policy": "context-1",
+  "reading_mode": "reread",
+  "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 0},
+  "model": null,
+  "notes": "PLAN B2：在 B1 之上加持续场景状态与边界判断（等于当前引擎默认行为）。需要真实模型配置才能运行。"
+}

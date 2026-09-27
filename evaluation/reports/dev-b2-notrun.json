@@ -1,0 +1,64 @@
+{
+  "report_version": "evaluation-1",
+  "generated_at": "2026-09-27T21:23:40.005989+00:00",
+  "manifest": "evaluation/manifests/dev.json",
+  "manifest_version": "1.0",
+  "config": {
+    "config_version": "1.0",
+    "config_id": "b2-scene-state",
+    "label": "B2 B1 + 持续场景状态与边界判断",
+    "strategy": "llm",
+    "scene_state": true,
+    "prompt_version": "labeling-1",
+    "context_policy": "context-1",
+    "reading_mode": "reread",
+    "budget": {
+      "max_input_tokens": 200000,
+      "max_output_tokens": 20000,
+      "max_rechecks": 0
+    },
+    "model": null,
+    "notes": "PLAN B2：在 B1 之上加持续场景状态与边界判断（等于当前引擎默认行为）。需要真实模型配置才能运行。"
+  },
+  "config_fingerprint": "0bd00a950906f86a5c5d3e1fd525ece74e870a34a3ce7e0f5be23f216074a788",
+  "versions": {
+    "evaluation": "evaluation-1",
+    "app": "0.1.0",
+    "engine": "attribution-engine-1",
+    "prompt": "labeling-1",
+    "scanner": "quote-scan-1",
+    "context_policy": "context-1",
+    "gold_schema": "1.0",
+    "rule_baseline": "b0-rule-1"
+  },
+  "splits": [
+    "dev"
+  ],
+  "quality_evidence": false,
+  "blocks": [
+    "ex-minimal-txt-001: NOT_RUN（真实运行需要显式 --allow-live（并确保已配置凭据与预算））"
+  ],
+  "books": [
+    {
+      "book_id": "ex-minimal-txt-001",
+      "work_id": "ex-original-minimal",
+      "state": "NOT_RUN",
+      "reason": "真实运行需要显式 --allow-live（并确保已配置凭据与预算）",
+      "provider": null,
+      "usage": {},
+      "hard_cases": {},
+      "metrics": null
+    }
+  ],
+  "overall": null,
+  "usage_total": {
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0
+  },
+  "usage_unknown_books": 0,
+  "targets": null,
+  "targets_met": null,
+  "notes": "指标由 ndr.evaluation.metrics 计算，不是前端模拟数据；样本不足或未达目标时报告如实给出 null/false。"
+}
