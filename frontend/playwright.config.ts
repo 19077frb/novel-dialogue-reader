@@ -39,6 +39,8 @@ export default defineConfig({
         NDR_PORT: String(E2E_API_PORT),
         NDR_HOST: '127.0.0.1',
         NDR_DATA_DIR: E2E_DATA_DIR,
+        // 测试绝不触碰真实系统凭据库：显式使用会话凭据后端。
+        NDR_CREDENTIAL_BACKEND: 'session',
         // E2E 使用隔离数据目录，启动时自动迁移到 head（默认行为仍是显式迁移）。
         NDR_AUTO_MIGRATE: '1',
       },

@@ -248,6 +248,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model-profiles/protocols": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 支持的模型协议与能力声明 */
+        get: operations["list_protocols_route_api_model_profiles_protocols_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/model-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 模型配置列表（不含密钥） */
+        get: operations["list_profiles_route_api_model_profiles_get"];
+        put?: never;
+        /** 新建模型配置 */
+        post: operations["create_profile_route_api_model_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/model-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除配置与凭据引用 */
+        delete: operations["delete_profile_route_api_model_profiles__profile_id__delete"];
+        options?: never;
+        head?: never;
+        /** 更新配置（含密钥 keep/replace/remove） */
+        patch: operations["update_profile_route_api_model_profiles__profile_id__patch"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -391,6 +444,11 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /**
+         * CredentialMode
+         * @enum {string}
+         */
+        CredentialMode: "session" | "system" | "none";
         /** CursorPage[BookOut] */
         CursorPage_BookOut_: {
             /** Items */
@@ -484,6 +542,15 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[ModelProfileOut] */
+        DataEnvelope_ModelProfileOut_: {
+            data: components["schemas"]["ModelProfileOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[QuoteDetailOut] */
         DataEnvelope_QuoteDetailOut_: {
             data: components["schemas"]["QuoteDetailOut"];
@@ -515,6 +582,26 @@ export interface components {
         DataEnvelope_list_ChapterOut__: {
             /** Data */
             data: components["schemas"]["ChapterOut"][];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[list[ModelProfileOut]] */
+        DataEnvelope_list_ModelProfileOut__: {
+            /** Data */
+            data: components["schemas"]["ModelProfileOut"][];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[list[ProtocolCapabilitiesOut]] */
+        DataEnvelope_list_ProtocolCapabilitiesOut__: {
+            /** Data */
+            data: components["schemas"]["ProtocolCapabilitiesOut"][];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -680,6 +767,123 @@ export interface components {
             synthetic: boolean;
             /** Text */
             text: string;
+        };
+        /** ModelProfileCreate */
+        ModelProfileCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Protocol
+             * @default chat-completions-compatible
+             */
+            protocol: string;
+            /**
+             * Base Url
+             * @description API 根路径，例如 https://api.example.com/v1
+             */
+            base_url: string;
+            /** Model */
+            model: string;
+            /**
+             * Params
+             * @description 生成参数（不能含密钥字段）
+             */
+            params?: {
+                [key: string]: unknown;
+            };
+            /** @default session */
+            credential_mode: components["schemas"]["CredentialMode"];
+            /**
+             * Api Key
+             * @description 只在请求里出现，绝不回传
+             */
+            api_key?: string | null;
+        };
+        /** ModelProfileOut */
+        ModelProfileOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Protocol */
+            protocol: string;
+            /** Base Url */
+            base_url: string;
+            /** Model */
+            model: string;
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            };
+            credential_mode: components["schemas"]["CredentialMode"];
+            /** Has Key */
+            has_key: boolean;
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Credential Warning
+             * @description 例如系统凭据库不可用、已降级为会话密钥
+             */
+            credential_warning?: string | null;
+        };
+        /** ModelProfilePatch */
+        ModelProfilePatch: {
+            /** Name */
+            name?: string | null;
+            /** Protocol */
+            protocol?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            } | null;
+            credential_mode?: components["schemas"]["CredentialMode"] | null;
+            /**
+             * Api Key
+             * @description 提供则视为替换密钥
+             */
+            api_key?: string | null;
+            /**
+             * Remove Api Key
+             * @description 清除该配置的密钥
+             * @default false
+             */
+            remove_api_key: boolean;
+            /** Expected Version */
+            expected_version?: number | null;
+        };
+        /** ProtocolCapabilitiesOut */
+        ProtocolCapabilitiesOut: {
+            /** Protocol */
+            protocol: string;
+            /** Supports Json Schema */
+            supports_json_schema: boolean;
+            /** Supports Json Object */
+            supports_json_object: boolean;
+            /** Supports Temperature */
+            supports_temperature: boolean;
+            /** Supports Max Tokens */
+            supports_max_tokens: boolean;
+            /** Requires Api Key */
+            requires_api_key: boolean;
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
         };
         /** QuoteDetailOut */
         QuoteDetailOut: {
@@ -1306,6 +1510,143 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_QuoteDetailOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_protocols_route_api_model_profiles_protocols_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_list_ProtocolCapabilitiesOut__"];
+                };
+            };
+        };
+    };
+    list_profiles_route_api_model_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_list_ModelProfileOut__"];
+                };
+            };
+        };
+    };
+    create_profile_route_api_model_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelProfileCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ModelProfileOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_profile_route_api_model_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_profile_route_api_model_profiles__profile_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelProfilePatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ModelProfileOut_"];
                 };
             };
             /** @description Validation Error */
