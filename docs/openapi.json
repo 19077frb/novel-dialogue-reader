@@ -2016,6 +2016,192 @@
           }
         }
       }
+    },
+    "/api/books/{book_id}/exports/preview": {
+      "post": {
+        "tags": [
+          "exports"
+        ],
+        "summary": "冻结导出快照并返回样张（不调用模型）",
+        "operationId": "export_preview_route_api_books__book_id__exports_preview_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportPreviewIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ExportPreviewOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/exports": {
+      "post": {
+        "tags": [
+          "exports"
+        ],
+        "summary": "按快照生成 EPUB/HTML（幂等，本地执行）",
+        "operationId": "create_export_route_api_books__book_id__exports_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ExportArtifactOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/exports/{export_id}": {
+      "get": {
+        "tags": [
+          "exports"
+        ],
+        "summary": "导出状态、校验结果与下载可用性",
+        "operationId": "get_export_route_api_exports__export_id__get",
+        "parameters": [
+          {
+            "name": "export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Export Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ExportArtifactOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/exports/{export_id}/download": {
+      "get": {
+        "tags": [
+          "exports"
+        ],
+        "summary": "受控下载（从不覆盖原书）",
+        "operationId": "download_export_route_api_exports__export_id__download_get",
+        "parameters": [
+          {
+            "name": "export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Export Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3367,6 +3553,44 @@
         ],
         "title": "DataEnvelope[EstimateOut]"
       },
+      "DataEnvelope_ExportArtifactOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExportArtifactOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ExportArtifactOut]"
+      },
+      "DataEnvelope_ExportPreviewOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExportPreviewOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ExportPreviewOut]"
+      },
       "DataEnvelope_GapCorrectionOut_": {
         "properties": {
           "data": {
@@ -3868,6 +4092,289 @@
           "total_tokens"
         ],
         "title": "EstimateOut"
+      },
+      "ExportArtifactOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ExportFormat"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "relative_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Path"
+          },
+          "byte_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Size"
+          },
+          "file_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Sha256"
+          },
+          "exporter_version": {
+            "type": "string",
+            "title": "Exporter Version"
+          },
+          "validation": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Validation"
+          },
+          "download_available": {
+            "type": "boolean",
+            "title": "Download Available",
+            "default": false
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "snapshot_id",
+          "format",
+          "state",
+          "exporter_version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ExportArtifactOut"
+      },
+      "ExportCreateIn": {
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ExportFormat"
+          },
+          "style": {
+            "$ref": "#/components/schemas/ExportStyleIn"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "format",
+          "idempotency_key"
+        ],
+        "title": "ExportCreateIn"
+      },
+      "ExportFormat": {
+        "type": "string",
+        "enum": [
+          "epub",
+          "html"
+        ],
+        "title": "ExportFormat"
+      },
+      "ExportPreviewIn": {
+        "properties": {
+          "book_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Version Id"
+          },
+          "chapter_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Ids",
+            "description": "留空表示整本；否则只导出选中的章节"
+          },
+          "visibility_policy": {
+            "$ref": "#/components/schemas/VisibilityPolicy",
+            "default": "position_safe"
+          },
+          "style": {
+            "$ref": "#/components/schemas/ExportStyleIn"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ExportPreviewIn",
+        "description": "冻结快照 + 样张；**不调用模型**。"
+      },
+      "ExportPreviewOut": {
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "snapshot_hash": {
+            "type": "string",
+            "title": "Snapshot Hash"
+          },
+          "source_revision": {
+            "type": "string",
+            "title": "Source Revision"
+          },
+          "visibility_policy": {
+            "$ref": "#/components/schemas/VisibilityPolicy"
+          },
+          "selected_chapter_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Selected Chapter Ids"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts"
+          },
+          "coverage": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Coverage"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "sample_html": {
+            "type": "string",
+            "title": "Sample Html",
+            "description": "后端导出渲染器产出的样张（隔离容器里展示）"
+          },
+          "sample_fragments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sample Fragments"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "book_id",
+          "book_version_id",
+          "snapshot_hash",
+          "source_revision",
+          "visibility_policy",
+          "sample_html",
+          "created_at"
+        ],
+        "title": "ExportPreviewOut"
+      },
+      "ExportStyleIn": {
+        "properties": {
+          "preset": {
+            "$ref": "#/components/schemas/ExportStylePreset",
+            "description": "color_and_label / color_only / label_only",
+            "default": "color_and_label"
+          },
+          "palette_id": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Palette Id",
+            "default": "reader-default"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ExportStyleIn"
+      },
+      "ExportStylePreset": {
+        "type": "string",
+        "enum": [
+          "color_and_label",
+          "color_only",
+          "label_only"
+        ],
+        "title": "ExportStylePreset"
       },
       "GapCorrectionIn": {
         "properties": {
@@ -6370,6 +6877,14 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VisibilityPolicy": {
+        "type": "string",
+        "enum": [
+          "position_safe",
+          "reread"
+        ],
+        "title": "VisibilityPolicy"
       },
       "DataEnvelope": {
         "additionalProperties": false,

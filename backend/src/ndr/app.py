@@ -30,6 +30,8 @@ from .api.corrections import (
 )
 from .api.errors import install_error_handlers, install_request_id_middleware
 from .api.estimates import router as estimates_router
+from .api.exports import book_router as exports_book_router
+from .api.exports import export_router
 from .api.health import router as health_router
 from .api.jobs import router as jobs_router
 from .api.model_profiles import router as model_profiles_router
@@ -120,6 +122,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(gaps_router, prefix="/api")
     app.include_router(corrections_router, prefix="/api")
     app.include_router(scenes_router, prefix="/api")
+    app.include_router(exports_book_router, prefix="/api")
+    app.include_router(export_router, prefix="/api")
     return app
 
 

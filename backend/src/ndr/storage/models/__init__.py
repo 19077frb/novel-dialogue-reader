@@ -8,6 +8,7 @@ from __future__ import annotations
 from ..base import Base
 from .book import Book, BookVersion, Chapter, ContentNode, Resource
 from .dialogue import Gap, Participant, Quote, Scene, SceneMembership, SpeakerGroup
+from .exports import ExportArtifact, ExportSnapshot
 from .jobs import InferenceRun, Job, JobWindow, ResultCache
 from .labeling import Annotation, AnnotationHistory, IdentityRevision
 from .mapping import TextMapping
@@ -23,6 +24,8 @@ __all__ = [
     "Chapter",
     "ContentNode",
     "Correction",
+    "ExportArtifact",
+    "ExportSnapshot",
     "Gap",
     "IdentityRevision",
     "InferenceRun",

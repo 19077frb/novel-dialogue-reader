@@ -1,0 +1,44 @@
+{
+  "generated_by": "T15A build（离线确定性 FakeProvider，未访问任何真实模型）",
+  "source": "../minimal-txt-001/text.txt",
+  "style": "color_and_label",
+  "visibility_policy": "reread",
+  "snapshot_id": "8336eef4-ee6d-4512-b1fd-f96017d39fd5",
+  "snapshot_hash": "0e3ffb3814d07757e8226278b33d078c1417ef0729f55ccb798c07d610cf6473",
+  "artifacts": {
+    "epub": {
+      "file": "minimal-txt-001-annotated.epub",
+      "sha256": "356c8764e96d05f2285eaa77c6d4b8ce5cac656d300f9dee4409cdbbb37c97ca",
+      "byte_size": 2794,
+      "validation": {
+        "non_empty": true,
+        "mimetype_first": true,
+        "mimetype_stored": true,
+        "mimetype_value": true,
+        "has_container": true,
+        "has_opf": true,
+        "has_nav": true,
+        "resource_closure": true,
+        "no_external_references": true,
+        "no_localhost": true,
+        "readable_zip": true,
+        "text_consistency": true
+      },
+      "standard": "NOT_RUN"
+    },
+    "html": {
+      "file": "minimal-txt-001-annotated.html",
+      "sha256": "8f8bee422812bb810c51f26fc6db2d91b01648da09f31350c28f7de8fd5a2ae4",
+      "byte_size": 2701,
+      "validation": {
+        "non_empty": true,
+        "has_charset": true,
+        "no_scripts": true,
+        "no_external_references": true,
+        "no_localhost": true,
+        "text_consistency": true
+      },
+      "standard": "NOT_APPLICABLE"
+    }
+  }
+}

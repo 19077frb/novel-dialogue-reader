@@ -639,6 +639,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/exports/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 冻结导出快照并返回样张（不调用模型） */
+        post: operations["export_preview_route_api_books__book_id__exports_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 按快照生成 EPUB/HTML（幂等，本地执行） */
+        post: operations["create_export_route_api_books__book_id__exports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exports/{export_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 导出状态、校验结果与下载可用性 */
+        get: operations["get_export_route_api_exports__export_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exports/{export_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 受控下载（从不覆盖原书） */
+        get: operations["download_export_route_api_exports__export_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1140,6 +1208,24 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[ExportArtifactOut] */
+        DataEnvelope_ExportArtifactOut_: {
+            data: components["schemas"]["ExportArtifactOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[ExportPreviewOut] */
+        DataEnvelope_ExportPreviewOut_: {
+            data: components["schemas"]["ExportPreviewOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[GapCorrectionOut] */
         DataEnvelope_GapCorrectionOut_: {
             data: components["schemas"]["GapCorrectionOut"];
@@ -1367,6 +1453,122 @@ export interface components {
             /** Notes */
             notes?: string[];
         };
+        /** ExportArtifactOut */
+        ExportArtifactOut: {
+            /** Id */
+            id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            format: components["schemas"]["ExportFormat"];
+            /** State */
+            state: string;
+            /** Filename */
+            filename?: string | null;
+            /** Relative Path */
+            relative_path?: string | null;
+            /** Byte Size */
+            byte_size?: number | null;
+            /** File Sha256 */
+            file_sha256?: string | null;
+            /** Exporter Version */
+            exporter_version: string;
+            /** Validation */
+            validation?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Download Available
+             * @default false
+             */
+            download_available: boolean;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /** ExportCreateIn */
+        ExportCreateIn: {
+            /** Snapshot Id */
+            snapshot_id: string;
+            format: components["schemas"]["ExportFormat"];
+            style?: components["schemas"]["ExportStyleIn"];
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /**
+         * ExportFormat
+         * @enum {string}
+         */
+        ExportFormat: "epub" | "html";
+        /**
+         * ExportPreviewIn
+         * @description 冻结快照 + 样张；**不调用模型**。
+         */
+        ExportPreviewIn: {
+            /** Book Version Id */
+            book_version_id?: string | null;
+            /**
+             * Chapter Ids
+             * @description 留空表示整本；否则只导出选中的章节
+             */
+            chapter_ids?: string[] | null;
+            /** @default position_safe */
+            visibility_policy: components["schemas"]["VisibilityPolicy"];
+            style?: components["schemas"]["ExportStyleIn"];
+        };
+        /** ExportPreviewOut */
+        ExportPreviewOut: {
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Book Id */
+            book_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Snapshot Hash */
+            snapshot_hash: string;
+            /** Source Revision */
+            source_revision: string;
+            visibility_policy: components["schemas"]["VisibilityPolicy"];
+            /** Selected Chapter Ids */
+            selected_chapter_ids?: string[];
+            /** Counts */
+            counts?: {
+                [key: string]: number;
+            };
+            /** Coverage */
+            coverage?: {
+                [key: string]: unknown;
+            };
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Sample Html
+             * @description 后端导出渲染器产出的样张（隔离容器里展示）
+             */
+            sample_html: string;
+            /** Sample Fragments */
+            sample_fragments?: string[];
+            /** Created At */
+            created_at: string;
+        };
+        /** ExportStyleIn */
+        ExportStyleIn: {
+            /**
+             * @description color_and_label / color_only / label_only
+             * @default color_and_label
+             */
+            preset: components["schemas"]["ExportStylePreset"];
+            /**
+             * Palette Id
+             * @default reader-default
+             */
+            palette_id: string;
+        };
+        /**
+         * ExportStylePreset
+         * @enum {string}
+         */
+        ExportStylePreset: "color_and_label" | "color_only" | "label_only";
         /** GapCorrectionIn */
         GapCorrectionIn: {
             decision: components["schemas"]["GapDecision"];
@@ -2377,6 +2579,11 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /**
+         * VisibilityPolicy
+         * @enum {string}
+         */
+        VisibilityPolicy: "position_safe" | "reread";
         /** DataEnvelope */
         DataEnvelope: {
             /** Data */
@@ -3636,6 +3843,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_SpeakerRevisionOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_preview_route_api_books__book_id__exports_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportPreviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ExportPreviewOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_export_route_api_books__book_id__exports_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ExportArtifactOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_export_route_api_exports__export_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ExportArtifactOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_export_route_api_exports__export_id__download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
