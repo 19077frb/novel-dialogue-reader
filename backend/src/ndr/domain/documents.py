@@ -56,6 +56,8 @@ class ContentNodeOut(ApiModel):
     chapter_id: str | None = None
     chapter_ordinal: int | None = None
     text: str
+    # 受限节点附加数据：标题层级、图片 resource_id/media_type、ruby 注音（rt 不进正文）。
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 class ContentResponse(ApiModel):
@@ -73,10 +75,14 @@ class ImportResult(ApiModel):
     book_id: str
     book_version_id: str
     job_id: str
+    format: BookFormat
     import_status: ImportStatus
-    encoding: str
-    encoding_confidence: str
+    # TXT 记录检测/指定的编码；EPUB 的正文编码由各 XHTML 文档的 XML 声明决定，故为 null。
+    encoding: str | None = None
+    encoding_confidence: str | None = None
     chapter_count: int
+    node_count: int = 0
+    resource_count: int = 0
     canonical_length_cp: int
     reused_book: bool
     reused_version: bool

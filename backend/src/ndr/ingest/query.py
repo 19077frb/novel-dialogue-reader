@@ -151,6 +151,16 @@ def job_out(job: Job) -> JobOut:
     )
 
 
+def _load_payload(tree_json: str | None) -> dict[str, object]:
+    if not tree_json:
+        return {}
+    try:
+        value = json.loads(tree_json)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def content_nodes(
     session: Session,
     settings: Settings,
@@ -182,13 +192,15 @@ def content_nodes(
             raise ApiError(ErrorCode.VALIDATION_ERROR, "cursor 内容为空")
         range_start = max(range_start, int(parts[0]))
 
-    if range_start < 0 or range_end > canonical_length or range_start >= range_end:
+    if range_start < 0 or range_end > canonical_length or range_start > range_end:
         raise ApiError.validation(
             "范围不合法",
             start_cp=range_start,
             end_cp=range_end,
             canonical_length_cp=canonical_length,
         )
+    # 允许空范围（例如只有插图的 EPUB，canonical 长度为 0；或零长度章节）：
+    # 返回该范围内的零长度节点（图片/分隔符），而不是报错。
 
     stmt = (
         select(ContentNode, Chapter)
@@ -214,6 +226,7 @@ def content_nodes(
             chapter_id=chapter_row.id,
             chapter_ordinal=chapter_row.ordinal,
             text=text[node.start_cp : node.end_cp],
+            payload=_load_payload(node.tree_json),
         )
         for node, chapter_row in rows
     ]

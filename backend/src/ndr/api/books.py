@@ -1,16 +1,18 @@
-"""书籍导入与阅读路由（DEVELOPMENT.md 5.2；T02 实现 TXT 部分）。
+"""书籍导入与阅读路由（DEVELOPMENT.md 5.2；T02 实现 TXT，T03 增加 EPUB 与资源）。
 
 - ``POST /api/books/import``：multipart + 可选 encoding；202 返回 book_id 与 IMPORT job_id。
-  T02 的解析在请求内同步完成并立即写入终态；T10 引入调度器后改为后台执行，契约不变。
+  解析在请求内同步完成并立即写入终态；T10 引入调度器后改为后台执行，契约不变。
 - ``GET /api/books``、``/books/{id}``、``/books/{id}/chapters``、``/books/{id}/content``：
   不调用模型，无 LLM 也能完整读取原文。
+- ``GET /api/books/{id}/resources/{resource_id}``：只服务已登记且位于书籍包内的资源。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from ..config import Settings
@@ -18,6 +20,7 @@ from ..domain.common import CursorPage, DataEnvelope
 from ..domain.documents import BookOut, ChapterOut, ContentResponse, ImportResult
 from ..domain.enums import ErrorCode
 from ..ingest.encoding import DecodeFailure
+from ..ingest.epub import EpubError, EpubLimits
 from ..ingest.query import (
     active_version,
     book_out,
@@ -26,7 +29,8 @@ from ..ingest.query import (
     list_books,
     list_chapters,
 )
-from ..ingest.service import import_txt, record_failed_import
+from ..ingest.resources import get_resource_or_404, read_resource_bytes
+from ..ingest.service import import_epub, import_txt, record_failed_import
 from ..storage.transactions import transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
@@ -35,29 +39,44 @@ from .pagination import parse_limit
 router = APIRouter(prefix="/books", tags=["books"])
 
 TXT_SUFFIX = ".txt"
+EPUB_SUFFIX = ".epub"
+SUPPORTED_SUFFIXES = (TXT_SUFFIX, EPUB_SUFFIX)
 MAX_IMPORT_BYTES_FALLBACK = 50 * 1024 * 1024
+
+
+def _epub_limits(settings: Settings) -> EpubLimits:
+    return EpubLimits(
+        max_entries=getattr(settings, "max_epub_entries", 2000),
+        max_total_uncompressed_bytes=getattr(
+            settings, "max_epub_total_uncompressed_bytes", 200 * 1024 * 1024
+        ),
+        max_entry_uncompressed_bytes=getattr(
+            settings, "max_epub_entry_bytes", 32 * 1024 * 1024
+        ),
+        max_spine_items=getattr(settings, "max_epub_spine_items", 500),
+    )
 
 
 @router.post(
     "/import",
     status_code=202,
     response_model=DataEnvelope[ImportResult],
-    summary="导入 TXT（202 + IMPORT 任务）",
+    summary="导入 TXT/EPUB（202 + IMPORT 任务）",
 )
 async def import_book(
     request: Request,
-    file: UploadFile = File(..., description="TXT 文件；EPUB 在 T03 支持"),
-    encoding: str | None = Form(default=None, description="显式编码；留空自动检测"),
-    title: str | None = Form(default=None, description="书名；留空用文件名"),
+    file: UploadFile = File(..., description="TXT 或 EPUB 文件"),
+    encoding: str | None = Form(default=None, description="显式编码；留空自动检测（仅 TXT）"),
+    title: str | None = Form(default=None, description="书名；留空用文件内元数据或文件名"),
 ) -> DataEnvelope[ImportResult]:
     settings: Settings = request.app.state.settings
     filename = file.filename or f"upload{TXT_SUFFIX}"
     suffix = Path(filename).suffix.lower()
-    if suffix != TXT_SUFFIX:
+    if suffix not in SUPPORTED_SUFFIXES:
         raise ApiError(
             ErrorCode.UNSUPPORTED_MEDIA_TYPE,
-            "T02 仅支持 .txt 文件；EPUB 导入在 T03 提供",
-            details={"filename": filename, "supported": [TXT_SUFFIX]},
+            "只支持 .txt 与 .epub 文件",
+            details={"filename": filename, "supported": list(SUPPORTED_SUFFIXES)},
             status_code=415,
         )
 
@@ -76,22 +95,35 @@ async def import_book(
     factory = request.app.state.session_factory
     try:
         with transaction(factory) as session:
-            outcome = import_txt(
-                session,
-                settings,
-                filename=filename,
-                raw=raw,
-                encoding=encoding,
-                title=title,
-            )
+            if suffix == EPUB_SUFFIX:
+                outcome = import_epub(
+                    session,
+                    settings,
+                    filename=filename,
+                    raw=raw,
+                    title=title,
+                    limits=_epub_limits(settings),
+                )
+            else:
+                outcome = import_txt(
+                    session,
+                    settings,
+                    filename=filename,
+                    raw=raw,
+                    encoding=encoding,
+                    title=title,
+                )
             result = ImportResult(
                 book_id=outcome.book.id,
                 book_version_id=outcome.version.id,
                 job_id=outcome.job.id,
+                format=outcome.book.format,
                 import_status=outcome.book.import_status,
                 encoding=outcome.parsed.encoding,
                 encoding_confidence=outcome.parsed.encoding_confidence,
                 chapter_count=len(outcome.parsed.chapters),
+                node_count=len(outcome.parsed.nodes),
+                resource_count=len(outcome.parsed.resources),
                 canonical_length_cp=outcome.parsed.canonical_length_cp,
                 reused_book=outcome.reused_book,
                 reused_version=outcome.reused_version,
@@ -105,12 +137,29 @@ async def import_book(
                 message=str(exc),
                 filename=filename,
                 requested_encoding=encoding,
+                stage="decode",
             )
             job_id = job.id
         raise ApiError(
             ErrorCode.VALIDATION_ERROR,
             str(exc),
             details={"job_id": job_id, **exc.details},
+            status_code=422,
+        ) from exc
+    except EpubError as exc:
+        with transaction(factory) as session:
+            job = record_failed_import(
+                session,
+                message=str(exc),
+                filename=filename,
+                requested_encoding=None,
+                stage="epub_structure",
+            )
+            job_id = job.id
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            str(exc),
+            details={"job_id": job_id, "reason_code": exc.code, **exc.details},
             status_code=422,
         ) from exc
 
@@ -146,7 +195,7 @@ def get_book_route(
 @router.get(
     "/{book_id}/chapters",
     response_model=DataEnvelope[list[ChapterOut]],
-    summary="目录（按 ordinal）",
+    summary="目录（按 ordinal，EPUB 为 spine 顺序）",
 )
 def list_chapters_route(
     request: Request,
@@ -205,3 +254,35 @@ def content_route(
         cursor=cursor,
     )
     return DataEnvelope(data=response, request_id=current_request_id(request))
+
+
+@router.get(
+    "/{book_id}/resources/{resource_id}",
+    summary="受控资源（图片等，独立响应体）",
+    response_class=Response,
+)
+def get_resource_route(
+    request: Request,
+    book_id: str,
+    resource_id: str,
+    session: Session = Depends(get_session),
+) -> Response:
+    settings: Settings = request.app.state.settings
+    book = get_book_or_404(session, book_id)
+    resource, version = get_resource_or_404(session, book, resource_id)
+    payload = read_resource_bytes(settings, book, version, resource)
+
+    name = Path(resource.relative_path).name or resource.resource_id
+    ascii_name = name.encode("ascii", "ignore").decode("ascii") or "resource"
+    disposition = (
+        f'inline; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(name)}'
+    )
+    return Response(
+        content=payload,
+        media_type=resource.media_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": disposition,
+            "Cache-Control": "private, max-age=600",
+            "X-Resource-Sha256": resource.sha256,
+        },
+    )

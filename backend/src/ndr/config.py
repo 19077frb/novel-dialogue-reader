@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # 单次导入的文件大小上限（字节）；超出返回 413。
     max_import_bytes: int = 50 * 1024 * 1024
 
+    # EPUB 解压与结构限制（DEVELOPMENT.md 4.1：限制值可配置并返回具体错误）。
+    max_epub_entries: int = 2000
+    max_epub_total_uncompressed_bytes: int = 200 * 1024 * 1024
+    max_epub_entry_bytes: int = 32 * 1024 * 1024
+    max_epub_spine_items: int = 500
+
     @field_validator("data_dir")
     @classmethod
     def _resolve_data_dir(cls, value: Path) -> Path:

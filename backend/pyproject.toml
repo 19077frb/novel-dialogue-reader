@@ -34,6 +34,8 @@ packages = ["src/ndr"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# 让测试可以直接 import fixtures.*（原创夹具构造器放在 tests/fixtures/）。
+pythonpath = ["tests"]
 
 [tool.ruff]
 line-length = 100

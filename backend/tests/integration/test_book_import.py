@@ -162,9 +162,19 @@ def test_changing_encoding_creates_new_version(migrated_client: TestClient) -> N
 
 
 def test_import_rejects_unsupported_extension(migrated_client: TestClient) -> None:
-    response = _import(migrated_client, b"dummy", filename="book.epub")
+    response = _import(migrated_client, b"dummy", filename="book.md")
     assert response.status_code == 415
     assert response.json()["error"]["code"] == "UNSUPPORTED_MEDIA_TYPE"
+
+
+def test_import_rejects_invalid_epub_payload(migrated_client: TestClient) -> None:
+    """扩展名是 .epub 但内容不是合法容器 → 422 且给出具体原因。"""
+
+    response = _import(migrated_client, b"definitely not a zip", filename="broken.epub")
+    assert response.status_code == 422
+    details = response.json()["error"]["details"]
+    assert details["reason_code"] == "EPUB_NOT_A_ZIP"
+    assert migrated_client.get("/api/books").json()["data"]["items"] == []
 
 
 def test_import_rejects_empty_file(migrated_client: TestClient) -> None:
