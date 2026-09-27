@@ -750,3 +750,49 @@ python -m ndr.evaluation loss --manifest evaluation/manifests/dev.json `
   逐段列出压缩丢掉的行文，并标记是否与金标准 `gaps[].must_keep` 重叠（删错计数）。
 - `evaluation/ablations.md`：消融说明、判定门槛与当前状态。**当前状态 = 未验证**：
   没有真实凭据与人工确认样本，B3/B4 的准确率—覆盖率—费用对比无法产出。
+## 30. 启动交付、同源静态服务与升级（T19 已实现）
+
+面向「用户自己启动」的交付契约：两种启动方式、一个宿主内配置项、一套升级步骤。
+
+### 30.1 两种启动方式
+
+| 方式 | 命令 | 端口 | 用途 |
+| --- | --- | --- | --- |
+| 开发 | `pwsh -File scripts/dev.ps1` | 后端 8765 + Vite 5173（`/api` 代理） | 改代码即热更新；`-Stop` 结束本脚本启动的进程 |
+| 生产/自用 | `pwsh -File scripts/serve.ps1` | **单端口 127.0.0.1:8765** | 迁移 → `npm run build` → 后端同时提供 API 与页面 |
+
+`serve.ps1` 参数：`-SkipBuild`（复用已有 `frontend/dist`）、`-Port`、`-DataDir`、
+`-AllowFakeProvider`（**仅离线演示**，会打印警告）、`-Stop`。两个脚本都会先检查依赖，
+`uv` 不可用时回退到 `backend\.venv\Scripts\python.exe`。
+
+### 30.2 同源静态服务（`NDR_STATIC_DIR`）
+
+- 配置项 `static_dir`（环境变量 `NDR_STATIC_DIR`）默认 **None**：不提供静态页面（开发用 Vite）。
+  `serve.ps1` 会设为 `frontend/dist`。
+- 设置后，后端在全部 API 路由**之后**注册兜底路由：
+  - 命中构建目录内的真实文件 → 原样返回（含 `assets/*` 的哈希产物）；
+  - 其他非 `/api/**` 路径 → 返回 `index.html`，交给前端路由（深链接可直接刷新）；
+  - `/api` 或 `/api/**` → 仍是 JSON 契约（未知路径返回契约 404），SPA 回退不会吞掉 API 错误；
+  - 静态路径解析限制在构建目录内，`..`、绝对路径等越界一律不读目录外文件。
+- 该兜底路由 `include_in_schema=False`，因此不进入 `docs/openapi.json`（接口契约不含静态页面规则）。
+
+### 30.3 初始化、迁移与升级
+
+- 初始化：`uv sync` → `npm ci` → `alembic upgrade head`（默认数据库 `data/ndr.sqlite3`）。
+  `GET /api/health` 的 `database.state=READY` 与 `revision=head_revision` 是初始化成功的判据。
+- 迁移**显式执行**（`dev.ps1`/`serve.ps1` 或 alembic 命令）；`NDR_AUTO_MIGRATE=1` 才在启动时迁移。
+  迁移只追加，禁止修改已发布迁移或用删库重建代替升级。
+- 升级流程：**备份 `data\` → 同步依赖 → `upgrade head` → 用 `/api/health` 与书架校验 →（必要时）整目录回滚**。
+- 自动化保证：`test_upgrade_preserves_data.py`（重跑迁移保留书籍、`user_locked` 人工确认、标注历史与待确认队列）、
+  `test_schema.py::test_existing_database_upgrades_without_data_loss`（`0001 → head`）。
+
+### 30.4 示例配置与密钥边界
+
+- `.env.example` 列出全部 `NDR_*` 开关，**不含任何密钥**；`.env` 被 `.gitignore` 忽略。
+- 模型密钥只在界面「模型配置」填写，后端写入系统凭据库（keyring）或进程内会话；
+  数据库、日志、导出件与任务快照里都没有密钥明文（`test_model_profiles.py` 有断言）。
+
+### 30.5 交付口径
+
+达到 T19 门槛时的对外表述：**工程交付完成，真实验证（live/quality）待完成**。
+四类结果与复现步骤见 `docs/verification-report.md`；未完成项清单见 README「未完成项与复现步骤」。

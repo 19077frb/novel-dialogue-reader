@@ -2,9 +2,11 @@
 
 更新时间：2026-09-28
 
-**结论**：功能 = 通过（离线 + 真实前后端/浏览器 E2E 证据齐全）；稳定性 = 通过（含边界与故障路径）；
+**结论**：功能 = 通过（离线 + 真实前后端/浏览器 E2E 证据齐全，含 T19 从零初始化与同源启动）；
+稳定性 = 通过（含边界、故障路径与升级保留数据）；
 **live = BLOCKED**（环境没有真实提供方凭据，网络受限）；**quality = BLOCKED**（没有人工确认的真实作品样本，
 B1–B4 全部 `NOT_RUN`）。本报告不把 FakeProvider 或离线基线当作真实能力证据。
+本报告同时记录 T18（联调/体验）与 T19（交付/升级）的验证结果；T19 的从零走查见第 10 节。
 
 ## 1. 范围与方法
 
@@ -83,8 +85,9 @@ B1–B4 全部 `NOT_RUN`）。本报告不把 FakeProvider 或离线基线当作
 3. **真实提供方试用与质量评测 BLOCKED**（见第 4、5 节）。
 4. 非阻塞遗留：`uv run` 在受限沙箱不可用（回退 `backend\.venv`）；评测的强模型路由还没有配置入口
    （`strong_profile_id` 只能由任务范围传入）。
-5. **下一任务 T19**：启动交付、操作文档与最终交接（README/dev.ps1/生产构建同源启动、初始化与升级说明、
-   示例配置不含密钥、整理未完成项与复现步骤）。
+5. **T19 交付已完成**（见第 10 节）：README（依赖检查/初始化迁移/生产同源启动/示例配置/升级/未完成项与复现步骤）、
+   `.env.example`（不含密钥）、`scripts/serve.ps1`（同源单端口）、升级保留数据的自动化测试都已就位。
+   **T00–T19 计划内任务全部完成**；剩下的只有上表这些「需要外部条件」的验证项，不要把它们当作已通过。
 
 ## 8. 离线 / E2E 报告索引
 
@@ -119,3 +122,59 @@ python -m ndr.evaluation run --manifest evaluation/manifests/dev.json `
   --config evaluation/configs/b2.json --profile-id <id> --allow-live `
   --output evaluation/reports/dev-b2-live.json
 ```
+
+## 10. T19 交付验证（从零初始化、同源启动、升级）
+
+### 10.1 全新数据目录 + 同源单端口启动（实测）
+
+```powershell
+$tmp = Join-Path $env:TEMP ("ndr-walkthrough-" + [guid]::NewGuid().ToString('N').Substring(0,8))
+pwsh -File scripts/serve.ps1 -DataDir $tmp -Port 8899 -SkipBuild -AllowFakeProvider
+```
+
+实测结果（真实进程 + HTTP）：
+
+| 检查 | 结果 |
+| --- | --- |
+| 迁移（全新目录） | `alembic upgrade head` 依次执行 `0001`～`0005`，无错误 |
+| `GET /` | 200，返回前端构建产物（`text/html`） |
+| `GET /library`（深链接） | 200，返回同一份 `index.html`（前端路由接管） |
+| `GET /api/health` | 200：`database.state=READY`、`revision=0005`、`head_revision=0005` |
+| `GET /api/unknown` | 404 契约错误信封（SPA 回退不会吞掉 `/api/**`） |
+
+### 10.2 从零走通「导入 → 处理 → 确认 → 导出」（实测）
+
+在同一实例上按 README 的 API 顺序执行（`evaluation/examples/minimal-txt-001/text.txt`，仓库原创样例）：
+
+| 步骤 | 实测结果 |
+| --- | --- |
+| `POST /api/books/import` | 202，`chapter_count=1`、`node_count=7`、`canonical_length_cp=97` |
+| `POST /api/model-profiles`（fake-provider，离线演示） | 201 |
+| `POST /api/jobs`（process，`run_now=true`） | 终态 `COMPLETED`，`calls=1`（真实调度器 + 真实数据库） |
+| `GET /api/books/{id}/quotes` | 返回 3 条候选，首条 `「雨停了。」` |
+| `POST /api/quotes/{id}/corrections`（assign_existing S1） | 201，标注版本 1 → 2（真实人工确认写入） |
+| `GET /api/books/{id}/annotations?reading_mode=reread` | 5 条投影项、图例 `S1` |
+| `POST /api/books/{id}/exports/preview` | 快照 `78e4f6af-…`，警告如实给出「4 条对白已过期（stale）」 |
+| `POST /api/books/{id}/exports`（html） | `COMPLETED`，下载 2494 字节；无 `http(s)`、无 `<script>`、含 `〔S1〕` 与 `「雨停了。」` |
+| `POST /api/books/{id}/exports`（epub） | `COMPLETED`，下载 2780 字节；zip 头 `PK`，头部含 `mimetype` |
+
+说明：模型侧用的是**显式启用的测试用假提供方**（`-AllowFakeProvider`，不联网），因此这一步证明的是
+「启动、迁移、导入、调度、确认、导出、下载」这条链路可用，**不是**真实识别质量。
+
+### 10.3 升级测试（自动化）
+
+- `backend/tests/integration/test_upgrade_preserves_data.py`：导入书籍 → 写入 `user_locked` 人工确认 +
+  标注历史 + 待确认项 → 重跑迁移 → 书籍/标注/历史/队列逐项核对，`GET /api/books/{id}` 与候选列表仍可用。
+- `backend/tests/integration/test_schema.py::test_existing_database_upgrades_without_data_loss`：`0001 → head`
+  的真实升级路径（旧工具链写入的数据保留）。
+- 迁移策略与备份/回滚步骤见 README「数据与版本升级」：只追加、可重复执行、不自动迁移（需显式执行或
+  `NDR_AUTO_MIGRATE=1`）。
+
+### 10.4 T19 相关门禁
+
+- `ruff` 全绿；`pytest backend/tests` → **376 passed**（新增 `test_static_site.py` 2 项、
+  `test_upgrade_preserves_data.py` 1 项）。
+- `scripts/verify.ps1` 退出码 0（OpenAPI 与前端 API 类型一致；前端 72 项单测与 build 通过）。
+- 全量 E2E 仍为 **33 passed**（前端未改动）。
+- 交付说明：[`README.md`](../README.md)（依赖检查/初始化迁移/同源启动/示例配置/升级/未完成项与复现步骤）、
+  [`.env.example`](../.env.example)（不含密钥）。
