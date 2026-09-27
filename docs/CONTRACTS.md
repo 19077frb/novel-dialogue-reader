@@ -63,7 +63,7 @@
 | `GET /api/jobs/{id}` | 任务状态、进度与错误 | **T02 已实现**（最小轮询；调度/usage/恢复见 T10/T14） |
 | `GET /api/books/{id}/annotations` | 有效投影与图例，受 horizon 与阅读模式约束 | T11/T15 |
 | `GET /api/books/{id}/review-items`、`GET /api/review-items/{id}` | 待确认队列与详情 | T13 |
-| `GET /api/quotes/{id}`、`POST /api/quotes/{id}/review-items` | 普通对白详情与主动标记 | T12/T13 |
+| `GET /api/quotes/{id}` | 候选对白详情（含上下文与前置 Gap） | **T05 已实现**（主动标记见 T13） |
 | `POST /api/quotes/{id}/corrections`、`POST /api/gaps/{id}/corrections` | 人工更正，不调用模型 | T12 |
 | `POST /api/review-items/{id}/defer`、`POST /api/corrections/{id}/undo` | 延后与撤销（版本校验） | T12/T13 |
 | `POST /api/scenes/{id}/speaker-revisions` | merge/split 与影响范围 | T12 |
@@ -189,3 +189,48 @@ FakeProvider 的成功只证明业务/状态机；真实模型兼容性需要真
   `GET /api/books/{id}` 也会返回当前 `read_position_cp` 与 `reading_mode`。
 - `reading_mode` 取值 `initial`（初读，只用读到的证据）或 `reread`（重读，可用后文证据）；
   T15 起它会影响证据 horizon 的投影。
+
+## 13. 候选引语与 Gap（T05 已实现）
+
+> 这些接口返回的是**扫描器提出的候选**，不含任何说话人判断；着色/编号属于 T11 起的标注投影。
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /api/books/{id}/quotes` | 候选列表；支持 `chapter_id`、`cursor`、`limit`（默认 200，最大 500） |
+| `GET /api/books/{id}/gaps` | 相邻外层候选之间的叙述；`decision` 为 `UNCERTAIN`（扫描器不判断语义） |
+| `GET /api/books/{id}/locate?start_cp=&end_cp=` | 把码点范围映射回章节/节点/源文档（纯读） |
+| `POST /api/books/{id}/quotes/scan` | 重新扫描；202 + RECOMPUTE 任务；已有用户标注时 409 |
+| `GET /api/quotes/{id}` | 候选详情：引号内文字、含引号片段、`kind_hint`、上下文与前置 Gap |
+
+契约要点：
+
+- `quote_id = sha1(book_version_id|start_cp|end_cp|scanner_version)`，重新扫描同一内容得到同一批 ID；
+  `gap_id` 同理。
+- `kind_hint` 只在排版约定明确时给出：`《》〈〉` → `quotation`，`（）()` → `other`，
+  嵌套里的 `『』` → `quotation`；其余为 `null`。
+- `nesting_depth`/`parent_quote_id` 表达嵌套；`utterance_id` 在扫描阶段恒为 `null`（合并同一发言需要证据）。
+- 扫描保护：单候选 ≤1200 码点、跨段 ≤3 个换行、嵌套 ≤8 层；超限的候选丢弃并在
+  `POST .../quotes/scan` 的 `warnings` 里给出 `quote_too_long` / `quote_spans_too_many_paragraphs` /
+  `unclosed_quote` / `stray_close` / `nesting_too_deep` 等稳定 code。
+- `POST .../quotes/scan` 是幂等的（替换该版本候选），但**已有用户标注时返回 409**
+  （`details.reason = USER_LABELING_PRESENT`），人工结果不被自动候选覆盖。
+- 阅读页只把候选画成虚线并提供开关（`data-testid=candidate-quote`），不显示颜色、编号或人物名。
+
+## 14. 金标准工具（T05）
+
+后端提供 `ndr.evaluation.gold_standard` 与 CLI `backend/scripts/gold_standard.py`：
+
+```powershell
+# 结构 + 跨字段 + 扫描器覆盖率
+uv run --project backend python backend/scripts/gold_standard.py validate `
+  --gold evaluation/examples/minimal-txt-001/gold.json `
+  --text evaluation/examples/minimal-txt-001/text.txt
+
+# 用扫描器候选生成可填写的标注模板（不是金标准）
+uv run --project backend python backend/scripts/gold_standard.py template --text <文件> --out <输出>
+```
+
+检查项：JSON Schema（`evaluation/schemas/gold-standard.schema.json`）、引用完整性（scene/quote/gap 存在）、
+范围合法性与包含关系（fragment ⊆ quote、must_keep ⊆ gap）、`resolvable=false ⇒ group_id=null`、
+`group_id` 属于同场景参与者、证据 `visible_from_cp` 不早于证据本身、以及“金标准对白是否被候选扫描器覆盖”。
+退出码非零表示存在 error。

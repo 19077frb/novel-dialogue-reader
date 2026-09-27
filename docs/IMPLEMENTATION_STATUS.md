@@ -16,7 +16,7 @@ FakeProvider 或自造样例通过只记入 Offline。
 | T02 | PASS | PASS | NOT_APPLICABLE | NOT_APPLICABLE | 当时 76 passed（`test_txt_ingest.py` 24 + `test_book_import.py` 11）；真实 GB18030 样例经代理导入后 11 个节点与原文逐行一致、无 U+FFFD；错误编码 422 + candidates + lossy preview | 已完成 |
 | T03 | PASS | PASS | NOT_APPLICABLE | NOT_APPLICABLE | 当时 109 passed（`test_epub_ingest.py` 22 + `test_resources.py` 10）；真实 EPUB 经代理导入：ruby 基底在正文、注音不在正文，图片资源字节与 sha256 一致；越界/符号链接/超限/外链均有拒绝与告警 | 已完成 |
 | T04 | PASS | PASS | NOT_APPLICABLE | NOT_APPLICABLE | `pytest backend/tests` → 114 passed（新增 `test_reading_progress.py` 5 项：保存/回读、409 版本冲突、跨书版本 422、越界 422、不产生任务与标注）；前端 `vitest` 13 passed（App/LibraryPage/DocumentRenderer/ReaderPage + `findCurrentStartCp`）；**真实浏览器 E2E 6 passed**（`data/run/e2e-t04.log`）：UTF-8 TXT 导入→阅读→切章→刷新仍停留同一章、EPUB 按 spine 打开且 `<rt>` 注音可见、插图 `naturalWidth>0`（真实经资源端点解码）、GB18030 声明为 UTF-8 → 候选+预演→一键换编码成功、`.md` 提示只支持 .txt/.epub；`ruff` 全绿；`scripts/verify.ps1` 退出码 0；OpenAPI/前端类型已重新生成（9 条路径） | 进入 T05：候选引语、Gap 与标注样例工具 |
-| T05 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 候选引语、Gap 与标注样例工具 |
+| T05 | PASS | PASS | NOT_APPLICABLE | NOT_APPLICABLE | `pytest backend/tests` → 163 passed（新增 `test_quote_scanner.py` 23、`test_source_map.py` 7、`test_quote_queries.py` 9、`test_gold_standard.py` 10）：配对/嵌套/父引用、未闭合与游离闭引号、长度与跨段与硬上限保护（异常引号不吞章）、码点偏移、ID 稳定派生、Gap 只用外层候选且 decision=UNCERTAIN、导入即产出候选、章节过滤、详情上下文、定位接口、重扫幂等、**有用户标注时 409 拒绝覆盖**、扫描不产生任何标注/场景；`ruff` 全绿；金标准 CLI 校验 T00 样例通过且候选覆盖 **精确 5 / 缺失 0**；前端 `vitest` 17 passed（候选标记/嵌套标记/开关）、Playwright 4 passed（阅读页出现候选覆盖并可关闭） | 进入 T06：模型配置后端与设置页 |
 | T06 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | 待填写 | 模型配置后端与设置页 |
 | T07 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | 待填写 | 适配器、输出契约与连接测试 |
 | T08 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 上下文、预算与证据范围 |
@@ -36,10 +36,10 @@ FakeProvider 或自造样例通过只记入 Offline。
 
 ## 说明
 
-- T00～T04 的 Live/Quality 为 NOT_APPLICABLE：这些任务不涉及真实模型或真实阅读器。
+- T00～T05 的 Live/Quality 为 NOT_APPLICABLE：这些任务不涉及真实模型或真实阅读器。
 - “真实联调”指本机真实前后端进程 + 真实浏览器 + 真实 TXT/EPUB 文件，仍不使用模型，因此只记入 Offline；
   T06/T07 之后才会有 provider 相关的 live 项。
-- 导入与阅读已可用，但**没有任何识别结果**：颜色/编号、场景、待定队列都要等 T05 起；
-  `AnnotationLayer` 现在只是占位容器（有测试保证不出现颜色/编号）。
+- 导入、阅读与**候选引语覆盖**已可用，但**没有任何识别结果**：颜色/编号、场景、待定队列都要等 T06 起（模型接入）；
+  `AnnotationLayer` 仍是占位容器，候选引语只用虚线提示（测试保证不出现颜色/编号/人物名）。
 - `data/run/*.log` 是本地运行产物（已忽略提交），可用账本列出的命令复现。
-- 已知命令偏差见 README“已知命令偏差”与决策 0001/0003；EPUB 表示见 0005；前端结构见 0006。
+- 已知命令偏差见 README“已知命令偏差”与决策 0001/0003；EPUB 表示见 0005；前端结构见 0006；扫描与金标准见 0007。

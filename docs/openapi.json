@@ -486,6 +486,332 @@
           }
         }
       }
+    },
+    "/api/books/{book_id}/quotes": {
+      "get": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "候选引语列表（不含说话人判断）",
+        "operationId": "list_quotes_route_api_books__book_id__quotes_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "chapter_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Chapter Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 500,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_CursorPage_QuoteOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/gaps": {
+      "get": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "Gap（相邻外层候选之间的叙述）",
+        "operationId": "list_gaps_route_api_books__book_id__gaps_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 500,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_CursorPage_GapOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/locate": {
+      "get": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "按码点范围定位原文（章节/节点/源文档）",
+        "operationId": "locate_route_api_books__book_id__locate_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "start_cp",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Start Cp"
+            }
+          },
+          {
+            "name": "end_cp",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "End Cp"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_LocateOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/quotes/scan": {
+      "post": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "重新扫描候选引语与 Gap（有用户标注时拒绝）",
+        "operationId": "scan_quotes_route_api_books__book_id__quotes_scan_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ScanResultOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/quotes/{quote_id}": {
+      "get": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "候选对白详情（含上下文与前置 Gap）",
+        "operationId": "get_quote_route_api_quotes__quote_id__get",
+        "parameters": [
+          {
+            "name": "quote_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Quote Id"
+            }
+          },
+          {
+            "name": "context_window_cp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 0,
+              "default": 120,
+              "title": "Context Window Cp"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_QuoteDetailOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -902,6 +1228,62 @@
         ],
         "title": "CursorPage[BookOut]"
       },
+      "CursorPage_GapOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GapOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CursorPage[GapOut]"
+      },
+      "CursorPage_QuoteOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QuoteOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CursorPage[QuoteOut]"
+      },
       "DataEnvelope_BookOut_": {
         "properties": {
           "data": {
@@ -959,6 +1341,44 @@
         ],
         "title": "DataEnvelope[CursorPage[BookOut]]"
       },
+      "DataEnvelope_CursorPage_GapOut__": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CursorPage_GapOut_"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[CursorPage[GapOut]]"
+      },
+      "DataEnvelope_CursorPage_QuoteOut__": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CursorPage_QuoteOut_"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[CursorPage[QuoteOut]]"
+      },
       "DataEnvelope_ImportResult_": {
         "properties": {
           "data": {
@@ -997,6 +1417,44 @@
         ],
         "title": "DataEnvelope[JobOut]"
       },
+      "DataEnvelope_LocateOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/LocateOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[LocateOut]"
+      },
+      "DataEnvelope_QuoteDetailOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QuoteDetailOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[QuoteDetailOut]"
+      },
       "DataEnvelope_ReadingProgressOut_": {
         "properties": {
           "data": {
@@ -1015,6 +1473,25 @@
           "request_id"
         ],
         "title": "DataEnvelope[ReadingProgressOut]"
+      },
+      "DataEnvelope_ScanResultOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScanResultOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ScanResultOut]"
       },
       "DataEnvelope_list_ChapterOut__": {
         "properties": {
@@ -1038,6 +1515,84 @@
           "request_id"
         ],
         "title": "DataEnvelope[list[ChapterOut]]"
+      },
+      "GapDecision": {
+        "type": "string",
+        "enum": [
+          "CONTINUE",
+          "UPDATE",
+          "BREAK",
+          "UNCERTAIN"
+        ],
+        "title": "GapDecision"
+      },
+      "GapOut": {
+        "properties": {
+          "gap_id": {
+            "type": "string",
+            "title": "Gap Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "left_quote_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Left Quote Id"
+          },
+          "right_quote_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Right Quote Id"
+          },
+          "start_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start Cp"
+          },
+          "end_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "End Cp"
+          },
+          "narration": {
+            "type": "string",
+            "title": "Narration"
+          },
+          "paragraph_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Paragraph Count"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/GapDecision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "gap_id",
+          "book_version_id",
+          "start_cp",
+          "end_cp",
+          "narration",
+          "paragraph_count",
+          "decision"
+        ],
+        "title": "GapOut"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1291,6 +1846,331 @@
         ],
         "title": "JobState"
       },
+      "LocateOut": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "start_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start Cp"
+          },
+          "end_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "End Cp"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/LocateSpanOut"
+            },
+            "type": "array",
+            "title": "Spans"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "book_version_id",
+          "start_cp",
+          "end_cp",
+          "text",
+          "spans"
+        ],
+        "title": "LocateOut"
+      },
+      "LocateSpanOut": {
+        "properties": {
+          "mapping_ordinal": {
+            "type": "integer",
+            "title": "Mapping Ordinal"
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "chapter_ordinal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Ordinal"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "node_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentNodeType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "canonical_start_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Canonical Start Cp"
+          },
+          "canonical_end_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Canonical End Cp"
+          },
+          "source_href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Href"
+          },
+          "source_text_start_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Source Text Start Cp"
+          },
+          "source_text_end_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Source Text End Cp"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "title": "Synthetic"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mapping_ordinal",
+          "canonical_start_cp",
+          "canonical_end_cp",
+          "source_text_start_cp",
+          "source_text_end_cp",
+          "synthetic",
+          "text"
+        ],
+        "title": "LocateSpanOut"
+      },
+      "QuoteDetailOut": {
+        "properties": {
+          "quote": {
+            "$ref": "#/components/schemas/QuoteOut"
+          },
+          "previous_quote_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Quote Id"
+          },
+          "next_quote_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Quote Id"
+          },
+          "gap_before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GapOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "context_before": {
+            "type": "string",
+            "title": "Context Before",
+            "default": ""
+          },
+          "context_after": {
+            "type": "string",
+            "title": "Context After",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quote"
+        ],
+        "title": "QuoteDetailOut"
+      },
+      "QuoteKind": {
+        "type": "string",
+        "enum": [
+          "speech",
+          "thought",
+          "quotation",
+          "group",
+          "other",
+          "unknown"
+        ],
+        "title": "QuoteKind"
+      },
+      "QuoteOut": {
+        "properties": {
+          "quote_id": {
+            "type": "string",
+            "title": "Quote Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "chapter_ordinal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Ordinal"
+          },
+          "start_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start Cp"
+          },
+          "end_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "End Cp"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "引号内的文字（不含引号本身）。"
+          },
+          "delimited_text": {
+            "type": "string",
+            "title": "Delimited Text",
+            "description": "包含引号的原文片段。"
+          },
+          "delimiter": {
+            "type": "string",
+            "title": "Delimiter"
+          },
+          "opening": {
+            "type": "string",
+            "title": "Opening"
+          },
+          "closing": {
+            "type": "string",
+            "title": "Closing"
+          },
+          "nesting_depth": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Nesting Depth"
+          },
+          "parent_quote_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Quote Id"
+          },
+          "kind_hint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scanner_version": {
+            "type": "string",
+            "title": "Scanner Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quote_id",
+          "book_version_id",
+          "start_cp",
+          "end_cp",
+          "text",
+          "delimited_text",
+          "delimiter",
+          "opening",
+          "closing",
+          "nesting_depth",
+          "scanner_version"
+        ],
+        "title": "QuoteOut"
+      },
       "ReadingMode": {
         "type": "string",
         "enum": [
@@ -1369,6 +2249,94 @@
           "version"
         ],
         "title": "ReadingProgressOut"
+      },
+      "ScanResultOut": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "scanner_version": {
+            "type": "string",
+            "title": "Scanner Version"
+          },
+          "quote_count": {
+            "type": "integer",
+            "title": "Quote Count"
+          },
+          "top_level_quote_count": {
+            "type": "integer",
+            "title": "Top Level Quote Count"
+          },
+          "gap_count": {
+            "type": "integer",
+            "title": "Gap Count"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ScanWarningOut"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "stats": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Stats"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "book_version_id",
+          "job_id",
+          "scanner_version",
+          "quote_count",
+          "top_level_quote_count",
+          "gap_count"
+        ],
+        "title": "ScanResultOut"
+      },
+      "ScanWarningOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "position_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Position Cp"
+          },
+          "delimiter": {
+            "type": "string",
+            "title": "Delimiter"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "position_cp",
+          "delimiter",
+          "detail"
+        ],
+        "title": "ScanWarningOut"
       },
       "ValidationError": {
         "properties": {

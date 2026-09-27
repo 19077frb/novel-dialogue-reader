@@ -4,7 +4,7 @@
 不确定的对白交给用户确认。产品目标见 [PLAN.md](PLAN.md)，实现规格见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 > **当前状态（2026-09-28）**：已完成 **T00 工程骨架**、**T01 领域模型/数据库迁移/公共契约**、
-> **T02 TXT 导入**、**T03 EPUB 导入与资源**、**T04 书架与无模型阅读器**（模型配置、识别预览、待确认与导出 **尚未实现**）。
+> **T02 TXT 导入**、**T03 EPUB 导入与资源**、**T04 书架与无模型阅读器**、**T05 候选引语/Gap 与金标准工具**（模型配置、识别预览、待确认与导出 **尚未实现**）。
 > 真实模型联调（live）与真实作品效果评测（quality）**均未开始**，没有任何准确率数据。
 > 进度与证据见 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)，交接见 [docs/HANDOFF.md](docs/HANDOFF.md)。
 
@@ -55,6 +55,38 @@ npm --prefix frontend run dev -- --host 127.0.0.1           # 前端 http://127.
 
 界面现在**不会**显示任何识别结果（颜色/编号/人物名）——那是 T05 起接入的标注层，
 `AnnotationLayer` 目前只是带节点定位属性的占位容器。
+
+## 候选引语与金标准（T05）
+
+导入后会自动扫描**候选引语**与它们之间的 **Gap**（不调用模型、不做说话人判断）：
+
+```powershell
+$bookId = (Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books").data.items[0].id
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId/quotes"            | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId/gaps"              | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId/locate?start_cp=0&end_cp=20"
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8765/api/books/$bookId/quotes/scan"
+```
+
+- 阅读页会把候选画成**虚线**（可一键关闭），并明确标注“尚未判定说话人”；颜色/编号要等 T11 起。
+- 候选 ID 由（原文版本 + 位置 + 扫描器版本）稳定派生；重新扫描幂等，但**已有用户标注时返回 409**，
+  不会覆盖人工结果。
+- 异常引号不会吞章：单条候选超过长度/跨段/嵌套上限会被丢弃并在扫描警告里说明。
+
+金标准（评测用）工具有三个子命令，全部离线、不需要模型：
+
+```powershell
+# 校验（结构 + 引用 + 范围 + 扫描器覆盖率）
+uv run --project backend python backend/scripts/gold_standard.py validate `
+  --gold evaluation/examples/minimal-txt-001/gold.json `
+  --text evaluation/examples/minimal-txt-001/text.txt
+
+# 生成可填写的标注模板（模板不是金标准）
+uv run --project backend python backend/scripts/gold_standard.py template --text .\我的小说.txt --out .\gold-template.json
+
+# 只看候选扫描结果（离线 sanity check）
+uv run --project backend python backend/scripts/gold_standard.py scan --text .\我的小说.txt
+```
 
 ## 数据库与迁移
 
