@@ -23,7 +23,7 @@ FakeProvider 或自造样例通过只记入 Offline。
 | T09 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **271 passed**（新增 `test_scene_state.py` 16 项 + `test_attribution_engine.py` 9 项）：UPDATE 不切场景、BREAK 关旧开新并清空参与者、UNCERTAIN 保留待定边界、状态快照往返、编号按首次发言顺序、接受策略（DIRECT→ACCEPTED / 风格与指代→PROVISIONAL / 证据不足→UNKNOWN 且**不建新人**）、非 speech 不污染人物、可见时点取最靠后证据、身份修订四类判定；引擎侧 F09/F07/F05/F06/F14/F12/F08/F17/F13 全部覆盖（跨窗口沿用同一分组、后文合并记录可见时点、锁定对白不被覆盖、坏 JSON 有限重试且不留半成品）；`ruff` 全绿。Live=BLOCKED：**全部用 FakeProvider 验证状态机，没有真实模型**（真实效果属 T16） | 进入 T10：持久化任务、缓存与用量 |
 | T10 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **283 passed**（新增 `test_cache.py` 4 项 + `test_jobs.py` 8 项）：同语义同缓存键且键里没有 job_id/purpose、提示/策略/模式/horizon 变化会换键、存储往返不覆盖；预览→处理同范围**命中缓存且发送次数不增加**、同幂等键同摘要复用任务、同键不同摘要 409、**已完成窗口不重复调用**、预算到顶不发调用、未知用量不写 0 且已知用量按口径结算、**未知结果不自动重发**且显式 retry 才回 QUEUED、暂停在窗口之间生效、估算纯本地；`ruff` 全绿；前端 typecheck/test/build 通过（类型跟随 JobDetailOut）；OpenAPI 25 条路径。Live=BLOCKED：真实提供方任务执行无凭据；后台工作循环/多进程属 T14 | 进入 T11：真实效果预览与按章处理 |
 | T11 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **287 passed**（新增 `test_annotations_projection.py` 4 项：FakeProvider 默认 UNKNOWN 时无颜色/编号、有明确归属时给场景内稳定色号且初读 horizon 之下不下发、投影只读且多次请求不新增标注/推理尝试、确定性 FakeProvider 端到端产生 S1 颜色）；`ruff` 全绿。前端 `vitest` → **41 passed**（`DocumentRenderer` 标注 6 项 + `PreviewPage` 4 项 + `ReaderPage` 新增 2 项）、typecheck/build 通过；Playwright → **12 passed**（新增 `preview.spec.ts` 3 项：TXT 估算→试运行着色→原文/标注切换零调用→正式处理 `calls=0` 且缓存命中窗口数=窗口总数；EPUB 预览着色且 ruby 仍在 `<rt>`；按章切换范围同步）。Live=BLOCKED：**没有真实提供方凭据，预览用的是显式启用的确定性 FakeProvider**（离线信号，不是真实效果） | 进入 T12：人工更正、分组修订与撤销后端；T16 仍需真实作品效果评测 |
-| T12 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 人工更正、分组修订与撤销 |
+| T12 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **302 passed**（新增 `test_corrections.py` 9 项 + `test_identity_revisions.py` 6 项）：四种说话人更正（含**未处理对白**与主动标记幂等）、跨场景误关联 422、并发旧版本 409 且不改数据（F18）、**撤销越过新修订 409 且保留较新修改**（F18）、`mark_unknown` 不新建分组、模型结果**不覆盖人工锁定**（F14，换模型名绕过缓存后真实调用适配器）、下游 `stale` + `STALE_DEPENDENCY`、Gap `BREAK` 拆场景与撤销、merge/split 与撤销、历史只追加（行数断言）、更正/撤销**零模型调用**（`inference_runs` 行数不变）；`ruff` 全绿 | 进入 T13：待确认队列与阅读页确认抽屉（前端） |
 | T13 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 待确认队列与阅读页确认抽屉 |
 | T14 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 暂停恢复、预算到顶与故障闭环 |
 | T15 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 证据时点、阅读投影与最终定位回归 |
@@ -44,10 +44,12 @@ FakeProvider 或自造样例通过只记入 Offline。
   仍不使用模型，因此只记入 Offline。
 - T11 的 Live = BLOCKED：预览页与阅读页的着色链路已用**确定性 FakeProvider**离线验证，
   但**没有真实提供方凭据与预算**，所以“真实效果预览”只是协议与渲染链路打通，不代表真实识别质量。
+- T12 的 Live = BLOCKED：更正/撤销是本地事务（不需要模型），已用真实 SQLite 事务与 FastAPI 请求验证；
+  但“更正后重新推理”的真实效果仍无凭据可测（属 T16），界面（队列与确认抽屉）属 T13。
 - 导入、阅读、候选覆盖、模型配置、任务与用量、颜色/编号投影均已可用：预览页可做范围估算、小范围试运行、
   原文/标注对比与按章处理，结果直接复用到正式阅读。
-  仍缺：人工更正与待确认队列（T12/T13）、导出（T15A/T15B）、真实作品效果评测（T16）。
+  仍缺：待确认队列的**界面**（T13）、导出（T15A/T15B）、真实作品效果评测（T16）。
 - `data/run/*.log` 是本地运行产物（已忽略提交），可用账本列出的命令复现。
 - 已知命令偏差见 README“已知命令偏差”与决策 0001/0003；EPUB 表示见 0005；前端结构见 0006；
   扫描与金标准见 0007；凭据处理见 0008；适配器与输出契约见 0009；上下文与预算见 0010；
-  场景/接受/身份修订见 0011；任务/缓存/用量见 0012；标注投影与预览见 0013。
+  场景/接受/身份修订见 0011；任务/缓存/用量见 0012；标注投影与预览见 0013；人工更正与撤销见 0014。

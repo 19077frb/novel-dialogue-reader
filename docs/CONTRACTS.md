@@ -401,3 +401,40 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 - `NDR_ALLOW_FAKE_PROVIDER=1` 才允许 `fake-provider` 协议。
 - `NDR_FAKE_PROVIDER_LABELS=deterministic` 让该适配器确定性地建一个分组并返回 `DIRECT` 归属，
   用于离线验证“颜色/编号”链路；默认 `unknown`（全部标为未知，不假装知道说话人）。
+
+## 21. 人工更正、待确认队列与身份修订（T12 已实现）
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /api/books/{id}/review-items` | 待确认队列；可按 `chapter_id`/`scene_id`/`reason`/`queue_status` 过滤，cursor 分页，附 `counts` |
+| `GET /api/review-items/{id}` | 目标、当前标注、场景、前后叙述与允许的动作（`assign_existing`… 或 `set_gap_decision`） |
+| `POST /api/quotes/{id}/review-items` | 用户主动标记问题（201，幂等：同一目标 + 原因只有一条当前项；已解决项会被重新打开） |
+| `POST /api/review-items/{id}/defer` | 只延后（`queue_status=DEFERRED`）；已解决项返回 409 |
+| `POST /api/quotes/{id}/corrections` | 说话人更正：`assign_existing` / `create_speaker` / `set_kind` / `mark_unknown`（201） |
+| `POST /api/gaps/{id}/corrections` | Gap 更正：`CONTINUE`/`UPDATE`/`BREAK`/`UNCERTAIN`，返回场景修订影响（201） |
+| `POST /api/scenes/{id}/speaker-revisions` | 场景内 `MERGE`/`SPLIT`（201） |
+| `POST /api/corrections/{id}/undo` | 撤销一次人工更正（201；历史只追加） |
+
+语义要点（DEVELOPMENT.md 3.4 / 5.3 / 6.4）：
+
+- **一个事务一个结果**：校验版本 → 写 `corrections` → 写 `annotation_history` 旧快照 → 改当前投影 →
+  解决待确认项 → 标下游 `stale`。任何一步失败都整体回滚。
+- **零模型调用**：这些接口只写更正/历史/队列，不创建 `inference_runs`（测试对行数做了断言）。
+- **人工优先**：更正后的标注 `source=USER`、`status=USER_CONFIRMED`（`mark_unknown` 为 `UNKNOWN`）、
+  `user_locked=true`；模型结果与自动 merge/split 都不得覆盖它（F14，调度器把锁定 ID 传给引擎）。
+- **未知不制造新人**：`mark_unknown` 只锁定「未知」，不新建分组，也不把 `assignment` 落到非 speech 类型上。
+- **普通对白也能改**：目标还没有标注时先建立一个未处理占位标注（并在没有场景时新建场景），
+  因此 `GET /api/quotes/{id}` / 更正接口不要求该对白已在待确认队列里。
+- **跨场景拒绝**：多目标范围与 `assign_existing` 只允许同一场景内的分组，否则 422
+  （`CROSS_SCENE_SPEAKER` / `CROSS_SCENE_SCOPE`）；`SPLIT` 的桶必须属于同一个分组，否则 `SPLIT_MIXED_GROUPS`。
+- **下游失效**：同一场景内、同一推理窗口（或同一旧分组）的下游标注被标为 `stale` 并生成
+  `STALE_DEPENDENCY` 待确认项；锁定的对白不动、历史不改。`stale_window_ids` 报告受影响的依赖哈希。
+- **撤销**：目标必须仍停在该次更正产生的版本上，否则 409 `VERSION_CONFLICT`（F18）；
+  撤销本身也写一条 `action=undo` 的更正记录 + 标注历史，**不做硬删除**；同一条更正不能重复撤销。
+- **Gap 更正**：`BREAK` 关闭左侧场景并把其后的引语移入新场景（按新场景重新编号）；`CONTINUE`/`UPDATE`
+  在右侧属于别的场景时合并回左侧（被合并场景标记为已关闭）；`UNCERTAIN` 只把边界问题留在队列里。
+  场景与引语的历史都保留，撤销按记录的原 `speaker_id` 精确还原。
+- **响应里的权威计数**：`updated_review_counts` 是扁平 map，键为状态值（`PENDING`/`DEFERRED`/`RESOLVED`）、
+  原因值（`STALE_DEPENDENCY`…）与 `total`；前端不得自己推算。
+- `GET /api/quotes/{id}` 在 T05 的上下文/Gap 之上补充 `annotation`、`scene`、`scene_groups`、
+  `review_items` 与 `can_correct`（未处理的对白 `annotation=null`）。

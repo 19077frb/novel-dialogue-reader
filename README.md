@@ -92,6 +92,23 @@ npm --prefix frontend run dev -- --host 127.0.0.1           # 前端 http://127.
 - 未知（UNKNOWN）不显示颜色也不显示编号：未知对白不等于新人。
 - 阅读页（`/books/:bookId/read`）用同一套投影着色，可一键关闭标注；候选虚线覆盖与标注是两层不同的信息。
 
+## 人工更正与待确认队列（T12）
+
+不需要等模型自己改对：普通对白和待确认项都能人工修正，**这些操作不调用模型**（不产生费用）。
+
+- 更正动作：指定已有说话人（`assign_existing`）、新建说话人（`create_speaker`）、改类型
+  （`set_kind`）、锁定为未知（`mark_unknown`）；Gap 可确认 `CONTINUE/UPDATE/BREAK/UNCERTAIN`；
+  同一场景内还能把两个分组 `MERGE` 或把一个分组 `SPLIT`。
+- 人工确认的结果会**锁定**（`user_locked`）：之后的模型结果与自动合并都不会覆盖它。
+- 锁定未知 ≠ 跳过：未知只是「这句还不知道是谁」，不会因此新建人物。
+- 撤销走 `POST /api/corrections/{id}/undo`：目标仍停在这次更正的版本上才允许，
+  否则返回 409（另一处已更新），**不会**回滚掉较新的修改；历史只追加，不做硬删除。
+- 更正会影响同一推理窗口的其它对白：它们被标为 `stale` 并进入 `STALE_DEPENDENCY` 待确认项，
+  等用户重新确认（界面在 T13 接入）。
+- 队列接口：`GET /api/books/{id}/review-items`（按章节/场景/原因/状态过滤）、
+  `GET /api/review-items/{id}`、`POST /api/quotes/{id}/review-items`（主动标记，幂等）、
+  `POST /api/review-items/{id}/defer`（只延后）。
+
 ## 场景与匿名分组（T09）
 
 模型结果不会直接变成「谁在说话」，而是先过一遍保守的接受策略：
