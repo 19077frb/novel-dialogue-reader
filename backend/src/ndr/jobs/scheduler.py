@@ -23,10 +23,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
-from ..context.budget import DEFAULT_POLICY, BudgetPolicy
+from ..context.budget import DEFAULT_POLICY, BudgetPolicy, policy_for_version
+from ..context.recheck import plan_recheck, route_window
 from ..context.service import load_window_inputs, plan_range
+from ..context.window_builder import plan_windows
 from ..domain.enums import (
     AnnotationSource,
+    AnnotationStatus,
     CredentialMode,
     InferenceRunState,
     JobState,
@@ -41,11 +44,12 @@ from ..scenes.engine import apply_window
 from ..scenes.runner import _messages_for, _targets_for
 from ..scenes.state import SceneState
 from ..storage.cache import CacheKeyParts, ResultCacheStore, compute_cache_key, fingerprint
-from ..storage.models import Annotation, BookVersion, InferenceRun, Job, JobWindow
+from ..storage.models import Annotation, BookVersion, InferenceRun, Job, JobWindow, ModelProfile
 from .service import (
     credential_mode_of,
     credential_reference,
     profile_for_job,
+    profile_snapshot,
     spent_tokens,
 )
 
@@ -76,6 +80,11 @@ class JobRunOutcome:
     cached_windows: int = 0
     calls: int = 0
     unknown_runs: int = 0
+    # T17：成本路由与局部复核的计数（默认都是 0；不是估计值）
+    strong_windows: int = 0
+    recheck_windows: int = 0
+    recheck_targets: int = 0
+    recheck_calls: int = 0
     budget_exhausted: bool = False
     errors: list[str] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=dict)
@@ -89,6 +98,10 @@ class JobRunOutcome:
             "cached_windows": self.cached_windows,
             "calls": self.calls,
             "unknown_runs": self.unknown_runs,
+            "strong_windows": self.strong_windows,
+            "recheck_windows": self.recheck_windows,
+            "recheck_targets": self.recheck_targets,
+            "recheck_calls": self.recheck_calls,
             "budget_exhausted": self.budget_exhausted,
             "errors": list(self.errors),
             "usage": self.usage,
@@ -122,6 +135,38 @@ def _reading_mode_of(job: Job) -> ReadingMode:
 
 def _load_state(job: Job) -> SceneState:
     return SceneState.from_snapshot(_json_of(job.checkpoint_json).get("scene_state"))
+
+
+def policy_for_job(job: Job) -> BudgetPolicy:
+    """任务范围的 ``context_policy`` 选择版本化的上下文策略；缺省一律保守的 ``context-1``。"""
+
+    return policy_for_version(_range_of(job).get("context_policy"))
+
+
+def _strong_profile(session: Session, job: Job) -> ModelProfile | None:
+    """成本路由用的强模型配置（任务范围里的 ``strong_profile_id``）；没有就不路由。"""
+
+    profile_id = _range_of(job).get("strong_profile_id")
+    if not profile_id:
+        return None
+    return session.get(ModelProfile, str(profile_id))
+
+
+def _unresolved_targets(session: Session, window) -> list[str]:  # noqa: ANN001
+    """首次结果里「未解决」（UNKNOWN 且未被用户锁定）的目标，按窗口顺序返回。"""
+
+    quote_ids = list(window.target_quote_ids)
+    if not quote_ids:
+        return []
+    rows = session.execute(
+        select(Annotation).where(
+            Annotation.quote_id.in_(quote_ids),
+            Annotation.status == AnnotationStatus.UNKNOWN,
+            Annotation.user_locked.is_(False),
+        )
+    ).scalars()
+    unresolved = {row.quote_id for row in rows}
+    return [quote_id for quote_id in quote_ids if quote_id in unresolved]
 
 
 def _plan(
@@ -278,6 +323,138 @@ def _apply_payload(
     return True, []
 
 
+def _run_recheck(
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    *,
+    job_id: str,
+    version: BookVersion,
+    window,  # noqa: ANN001 - ProcessingWindow
+    adapter: ProviderAdapter | None,
+    snapshot: dict[str, Any] | None,
+    policy: BudgetPolicy,
+    reading_mode: ReadingMode,
+    horizon_cp: int | None,
+) -> dict[str, int]:
+    """T17 有限局部复核：只复核未解决的目标，并用保守策略把压缩丢掉的行文补回。
+
+    复核是**额外**一次尝试：单独写 `inference_runs` 并计入用量（不是只统计最后一次调用）。
+    复核失败不改变首次结果；只有超时（结果未知、可能已计费）才升级为人工对账。
+    """
+
+    stats = {"windows": 0, "targets": 0, "calls": 0, "restored_evidence": 0, "unknown_outcome": 0}
+    if adapter is None:
+        return stats
+
+    with session_factory() as session:
+        decision = plan_recheck(
+            policy=policy,
+            window=window,
+            unresolved_target_ids=_unresolved_targets(session, window),
+        )
+        if not decision.enabled:
+            return stats
+        inputs = load_window_inputs(
+            session,
+            settings,
+            version,
+            reading_mode=reading_mode,
+            visible_horizon_cp=horizon_cp,
+            scene_ref=window.scene_ref,
+            policy=DEFAULT_POLICY,  # 复核一律回到保守策略：把压缩阶段丢掉的句子补回来
+        )
+        recheck_windows = plan_windows(inputs, target_quote_ids=list(decision.targets)).windows
+
+    if not recheck_windows:
+        return stats
+    if decision.restore_evidence:
+        stats["restored_evidence"] = 1
+
+    for recheck_window in recheck_windows:
+        with session_factory() as session:
+            job = session.get(Job, job_id)
+            assert job is not None
+            cache_key = _cache_key_for(
+                job=job, version=version, window=recheck_window, snapshot=snapshot
+            )
+            cached_result = ResultCacheStore(session).get(cache_key)
+            state = _load_state(job)
+
+        raw: Any = None
+        run_id: str | None = None
+        elapsed_ms = 0
+        if cached_result is None:
+            raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
+                session_factory,
+                adapter,
+                job_id=job_id,
+                window=recheck_window,
+                state=state,
+                snapshot=snapshot,
+                settings=settings,
+            )
+            stats["calls"] += 1
+            if error is not None:
+                timeout = error.kind is ProviderErrorKind.TIMEOUT
+                with session_factory() as session:
+                    run = session.get(InferenceRun, run_id) if run_id else None
+                    if run is not None:
+                        run.elapsed_ms = elapsed_ms
+                        run.error_code = error.code.value
+                        run.state = (
+                            InferenceRunState.UNKNOWN_OUTCOME
+                            if timeout
+                            else InferenceRunState.FAILED
+                        )
+                        if not timeout:
+                            run.usage_json = None
+                    if timeout:
+                        failed_job = session.get(Job, job_id)
+                        if failed_job is not None:
+                            failed_job.state = JobState.NEEDS_RECONCILIATION
+                            failed_job.last_error = f"复核超时，结果未知：{error.message}"
+                    session.commit()
+                if timeout:
+                    stats["unknown_outcome"] = 1
+                    return stats
+                continue
+        else:
+            raw = cached_result.payload()
+
+        with session_factory() as session:
+            job = session.get(Job, job_id)
+            assert job is not None
+            state = _load_state(job)
+            ok, _codes = _apply_payload(
+                session,
+                window=recheck_window,
+                inputs=inputs,
+                state=state,
+                raw=raw,
+                run_id=run_id,
+                cache_key=cache_key,
+            )
+            if run_id:
+                run = session.get(InferenceRun, run_id)
+                if run is not None:
+                    run.elapsed_ms = elapsed_ms
+                    if ok:
+                        run.state = InferenceRunState.SUCCEEDED
+                        usage = raw.get("_usage") if isinstance(raw, dict) else None
+                        known_usage = bool(usage) and not usage.get("unknown")
+                        run.usage_json = (
+                            json.dumps(usage, ensure_ascii=False) if known_usage else None
+                        )
+                    else:
+                        run.state = InferenceRunState.FAILED
+                        run.error_code = "INVALID_MODEL_OUTPUT"
+            if ok:
+                stats["windows"] += 1
+                stats["targets"] += len(recheck_window.target_quote_ids)
+            session.commit()
+    return stats
+
+
 def _build_adapter(
     settings: Settings,
     credentials,  # noqa: ANN001
@@ -419,12 +596,19 @@ def run_job(
     credentials=None,  # noqa: ANN001 - CredentialService
     adapter_factory: Callable[[Job, dict[str, Any] | None], ProviderAdapter] | None = None,
     max_windows: int | None = None,
+    policy: BudgetPolicy | None = None,
 ) -> JobRunOutcome:
-    """把任务跑到终态（或暂停 / 预算耗尽 / 需要人工对账）。"""
+    """把任务跑到终态（或暂停 / 预算耗尽 / 需要人工对账）。
+
+    T17：上下文策略默认取任务范围里的 ``context_policy``（缺省是保守的 ``context-1``）；
+    显式传入 ``policy`` 可以覆盖它（测试与 B3/B4 消融对比用）。
+    """
 
     outcome = JobRunOutcome(job_id=job_id, state=JobState.QUEUED)
     calls = cached = done = 0
-    policy = DEFAULT_POLICY
+    strong_used = 0
+    requested_policy = policy
+    policy = requested_policy or DEFAULT_POLICY
 
     # ---------- 阶段 1：准备（短事务） ----------
     with session_factory() as session:
@@ -450,6 +634,7 @@ def run_job(
             outcome.state = JobState.FAILED
             return outcome
 
+        policy = requested_policy or policy_for_job(job)
         # 不要覆盖 PAUSING：让窗口之间的暂停检查有机会生效
         if job.state is not JobState.PAUSING:
             job.state = JobState.RUNNING
@@ -468,6 +653,10 @@ def run_job(
         profile = profile_for_job(session, job)
         credential_mode = credential_mode_of(profile)
         credential_ref = credential_reference(profile)
+        strong_profile = _strong_profile(session, job)
+        strong_snapshot = profile_snapshot(strong_profile) if strong_profile is not None else None
+        strong_mode = credential_mode_of(strong_profile)
+        strong_ref = credential_reference(strong_profile)
         session.commit()
 
     outcome.windows_total = len(plan.windows)
@@ -498,6 +687,51 @@ def run_job(
             outcome.state = JobState.FAILED
             outcome.errors.append(exc.code.value)
             return outcome
+
+    # T17 成本路由：只有策略开启、且任务里指定了强模型配置时才可能升级
+    strong_adapter: ProviderAdapter | None = None
+    if policy.strong_model_share > 0 and strong_snapshot is not None:
+        if adapter_factory is not None:
+            strong_adapter = adapter_factory(job, strong_snapshot)
+        elif credentials is not None:
+            try:
+                strong_adapter = _build_adapter(
+                    settings,
+                    credentials,
+                    snapshot=strong_snapshot,
+                    credential_mode=strong_mode,
+                    credential_ref=strong_ref,
+                )
+            except ProviderError as exc:
+                # 强模型不可用不是致命错误：如实退回基础模型，并把原因记进结果
+                strong_adapter = None
+                outcome.errors.append(f"strong_route_unavailable:{exc.code.value}")
+
+    def _maybe_recheck(window_, window_adapter_, window_snapshot_) -> bool:  # noqa: ANN001, ANN202
+        """首次结果落地后的有限复核（默认关闭）；返回 False 表示任务需要人工对账。"""
+
+        if policy.recheck_max_targets <= 0 or window_adapter_ is None:
+            return True
+        stats = _run_recheck(
+            session_factory,
+            settings,
+            job_id=job_id,
+            version=version,
+            window=window_,
+            adapter=window_adapter_,
+            snapshot=window_snapshot_,
+            policy=policy,
+            reading_mode=_reading_mode_of(job_snapshot),
+            horizon_cp=window_.visible_horizon_cp,
+        )
+        outcome.recheck_windows += int(stats["windows"])
+        outcome.recheck_targets += int(stats["targets"])
+        outcome.recheck_calls += int(stats["calls"])
+        if stats.get("unknown_outcome"):
+            outcome.unknown_runs += 1
+            outcome.state = JobState.NEEDS_RECONCILIATION
+            return False
+        return True
 
     # ---------- 阶段 2：逐窗口 ----------
     for window in plan.windows:
@@ -553,8 +787,19 @@ def run_job(
             outcome.budget_exhausted = True
             break
 
+        # T17 成本路由：默认关闭；开启时也只升级困难窗口，且不超过 share 上限
+        route = route_window(
+            policy=policy,
+            window=window,
+            total_windows=len(plan.windows),
+            strong_available=strong_adapter is not None,
+            strong_used=strong_used,
+        )
+        window_adapter = strong_adapter if route.strong else adapter
+        window_snapshot = strong_snapshot if route.strong else snapshot
+
         cache_key = _cache_key_for(
-            job=job_snapshot, version=version, window=window, snapshot=snapshot
+            job=job_snapshot, version=version, window=window, snapshot=window_snapshot
         )
 
         # 缓存命中：不调用模型，也不新增推理尝试
@@ -601,9 +846,12 @@ def run_job(
                 job.last_error = None if ok else f"缓存结果未通过校验：{codes}"
                 session.commit()
             if ok:
+                # T17：首次结果落地后按策略做有限局部复核（默认关闭）
+                if not _maybe_recheck(window, window_adapter, window_snapshot):
+                    return outcome
                 continue
 
-        if adapter is None:
+        if window_adapter is None:
             outcome.errors.append("adapter_unavailable")
             with session_factory() as session:
                 job = session.get(Job, job_id)
@@ -616,13 +864,17 @@ def run_job(
 
         # 一次（或有限次退避重试的）尝试：
         # PREPARED → DISPATCHED（提交）→ 调用（无事务）→ 应用 + 结算（新事务）
+        if route.strong:
+            strong_used += 1
+            outcome.strong_windows += 1
+
         raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
             session_factory,
-            adapter,
+            window_adapter,
             job_id=job_id,
             window=window,
             state=state,
-            snapshot=snapshot,
+            snapshot=window_snapshot,
             settings=settings,
         )
 
@@ -711,11 +963,17 @@ def run_job(
                     "calls": calls,
                     "cached_windows": cached,
                     "unknown_runs": outcome.unknown_runs,
+                    "strong_windows": outcome.strong_windows,
+                    "route": route.as_dict(),
                 },
                 ensure_ascii=False,
             )
             job.last_error = None
             session.commit()
+
+        # T17：有限局部复核（默认关闭；只有策略显式开启才会多花一次调用）
+        if not _maybe_recheck(window, window_adapter, window_snapshot):
+            return outcome
 
     # ---------- 阶段 3：收尾 ----------
     with session_factory() as session:
@@ -734,6 +992,10 @@ def run_job(
                         "windows_done": done,
                         "cached_windows": cached,
                         "calls": calls,
+                        "strong_windows": outcome.strong_windows,
+                        "recheck_windows": outcome.recheck_windows,
+                        "recheck_targets": outcome.recheck_targets,
+                        "recheck_calls": outcome.recheck_calls,
                     },
                     ensure_ascii=False,
                 )

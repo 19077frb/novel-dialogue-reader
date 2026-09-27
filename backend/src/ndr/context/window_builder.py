@@ -19,12 +19,14 @@ from typing import Any
 from ..domain.enums import ReadingMode
 from ..llm.prompts import LABELING_PROMPT_VERSION
 from .budget import (
+    CONTEXT_POLICY_CONSERVATIVE,
     DEFAULT_ESTIMATOR,
     DEFAULT_POLICY,
     BudgetItemKind,
     BudgetPolicy,
     TokenEstimator,
     estimate_tokens,
+    policy_version_for,
 )
 from .source_selection import (
     ContextFragment,
@@ -35,7 +37,9 @@ from .source_selection import (
     select_evidence,
 )
 
-CONTEXT_POLICY_VERSION = "context-1"
+# 默认（保守）上下文策略的版本号。窗口/计划真正使用的版本由 `policy_version_for(policy)` 计算：
+# 开启 T17 压缩策略（context-2）会得到不同的窗口 ID、依赖哈希与缓存键，避免错误复用缓存。
+CONTEXT_POLICY_VERSION = CONTEXT_POLICY_CONSERVATIVE
 OVERSIZED_WARNING = "oversized_quote"
 
 
@@ -222,6 +226,7 @@ def plan_windows(
 
     groups, split_warnings = _split_targets(inputs=inputs, ordered_targets=ordered)
     warnings = [*missing_warnings(missing), *split_warnings]
+    policy_version = policy_version_for(inputs.policy)
 
     windows: list[ProcessingWindow] = []
     previous_quote_id: str | None = None
@@ -246,7 +251,7 @@ def plan_windows(
         window_id = _window_id(
             book_version_id=inputs.book_version_id,
             target_ids=target_ids,
-            policy_version=CONTEXT_POLICY_VERSION,
+            policy_version=policy_version,
             prompt_version=inputs.prompt_version,
             reading_mode=inputs.reading_mode,
             horizon=selection.horizon_cp,
@@ -258,7 +263,7 @@ def plan_windows(
             selection.fragment_ids,
             [_record.fragment_id for _record in selection.omitted],
             inputs.policy.as_key(),
-            CONTEXT_POLICY_VERSION,
+            policy_version,
             inputs.prompt_version,
             inputs.reading_mode.value,
             selection.horizon_cp,
@@ -294,7 +299,7 @@ def plan_windows(
                 reading_mode=inputs.reading_mode,
                 visible_horizon_cp=selection.horizon_cp,
                 prompt_version=inputs.prompt_version,
-                policy_version=CONTEXT_POLICY_VERSION,
+                policy_version=policy_version,
                 dependency_hash=dependency_hash,
                 estimated_tokens={key: int(value) for key, value in estimated.items()},
                 budget=summary,
@@ -313,7 +318,7 @@ def plan_windows(
         inputs.book_version_id,
         sorted(target_quote_ids),
         [window.dependency_hash for window in windows],
-        CONTEXT_POLICY_VERSION,
+        policy_version,
         inputs.prompt_version,
         inputs.reading_mode.value,
         inputs.visible_horizon_cp if inputs.reading_mode is ReadingMode.INITIAL else None,
@@ -334,6 +339,7 @@ def plan_windows(
         warnings=tuple(warnings),
         dependency_hash=plan_hash,
         policy=inputs.policy,
+        policy_version=policy_version,
         stats=stats,
     )
 

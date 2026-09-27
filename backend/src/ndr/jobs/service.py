@@ -277,10 +277,15 @@ def usage_summary(session: Session, book_id: str) -> dict[str, Any]:
     by_model: dict[str, int] = {}
     for run, job in rows:
         by_state[run.state.value] = by_state.get(run.state.value, 0) + 1
+        # T17：按**每次尝试自己的**配置快照归属模型（成本路由会为个别窗口换模型，
+        # 只看任务级快照会把强模型用量算到基础模型头上）。
+        snapshot_raw = run.profile_snapshot_json or (
+            job.profile_snapshot_json if job is not None else None
+        )
         model = ""
-        if job is not None and job.profile_snapshot_json:
+        if snapshot_raw:
             try:
-                model = json.loads(job.profile_snapshot_json).get("model", "") or ""
+                model = json.loads(snapshot_raw).get("model", "") or ""
             except json.JSONDecodeError:
                 model = ""
         if model:

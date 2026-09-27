@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from ndr.context.budget import (
+    COMPRESSED_POLICY,
     DEFAULT_ESTIMATOR,
     DEFAULT_POLICY,
     RECHECK_POLICY,
@@ -16,6 +17,8 @@ from ndr.context.budget import (
     BudgetLedger,
     BudgetPolicy,
     estimate_tokens,
+    policy_for_version,
+    policy_version_for,
 )
 
 
@@ -113,7 +116,16 @@ def test_policy_defaults_follow_plan_7_3() -> None:
     assert 100 <= DEFAULT_POLICY.overlap_tokens <= 300
     assert DEFAULT_POLICY.gap_compression is False  # 激进压缩默认关闭
     assert RECHECK_POLICY.context_tokens > DEFAULT_POLICY.context_tokens
-    # 参与依赖哈希的字段必须完整
+    # T17：两个优化开关默认关闭（没有真实对比证据就不改默认策略）
+    assert DEFAULT_POLICY.recheck_max_targets == 0
+    assert DEFAULT_POLICY.strong_model_share == 0.0
+    assert policy_version_for(DEFAULT_POLICY) == "context-1"
+    assert policy_version_for(COMPRESSED_POLICY) == "context-2"
+    assert policy_for_version("context-2") is COMPRESSED_POLICY
+    assert policy_for_version("context-1") is DEFAULT_POLICY
+    assert policy_for_version("unknown-policy") is DEFAULT_POLICY
+    assert policy_for_version(None) is DEFAULT_POLICY
+    # 参与依赖哈希的字段必须完整（漏一个字段就会错误复用缓存）
     key = DEFAULT_POLICY.as_key()
     assert set(key) == {
         "context_tokens",
@@ -122,6 +134,11 @@ def test_policy_defaults_follow_plan_7_3() -> None:
         "prompt_reserve_tokens",
         "output_reserve_tokens",
         "gap_compression",
+        "gap_compression_threshold_cp",
+        "gap_compression_margin_sentences",
+        "gap_compression_max_ratio",
+        "recheck_max_targets",
+        "strong_model_share",
     }
 
 

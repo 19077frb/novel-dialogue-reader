@@ -29,6 +29,113 @@ from .budget import (
 
 HORIZON_OMIT_REASON = "beyond_visible_horizon"
 BUDGET_OMIT_REASON = "budget_exhausted"
+COMPRESSION_OMIT_REASON = "gap_compression"
+COMPRESSION_SKIPPED_WARNING = "gap_compression_skipped:insufficient_savings"
+
+# 可能承载「谁在说话」的线索：出现这些词就**保留**（宁可多留，不可漏留）
+ATTRIBUTION_CUES: tuple[str, ...] = (
+    "说",
+    "道",
+    "问",
+    "答",
+    "喊",
+    "叫",
+    "低语",
+    "嘟囔",
+    "回答",
+    "反问",
+    "开口",
+    "出声",
+    "回话",
+    "点头",
+    "摇头",
+    "笑",
+    "叹",
+    "沉默",
+    "看向",
+    "转向",
+    "抬起头",
+    "低下头",
+)
+QUOTE_MARKERS: tuple[str, ...] = ("「", "」", "『", "』", "“", "”", '"', "'")
+SENTENCE_ENDINGS = "。！？!?"
+
+
+def split_sentences(text: str) -> list[tuple[int, int, str]]:
+    """按句末标点/换行切句，返回 ``(相对起点, 相对终点, 句子)``；不丢字符。"""
+
+    sentences: list[tuple[int, int, str]] = []
+    start = 0
+    for index, char in enumerate(text):
+        if char in SENTENCE_ENDINGS or char == "\n":
+            end = index + 1
+            sentences.append((start, end, text[start:end]))
+            start = end
+    if start < len(text):
+        sentences.append((start, len(text), text[start:]))
+    return sentences
+
+
+def looks_like_evidence(sentence: str) -> bool:
+    """是否为「可能揭示说话人」的句子（保守：命中任一线索就保留）。"""
+
+    if any(marker in sentence for marker in QUOTE_MARKERS):
+        return True
+    return any(cue in sentence for cue in ATTRIBUTION_CUES)
+
+
+def compress_gap_spans(
+    text: str,
+    *,
+    threshold_cp: int,
+    margin_sentences: int,
+    max_ratio: float,
+) -> tuple[list[tuple[int, int, str]], list[tuple[int, int, str]]]:
+    """长 Gap 的保守筛选。
+
+    返回 ``(保留片段, 丢弃片段)``，坐标是**相对 text 起点**的 ``(start, end, text)``。
+    规则：命中线索的句子保留；其前后各补回 ``margin_sentences`` 句；
+    若这样仍然省不下来（保留比例 > ``max_ratio``）就整体放弃压缩（返回空丢弃列表）。
+    """
+
+    if len(text) <= threshold_cp:
+        return [(0, len(text), text)], []
+    sentences = split_sentences(text)
+    if len(sentences) < 3:
+        return [(0, len(text), text)], []
+
+    hit = [
+        index
+        for index, (_start, _end, sentence) in enumerate(sentences)
+        if looks_like_evidence(sentence)
+    ]
+    hit.append(0)
+    hit.append(len(sentences) - 1)
+    expanded: set[int] = set()
+    for index in hit:
+        for offset in range(-margin_sentences, margin_sentences + 1):
+            candidate = index + offset
+            if 0 <= candidate < len(sentences):
+                expanded.add(candidate)
+    kept_cp = sum(sentences[index][1] - sentences[index][0] for index in expanded)
+    if kept_cp > len(text) * max_ratio:
+        return [(0, len(text), text)], []
+
+    kept: list[tuple[int, int, str]] = []
+    dropped: list[tuple[int, int, str]] = []
+    run_start: int | None = None
+    for index, (start, end, _sentence) in enumerate(sentences):
+        if index in expanded:
+            if run_start is None:
+                run_start = start
+            if index == len(sentences) - 1:
+                kept.append((run_start, end, text[run_start:end]))
+            continue
+        if run_start is not None:
+            kept.append((run_start, start, text[run_start:start]))
+            run_start = None
+        dropped.append((start, end, text[start:end]))
+    return kept, dropped
 
 
 @dataclass(frozen=True)
@@ -198,6 +305,39 @@ def select_evidence(
     def _horizon_blocked(start_cp: int, end_cp: int) -> bool:
         return horizon_cp is not None and end_cp > horizon_cp
 
+    def _add_compressed_gap(gap: GapView) -> None:
+        """长 Gap 保守筛选：只留线索句（前后各补一句），丢弃的句子全部留痕。"""
+
+        gap_text = canonical_text[gap.start_cp : gap.end_cp]
+        kept, dropped = compress_gap_spans(
+            gap_text,
+            threshold_cp=policy.gap_compression_threshold_cp,
+            margin_sentences=policy.gap_compression_margin_sentences,
+            max_ratio=policy.gap_compression_max_ratio,
+        )
+        if not dropped:
+            result.warnings.append(f"{COMPRESSION_SKIPPED_WARNING}:{gap.gap_id}")
+        for index, (start, end, _text) in enumerate(kept):
+            _add(
+                fragment_id=f"{gap.gap_id}#keep{index}",
+                kind=BudgetItemKind.INNER_GAP,
+                start_cp=gap.start_cp + start,
+                end_cp=gap.start_cp + end,
+                reason="gap_compression:evidence",
+                optional=False,
+            )
+        for start, end, text in dropped:
+            result.omitted.append(
+                OmittedRecord(
+                    fragment_id=f"{gap.gap_id}#drop",
+                    kind=BudgetItemKind.INNER_GAP.value,
+                    start_cp=gap.start_cp + start,
+                    end_cp=gap.start_cp + end,
+                    reason=COMPRESSION_OMIT_REASON,
+                    tokens=estimator.estimate(text),
+                )
+            )
+
     def _add(
         *,
         fragment_id: str,
@@ -282,6 +422,11 @@ def select_evidence(
         if gap.start_cp >= first_start and gap.end_cp <= last_end and gap.end_cp > gap.start_cp
     ]
     for gap in sorted(inner_gaps, key=lambda item: item.start_cp):
+        if policy.gap_compression and (
+            gap.end_cp - gap.start_cp
+        ) > policy.gap_compression_threshold_cp:
+            _add_compressed_gap(gap)
+            continue
         _add(
             fragment_id=gap.gap_id,
             kind=BudgetItemKind.INNER_GAP,

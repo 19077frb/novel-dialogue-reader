@@ -77,14 +77,26 @@ REQUIRED_KINDS: frozenset[BudgetItemKind] = frozenset(
 
 @dataclass(frozen=True)
 class BudgetPolicy:
-    """PLAN 7.3 的初始实验配置（默认保守，Gap 压缩关闭）。"""
+    """上下文策略（T08 起，T17 加入可回滚的压缩/复核/路由开关）。
+
+    **默认仍然是保守的 `context-1`**：`gap_compression=False`、不做复核、不做模型路由。
+    只有拿到真实对比证据（B3/B4 消融）才应该把默认切到 `context-2`；切换前必须能一键回滚。
+    """
 
     context_tokens: int = 2500
     overlap_tokens: int = 200
     state_tokens: int = 300
     prompt_reserve_tokens: int = 900
     output_reserve_tokens: int = 800
-    gap_compression: bool = False  # 默认关闭；T17 依据真实对比实验才开启
+    # T17：长 Gap 保守筛选（默认关闭）
+    gap_compression: bool = False
+    gap_compression_threshold_cp: int = 80  # 短于这个长度的 Gap 原样保留
+    gap_compression_margin_sentences: int = 1  # 命中句前后各补回一句
+    gap_compression_max_ratio: float = 0.6  # 压缩后仍超过该比例就放弃压缩（省不下来就别动）
+    # T17：有限局部复核（默认 0 = 不复核）
+    recheck_max_targets: int = 0
+    # T17：可选强模型路由（默认关闭；>0 时才允许把困难窗口交给强模型）
+    strong_model_share: float = 0.0
 
     def as_key(self) -> dict[str, Any]:
         """参与依赖哈希/缓存键的字段（改动会影响缓存复用）。"""
@@ -96,11 +108,45 @@ class BudgetPolicy:
             "prompt_reserve_tokens": self.prompt_reserve_tokens,
             "output_reserve_tokens": self.output_reserve_tokens,
             "gap_compression": self.gap_compression,
+            "gap_compression_threshold_cp": self.gap_compression_threshold_cp,
+            "gap_compression_margin_sentences": self.gap_compression_margin_sentences,
+            "gap_compression_max_ratio": self.gap_compression_max_ratio,
+            "recheck_max_targets": self.recheck_max_targets,
+            "strong_model_share": self.strong_model_share,
         }
 
 
 DEFAULT_POLICY = BudgetPolicy()
+# T17 的候选策略：保守筛选 + 有限复核；**不是默认值**，需要真实对比证据才切换
+COMPRESSED_POLICY = BudgetPolicy(
+    gap_compression=True,
+    recheck_max_targets=3,
+    strong_model_share=0.0,
+)
 RECHECK_POLICY = BudgetPolicy(context_tokens=6000, overlap_tokens=300, state_tokens=600)
+
+CONTEXT_POLICY_CONSERVATIVE = "context-1"
+CONTEXT_POLICY_COMPRESSED = "context-2"
+
+
+def policy_version_for(policy: BudgetPolicy) -> str:
+    """策略版本号：进入依赖哈希与缓存键，默认仍是 context-1。"""
+
+    return CONTEXT_POLICY_COMPRESSED if policy.gap_compression else CONTEXT_POLICY_CONSERVATIVE
+
+
+POLICY_BY_VERSION: dict[str, BudgetPolicy] = {
+    CONTEXT_POLICY_CONSERVATIVE: DEFAULT_POLICY,
+    CONTEXT_POLICY_COMPRESSED: COMPRESSED_POLICY,
+}
+
+
+def policy_for_version(version: str | None) -> BudgetPolicy:
+    """按版本名取策略；未知/空值一律回落到**保守**策略（默认不会被意外改成激进）。"""
+
+    if not version:
+        return DEFAULT_POLICY
+    return POLICY_BY_VERSION.get(str(version), DEFAULT_POLICY)
 
 
 @dataclass
