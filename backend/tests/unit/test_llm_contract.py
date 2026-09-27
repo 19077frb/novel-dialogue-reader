@@ -171,13 +171,14 @@ def test_undeclared_new_speaker_is_rejected() -> None:
 def test_retry_policy_is_bounded_and_skips_provider_errors() -> None:
     policy = RetryPolicy(max_format_retries=1)
     invalid = InvalidModelOutput("坏 JSON")
-    assert policy.should_retry(invalid, attempt=0) is True
-    assert policy.should_retry(invalid, attempt=1) is False
+    # max_format_retries 是额外重试次数：还没有重试过 → 允许一次；已经重试过 → 不再重试
+    assert policy.should_retry(invalid, retries_used=0) is True
+    assert policy.should_retry(invalid, retries_used=1) is False
 
     auth = ProviderError(ProviderErrorKind.AUTH, "401")
     rate = ProviderError(ProviderErrorKind.RATE_LIMITED, "429")
-    assert policy.should_retry(auth, attempt=0) is False
-    assert policy.should_retry(rate, attempt=0) is False
+    assert policy.should_retry(auth, retries_used=0) is False
+    assert policy.should_retry(rate, retries_used=0) is False
     assert auth.retryable is False and rate.retryable is True
 
 

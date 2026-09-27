@@ -99,9 +99,12 @@ class FakeProviderAdapter:
         )
 
     async def generate_labels(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        text = self._next(kind="labels", payload=payload)
-        text = self._next(kind="labels", payload=payload)
-        parsed = json.loads(text) if isinstance(text, str) else dict(text)
+        """返回脚本里的响应；字符串按模型原始输出原样返回（用于模拟坏 JSON）。"""
+
+        response = self._next(kind="labels", payload=payload)
+        if isinstance(response, str):
+            return response  # type: ignore[return-value]
+        parsed = dict(response)
         parsed.setdefault("_usage", self.normalize_usage(None).as_dict())
         return parsed
 

@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ..domain.enums import Assignment, GapDecision, QuoteKind
-from .errors import InvalidModelOutput, ProviderError
+from .errors import InvalidModelOutput, ProviderError, ProviderErrorKind
 from .schemas import LlmOutput, QuoteLabel
 
 MAX_LABEL_ATTEMPTS = 2
@@ -65,10 +65,12 @@ class RetryPolicy:
 
     max_format_retries: int = 1
 
-    def should_retry(self, error: ProviderError, *, attempt: int) -> bool:
-        if attempt >= self.max_format_retries:
+    def should_retry(self, error: ProviderError, *, retries_used: int) -> bool:
+        """``max_format_retries`` 是**额外**允许的重试次数（不是总尝试次数）。"""
+
+        if retries_used >= self.max_format_retries:
             return False
-        return error.kind.value == "INVALID_OUTPUT"
+        return error.kind is ProviderErrorKind.INVALID_OUTPUT
 
 
 def _strip_code_fence(text: str) -> str:
@@ -247,7 +249,12 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
             continue
         if label.kind is QuoteKind.SPEECH and label.assignment is not None:
             if label.assignment is Assignment.EXISTING:
-                if label.speaker_ref not in allowed_speakers:
+                # EXISTING 可以指向已建立的稳定分组，也可以指向**本次输出里刚声明**的临时人物
+                # （同一窗口里同一新声音的第二句就是这种情况）。
+                if (
+                    label.speaker_ref not in allowed_speakers
+                    and label.speaker_ref not in new_speakers
+                ):
                     issues.append(
                         ValidationIssue(
                             "unknown_speaker",
