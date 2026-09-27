@@ -100,6 +100,9 @@ data/                   运行数据（忽略提交）
 2. 受限沙箱（如某些自动化环境）中 `uv run` 可能因无法打开 uv 缓存中的 `.git` 标记而失败。
    `scripts/verify.ps1` 会自动回退到已同步的 `backend\.venv`；请勿据此认为 `uv` 命令本身有误。
 
+3. npm 依赖缓存写在 `frontend/.npm-cache`（由 `frontend/.npmrc` 指定，已忽略提交），
+   避免受限环境访问用户级缓存目录。`backend` 同理使用 `.uv-cache`（见 `backend/pyproject.toml`
+   的 `[tool.uv] cache-dir`）。
 ## 隐私与安全
 
 - 原文、数据库、导出成品与日志都在 `data/`，已忽略提交。
