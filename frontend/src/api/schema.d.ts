@@ -545,6 +545,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/quotes/{quote_id}/recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 局部复核（有上限；创建真实任务并可能产生费用）
+         * @description 局部复核：范围取当前场景（其次章节），必须显式给出模型配置与预算。
+         *
+         *     这是**可能付费**的操作（DEVELOPMENT.md 6.4），与「展开原文」完全不同：
+         *     后者只读本地原文，本接口会创建 RECHECK 任务并调用提供方。
+         */
+        post: operations["recheck_quote_route_api_quotes__quote_id__recheck_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/gaps/{gap_id}/corrections": {
         parameters: {
             query?: never;
@@ -1897,6 +1920,35 @@ export interface components {
             reading_mode: components["schemas"]["ReadingMode"];
             /** Version */
             version: number;
+        };
+        /**
+         * RecheckIn
+         * @description `POST /api/quotes/{id}/recheck`：有上限的局部复核（**会创建真实付费任务**）。
+         */
+        RecheckIn: {
+            /**
+             * Profile Id
+             * @description 模型配置 ID；复核必须显式指定
+             */
+            profile_id: string;
+            budget?: components["schemas"]["BudgetIn"];
+            /** @default initial */
+            reading_mode: components["schemas"]["ReadingMode"];
+            /** Visible Horizon Cp */
+            visible_horizon_cp?: number | null;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /**
+             * Run Now
+             * @description 是否立即在后台执行（测试可显式触发）
+             * @default true
+             */
+            run_now: boolean;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
         };
         /** ReconcileIn */
         ReconcileIn: {
@@ -3309,6 +3361,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_CorrectionOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recheck_quote_route_api_quotes__quote_id__recheck_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecheckIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_JobDetailOut_"];
                 };
             };
             /** @description Validation Error */

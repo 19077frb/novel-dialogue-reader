@@ -823,3 +823,30 @@ def undo_out(outcome: UndoOutcome, counts: ReviewItemCountsOut) -> UndoOut:
         stale_quote_ids=list(outcome.stale_quote_ids),
         updated_review_counts=review_count_map(counts),
     )
+
+
+def recheck_range(session: Session, *, quote: Quote, version: Any) -> dict[str, Any]:
+    """局部复核的范围：优先当前场景（含前后文），其次章节，最后整本。
+
+    只返回范围，不写数据库：是否真的调用模型由任务与预算决定。
+    """
+
+    from ..storage.models import Chapter
+
+    annotation = session.execute(
+        select(Annotation).where(Annotation.quote_id == quote.id)
+    ).scalar_one_or_none()
+    if annotation is not None and annotation.scene_id:
+        scene = session.get(Scene, annotation.scene_id)
+        if scene is not None:
+            payload: dict[str, Any] = {"start_cp": scene.start_cp}
+            if scene.end_cp is not None:
+                payload["end_cp"] = scene.end_cp
+            else:
+                payload["end_cp"] = version.canonical_length_cp
+            return payload
+    if quote.chapter_id:
+        chapter = session.get(Chapter, quote.chapter_id)
+        if chapter is not None:
+            return {"start_cp": chapter.start_cp, "end_cp": chapter.end_cp}
+    return {"start_cp": 0, "end_cp": version.canonical_length_cp}

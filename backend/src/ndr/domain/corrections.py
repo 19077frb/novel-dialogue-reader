@@ -26,11 +26,13 @@ from .enums import (
     GapDecision,
     IdentityOperation,
     QuoteKind,
+    ReadingMode,
     ReviewQueueStatus,
     ReviewReason,
     ReviewTargetType,
     SpeakerBasis,
 )
+from .jobs import BudgetIn
 
 # 说话人级别的四种更正；其余动作各有专用端点（Gap / merge / split / undo）。
 QuoteCorrectionAction = Literal[
@@ -184,6 +186,18 @@ class SpeakerRevisionOut(ApiModel):
     affected_quote_ids: list[str] = Field(default_factory=list)
     stale_quote_ids: list[str] = Field(default_factory=list)
     updated_review_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class RecheckIn(ApiModel):
+    """`POST /api/quotes/{id}/recheck`：有上限的局部复核（**会创建真实付费任务**）。"""
+
+    profile_id: str = Field(description="模型配置 ID；复核必须显式指定")
+    budget: BudgetIn = Field(default_factory=BudgetIn)
+    reading_mode: ReadingMode = ReadingMode.INITIAL
+    visible_horizon_cp: int | None = Field(default=None, ge=0)
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    run_now: bool = Field(default=True, description="是否立即在后台执行（测试可显式触发）")
+    note: str = Field(default="", max_length=1000)
 
 
 class ReviewFlagIn(ApiModel):

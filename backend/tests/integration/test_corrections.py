@@ -421,24 +421,30 @@ def test_model_result_does_not_overwrite_user_locked_quote(
 def test_gap_break_splits_scene_and_undo_restores_membership(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-
     data = _prepare(fake_provider_client, migrated_settings)
     book_id = data["book_id"]
     gaps = fake_provider_client.get(f"/api/books/{book_id}/gaps", params={"limit": 50}).json()[
         "data"
     ]["items"]
-    # 取一个两侧都有对白的 Gap
-    projection = annotations_of(fake_provider_client, book_id)
-    middle = projection["items"][len(projection["items"]) // 2]
+    items = annotations_of(fake_provider_client, book_id)["items"]
+    by_quote = {row["quote_id"]: row for row in items}
+    # 取第一个「两侧都有标注且同属一个场景」的 Gap（与返回顺序无关，断言只用集合）
     gap = next(
-        item
-        for item in gaps
-        if item["left_quote_id"] and item["right_quote_id"] and item["start_cp"] < middle["start_cp"]
+        row
+        for row in gaps
+        if row["left_quote_id"] in by_quote
+        and row["right_quote_id"] in by_quote
+        and by_quote[row["left_quote_id"]]["scene_id"]
+        == by_quote[row["right_quote_id"]]["scene_id"]
     )
-    before_scene = _scene_state(migrated_settings, middle["scene_id"])
-    moved_before = [
-        row["quote_id"] for row in projection["items"] if row["start_cp"] >= gap["start_cp"]
-    ]
+    scene_id = by_quote[gap["left_quote_id"]]["scene_id"]
+    assert scene_id
+    before_scene = _scene_state(migrated_settings, scene_id)
+    moved_before = sorted(
+        row["quote_id"]
+        for row in items
+        if row["start_cp"] >= gap["start_cp"] and row["scene_id"] == scene_id
+    )
     assert moved_before
 
     response = fake_provider_client.post(
@@ -449,11 +455,11 @@ def test_gap_break_splits_scene_and_undo_restores_membership(
     payload = response.json()["data"]
     assert payload["previous_decision"] == "UNCERTAIN"
     assert payload["decision"] == "BREAK"
-    assert payload["closed_scene_ids"] == [before_scene["id"]]
+    assert payload["closed_scene_ids"] == [scene_id]
     assert payload["opened_scene_id"]
-    assert set(payload["affected_quote_ids"]) == set(moved_before)
+    assert sorted(payload["affected_quote_ids"]) == moved_before
 
-    closed = _scene_state(migrated_settings, before_scene["id"])
+    closed = _scene_state(migrated_settings, scene_id)
     assert closed["status"] == "CLOSED"
     assert closed["end_cp"] == gap["start_cp"]
     opened = _scene_state(migrated_settings, payload["opened_scene_id"])
@@ -473,16 +479,13 @@ def test_gap_break_splits_scene_and_undo_restores_membership(
 
     undo = fake_provider_client.post(f"/api/corrections/{payload['correction_id']}/undo")
     assert undo.status_code == 201, undo.text
-    restored_scene = _scene_state(migrated_settings, before_scene["id"])
-    assert restored_scene["status"] == "OPEN"
+    assert _scene_state(migrated_settings, scene_id)["status"] == "OPEN"
     restored_items = {
         row["quote_id"]: row
         for row in annotations_of(fake_provider_client, book_id)["items"]
     }
-    for row in projection["items"]:
-        if row["quote_id"] in restored_items:
-            assert restored_items[row["quote_id"]]["scene_id"] == before_scene["id"]
-
+    for quote_id in moved_before:
+        assert restored_items[quote_id]["scene_id"] == scene_id
 
 def test_gap_correction_uncertain_keeps_boundary_in_review_queue(
     fake_provider_client: TestClient, migrated_settings: Settings
@@ -508,3 +511,66 @@ def test_gap_correction_uncertain_keeps_boundary_in_review_queue(
     )
     assert resolved.status_code == 201, resolved.text
     assert payload["created_review_item_ids"][0] in resolved.json()["data"]["resolved_review_item_ids"]
+
+
+def test_recheck_creates_bounded_job_and_does_not_call_model_at_creation(
+    fake_provider_client: TestClient, migrated_settings: Settings
+) -> None:
+    """局部复核 = 真实的付费任务（与「展开原文」完全不同）：显式配置 + 预算 + 幂等键。"""
+
+    data = _prepare(fake_provider_client, migrated_settings, key="k-recheck")
+    book_id = data["book_id"]
+    target = quote_ids(fake_provider_client, book_id)[0]
+    profile_id = create_fake_profile(
+        fake_provider_client, name="T12 复核提供方", model="fake-model-recheck"
+    )
+    scene = _scene_state(
+        migrated_settings, _annotation_state(migrated_settings, target)["scene_id"]
+    )
+    runs_before = _counts(migrated_settings)["runs"]
+
+    response = fake_provider_client.post(
+        f"/api/quotes/{target}/recheck",
+        json={
+            "profile_id": profile_id,
+            "budget": {"max_input_tokens": 5000, "max_rechecks": 1},
+            "idempotency_key": "k-recheck-1",
+            "run_now": False,
+            "note": "人工触发",
+        },
+    )
+    assert response.status_code == 202, response.text
+    payload = response.json()["data"]
+    assert payload["kind"] == "RECHECK"
+    assert payload["state"] == "QUEUED"
+    # 创建任务本身不调用模型（真正执行由后台/显式触发）
+    assert _counts(migrated_settings)["runs"] == runs_before
+
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        from ndr.storage.models import Job
+
+        job = session.get(Job, payload["id"])
+        assert job is not None
+        range_payload = json.loads(job.range_json)
+    assert range_payload["start_cp"] == scene["start_cp"]
+    assert range_payload["end_cp"] == (scene["end_cp"] or range_payload["end_cp"])
+
+    # 幂等：同键同摘要复用同一任务
+    again = fake_provider_client.post(
+        f"/api/quotes/{target}/recheck",
+        json={
+            "profile_id": profile_id,
+            "budget": {"max_input_tokens": 5000, "max_rechecks": 1},
+            "idempotency_key": "k-recheck-1",
+            "run_now": False,
+            "note": "人工触发",
+        },
+    )
+    assert again.status_code == 202
+    assert again.json()["data"]["id"] == payload["id"]
+
+    missing = fake_provider_client.post(
+        f"/api/quotes/{target}/recheck",
+        json={"profile_id": "does-not-exist", "idempotency_key": "k-recheck-2"},
+    )
+    assert missing.status_code == 404

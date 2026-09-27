@@ -28,6 +28,7 @@ from ..domain.enums import (
     JobState,
     ReadingMode,
 )
+from ..domain.jobs import JobDetailOut, JobWindowOut
 from ..storage.cache import fingerprint
 from ..storage.models import Book, BookVersion, InferenceRun, Job, JobWindow, ModelProfile
 
@@ -194,6 +195,63 @@ def create_inference_job(
     session.flush()
     return job, True
 
+
+def window_out(row: JobWindow, attempts: int = 0) -> JobWindowOut:
+    try:
+        targets = json.loads(row.target_ids_json or "[]")
+    except json.JSONDecodeError:
+        targets = []
+    return JobWindowOut(
+        window_id=row.window_id,
+        state=row.state,
+        target_count=len(targets) if isinstance(targets, list) else 0,
+        dependency_hash=row.dependency_hash,
+        attempts=attempts,
+    )
+
+
+def job_detail(session: Session, job: Job) -> JobDetailOut:
+    """任务状态快照（窗口 + 用量 + 剩余）：`POST /api/jobs` 与局部复核共用。"""
+
+    rows = job_windows(session, job.id)
+    attempts_by_window: dict[str, int] = {}
+    for run in session.execute(
+        select(InferenceRun).where(InferenceRun.job_id == job.id)
+    ).scalars():
+        if run.window_id:
+            attempts_by_window[run.window_id] = attempts_by_window.get(run.window_id, 0) + 1
+    windows = [window_out(row, attempts_by_window.get(row.window_id, 0)) for row in rows]
+    usage = spent_tokens(session, job.id)
+    runs = list(
+        session.execute(select(InferenceRun).where(InferenceRun.job_id == job.id)).scalars()
+    )
+    unknown_runs = sum(1 for run in runs if run.usage_json is None)
+    progress = json.loads(job.progress_json) if job.progress_json else None
+    return JobDetailOut(
+        id=job.id,
+        kind=job.kind,
+        purpose=job.purpose,
+        state=job.state,
+        book_id=job.book_id,
+        book_version_id=job.book_version_id,
+        progress=progress,
+        checkpoint=json.loads(job.checkpoint_json) if job.checkpoint_json else None,
+        last_error=job.last_error,
+        windows=windows,
+        remaining_windows=sum(
+            1 for row in rows if row.state in {JobState.QUEUED, JobState.NEEDS_RECONCILIATION}
+        ),
+        windows_total=len(rows),
+        calls=len(runs),
+        cached_windows=int(
+            (progress or {}).get("cached_windows", 0) if isinstance(progress, dict) else 0
+        )
+        or 0,
+        unknown_usage_runs=unknown_runs,
+        usage=usage,
+        created_at=job.created_at.isoformat(),
+        updated_at=job.updated_at.isoformat(),
+    )
 
 def job_windows(session: Session, job_id: str) -> list[JobWindow]:
     return list(

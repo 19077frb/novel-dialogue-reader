@@ -1775,6 +1775,59 @@
         }
       }
     },
+    "/api/quotes/{quote_id}/recheck": {
+      "post": {
+        "tags": [
+          "corrections"
+        ],
+        "summary": "局部复核（有上限；创建真实任务并可能产生费用）",
+        "description": "局部复核：范围取当前场景（其次章节），必须显式给出模型配置与预算。\n\n这是**可能付费**的操作（DEVELOPMENT.md 6.4），与「展开原文」完全不同：\n后者只读本地原文，本接口会创建 RECHECK 任务并调用提供方。",
+        "operationId": "recheck_quote_route_api_quotes__quote_id__recheck_post",
+        "parameters": [
+          {
+            "name": "quote_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Quote Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecheckIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_JobDetailOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/gaps/{gap_id}/corrections": {
       "post": {
         "tags": [
@@ -5249,6 +5302,60 @@
           "version"
         ],
         "title": "ReadingProgressOut"
+      },
+      "RecheckIn": {
+        "properties": {
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id",
+            "description": "模型配置 ID；复核必须显式指定"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/BudgetIn"
+          },
+          "reading_mode": {
+            "$ref": "#/components/schemas/ReadingMode",
+            "default": "initial"
+          },
+          "visible_horizon_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible Horizon Cp"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "run_now": {
+            "type": "boolean",
+            "title": "Run Now",
+            "description": "是否立即在后台执行（测试可显式触发）",
+            "default": true
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_id",
+          "idempotency_key"
+        ],
+        "title": "RecheckIn",
+        "description": "`POST /api/quotes/{id}/recheck`：有上限的局部复核（**会创建真实付费任务**）。"
       },
       "ReconcileIn": {
         "properties": {

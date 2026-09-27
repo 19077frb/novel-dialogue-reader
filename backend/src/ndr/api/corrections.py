@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from ..corrections.identity import apply_speaker_revision, speaker_revision_out
@@ -33,6 +33,7 @@ from ..corrections.service import (
     correction_out,
     gap_correction_out,
     get_correction_or_404,
+    recheck_range,
     undo_correction,
     undo_out,
 )
@@ -42,6 +43,7 @@ from ..domain.corrections import (
     GapCorrectionIn,
     GapCorrectionOut,
     QuoteCorrectionIn,
+    RecheckIn,
     ReviewDeferIn,
     ReviewFlagIn,
     ReviewItemCountsOut,
@@ -52,9 +54,18 @@ from ..domain.corrections import (
     SpeakerRevisionOut,
     UndoOut,
 )
-from ..domain.enums import ErrorCode, ReviewQueueStatus, ReviewReason
+from ..domain.enums import (
+    ErrorCode,
+    JobKind,
+    JobPurpose,
+    ReviewQueueStatus,
+    ReviewReason,
+)
+from ..domain.jobs import JobDetailOut
 from ..ingest.query import active_version, get_book_or_404, load_canonical_text
-from ..storage.models import Gap, Quote
+from ..jobs.scheduler import run_job
+from ..jobs.service import create_inference_job, job_detail
+from ..storage.models import Book, BookVersion, Gap, ModelProfile, Quote
 from ..storage.transactions import transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
@@ -268,3 +279,61 @@ def speaker_revision_route(
         counts = review_counts(session, scene.book_version_id)
         out = speaker_revision_out(outcome, review_count_map(counts))
     return DataEnvelope(data=out, request_id=current_request_id(request))
+
+
+@quotes_router.post(
+    "/{quote_id}/recheck",
+    status_code=202,
+    response_model=DataEnvelope[JobDetailOut],
+    summary="局部复核（有上限；创建真实任务并可能产生费用）",
+)
+def recheck_quote_route(
+    request: Request,
+    quote_id: str,
+    payload: RecheckIn,
+    background: BackgroundTasks,
+) -> DataEnvelope[JobDetailOut]:
+    """局部复核：范围取当前场景（其次章节），必须显式给出模型配置与预算。
+
+    这是**可能付费**的操作（DEVELOPMENT.md 6.4），与「展开原文」完全不同：
+    后者只读本地原文，本接口会创建 RECHECK 任务并调用提供方。
+    """
+
+    settings = request.app.state.settings
+    credentials = request.app.state.credentials
+    factory = request.app.state.session_factory
+
+    with transaction(factory) as session:
+        quote = session.get(Quote, quote_id)
+        if quote is None:
+            raise ApiError.not_found("候选对白不存在", quote_id=quote_id)
+        version = session.get(BookVersion, quote.book_version_id)
+        if version is None:
+            raise ApiError.not_found("书籍版本不存在", book_version_id=quote.book_version_id)
+        book = session.get(Book, version.book_id)
+        if book is None:
+            raise ApiError.not_found("书籍不存在", book_id=version.book_id)
+        profile = session.get(ModelProfile, payload.profile_id)
+        if profile is None:
+            raise ApiError.not_found("模型配置不存在", profile_id=payload.profile_id)
+        range_payload = recheck_range(session, quote=quote, version=version)
+        job, created = create_inference_job(
+            session,
+            book=book,
+            version=version,
+            profile=profile,
+            purpose=JobPurpose.PROCESS,
+            range_payload=range_payload,
+            budget=payload.budget.model_dump(),
+            idempotency_key=payload.idempotency_key,
+            reading_mode=payload.reading_mode,
+            visible_horizon_cp=payload.visible_horizon_cp,
+            kind=JobKind.RECHECK,
+        )
+        detail = job_detail(session, job)
+
+    if payload.run_now and created:
+        background.add_task(
+            run_job, factory, settings, job_id=detail.id, credentials=credentials
+        )
+    return DataEnvelope(data=detail, request_id=current_request_id(request))

@@ -9,10 +9,7 @@
 
 from __future__ import annotations
 
-import json
-
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..domain.common import DataEnvelope
@@ -21,80 +18,20 @@ from ..domain.jobs import (
     JobCreate,
     JobDetailOut,
     JobRunOut,
-    JobWindowOut,
     ReconcileIn,
 )
 from ..jobs.scheduler import reconcile_job, run_job
 from ..jobs.service import (
     create_inference_job,
+    job_detail,
     job_windows,
-    spent_tokens,
 )
-from ..storage.models import Book, BookVersion, InferenceRun, Job, JobWindow, ModelProfile
+from ..storage.models import Book, BookVersion, Job, ModelProfile
 from ..storage.transactions import transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
-
-
-def _window_out(row: JobWindow, attempts: int = 0) -> JobWindowOut:
-    try:
-        targets = json.loads(row.target_ids_json or "[]")
-    except json.JSONDecodeError:
-        targets = []
-    return JobWindowOut(
-        window_id=row.window_id,
-        state=row.state,
-        target_count=len(targets) if isinstance(targets, list) else 0,
-        dependency_hash=row.dependency_hash,
-        attempts=attempts,
-    )
-
-
-def _job_detail(session: Session, job: Job) -> JobDetailOut:
-    rows = job_windows(session, job.id)
-    attempts_by_window: dict[str, int] = {}
-    for run in session.execute(
-        select(InferenceRun).where(InferenceRun.job_id == job.id)
-    ).scalars():
-        if run.window_id:
-            attempts_by_window[run.window_id] = attempts_by_window.get(run.window_id, 0) + 1
-    windows = [_window_out(row, attempts_by_window.get(row.window_id, 0)) for row in rows]
-    usage = spent_tokens(session, job.id)
-    runs = list(
-        session.execute(select(InferenceRun).where(InferenceRun.job_id == job.id)).scalars()
-    )
-    unknown_runs = sum(1 for run in runs if run.usage_json is None)
-    return JobDetailOut(
-        id=job.id,
-        kind=job.kind,
-        purpose=job.purpose,
-        state=job.state,
-        book_id=job.book_id,
-        book_version_id=job.book_version_id,
-        progress=json.loads(job.progress_json) if job.progress_json else None,
-        checkpoint=json.loads(job.checkpoint_json) if job.checkpoint_json else None,
-        last_error=job.last_error,
-        windows=windows,
-        remaining_windows=sum(
-            1 for row in rows if row.state in {JobState.QUEUED, JobState.NEEDS_RECONCILIATION}
-        ),
-        windows_total=len(rows),
-        calls=len(runs),
-        cached_windows=int(
-            (
-                json.loads(job.progress_json).get("cached_windows", 0)
-                if job.progress_json
-                else 0
-            )
-            or 0
-        ),
-        unknown_usage_runs=unknown_runs,
-        usage=usage,
-        created_at=job.created_at.isoformat(),
-        updated_at=job.updated_at.isoformat(),
-    )
 
 
 @router.post("", status_code=202, response_model=DataEnvelope[JobDetailOut], summary="创建任务")
@@ -140,7 +77,7 @@ def create_job_route(
             visible_horizon_cp=payload.visible_horizon_cp,
             kind=payload.kind,
         )
-        detail = _job_detail(session, job)
+        detail = job_detail(session, job)
 
     if payload.run_now and created:
         background.add_task(
@@ -158,7 +95,7 @@ def get_job_route(
     job = session.get(Job, job_id)
     if job is None:
         raise ApiError.not_found("任务不存在", job_id=job_id)
-    return DataEnvelope(data=_job_detail(session, job), request_id=current_request_id(request))
+    return DataEnvelope(data=job_detail(session, job), request_id=current_request_id(request))
 
 
 @router.post("/{job_id}/pause", status_code=202, response_model=DataEnvelope[JobDetailOut])
@@ -172,7 +109,7 @@ def pause_job_route(request: Request, job_id: str) -> DataEnvelope[JobDetailOut]
             job.state = JobState.PAUSING  # 当前窗口结束后进入 PAUSED，不承诺远程请求已停止计费
         elif job.state in {JobState.QUEUED, JobState.PARTIAL}:
             job.state = JobState.PAUSED
-        detail = _job_detail(session, job)
+        detail = job_detail(session, job)
     return DataEnvelope(data=detail, request_id=current_request_id(request))
 
 
