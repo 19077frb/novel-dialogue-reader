@@ -1,45 +1,41 @@
 """健康检查路由。
 
-`GET /api/health` 报告进程、数据库与版本状态，且不调用模型
-（DEVELOPMENT.md 5.2）。数据库在 T01 引入迁移后从 NOT_INITIALIZED 变为 READY。
+`GET /api/health` 报告进程、数据库与版本状态，且不调用模型（DEVELOPMENT.md 5.2）。
+数据库状态来自真实迁移状态：未迁移 → NOT_INITIALIZED，版本落后 → OUTDATED，
+迁移到 head → READY，读取失败 → ERROR 且整体状态变为 degraded。
 """
 
 from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Request
 
 from .. import API_VERSION, __version__
+from ..domain.enums import DatabaseState
+from ..storage.engine import migration_status
 
 router = APIRouter(tags=["health"])
 
-DatabaseState = Literal["READY", "NOT_INITIALIZED", "ERROR"]
 
-
-def _database_status() -> dict[str, Any]:
-    """T00 尚无数据库层，如实报告未初始化，不伪造 READY。"""
-
-    return {
-        "state": "NOT_INITIALIZED",
-        "detail": "数据库与迁移在 T01 建立；当前仅返回进程与版本状态。",
-    }
-
-
-@router.get("/health")
+@router.get(
+    "/health",
+    summary="进程、数据库与版本状态（不调用模型）",
+    description="独立响应体；不返回任意磁盘路径，也不触发任何模型调用。",
+)
 def health(request: Request) -> dict[str, Any]:
-    started_at: datetime = request.app.state.started_at
-    now = datetime.now(tz=UTC)
+    app = request.app
+    database = migration_status(app.state.engine)
     return {
-        "status": "ok",
+        "status": "degraded" if database.state is DatabaseState.ERROR else "ok",
         "app": "novel-dialogue-reader",
         "version": __version__,
         "api_version": API_VERSION,
-        "environment": request.app.state.settings.environment,
-        "started_at": started_at.isoformat(),
-        "uptime_seconds": round(time.monotonic() - request.app.state.started_monotonic, 3),
-        "server_time": now.isoformat(),
-        "database": _database_status(),
+        "environment": app.state.settings.environment,
+        "started_at": app.state.started_at.isoformat(),
+        "uptime_seconds": round(time.monotonic() - app.state.started_monotonic, 3),
+        "server_time": datetime.now(tz=UTC).isoformat(),
+        "database": database.as_dict(),
     }

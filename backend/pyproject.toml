@@ -4,9 +4,11 @@ version = "0.1.0"
 description = "轻小说对话辅助阅读器（Novel Dialogue Reader）后端"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.13",
     "fastapi>=0.115",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
+    "sqlalchemy>=2.0.30",
     "uvicorn[standard]>=0.30",
 ]
 
@@ -42,3 +44,4 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["E501"]
+"../migrations/versions/**" = ["E501"]
