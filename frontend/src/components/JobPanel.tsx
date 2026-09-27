@@ -79,7 +79,7 @@ export function JobPanel({ jobId, onTerminal }: JobPanelProps) {
   const recoveryActions = info?.actions ?? []
   return (
     <div className="ndr-job-panel" data-testid="job-panel">
-      <p>
+      <p role="status" aria-live="polite">
         任务 {job.data.kind}
         {job.data.purpose ? ` · ${job.data.purpose}` : ''} ·{' '}
         <strong data-testid="job-state">{state}</strong>

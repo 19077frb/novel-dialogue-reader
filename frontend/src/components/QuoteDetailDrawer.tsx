@@ -5,7 +5,7 @@
  * - 更正/撤销/延后都不调用模型；提交旧版本会得到 409，这里提示冲突并刷新为最新状态。
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import { ApiError } from '../api/client'
 import { fetchQuoteDetail } from '../api/books'
@@ -53,6 +53,31 @@ export function QuoteDetailDrawer({
     setLastCorrectionId(null)
     setShowRecheck(false)
     setContextWindowCp(CONTEXT_STEPS[0])
+  }, [quoteId])
+
+  // T18 可访问性：抽屉是一个有标题的对话框区域；打开时移入焦点，Escape 关闭并归还焦点。
+  const titleId = useId()
+  const drawerRef = useRef<HTMLElement | null>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  useEffect(() => {
+    if (!quoteId) return
+    const previous = document.activeElement as HTMLElement | null
+    drawerRef.current?.focus()
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeRef.current()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      if (previous && typeof previous.focus === 'function' && document.contains(previous)) {
+        previous.focus()
+      }
+    }
   }, [quoteId])
 
   const detail = useQuery({
@@ -157,9 +182,16 @@ export function QuoteDetailDrawer({
     correction.isPending || undo.isPending || defer.isPending || flag.isPending || gapDecision.isPending
 
   return (
-    <aside className="ndr-drawer" data-testid="quote-detail-drawer">
+    <aside
+      className="ndr-drawer"
+      role="dialog"
+      aria-labelledby={titleId}
+      ref={drawerRef}
+      tabIndex={-1}
+      data-testid="quote-detail-drawer"
+    >
       <header className="ndr-drawer-header">
-        <h2>对白确认</h2>
+        <h2 id={titleId}>对白确认</h2>
         <button type="button" onClick={onClose} data-testid="drawer-close">
           关闭
         </button>

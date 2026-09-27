@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link, Navigate, Route, Routes } from 'react-router-dom'
+import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 
 import { queryKeys } from './api/books'
 import { fetchHealth } from './api/client'
@@ -49,6 +49,9 @@ export function HealthBadge() {
 export default function App() {
   return (
     <div className="app-shell">
+      <a className="ndr-skip-link" href="#ndr-main">
+        跳到主要内容
+      </a>
       <header className="ndr-app-header">
         <div className="ndr-brand">
           <h1>轻小说对话辅助阅读器</h1>
@@ -57,13 +60,14 @@ export default function App() {
           </p>
         </div>
         <nav className="ndr-app-nav" aria-label="主导航">
-          <Link to="/library">书架</Link>
-          <Link to="/settings/models">模型配置</Link>
+          {/* NavLink 会在当前页给出 aria-current="page"，键盘/读屏用户能知道自己在哪一页 */}
+          <NavLink to="/library">书架</NavLink>
+          <NavLink to="/settings/models">模型配置</NavLink>
         </nav>
         <HealthBadge />
       </header>
 
-      <main className="ndr-main">
+      <main className="ndr-main" id="ndr-main" tabIndex={-1}>
         <Routes>
           <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/library" element={<LibraryPage />} />

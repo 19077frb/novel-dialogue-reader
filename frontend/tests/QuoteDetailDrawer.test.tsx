@@ -1,4 +1,5 @@
 import { screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -232,5 +233,51 @@ describe('QuoteDetailDrawer', () => {
 
     await userEvent.click(screen.getByTestId('drawer-defer'))
     await waitFor(() => expect(reviewApi.deferReviewItem).toHaveBeenCalledWith('r1', '稍后处理'))
+  })
+})
+describe('QuoteDetailDrawer 可访问性（T18）', () => {
+  beforeEach(() => {
+    vi.mocked(booksApi.fetchQuoteDetail).mockReset()
+    vi.mocked(booksApi.fetchQuoteDetail).mockResolvedValue(DETAIL)
+    vi.mocked(profilesApi.fetchProfiles).mockReset()
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([])
+    vi.mocked(reviewApi.fetchReviewItemDetail).mockReset()
+  })
+
+  it('是带标题的对话框区域，Escape 关闭并把焦点还给打开按钮', async () => {
+    const onClose = vi.fn()
+    function Host() {
+      const [quoteId, setQuoteId] = useState<string | null>(null)
+      return (
+        <>
+          <button type="button" data-testid="drawer-opener" onClick={() => setQuoteId('q1')}>
+            打开详情
+          </button>
+          <QuoteDetailDrawer
+            quoteId={quoteId}
+            onClose={() => {
+              setQuoteId(null)
+              onClose()
+            }}
+          />
+        </>
+      )
+    }
+
+    renderWithProviders(<Host />)
+    const opener = screen.getByTestId('drawer-opener')
+    opener.focus()
+    await userEvent.click(opener)
+
+    const drawer = await screen.findByRole('dialog', { name: '对白确认' })
+    const labelledBy = drawer.getAttribute('aria-labelledby')
+    expect(labelledBy).toBeTruthy()
+    expect(document.getElementById(labelledBy as string)).toHaveTextContent('对白确认')
+    await waitFor(() => expect(drawer).toHaveFocus())
+
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(opener).toHaveFocus())
   })
 })

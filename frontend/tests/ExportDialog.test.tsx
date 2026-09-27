@@ -1,4 +1,5 @@
 import { screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -182,5 +183,51 @@ describe('ExportDialog', () => {
     expect(await screen.findByTestId('export-failed')).toBeInTheDocument()
     expect(screen.getByTestId('export-missing-resources')).toHaveTextContent('x.png')
     expect(screen.queryByTestId('export-download-link')).toBeNull()
+  })
+})
+describe('ExportDialog 可访问性（T18）', () => {
+  beforeEach(() => {
+    vi.mocked(exportsApi.previewExport).mockReset()
+    vi.mocked(exportsApi.previewExport).mockResolvedValue(preview())
+  })
+
+  it('有 role/aria-modal 与标题关联，Escape 关闭并把焦点还给打开按钮', async () => {
+    const onClose = vi.fn()
+    function Host() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" data-testid="export-opener" onClick={() => setOpen(true)}>
+            打开导出
+          </button>
+          <ExportDialog
+            bookId="b1"
+            open={open}
+            chapters={CHAPTERS}
+            onClose={() => {
+              setOpen(false)
+              onClose()
+            }}
+          />
+        </>
+      )
+    }
+
+    renderWithProviders(<Host />)
+    const opener = screen.getByTestId('export-opener')
+    opener.focus()
+    await userEvent.click(opener)
+
+    const dialog = await screen.findByRole('dialog', { name: '导出' })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    const labelledBy = dialog.getAttribute('aria-labelledby')
+    expect(labelledBy).toBeTruthy()
+    expect(document.getElementById(labelledBy as string)).toHaveTextContent('导出')
+    await waitFor(() => expect(dialog).toHaveFocus())
+
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(opener).toHaveFocus())
   })
 })

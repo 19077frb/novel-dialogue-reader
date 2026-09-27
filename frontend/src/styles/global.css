@@ -150,6 +150,38 @@ a {
 
 /* ---------- 应用外壳 ---------- */
 
+/* T18 可访问性：跳转到主内容的键盘入口（默认藏在视口外，聚焦时出现） */
+.ndr-skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--ndr-card);
+  border: 1px solid var(--ndr-accent);
+  border-radius: 6px;
+  padding: 6px 10px;
+  z-index: 40;
+}
+
+.ndr-skip-link:focus {
+  left: 12px;
+  top: 12px;
+}
+
+/* 程序化聚焦的对话框/抽屉容器不画外框（内部控件仍有可见焦点环） */
+.ndr-dialog:focus,
+.ndr-drawer:focus {
+  outline: none;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--ndr-accent);
+  outline-offset: 2px;
+}
+
 .ndr-app-header {
   display: flex;
   flex-wrap: wrap;

@@ -16,7 +16,7 @@ export interface ExportProgressProps {
 export function ExportProgress({ artifact, busy }: ExportProgressProps) {
   if (busy) {
     return (
-      <p className="hint" data-testid="export-progress">
+      <p className="hint" role="status" aria-live="polite" data-testid="export-progress">
         正在生成…（本地打包，不调用模型）
       </p>
     )
@@ -36,7 +36,7 @@ export function ExportProgress({ artifact, busy }: ExportProgressProps) {
   }
   return (
     <div className="ndr-export-progress" data-testid="export-progress">
-      <p>
+      <p role="status" aria-live="polite">
         状态：<strong data-testid="export-state">{STATE_LABEL[artifact.state] ?? artifact.state}</strong>
         {artifact.filename ? ` · ${artifact.filename}` : ''}
         {artifact.byte_size ? ` · ${Math.round(artifact.byte_size / 1024)} KB` : ''}

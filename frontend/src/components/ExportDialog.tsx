@@ -7,7 +7,7 @@
  * - 全过程不调用模型；失败时展示校验原因，不提供下载。
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { createExport, exportKeys, previewExport } from '../api/exports'
 import { fetchChapters, queryKeys } from '../api/books'
@@ -50,6 +50,32 @@ export function ExportDialog({
   // 记录「生成时用的快照指纹」：用来判断标注是否在生成之后又变了（内容哈希，不是行 ID）
   const [generatedSnapshotHash, setGeneratedSnapshotHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // T18 可访问性：对话框要有 role/aria-modal/标题关联，打开时把焦点移进来，
+  // Escape 关闭，关闭后把焦点还给触发它的按钮（键盘用户不会「丢失焦点」）。
+  const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  useEffect(() => {
+    if (!open) return
+    const previous = document.activeElement as HTMLElement | null
+    dialogRef.current?.focus()
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeRef.current()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      if (previous && typeof previous.focus === 'function' && document.contains(previous)) {
+        previous.focus()
+      }
+    }
+  }, [open])
 
   const chapterList = useQuery({
     queryKey: queryKeys.chapters(bookId),
@@ -115,10 +141,17 @@ export function ExportDialog({
   if (!open) return null
 
   return (
-    <div className="ndr-dialog-backdrop" role="dialog" aria-label="导出" data-testid="export-dialog">
-      <div className="ndr-dialog">
+    <div className="ndr-dialog-backdrop" data-testid="export-dialog">
+      <div
+        className="ndr-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        ref={dialogRef}
+        tabIndex={-1}
+      >
         <header className="ndr-dialog-header">
-          <h2>导出</h2>
+          <h2 id={titleId}>导出</h2>
           <button type="button" onClick={onClose} data-testid="export-close">
             关闭
           </button>
