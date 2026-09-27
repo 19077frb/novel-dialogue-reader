@@ -71,9 +71,14 @@ $backendInvoker = Get-BackendInvoker
 
 Push-Location $repoRoot
 try {
-    Write-Host '同步后端依赖（uv sync --project backend --all-groups）…'
-    & uv sync --project backend --all-groups
-    if ($LASTEXITCODE -ne 0) { throw 'uv sync 失败' }
+    if ($backendInvoker.Exe -eq 'uv') {
+        Write-Host '同步后端依赖（uv sync --project backend --all-groups）…'
+        & uv sync --project backend --all-groups
+        if ($LASTEXITCODE -ne 0) { throw 'uv sync 失败' }
+    }
+    else {
+        Write-Warning '跳过 uv sync（使用已有的 backend\.venv）；如需同步依赖请手动运行 uv sync。'
+    }
 
     if (Test-Path (Join-Path $repoRoot 'backend\alembic.ini')) {
         Write-Host '执行数据库迁移…'

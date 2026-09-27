@@ -7,9 +7,11 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -28,7 +30,7 @@ from .api.corrections import (
 from .api.corrections import (
     quotes_router as corrections_quotes_router,
 )
-from .api.errors import install_error_handlers, install_request_id_middleware
+from .api.errors import ApiError, install_error_handlers, install_request_id_middleware
 from .api.estimates import router as estimates_router
 from .api.exports import book_router as exports_book_router
 from .api.exports import export_router
@@ -124,7 +126,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(scenes_router, prefix="/api")
     app.include_router(exports_book_router, prefix="/api")
     app.include_router(export_router, prefix="/api")
+
+    if resolved.static_dir is not None:
+        _install_static(app, resolved.static_dir)
     return app
+
+
+def _install_static(app: FastAPI, static_dir: Path) -> None:
+    """生产同源启动：把前端构建产物挂在 `/`，未命中的非 API 路径回退到 index.html。
+
+    - `/api/**` 永远走 JSON 契约：未知路径仍是契约 404，不会被 SPA 回退吞掉；
+    - 静态路径解析限制在构建目录内，`..` 之类越界一律回退到 index.html（不读目录外文件）。
+
+    该路由在全部 API 路由之后注册，因此不会遮挡既有端点（含 /docs 与 /openapi.json）。
+    """
+
+    root = static_dir.resolve()
+    index = root / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_fallback(full_path: str) -> FileResponse:
+        if full_path == "api" or full_path.startswith("api/"):
+            raise ApiError.not_found("接口不存在", path=f"/{full_path}")
+        candidate = (root / full_path).resolve()
+        if candidate.is_file() and root in candidate.parents:
+            return FileResponse(candidate)
+        if index.is_file():
+            # 前端路由（/library、/books/:id/read …）交给 SPA 自己解析
+            return FileResponse(index)
+        raise ApiError.not_found("前端构建产物缺失", static_dir=str(root))
 
 
 app = create_app()

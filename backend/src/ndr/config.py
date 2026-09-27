@@ -45,6 +45,10 @@ class Settings(BaseSettings):
 
     data_dir: Path = Field(default_factory=default_data_dir)
 
+    # 生产同源启动：把前端构建产物（frontend/dist）挂在同一个端口上。
+    # 默认 None = 不在后端提供静态页面（开发时用 Vite 的 5173）；scripts/serve.ps1 会显式设置。
+    static_dir: Path | None = None
+
     # 默认不自动迁移：显式执行 alembic 或设置 NDR_AUTO_MIGRATE=1。
     auto_migrate: bool = False
 
@@ -89,6 +93,11 @@ class Settings(BaseSettings):
     @classmethod
     def _resolve_data_dir(cls, value: Path) -> Path:
         return value.expanduser().resolve()
+
+    @field_validator("static_dir")
+    @classmethod
+    def _resolve_static_dir(cls, value: Path | None) -> Path | None:
+        return None if value is None else value.expanduser().resolve()
 
     @property
     def database_path(self) -> Path:
