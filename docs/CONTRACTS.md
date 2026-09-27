@@ -302,7 +302,11 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 
 - `BudgetPolicy`（PLAN 7.3 起点）：正文 `context_tokens=2500`、重叠 `overlap_tokens=200`、
   状态 `state_tokens=300`、提示预留 `prompt_reserve_tokens=900`、输出预留 `output_reserve_tokens=800`；
-  复核策略 `RECHECK_POLICY=6000/300/600`；`gap_compression` 默认 **False**（T17 才可能开启）。
+  复核策略 `RECHECK_POLICY=6000/300/600`。
+- T17 新增字段（全部进入 `as_key()`，因此进入依赖哈希与缓存键）：
+  `gap_compression`（默认 **False**）、`gap_compression_threshold_cp=80`、
+  `gap_compression_margin_sentences=1`、`gap_compression_max_ratio=0.6`、
+  `recheck_max_targets=0`、`strong_model_share=0.0`。
 - 证据保留层级：目标对白 → 目标之间的 Gap（必留） → 场景状态/已锁定结果 → 两端重叠 → 外层 Gap；
   预算不足时按此顺序丢可选片段。**目标对白绝不截断**。
 - 单个目标自身超过正文预算 → 独立窗口 + 标 `oversized_quote`（保留待定，按完整长度计费）。
@@ -310,9 +314,11 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
   越界证据进入省略记录（`reason=beyond_visible_horizon`），不会送进模型。
 - 每条片段都有可回溯 ID（`quote_id`/`gap_id`/`node_id`/`overlap:<start>-<end>`/`state:*`），
   窗口账本逐条记录 token，正文用量等于这些记录之和。
-- `CONTEXT_POLICY_VERSION="context-1"`；窗口/计划的 `dependency_hash` 覆盖
-  （原文版本、目标、证据、策略、提示版本、阅读模式、horizon、场景引用）。
-  **T10 的缓存键必须包含这些字段**，horizon 或阅读模式变化不得复用旧结果。
+- 策略版本：`context-1`（保守，默认）与 `context-2`（长 Gap 保守筛选），由 `policy_version_for(policy)`
+  计算；窗口 `window_id`、窗口/计划 `dependency_hash` 与缓存键都带这个版本，两版结果**不会互相复用**。
+  任务范围里的 `context_policy` 选择策略，缺省或未知一律回落到 `context-1`（保证一键回滚）。
+- `dependency_hash` 覆盖（原文版本、目标、证据、**省略记录**、策略、策略版本、提示版本、阅读模式、
+  horizon、场景引用、说话人引用）。**T10 的缓存键必须包含这些字段**，horizon 或阅读模式变化不得复用旧结果。
 
 ## 18. 场景状态、接受策略与身份修订（T09 已实现，内部契约）
 
@@ -659,6 +665,8 @@ python -m ndr.evaluation run --manifest evaluation/manifests/dev.json `
 python -m ndr.evaluation run --manifest evaluation/manifests/dev.json `
     --config evaluation/configs/b2.json --profile-id <id> --allow-live `
     --output evaluation/reports/dev-b2-live.json
+python -m ndr.evaluation loss --manifest evaluation/manifests/dev.json `
+    --context-policy context-2 --output evaluation/reports/dev-context-loss.json
 ```
 
 | 部件 | 说明 |
@@ -668,8 +676,9 @@ python -m ndr.evaluation run --manifest evaluation/manifests/dev.json `
 | `ndr.evaluation.baselines` | **B0 规则基线**（无 LLM）：显式归属表面形式 + 叙述长度切场景；找不到就拒答 |
 | `ndr.evaluation.metrics` | 指标计算（纯函数，手算样例可验证） |
 | `ndr.evaluation.live` | 显式允许的真实运行：导入正文 → 建任务 → 引擎 → 读投影（需 `--allow-live` + `--profile-id`） |
+| `ndr.evaluation.loss` | 离线证据账（T17）：重放长 Gap 压缩，逐段列出丢掉的行文与是否删到金标准 `must_keep` |
 | `ndr.evaluation.runner` | 编排、按作品/难例/总体聚合、写报告 |
-| `evaluation/manifests`、`configs`、`reports` | 清单、B0/B1/B2 配置、报告与复现说明 |
+| `evaluation/manifests`、`configs`、`reports` | 清单、B0/B1/B2/B3/B4 配置、报告与复现说明 |
 
 指标（DEVELOPMENT 7.3）：
 
@@ -693,3 +702,51 @@ python -m ndr.evaluation run --manifest evaluation/manifests/dev.json `
   样本足够」时才为 true；B0 基线、FakeProvider、外部假预测一律 false，并在 `blocks` 里写明原因。
 - `--allow-live` 是**显式开关**；不加就只写 `NOT_RUN` 与原因，绝不偷偷调用模型。
 - 真实运行失败（凭据缺失、限流、超时）会记 `LIVE_FAILED` 与错误原因，不回退到假数据。
+
+## 29. 上下文压缩、有限局部复核与成本路由（T17 已实现，默认关闭）
+
+三件事都**可离线验证**，但**是否值得开启**需要真实对比数据（B3/B4）。因此默认配置不变：
+`context-1` + `recheck_max_targets=0` + `strong_model_share=0.0`；账本里如实写「优化未验证」。
+
+### 29.1 版本化上下文策略
+
+- `context-1`（默认）：现状，完整 Gap 必留。`context-2`：长 Gap 保守筛选（见 §17 的 T17 字段）。
+- 只在「Gap 宽度 > `gap_compression_threshold_cp`（默认 80 码点）」时筛选；短 Gap 原样保留。
+- 保留规则：命中归属线索的句子（引号标记或 `说/道/问/答/喊/叫/…` 线索词）必须保留，
+  其前后各补 `gap_compression_margin_sentences`（默认 1）句；首句与末句一定保留。
+- **省不下来就不压缩**：保留比例 > `gap_compression_max_ratio`（默认 0.6）时整体保留，并写
+  `warnings: gap_compression_skipped:insufficient_savings:<gap_id>`。
+- 丢掉的行文逐段写入窗口 `omitted`（`reason=gap_compression`，含 `start_cp/end_cp/tokens`）：
+  保留 + 丢弃恰好覆盖整个 Gap，既不跳过原文也不编造内容（单测逐段核对）。
+- 策略版本进入窗口 ID、依赖哈希与缓存键（§17），换策略不会复用旧缓存；任务范围用
+  `context_policy` 选择版本，缺省/未知一律回落 `context-1`。
+
+### 29.2 有限局部复核（`recheck_max_targets`）
+
+- 触发条件：该窗口首次结果里仍有**未解决**的目标（`status=UNKNOWN` 且未被用户锁定）。
+- 上限：每个窗口最多 `recheck_max_targets` 条（默认 0 = 不复核）；目标按窗口顺序取交集后截断。
+- 复核窗口一律**用保守策略重建**，把压缩阶段丢掉的句子补回来（`restore_evidence`）；
+  它有自己的窗口 ID / 依赖哈希 / 缓存键。
+- 首次结果与复核各写一条 `inference_runs`，用量按每次尝试结算（不是「只统计最后一次调用」）；
+  复核窗口**不写** `job_windows`，窗口级「一次有效提交」的语义不变。
+- 复核失败不改变首次结果；复核**超时**按 F15 处理：标 `UNKNOWN_OUTCOME` + 任务
+  `NEEDS_RECONCILIATION`，不自动重发。
+
+### 29.3 成本路由（`strong_model_share`）
+
+- 任务范围可给出 `strong_profile_id`（`range` 是自由字段，不新增端点、不改 OpenAPI）；
+  没有它时路由不可用，**如实退回基础模型**并把原因记进运行结果。
+- 上限：`floor(strong_model_share × 计划窗口数)`；默认 0.0 = 关闭。
+- 只升级**困难窗口**：丢过证据（`omitted` 非空）、有超长目标、目标 ≥4 条，或需要复核。
+- 审计：每次尝试的 `inference_runs.profile_snapshot_json` 记录实际使用的模型配置；
+  `GET /api/books/{id}/usage` 的 `by_model` 也按**每次尝试自己的快照**归属。
+- 任务 `progress_json` 如实给出 `strong_windows` / `recheck_windows` / `recheck_targets` / `recheck_calls`。
+
+### 29.4 评测与证据
+
+- `evaluation/configs/b3.json`（context-2，`max_rechecks=0`）与 `b4.json`（context-2，`max_rechecks=3`）：
+  同一清单、同一模型配置下只改上下文/复核参数，用 `python -m ndr.evaluation run … --allow-live` 跑对比。
+- `python -m ndr.evaluation loss --manifest … --context-policy context-2`：**离线证据账**，
+  逐段列出压缩丢掉的行文，并标记是否与金标准 `gaps[].must_keep` 重叠（删错计数）。
+- `evaluation/ablations.md`：消融说明、判定门槛与当前状态。**当前状态 = 未验证**：
+  没有真实凭据与人工确认样本，B3/B4 的准确率—覆盖率—费用对比无法产出。

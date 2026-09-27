@@ -122,10 +122,15 @@ uv run --project backend python -m ndr.evaluation run `
   --manifest evaluation/manifests/dev.json --config evaluation/configs/b0.json `
   --output evaluation/reports/dev-b0-offline.json
 
-# B1/B2 需要真实模型：必须显式允许并指定配置
+# B1/B2/B3/B4 需要真实模型：必须显式允许并指定配置（B3=上下文压缩，B4=B3+有限复核）
 uv run --project backend python -m ndr.evaluation run `
   --manifest evaluation/manifests/dev.json --config evaluation/configs/b2.json `
   --profile-id <model-profile-id> --allow-live --output evaluation/reports/dev-b2-live.json
+
+# T17 离线证据账：压缩实际丢掉了哪些原文、是否删到金标准 must_keep（不加载模型）
+uv run --project backend python -m ndr.evaluation loss `
+  --manifest evaluation/manifests/dev.json --context-policy context-2 `
+  --output evaluation/reports/dev-context-loss.json
 ```
 
 - 指标：提取 precision/recall/F1、错误切断/连接、**已接受准确率**、**覆盖率**、同人 pairwise F1、
@@ -133,7 +138,9 @@ uv run --project backend python -m ndr.evaluation run `
 - 目标（PLAN）：已接受准确率 ≥97%、覆盖率 ≥70%；**样本不足或没有已接受样本时报告 `targets_met=null`**，
   不宣布达标。测试用 FakeProvider 的结果一律 `quality_evidence=false`。
 - 口径、清单格式与复现说明见 `evaluation/manifests/README.md`、`evaluation/configs/README.md`、
-  `evaluation/reports/README.md`。
+  `evaluation/reports/README.md`；T17 的压缩/复核/路由消融口径与门槛见 `evaluation/ablations.md`。
+- T17：上下文策略默认仍是 `context-1`（完整 Gap）；`context-2`（长 Gap 保守筛选）、有限局部复核
+  与强模型路由默认关闭，只有拿到真实对比证据才应改变默认——账本里如实标注「优化未验证」。
 
 ## 导出界面（T15B）
 
