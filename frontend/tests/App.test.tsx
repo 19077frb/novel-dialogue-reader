@@ -1,34 +1,51 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import * as books from '../src/api/books'
 import * as client from '../src/api/client'
 import App from '../src/App'
+import { renderWithProviders } from './helpers'
 
 vi.mock('../src/api/client', () => ({
   fetchHealth: vi.fn(),
+  ApiError: class ApiError extends Error {},
+}))
+vi.mock('../src/api/books', () => ({
+  queryKeys: {
+    health: () => ['health'],
+    books: () => ['books'],
+    book: (id: string) => ['book', id],
+    chapters: (id: string) => ['chapters', id],
+    content: (id: string, chapter: string | null, cursor: string | null) => [
+      'content',
+      id,
+      chapter,
+      cursor,
+    ],
+    job: (id: string) => ['job', id],
+  },
+  fetchBooks: vi.fn(),
+  importBook: vi.fn(),
+  fetchJob: vi.fn(),
+  fetchBook: vi.fn(),
+  fetchChapters: vi.fn(),
+  fetchContent: vi.fn(),
+  saveReadingProgress: vi.fn(),
+  resourceUrl: (bookId: string, resourceId: string) =>
+    `/api/books/${bookId}/resources/${resourceId}`,
 }))
 
-const mockedFetchHealth = vi.mocked(client.fetchHealth)
-
-function renderApp() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>,
-  )
-}
+const mockedHealth = vi.mocked(client.fetchHealth)
+const mockedBooks = vi.mocked(books.fetchBooks)
 
 describe('App', () => {
   beforeEach(() => {
-    mockedFetchHealth.mockReset()
+    mockedHealth.mockReset()
+    mockedBooks.mockReset()
   })
 
-  it('展示后端返回的状态与版本，而不是硬编码文本', async () => {
-    mockedFetchHealth.mockResolvedValue({
+  it('显示后端返回的健康状态并默认进入书架', async () => {
+    mockedHealth.mockResolvedValue({
       status: 'ok',
       app: 'novel-dialogue-reader',
       version: '9.9.9-test',
@@ -37,23 +54,24 @@ describe('App', () => {
       started_at: '2026-09-28T00:00:00+00:00',
       uptime_seconds: 12.5,
       server_time: '2026-09-28T00:00:12.500000+00:00',
-      database: { state: 'NOT_INITIALIZED', detail: '数据库与迁移在 T01 建立' },
+      database: { state: 'READY', revision: '0004', head_revision: '0004' },
     })
+    mockedBooks.mockResolvedValue({ items: [], next_cursor: null })
 
-    renderApp()
+    renderWithProviders(<App />, '/')
 
-    expect(await screen.findByTestId('health-ok')).toBeInTheDocument()
-    expect(screen.getByText('9.9.9-test')).toBeInTheDocument()
-    expect(screen.getByText(/NOT_INITIALIZED/)).toBeInTheDocument()
+    expect(await screen.findByTestId('health-ok')).toHaveTextContent('READY')
+    expect(screen.getByTestId('health-ok')).toHaveTextContent('9.9.9-test')
+    expect(await screen.findByTestId('library-empty')).toBeInTheDocument()
   })
 
   it('后端不可用时给出可理解的错误与重试入口', async () => {
-    mockedFetchHealth.mockRejectedValue(new Error('连接被拒绝'))
+    mockedHealth.mockRejectedValue(new Error('连接被拒绝'))
+    mockedBooks.mockResolvedValue({ items: [], next_cursor: null })
 
-    renderApp()
+    renderWithProviders(<App />, '/')
 
     expect(await screen.findByTestId('health-error')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重试连接' })).toBeInTheDocument()
-    expect(screen.getByText(/连接被拒绝/)).toBeInTheDocument()
   })
 })

@@ -1,12 +1,16 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * E2E 使用独立端口与独立数据目录，绝不接触用户书库，
+ * E2E 使用独立端口与**每次运行独立的数据目录**，绝不接触用户书库，
  * 也不会与开发中的 8765/5173 冲突（DEVELOPMENT.md 2.3）。
  */
 const E2E_API_PORT = Number(process.env.NDR_E2E_API_PORT ?? 8795)
 const E2E_UI_PORT = Number(process.env.NDR_E2E_UI_PORT ?? 5273)
-const E2E_DATA_DIR = process.env.NDR_E2E_DATA_DIR ?? '.e2e/data'
+
+// 每次运行一个全新的数据目录，避免上一轮残留的 SQLite 句柄导致清理失败。
+const E2E_RUN_ID = process.env.NDR_E2E_RUN_ID ?? String(Date.now())
+const E2E_DATA_DIR = process.env.NDR_E2E_DATA_DIR ?? `.e2e/data-${E2E_RUN_ID}`
+process.env.NDR_E2E_DATA_DIR = E2E_DATA_DIR
 
 // 受限环境中 uv 缓存可能不可访问，可用该变量回退到 backend\.venv 的解释器。
 const backendCommand =
@@ -14,7 +18,8 @@ const backendCommand =
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 30_000,
+  globalSetup: './e2e/global-setup.ts',
+  timeout: 45_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,

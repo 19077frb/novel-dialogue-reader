@@ -6,6 +6,7 @@
   --ndr-border: #d8dce1;
   --ndr-ok: #1a7f37;
   --ndr-error: #b42318;
+  --ndr-accent: #2f6feb;
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
 }
 
@@ -18,6 +19,7 @@
     --ndr-border: #333941;
     --ndr-ok: #4ac26b;
     --ndr-error: #ff8a80;
+    --ndr-accent: #6ea8fe;
   }
 }
 
@@ -32,19 +34,24 @@ body {
 }
 
 .app-shell {
-  max-width: 880px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 24px 16px 48px;
+  padding: 20px 16px 48px;
 }
 
 h1 {
-  font-size: 1.5rem;
-  margin: 0 0 8px;
+  font-size: 1.4rem;
+  margin: 0 0 6px;
 }
 
 h2 {
   font-size: 1.1rem;
-  margin: 0 0 8px;
+  margin: 0 0 10px;
+}
+
+h3 {
+  font-size: 1rem;
+  margin: 0;
 }
 
 .subtitle,
@@ -64,8 +71,8 @@ h2 {
 dl {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 4px 16px;
-  margin: 0;
+  gap: 4px 12px;
+  margin: 8px 0;
 }
 
 dt {
@@ -98,8 +105,293 @@ button {
   cursor: pointer;
 }
 
-code {
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+input[type='text'],
+select {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ndr-border);
+  background: transparent;
+  color: inherit;
+  width: 100%;
+}
+
+code,
+pre {
   background: rgba(127, 127, 127, 0.14);
-  padding: 1px 4px;
   border-radius: 4px;
+}
+
+code {
+  padding: 1px 4px;
+}
+
+pre {
+  padding: 8px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+a {
+  color: var(--ndr-accent);
+}
+
+.ndr-primary {
+  border-color: var(--ndr-accent);
+  color: var(--ndr-accent);
+  font-weight: 600;
+}
+
+/* ---------- 应用外壳 ---------- */
+
+.ndr-app-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--ndr-border);
+  padding-bottom: 12px;
+}
+
+.ndr-app-nav a {
+  margin-right: 12px;
+}
+
+.ndr-health {
+  grid-template-columns: max-content 1fr;
+  font-size: 0.9rem;
+  margin: 0;
+  min-width: 240px;
+}
+
+.ndr-health-error {
+  font-size: 0.9rem;
+  max-width: 320px;
+}
+
+/* ---------- 书架 ---------- */
+
+.ndr-dropzone {
+  border: 2px dashed var(--ndr-border);
+  border-radius: 10px;
+  padding: 24px;
+  text-align: center;
+  margin: 12px 0;
+}
+
+.ndr-dropzone.dragging {
+  border-color: var(--ndr-accent);
+  background: rgba(47, 111, 235, 0.08);
+}
+
+.ndr-import-controls {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.ndr-import-controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: var(--ndr-muted);
+}
+
+.ndr-book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.ndr-book-card {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ndr-book-card header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.ndr-badge {
+  font-size: 0.75rem;
+  border: 1px solid var(--ndr-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  color: var(--ndr-muted);
+}
+
+.ndr-badge-epub {
+  border-color: var(--ndr-accent);
+  color: var(--ndr-accent);
+}
+
+.ndr-candidates {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.ndr-candidates li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ndr-job-panel ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 2px 12px;
+  padding-left: 18px;
+  margin: 4px 0;
+}
+
+/* ---------- 阅读器 ---------- */
+
+.ndr-reader-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.ndr-reader-body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.ndr-reader-sidebar {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+.ndr-chapter-nav ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.ndr-chapter {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+}
+
+.ndr-chapter.active {
+  border-color: var(--ndr-accent);
+  color: var(--ndr-accent);
+  font-weight: 600;
+}
+
+.ndr-chapter-range {
+  color: var(--ndr-muted);
+  font-size: 0.75rem;
+}
+
+.ndr-reader-content {
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+.ndr-chapter-heading {
+  font-size: 1.2rem;
+  margin: 0 0 12px;
+}
+
+.ndr-document p {
+  line-height: 1.95;
+  margin: 0 0 0.9em;
+  text-indent: 2em;
+}
+
+.ndr-node-heading p,
+.ndr-heading {
+  text-indent: 0;
+}
+
+.ndr-heading {
+  margin: 1.4em 0 0.6em;
+}
+
+.ndr-image {
+  max-width: 100%;
+  display: block;
+  margin: 8px auto;
+}
+
+.ndr-separator {
+  border: none;
+  border-top: 1px solid var(--ndr-border);
+  margin: 16px 0;
+}
+
+.ndr-missing-image {
+  color: var(--ndr-muted);
+  text-indent: 0;
+}
+
+.ndr-node {
+  cursor: default;
+}
+
+.ndr-node:focus-within {
+  outline: 1px solid var(--ndr-accent);
+}
+
+/* 360px 窄屏与 1280px 宽屏都要可读 */
+@media (max-width: 900px) {
+  .ndr-reader-body {
+    grid-template-columns: 1fr;
+  }
+
+  .ndr-reader-sidebar {
+    position: static;
+    max-height: 40vh;
+  }
+
+  .ndr-reader-content {
+    max-height: none;
+  }
+
+  .ndr-import-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  .app-shell {
+    padding: 12px 10px 32px;
+  }
+
+  .ndr-document p {
+    line-height: 1.8;
+    text-indent: 1.5em;
+  }
+
+  .ndr-health {
+    min-width: 0;
+  }
 }

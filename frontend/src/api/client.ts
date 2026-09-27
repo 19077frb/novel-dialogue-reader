@@ -1,30 +1,29 @@
 /**
- * 后端 API 访问封装。
+ * 后端 API 客户端。
  *
  * 公共约定见 docs/CONTRACTS.md：JSON snake_case、UTC ISO 8601、
  * 错误体为 { error: { code, message, details }, request_id }。
  */
-
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? ''
 
 export interface ApiErrorBody {
   code: string
   message: string
-  details?: unknown
+  details?: Record<string, unknown>
   request_id?: string
 }
 
 export class ApiError extends Error {
   readonly code: string
   readonly status: number
-  readonly details?: unknown
+  readonly details: Record<string, unknown>
 
   constructor(status: number, body: ApiErrorBody) {
     super(body.message)
     this.name = 'ApiError'
     this.status = status
     this.code = body.code
-    this.details = body.details
+    this.details = body.details ?? {}
   }
 }
 
@@ -35,19 +34,7 @@ export interface RequestOptions {
   headers?: Record<string, string>
 }
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, signal, headers } = options
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    signal,
-    headers: {
-      Accept: 'application/json',
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...headers,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-
+async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let payload: ApiErrorBody = {
       code: `HTTP_${response.status}`,
@@ -56,24 +43,60 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     try {
       const parsed = (await response.json()) as { error?: ApiErrorBody }
       if (parsed?.error?.code) {
-        payload = { ...parsed.error, request_id: parsed.error.request_id }
+        payload = parsed.error
       }
     } catch {
-      // 保持上面的兜底错误信息，不吞掉状态码。
+      // 保持兜底信息，不吞掉状态码。
     }
     throw new ApiError(response.status, payload)
   }
-
   return (await response.json()) as T
 }
 
+export function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { method = 'GET', body, signal, headers } = options
+  return fetch(`${API_BASE}${path}`, {
+    method,
+    signal,
+    headers: {
+      Accept: 'application/json',
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...headers,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }).then((response) => readJson<T>(response))
+}
+
+/** 取 `{"data": ...}` 包里的数据。 */
+export async function apiData<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const envelope = await apiRequest<{ data: T }>(path, options)
+  return envelope.data
+}
+
+/** multipart 上传（导入文件）。 */
+export async function apiUpload<T>(
+  path: string,
+  form: FormData,
+  options: { signal?: AbortSignal } = {},
+): Promise<T> {
+  const envelope = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    body: form,
+    signal: options.signal,
+    headers: { Accept: 'application/json' },
+  }).then((response) => readJson<{ data: T }>(response))
+  return envelope.data
+}
+
 export interface DatabaseStatus {
-  state: 'READY' | 'NOT_INITIALIZED' | 'ERROR'
+  state: 'READY' | 'NOT_INITIALIZED' | 'OUTDATED' | 'ERROR'
+  revision?: string
+  head_revision?: string
   detail?: string | null
 }
 
 export interface HealthResponse {
-  status: 'ok'
+  status: 'ok' | 'degraded'
   app: string
   version: string
   api_version: string

@@ -126,6 +126,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/reading-progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 保存阅读位置与阅读模式（不调用模型）
+         * @description 保存书签：只写数据库，不触发任何模型调用。
+         */
+        put: operations["save_reading_progress_route_api_books__book_id__reading_progress_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -182,6 +202,8 @@ export interface components {
             import_status: components["schemas"]["ImportStatus"];
             /** Read Position Cp */
             read_position_cp: number;
+            /** @default initial */
+            reading_mode: components["schemas"]["ReadingMode"];
             /** Version */
             version: number;
             /** Active Version Id */
@@ -336,6 +358,15 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[ReadingProgressOut] */
+        DataEnvelope_ReadingProgressOut_: {
+            data: components["schemas"]["ReadingProgressOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[list[ChapterOut]] */
         DataEnvelope_list_ChapterOut__: {
             /** Data */
@@ -440,6 +471,37 @@ export interface components {
          * @enum {string}
          */
         JobState: "QUEUED" | "RUNNING" | "PAUSING" | "PAUSED" | "PARTIAL" | "COMPLETED" | "FAILED" | "BUDGET_EXHAUSTED" | "NEEDS_RECONCILIATION";
+        /**
+         * ReadingMode
+         * @enum {string}
+         */
+        ReadingMode: "initial" | "reread";
+        /**
+         * ReadingProgressIn
+         * @description 保存阅读书签：不调用模型，只写位置与模式。
+         */
+        ReadingProgressIn: {
+            /** Book Version Id */
+            book_version_id: string;
+            /** Read Position Cp */
+            read_position_cp: number;
+            /** @default initial */
+            reading_mode: components["schemas"]["ReadingMode"];
+            /** Expected Version */
+            expected_version?: number | null;
+        };
+        /** ReadingProgressOut */
+        ReadingProgressOut: {
+            /** Book Id */
+            book_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Read Position Cp */
+            read_position_cp: number;
+            reading_mode: components["schemas"]["ReadingMode"];
+            /** Version */
+            version: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -706,6 +768,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_reading_progress_route_api_books__book_id__reading_progress_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReadingProgressIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ReadingProgressOut_"];
+                };
             };
             /** @description Validation Error */
             422: {
