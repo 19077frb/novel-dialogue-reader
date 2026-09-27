@@ -54,7 +54,7 @@
 | `POST /api/books/import` | multipart file + encoding；202 返回 book_id 与 IMPORT job_id（TXT/EPUB） | **T02/T03 已实现** |
 | `GET /api/books`、`GET /api/books/{id}` | 元数据、导入状态、当前版本 | **T02 已实现** |
 | `GET /api/books/{id}/chapters` | 按 ordinal 的目录（EPUB 为 spine 顺序） | **T02/T03 已实现** |
-| `PUT /api/books/{id}/reading-progress` | 保存阅读位置，不调用模型 | T04 |
+| `PUT /api/books/{id}/reading-progress` | 保存阅读位置与阅读模式，不调用模型 | **T04 已实现** |
 | `GET /api/books/{id}/content` | 结构化正文节点 + `payload`（章节或码点范围；horizon 见 T04/T15） | **T02/T03 已实现**（范围部分） |
 | `GET /api/books/{id}/resources/{resource_id}` | 受控登记资源（图片等，独立响应体） | **T03 已实现** |
 | `GET/POST/PATCH/DELETE /api/model-profiles*` | 非敏感配置与 has_key；keep/replace/remove 密钥 | T06 |
@@ -171,3 +171,21 @@ FakeProvider 的成功只证明业务/状态机；真实模型兼容性需要真
   并留下 FAILED 的 IMPORT 任务。
 - `book_versions.encoding` 对 EPUB 记为 `"xml"`（正文编码由各 XHTML 文档的 XML 声明决定）；
   `ImportResult.encoding` 对 EPUB 为 `null`。
+
+## 12. 阅读进度（T04 已实现）
+
+`PUT /api/books/{book_id}/reading-progress`
+
+```json
+{ "book_version_id": "bv1", "read_position_cp": 1200, "reading_mode": "initial", "expected_version": 3 }
+```
+
+- 只写数据库，**不调用模型**、不产生任务或标注。
+- `book_version_id` 必须属于该书籍（否则 422）；`read_position_cp` 必须落在该版本
+  `[0, canonical_length_cp]` 内（否则 422）。
+- 带 `expected_version` 时做乐观并发校验：版本不符返回 409 `VERSION_CONFLICT`
+  （`details.current_version` 为当前版本），前端刷新后按最新版本重试一次，绝不覆盖较新写入。
+- 响应 `{book_id, book_version_id, read_position_cp, reading_mode, version}`；
+  `GET /api/books/{id}` 也会返回当前 `read_position_cp` 与 `reading_mode`。
+- `reading_mode` 取值 `initial`（初读，只用读到的证据）或 `reread`（重读，可用后文证据）；
+  T15 起它会影响证据 horizon 的投影。

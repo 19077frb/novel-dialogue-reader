@@ -4,7 +4,7 @@
 不确定的对白交给用户确认。产品目标见 [PLAN.md](PLAN.md)，实现规格见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 > **当前状态（2026-09-28）**：已完成 **T00 工程骨架**、**T01 领域模型/数据库迁移/公共契约**、
-> **T02 TXT 导入**、**T03 EPUB 导入与资源**（模型配置、预览、确认、导出与阅读界面 **尚未实现**）。
+> **T02 TXT 导入**、**T03 EPUB 导入与资源**、**T04 书架与无模型阅读器**（模型配置、识别预览、待确认与导出 **尚未实现**）。
 > 真实模型联调（live）与真实作品效果评测（quality）**均未开始**，没有任何准确率数据。
 > 进度与证据见 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)，交接见 [docs/HANDOFF.md](docs/HANDOFF.md)。
 
@@ -42,6 +42,19 @@ npm --prefix frontend run dev -- --host 127.0.0.1           # 前端 http://127.
 
 打开 http://127.0.0.1:5173 应看到页面显示后端 `GET /api/health` 返回的真实状态：应用/契约版本，
 以及数据库迁移状态（`READY` = 已迁移到仓库 head）。该路径不调用任何模型。
+
+## 界面（T04）
+
+打开 http://127.0.0.1:5173 ：
+
+- **书架**（`/library`）：拖放或选择本机的 TXT/EPUB 导入，可选编码与书名；导入失败会给出可用的编码候选与
+  （标注为有损的）预演，并可一键换编码重试。书架卡片显示格式、正文长度与导入警告。
+- **阅读**（`/books/:id/read`）：左侧目录（EPUB 为 spine 顺序）、正文按节点渲染，
+  ruby 注音用 `<ruby>/<rt>` 显示、插图通过受控资源端点加载；切换章节或滚动会保存阅读位置，
+  重新打开会回到书签所在章节。**不需要填写任何 API 配置**。
+
+界面现在**不会**显示任何识别结果（颜色/编号/人物名）——那是 T05 起接入的标注层，
+`AnnotationLayer` 目前只是带节点定位属性的占位容器。
 
 ## 数据库与迁移
 
@@ -160,3 +173,14 @@ data/                      运行数据（忽略提交）
 - 原文、数据库、导出成品与日志都在 `data/`，已忽略提交。
 - API 只监听回环地址；跨域仅允许配置的本地前端来源。
 - 未经用户明确操作，不发起真实模型调用；测试默认使用 FakeProvider（T07 引入）。
+
+## E2E 样例文件
+
+`frontend/e2e/fixtures/` 里的样例由脚本生成（原创内容，含 GB18030 文本与真实 1×1 PNG）：
+
+```powershell
+uv run --project backend python backend/scripts/make_e2e_fixtures.py
+```
+
+E2E 每次运行使用独立数据目录 `frontend/.e2e/data-<runId>`（`e2e/global-setup.ts` 尽力清理旧目录），
+后端以 `NDR_AUTO_MIGRATE=1` 在测试端口启动，绝不接触 `data/` 里的用户书库。
