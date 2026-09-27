@@ -1,0 +1,5 @@
+# 仓库内文本统一按 LF 存储，避免 Windows 检出时改变字节。
+* text=auto eol=lf
+
+# 金标准样例必须保持字节不变：sha256 与码点偏移都基于这些字节计算。
+evaluation/examples/**/*.txt -text

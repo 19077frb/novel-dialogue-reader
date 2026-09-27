@@ -1,0 +1,57 @@
+# ---- Python / backend ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# ---- Node / frontend ----
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# ---- Playwright ----
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+.e2e/
+
+# ---- Local data, credentials, 原文, 数据库 ----
+# 原文、SQLite、解析资源、导出成品与运行日志都不提交。
+data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+logs/
+*.log
+.env
+.env.*
+!.env.example
+
+# ---- 凭据/密钥导出（绝不提交） ----
+*.pem
+*.key
+credentials*.json
+
+# ---- OS / 编辑器 ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ---- 工具运行缓存（保留在项目内以免污染用户缓存目录） ----
+.uv-cache/
+.tools/
+.npm-cache/

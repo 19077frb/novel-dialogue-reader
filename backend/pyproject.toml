@@ -1,0 +1,44 @@
+[project]
+name = "ndr"
+version = "0.1.0"
+description = "轻小说对话辅助阅读器（Novel Dialogue Reader）后端"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "uvicorn[standard]>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.3",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# 缓存放在仓库内（已 .gitignore），这样受限沙箱中也能读写依赖缓存。
+[tool.uv]
+cache-dir = "../.uv-cache"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ndr"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]

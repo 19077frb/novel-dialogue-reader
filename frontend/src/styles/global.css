@@ -1,0 +1,105 @@
+:root {
+  --ndr-bg: #f7f7f5;
+  --ndr-fg: #1f2328;
+  --ndr-muted: #5c6570;
+  --ndr-card: #ffffff;
+  --ndr-border: #d8dce1;
+  --ndr-ok: #1a7f37;
+  --ndr-error: #b42318;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ndr-bg: #17191c;
+    --ndr-fg: #e6e8eb;
+    --ndr-muted: #a3abb5;
+    --ndr-card: #212429;
+    --ndr-border: #333941;
+    --ndr-ok: #4ac26b;
+    --ndr-error: #ff8a80;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ndr-bg);
+  color: var(--ndr-fg);
+}
+
+.app-shell {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+h1 {
+  font-size: 1.5rem;
+  margin: 0 0 8px;
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin: 0 0 8px;
+}
+
+.subtitle,
+.hint {
+  color: var(--ndr-muted);
+  line-height: 1.6;
+}
+
+.card {
+  background: var(--ndr-card);
+  border: 1px solid var(--ndr-border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+dt {
+  color: var(--ndr-muted);
+}
+
+dd {
+  margin: 0;
+}
+
+.status {
+  font-weight: 600;
+}
+
+.status-ok {
+  color: var(--ndr-ok);
+}
+
+.status-error {
+  color: var(--ndr-error);
+}
+
+button {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--ndr-border);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+code {
+  background: rgba(127, 127, 127, 0.14);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
