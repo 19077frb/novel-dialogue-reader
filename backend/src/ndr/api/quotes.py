@@ -16,13 +16,13 @@ import json
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
+from ..corrections.review import build_quote_detail as _build_quote_detail
 from ..domain.common import CursorPage, DataEnvelope
 from ..domain.enums import ErrorCode, JobKind, JobState
 from ..domain.quotes import GapOut, LocateOut, QuoteDetailOut, QuoteOut, ScanResultOut
 from ..ingest.query import active_version, get_book_or_404
 from ..quotes.service import (
     ScanConflict,
-    get_quote_detail,
     list_gaps,
     list_quotes,
     locate,
@@ -195,7 +195,7 @@ def get_quote_route(
     version = session.get(BookVersion, quote.book_version_id)
     if version is None:
         raise ApiError.not_found("书籍版本不存在", quote_id=quote_id)
-    detail = get_quote_detail(
+    detail = _build_quote_detail(
         session, settings, version, quote_id, context_window_cp=context_window_cp
     )
     return DataEnvelope(data=detail, request_id=current_request_id(request))

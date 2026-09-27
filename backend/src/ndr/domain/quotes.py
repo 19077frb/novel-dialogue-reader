@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import Field
 
 from .common import ApiModel
+from .corrections import AnnotationStateOut, ReviewItemOut, SceneGroupRefOut, SceneRefOut
 from .enums import ContentNodeType, GapDecision, QuoteKind
 
 
@@ -46,12 +47,23 @@ class GapOut(ApiModel):
 
 
 class QuoteDetailOut(ApiModel):
+    """普通对白详情；**不要求**该对白已经在待确认队列里（T12）。"""
+
     quote: QuoteOut
     previous_quote_id: str | None = None
     next_quote_id: str | None = None
     gap_before: GapOut | None = None
     context_before: str = ""
     context_after: str = ""
+    annotation: AnnotationStateOut | None = Field(
+        default=None, description="当前有效标注；未处理过则为 null"
+    )
+    scene: SceneRefOut | None = None
+    review_items: list[ReviewItemOut] = Field(default_factory=list)
+    scene_groups: list[SceneGroupRefOut] = Field(
+        default_factory=list, description="同场景内可指定的已有分组（编号 + group_id）"
+    )
+    can_correct: bool = Field(default=False, description="是否可通过更正接口人工修改")
 
 
 class LocateSpanOut(ApiModel):

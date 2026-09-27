@@ -41,7 +41,7 @@ from ..scenes.engine import apply_window
 from ..scenes.runner import _messages_for, _targets_for
 from ..scenes.state import SceneState
 from ..storage.cache import CacheKeyParts, ResultCacheStore, compute_cache_key, fingerprint
-from ..storage.models import BookVersion, InferenceRun, Job, JobWindow
+from ..storage.models import Annotation, BookVersion, InferenceRun, Job, JobWindow
 from .service import (
     credential_mode_of,
     credential_reference,
@@ -226,6 +226,29 @@ def _apply_payload(
     if not report.ok or report.output is None:
         return False, report.error_codes
     quote_positions, gap_positions, evidence_positions = _positions(inputs, window)
+    # F14：人工确认过的对白（user_locked）不能被模型结果覆盖，也不能被自动 merge/split。
+    locked_quote_ids = {
+        row.quote_id
+        for row in session.execute(
+            select(Annotation).where(
+                Annotation.quote_id.in_(list(window.target_quote_ids) or [""]),
+                Annotation.user_locked.is_(True),
+            )
+        ).scalars()
+    }
+    locked_group_ids: set[str] = set()
+    if state.scene_id:
+        locked_group_ids = {
+            row.speaker_id
+            for row in session.execute(
+                select(Annotation).where(
+                    Annotation.scene_id == state.scene_id,
+                    Annotation.user_locked.is_(True),
+                    Annotation.speaker_id.is_not(None),
+                )
+            ).scalars()
+            if row.speaker_id
+        }
     result = apply_window(
         session,
         book_version_id=inputs.book_version_id,
@@ -235,6 +258,8 @@ def _apply_payload(
         quote_positions=quote_positions,
         gap_positions=gap_positions,
         evidence_positions=evidence_positions,
+        locked_quote_ids=locked_quote_ids,
+        locked_group_ids=locked_group_ids,
         dependency_hash=window.dependency_hash,
         source=AnnotationSource.MODEL,
         run_id=run_id,
