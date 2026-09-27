@@ -18,6 +18,8 @@ from .api.errors import install_error_handlers, install_request_id_middleware
 from .api.health import router as health_router
 from .api.jobs import router as jobs_router
 from .api.openapi import install_openapi
+from .api.quotes import quote_router
+from .api.quotes import router as quotes_router
 from .config import Settings, get_settings
 from .storage.engine import create_db_engine, create_session_factory
 from .storage.migrate import run_migrations
@@ -72,6 +74,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(books_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
+    app.include_router(quotes_router, prefix="/api")
+    app.include_router(quote_router, prefix="/api")
     return app
 
 

@@ -27,6 +27,8 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings
 from ..domain.enums import BookFormat, ImportStatus, JobKind, JobState
+from ..quotes.scanner import SCANNER_VERSION, ScanLimits
+from ..quotes.service import scan_and_store
 from ..storage.models import (
     Book,
     BookVersion,
@@ -183,6 +185,15 @@ def persist_parsed(
             _insert_nodes(session, parsed, chapter_ids)
             _insert_mappings(session, version, parsed, chapter_ids)
             _insert_resources(session, version, parsed)
+            # 候选引语/Gap 是派生数据：导入后立即扫描，便于界面显示候选覆盖（不涉及任何模型调用）。
+            scan_and_store(
+                session,
+                settings,
+                version,
+                canonical_text=parsed.canonical_text,
+                limits=ScanLimits(),
+                scanner_version=SCANNER_VERSION,
+            )
 
         book.active_version_id = version.id
         book.import_status = ImportStatus.COMPLETED
