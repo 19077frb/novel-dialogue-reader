@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.115",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
+    "python-multipart>=0.0.9",
     "sqlalchemy>=2.0.30",
     "uvicorn[standard]>=0.30",
 ]
@@ -43,5 +44,6 @@ src = ["src", "tests"]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["E501"]
+"tests/**" = ["E501", "UP012"]  # 测试里显式写 encode("utf-8") 更清楚
+"src/ndr/api/*.py" = ["B008"]  # FastAPI 依赖/表单参数的惯用写法
 "../migrations/versions/**" = ["E501"]

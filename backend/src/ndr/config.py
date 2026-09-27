@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # 默认不自动迁移：显式执行 alembic 或设置 NDR_AUTO_MIGRATE=1。
     auto_migrate: bool = False
 
+    # 单次导入的文件大小上限（字节）；超出返回 413。
+    max_import_bytes: int = 50 * 1024 * 1024
+
     @field_validator("data_dir")
     @classmethod
     def _resolve_data_dir(cls, value: Path) -> Path:

@@ -13,8 +13,10 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from . import __version__
+from .api.books import router as books_router
 from .api.errors import install_error_handlers, install_request_id_middleware
 from .api.health import router as health_router
+from .api.jobs import router as jobs_router
 from .api.openapi import install_openapi
 from .config import Settings, get_settings
 from .storage.engine import create_db_engine, create_session_factory
@@ -68,6 +70,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(health_router, prefix="/api")
+    app.include_router(books_router, prefix="/api")
+    app.include_router(jobs_router, prefix="/api")
     return app
 
 

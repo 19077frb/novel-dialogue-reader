@@ -10,6 +10,7 @@ from .book import Book, BookVersion, Chapter, ContentNode, Resource
 from .dialogue import Gap, Participant, Quote, Scene, SceneMembership, SpeakerGroup
 from .jobs import InferenceRun, Job, JobWindow, ResultCache
 from .labeling import Annotation, AnnotationHistory, IdentityRevision
+from .mapping import TextMapping
 from .modeling import ModelProfile
 from .review import Correction, ReviewItem
 
@@ -36,4 +37,5 @@ __all__ = [
     "Scene",
     "SceneMembership",
     "SpeakerGroup",
+    "TextMapping",
 ]

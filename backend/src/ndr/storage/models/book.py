@@ -53,6 +53,8 @@ class BookVersion(IdMixin, TimestampMixin, Base):
     normalization_version: Mapped[str] = mapped_column(String(64), nullable=False)
     canonical_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     canonical_length_cp: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 规范化全文的相对路径（位于数据目录内）；原始文件路径见 source_path。
+    canonical_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     warnings_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
 
