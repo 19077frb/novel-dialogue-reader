@@ -4,7 +4,7 @@
 不确定的对白交给用户确认。产品目标见 [PLAN.md](PLAN.md)，实现规格见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 > **当前状态（2026-09-28）**：已完成 **T00 工程骨架**、**T01 领域模型/数据库迁移/公共契约**、
-> **T02 TXT 导入与无模型阅读**（EPUB 导入、模型配置、预览、确认与导出功能 **尚未实现**）。
+> **T02 TXT 导入**、**T03 EPUB 导入与资源**（模型配置、预览、确认、导出与阅读界面 **尚未实现**）。
 > 真实模型联调（live）与真实作品效果评测（quality）**均未开始**，没有任何准确率数据。
 > 进度与证据见 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)，交接见 [docs/HANDOFF.md](docs/HANDOFF.md)。
 
@@ -61,12 +61,12 @@ uv run --project backend alembic -c backend/alembic.ini current        # 查看�
 - 应用默认**不会**自动迁移（避免隐式改动用户数据）；需要时用 `NDR_AUTO_MIGRATE=1` 显式开启
   （E2E 用隔离数据目录时使用）。
 
-## 导入与阅读（T02）
+## 导入与阅读（T02/T03）
 
 无模型也能跑通导入与整本阅读（`GET /api/books/{id}/content` 返回结构化节点，前端在 T04 接入）：
 
 ```powershell
-# 导入 TXT（encoding 可省略：按 utf-8 → gb18030 → big5 严格检测）
+# 导入 TXT 或 EPUB（TXT 的 encoding 可省略：按 utf-8 → gb18030 → big5 严格检测）
 $r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8765/api/books/import -Form @{ file = Get-Item .\我的小说.txt }
 $bookId = $r.data.book_id
 
@@ -81,6 +81,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/jobs/$($r.data.job_id)"       
 - 重复导入同一份文件复用同一本书与同一版本；换编码生成新版本并切换活动版本。
 - 落盘位置（数据目录内，API 不暴露路径）：`books/<book_id>/source.*`（原始字节，不可变）与
   `books/<book_id>/versions/<version_id>/canonical.txt`（规范化全文，LF）。
+- EPUB：按 spine 顺序阅读，标题取自 nav/NCX 目录；ruby 的注音（rt）不进入正文，
+  存在节点 `payload.ruby` 里；插图是零长度 `image` 节点，图片通过
+  `GET /api/books/{id}/resources/{resource_id}` 读取（只读包内已登记资源，不下载外链）。
 ## 验证
 
 ```powershell

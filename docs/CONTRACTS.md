@@ -51,12 +51,12 @@
 | 端点 | 契约摘要 | 实现任务 |
 | --- | --- | --- |
 | `GET /api/health` | 进程、数据库与版本状态；不调用模型 | **T00 已实现** |
-| `POST /api/books/import` | multipart file + encoding；202 返回 book_id 与 IMPORT job_id | **T02 已实现** |
+| `POST /api/books/import` | multipart file + encoding；202 返回 book_id 与 IMPORT job_id（TXT/EPUB） | **T02/T03 已实现** |
 | `GET /api/books`、`GET /api/books/{id}` | 元数据、导入状态、当前版本 | **T02 已实现** |
-| `GET /api/books/{id}/chapters` | 按 ordinal 的目录与可定位范围 | **T02 已实现**（EPUB 在 T03） |
+| `GET /api/books/{id}/chapters` | 按 ordinal 的目录（EPUB 为 spine 顺序） | **T02/T03 已实现** |
 | `PUT /api/books/{id}/reading-progress` | 保存阅读位置，不调用模型 | T04 |
-| `GET /api/books/{id}/content` | 结构化正文节点（章节或码点范围；horizon 见 T04/T15） | **T02 已实现**（范围部分） |
-| `GET /api/books/{id}/resources/{resource_id}` | 受控登记资源 | T03 |
+| `GET /api/books/{id}/content` | 结构化正文节点 + `payload`（章节或码点范围；horizon 见 T04/T15） | **T02/T03 已实现**（范围部分） |
+| `GET /api/books/{id}/resources/{resource_id}` | 受控登记资源（图片等，独立响应体） | **T03 已实现** |
 | `GET/POST/PATCH/DELETE /api/model-profiles*` | 非敏感配置与 has_key；keep/replace/remove 密钥 | T06 |
 | `POST /api/model-profiles/test` | 有预算的微型连接测试 | T07 |
 | `POST /api/books/{id}/estimates` | 纯本地估算，说明依据 | T08 |
@@ -149,3 +149,25 @@ FakeProvider 的成功只证明业务/状态机；真实模型兼容性需要真
   `books/<book_id>/versions/<version_id>/canonical.txt`（规范化全文，LF）。
 - `text_mappings` 每个 canonical 行一条记录，无缝覆盖整段 canonical 文本；`synthetic=true` 表示
   该行行尾是导入时规范化出来的（原文为 CRLF/CR）。
+
+## 11. EPUB 导入与资源（T03 已实现）
+
+- 阅读顺序只由 **spine** 决定；章节标题取自 nav.xhtml（`epub:type="toc"`，缺失时退回 NCX），
+  目录项不改变顺序。`chapters[].source_href` 记录 spine 文档路径。
+- canonical 文本是各块文本用 `\n` 连接，块间换行是合成的（`text_mappings.synthetic=true`）；
+  `source_text_*` 是所在 XHTML 文档内纯文本的偏移。
+- 受限节点：块级元素 → `paragraph`/`heading`，`hr` → 零长度 `separator`，
+  `img`/`svg image` → 零长度 `image`（`payload.resource_id`/`media_type`）。
+  `script`/`style`/`object`/`iframe`/`audio`/`video` 等既不进正文也不登记为资源。
+- ruby：基底文字保留在正文，`rt`/`rp` 不进入正文；注音保存在段落节点 `payload.ruby`
+  （`[{start_cp, end_cp, base, rt}]`）。
+- 资源：非正文 manifest 项登记为 `resources`（`media_type`/`relative_path`/`sha256`），
+  脚本类媒体类型不登记；`GET /api/books/{id}/resources/{resource_id}` 从源 EPUB 内按条目读取，
+  并带 `X-Resource-Sha256`。资源 ID 只在所属书籍版本内唯一；跨书或不存在的 ID 返回 404。
+  外链（http/https）只告警不下载；spine 中的包外文档直接拒绝（422 `EPUB_EXTERNAL_REFERENCE`）。
+- 安全与上限（可配置 `NDR_MAX_EPUB_*`）：条目数、单条目解压大小、总解压大小、spine 条目数；
+  拒绝绝对路径/`..`/反斜杠逃逸、重复条目、符号链接条目、加密条目、非 ZIP 容器与非法 XHTML。
+  失败返回 422，`details.reason_code` 为稳定值（如 `EPUB_UNSAFE_PATH`、`EPUB_SIZE_LIMIT`），
+  并留下 FAILED 的 IMPORT 任务。
+- `book_versions.encoding` 对 EPUB 记为 `"xml"`（正文编码由各 XHTML 文档的 XML 声明决定）；
+  `ImportResult.encoding` 对 EPUB 为 `null`。
