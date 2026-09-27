@@ -1,67 +1,75 @@
 # 开发交接
 
 更新时间：2026-09-28
-当前任务：T10 持久化任务、缓存与用量（implementation / offline_verification 完成；live = BLOCKED）
-最近完成任务：T10（此前 T00～T09：骨架→迁移→TXT→EPUB→阅读器→候选与金标准→配置页→适配器→上下文预算→场景引擎）
-下一任务与理由：T11 真实效果预览与按章处理。T10 已提供任务/窗口/检查点/缓存/用量与暂停恢复，
-T11 需要用同一套 annotations 投影做预览页与按章处理界面（范围选择、估算、试运行、任务面板、原文/标注对比、图例与 usage）。
+当前任务：T11 真实效果预览与按章处理（implementation / offline_verification 完成；live = BLOCKED，quality 未开始）
+最近完成任务：T11（此前 T00～T10：骨架→迁移→TXT→EPUB→阅读器→候选与金标准→配置页→适配器→上下文预算→场景引擎→任务缓存用量）
+下一任务与理由：T12 人工更正、分组修订与撤销后端。T11 已经把「当前有效投影」暴露给前端
+（`GET /api/books/{id}/annotations` 的颜色/编号/图例/统计），T12 要在此基础上支持普通对白详情与主动标记、
+`assign_existing`/`create_speaker`/`set_kind`/`mark_unknown`、Gap 更正、merge/split 与撤销
+（版本校验、`user_locked` 优先、历史留痕、下游 stale）。
 
 ## 实际运行方式
 
 - 前置环境与已锁定版本：CPython 3.11.4；uv 0.9.0（`backend/uv.lock`）；Node.js 22.14.0 / npm 10.9.2；
   React 18.3 / Vite 5.4 / Vitest 2.1 / Playwright 1.63 + Chromium。
 - 启动命令与访问地址：`pwsh -File scripts/dev.ps1` → 后端 `http://127.0.0.1:8765`、前端 `http://127.0.0.1:5173`。
+- 页面：`/library`、`/books/:id/read`（阅读 + 标注投影）、`/books/:id/preview`（预览与按章处理）、`/settings/models`。
 - 数据目录与迁移：`data/`（`NDR_DATA_DIR` 可覆盖），数据库 revision `0004`（= head）。
-  测试/E2E：`NDR_CREDENTIAL_BACKEND=session`；E2E 另开 `NDR_ALLOW_FAKE_PROVIDER=1`。
+  测试/E2E：`NDR_CREDENTIAL_BACKEND=session`；E2E 另开 `NDR_ALLOW_FAKE_PROVIDER=1` 与
+  `NDR_FAKE_PROVIDER_LABELS=deterministic`（仅测试，见 `frontend/playwright.config.ts`）。
 - 验证命令：`pwsh -File scripts/verify.ps1`。
 
 ## 本次改动
 
-- `ndr/storage/cache.py`：语义缓存键（原文版本/目标 IDs/输入指纹/模型与参数/协议·提示·schema·策略版本/
-  依赖哈希/阅读模式/horizon；**排除** job_id 与 preview·process 目的）与 `ResultCacheStore`（不覆盖既有结果）。
-- `ndr/jobs/service.py`：幂等创建（同 key 同摘要复用、不同摘要 409）、本地估算（窗口数/目标数/token，
-  标注为启发式）、profile 快照（无密钥）、`usage_summary` 与 `spent_tokens`（未知用量单独计数）。
-- `ndr/jobs/scheduler.py`：`run_job`（窗口顺序执行、PREPARED→DISPATCHED→应用+结算、
-  缓存命中不调用、预算预留与 `BUDGET_EXHAUSTED`、暂停在窗口之间生效、超时→`NEEDS_RECONCILIATION`、
-  每窗口写检查点）、`reconcile_stale_runs`（重启后把超租约 DISPATCHED 标为未知结果）、
-  `reconcile_job`（显式 retry / keep_unknown）。
-- API：`POST /api/jobs`、`GET /api/jobs/{id}`（`JobDetailOut`，含窗口/用量/剩余）、
-  `POST /api/jobs/{id}/pause|resume|run|reconcile`；`POST /api/books/{id}/estimates`、
-  `GET /api/books/{id}/usage`（`api/estimates.py`）。
-- 前端：类型跟随新契约（`JobOut` → `JobDetailOut`、新增 `JobRunOut`/`EstimateOut`/`UsageOut`），
-  测试夹具同步更新。
-- 测试：`tests/integration/test_cache.py` 4 项、`tests/integration/test_jobs.py` 8 项；
-  `FakeProviderAdapter` 新增可控 `usage`（默认未知）。
-- 文档：决策 0012；CONTRACTS 第 19 节；README 增加“任务与用量（T10）”；OpenAPI/前端类型已重新生成（25 条路径）。
+- `ndr/scenes/projection.py`：只读投影。场景内按首次发言顺序给稳定 `color_index`（与 S1/S2 同源）；
+  初读且 `visible_from_cp > horizon` 的条目下发 `withheld=true` 且 label/color 为 null；
+  UNKNOWN 不给分组/颜色；统计含 `unprocessed_quotes`；`legend` 只列本范围内实际出现过的分组。
+- `ndr/api/annotations.py` + `ndr/domain/annotations.py`：`GET /api/books/{id}/annotations`
+  （`start_cp`/`end_cp`/`reading_mode`/`visible_horizon_cp`），已挂进 `app.py`；OpenAPI 与前端类型重新生成。
+- 测试专用开关：`NDR_FAKE_PROVIDER_LABELS`（`unknown` 默认 / `deterministic`），经 `AdapterSpec` 传到
+  `FakeProviderAdapter`；`ndr/llm/adapters/fake.py` 新增确定性标注脚本
+  （第一句 NEW + `new1`，其余 EXISTING，`basis=DIRECT` → ACCEPTED）。
+- 前端：`DocumentRenderer` 按标注边界分片着色，编号渲染为**真实文本节点** `〔S1〕`；
+  `AnnotationLayer`/`SpeakerLegend`/`RangePicker`/`BudgetForm`/`EstimateSummary`/`UsageSummary` 新组件；
+  `PreviewPage`（`/books/:bookId/preview`）做范围选择 → 本地估算 → 试运行 → 任务面板 → 原文/标注对比；
+  `ReaderPage` 接入同一套投影（读取模式切换 + 图例 + 可关闭标注）；`JobPanel` 显示真实
+  `calls`/`cached_windows`/`unknown_usage_runs` 并在终态回调刷新投影与用量。
+- 文档：决策 0013；CONTRACTS 第 20 节；README 增加“预览与按章处理（T11）”与两个测试专用环境变量。
 
 ## 验证证据
 
-- `pytest backend/tests` → **283 passed**（T09 时 271；新增 4 + 8）；`ruff` 全绿；`scripts/verify.ps1` 退出码 0；
-  前端 typecheck / vitest（29）/ build 全部通过。
+- `pytest backend/tests` → **287 passed**（T10 时 283；新增 `test_annotations_projection.py` 4 项）；
+  `ruff` 全绿；OpenAPI 与 `docs/openapi.json` 一致；`scripts/verify.ps1` 退出码 0。
+- 前端：`typecheck` 通过；`vitest` → **41 passed**（T10 时 29；`DocumentRenderer` 标注 6 项、
+  `PreviewPage` 4 项、`ReaderPage` 新增 2 项）；`vite build` 通过。
+- Playwright（真实后端 + 真实 Chromium + 隔离数据目录，模型侧是显式启用的确定性 FakeProvider）→ **12 passed**：
+  - TXT：估算（窗口/目标/token）→ 试运行 `mode=preview` → 着色（`data-status=ACCEPTED`、`〔S1〕`、图例 S1）
+    → 原文/标注切换后原文不变且**调用数不变** → 按此范围正式处理 `calls=0` 且 `cached_windows == windows_total`。
+  - EPUB：同一流程能着色，且 ruby 注音仍在 `<rt>` 里（没有被当正文重复输出）。
+  - 按章处理：切换章节后范围随目录变化，着色跟着换。
 - 门槛逐条核对：
-  - **已完成窗口不重复调用**：同一任务跑两次，第二次 `calls=0`，适配器调用列表长度不变。
-  - **未知远程结果不自动重发**：构造超租约的 DISPATCHED 尝试 → `reconcile_stale_runs` 标
-    `UNKNOWN_OUTCOME` 且任务/窗口 `NEEDS_RECONCILIATION`；再跑任务 `calls=0`；
-    只有显式 `POST /reconcile {"action":"retry"}` 才把窗口放回 QUEUED。
-  - **每个尝试可追溯用量**：`inference_runs` 逐次记录 state/usage/elapsed/error_code；
-    未知 usage 落 NULL 并计入 `unknown_usage_runs`，`GET /usage` 的 `total_tokens` 不把未知算进去。
-  - 另覆盖 F16（预览→处理命中缓存、发送次数不增加、重复点击同幂等键复用任务）、
-    F20（预算到顶不发调用、已知 usage 按口径结算）、暂停在窗口之间生效、估算纯本地。
-- 本轮修复的**真实缺陷**：`run_job` 无条件置 RUNNING 覆盖 PAUSING 导致暂停失效（改为保留 PAUSING）；
-  任务 API 草稿里的 `__import__` 取模型等临时写法清理；`JobOut`→`JobDetailOut` 契约变化后前端类型与夹具同步。
-- 未验证（BLOCKED）：真实提供方的任务执行（无凭据）；后台工作循环/多进程调度属 T14。
+  - **UI 由后端实际任务结果驱动**：任务面板直接显示后端 `calls`/`cached_windows`，前端不合成成功状态。
+  - **正常配置无法显示伪造的成功结果**：FakeProvider 必须 `NDR_ALLOW_FAKE_PROVIDER=1` 才可用，
+    且界面明确标注“没有访问任何真实服务”；确定性脚本是额外的测试专用开关，真实提供方不会走到分支。
+  - **TXT/EPUB 均能着色**：两条 E2E 分别覆盖。
+  - **样式/颜色切换模型调用数为零**：组件测试 + E2E 都断言切换前后调用次数不变。
+- 本轮修复的**真实缺陷**：预览页把整段预算 JSON 拼进 `idempotency_key`，超过后端 128 字符上限
+  导致创建任务 422（改为 FNV-1a 短摘要）；`settings.spec.ts` 原先假设配置列表为空，
+  多个配置并存时 strict mode 冲突（改为按名称限定卡片 + 唯一名称）。
+- 未验证（BLOCKED）：真实提供方的预览效果（无凭据、无预算）；真实小说的着色/归属质量（T16，未开始）。
 
 ## 未完成与已知问题
 
-1. **后台执行是 FastAPI BackgroundTasks**：单进程、无租约续期，重启后的“孤儿”任务需要
-   `reconcile_stale_runs`（目前由测试/后续 T14 调用；T14 会加入启动扫描与 UI 入口）。
-2. **`POST /api/jobs/{id}/resume` 立即返回快照**（state=QUEUED），真实进度靠轮询 `GET /api/jobs/{id}`。
-3. **预算只按输入 token 预留**：输出按每条目标 20 token 粗估；真实分词器/价格资料接入后需重算（T16/T17）。
-4. **缓存不会过期**：依赖哈希变化会换键；手动清理接口留给 T14/T18。
-5. **界面还没有任务面板**：T11 接入预览页与任务轮询。
+1. **Live 仍未打通**：没有真实提供方凭据，T07/T09/T10/T11 的 Live 都是 BLOCKED；T16 的效果评测未开始。
+2. **投影没有独立版本常量**：它是读时派生（不入缓存键）。将来导出需要冻结投影时（T15）应补
+   `visibility_policy` 之类的版本号。
+3. **预览页文档只加载当前章节前 500 个节点**：整本范围时视图可能只显示前一段，标注/估算仍按完整范围算。
+4. **任务面板仍靠轮询**（终态即停）：后台工作循环、租约续期与启动对账属 T14。
+5. **未知用量与预算**仍按启发式 token 口径；真实分词器/价格资料接入后需重算（T16/T17）。
 6. 其余既有事项：`uv run` 在受限沙箱失败（脚本回退 venv）；`npm --prefix frontend install/ci` 需在包目录内执行；
    `alembic.ini` 保持 ASCII；脚本设置 `PYTHONUTF8=1`；`apply_patch` 失效时用 `.tools/newfile.ps1`；
-   **测试窗口的目标必须全部被标注**（否则 `missing_targets`）。
+   **测试窗口的目标必须全部被标注**（否则 `missing_targets`）；E2E 数据目录在同一次运行里共享，
+   新用例不要假设配置/书库是空的。
 
 ## 后续约束
 
@@ -69,7 +77,7 @@ T11 需要用同一套 annotations 投影做预览页与按章处理界面（范
   真实预览、待定确认或导出功能。
 - 不可覆盖的内容：`evaluation/examples/**`、`frontend/e2e/fixtures/**` 的原始字节；已发布迁移 `0001`～`0004`；
   **`user_locked` 标注与用户密钥**。
-- 当前版本号（都会进入缓存键/依赖哈希）：API 契约 `1`；数据库 `0004`；输出契约 `1.0`；
+- 当前版本号（进入缓存键/依赖哈希）：API 契约 `1`；数据库 `0004`；输出契约 `1.0`；
   提示词 `labeling-1`/`connection-1`；上下文 `context-1`；场景状态 `scene-state-1`；接受策略 `acceptance-1`；
   引擎 `attribution-engine-1`；调度器 `scheduler-1`；缓存 `cache-1`；扫描器 `quote-scan-1`。
 - 提交习惯：每完成一部分功能即用 git 提交。

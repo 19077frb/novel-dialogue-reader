@@ -22,7 +22,7 @@ FakeProvider 或自造样例通过只记入 Offline。
 | T08 | PASS | PASS | NOT_APPLICABLE | NOT_APPLICABLE | `pytest backend/tests` → **246 passed**（新增 `test_budget.py` 10 项 + `test_context_windows.py` 11 项 + `test_context_from_book.py` 3 项）：token 估算统一口径与低置信标注、预留计入、**补入片段全部计入预算**、可选片段按序丢弃、超长引语独立窗口且**原文按完整长度计费不截断**、F05 长叙述不拆窗口也不改场景、F06 短 Gap 照常保留、F12 长场景拆窗口并带重叠与接力、**预算边界≠场景边界**、F17 horizon 只影响初读且依赖哈希不同、窗口 ID/哈希确定、真实导入产出的候选与 Gap 目标全覆盖且跨章节仍带 Gap；`ruff` 全绿；`scripts/verify.ps1` 退出码 0（无新增端点，OpenAPI 未变） | 进入 T09：联合场景与匿名分组引擎 |
 | T09 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **271 passed**（新增 `test_scene_state.py` 16 项 + `test_attribution_engine.py` 9 项）：UPDATE 不切场景、BREAK 关旧开新并清空参与者、UNCERTAIN 保留待定边界、状态快照往返、编号按首次发言顺序、接受策略（DIRECT→ACCEPTED / 风格与指代→PROVISIONAL / 证据不足→UNKNOWN 且**不建新人**）、非 speech 不污染人物、可见时点取最靠后证据、身份修订四类判定；引擎侧 F09/F07/F05/F06/F14/F12/F08/F17/F13 全部覆盖（跨窗口沿用同一分组、后文合并记录可见时点、锁定对白不被覆盖、坏 JSON 有限重试且不留半成品）；`ruff` 全绿。Live=BLOCKED：**全部用 FakeProvider 验证状态机，没有真实模型**（真实效果属 T16） | 进入 T10：持久化任务、缓存与用量 |
 | T10 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **283 passed**（新增 `test_cache.py` 4 项 + `test_jobs.py` 8 项）：同语义同缓存键且键里没有 job_id/purpose、提示/策略/模式/horizon 变化会换键、存储往返不覆盖；预览→处理同范围**命中缓存且发送次数不增加**、同幂等键同摘要复用任务、同键不同摘要 409、**已完成窗口不重复调用**、预算到顶不发调用、未知用量不写 0 且已知用量按口径结算、**未知结果不自动重发**且显式 retry 才回 QUEUED、暂停在窗口之间生效、估算纯本地；`ruff` 全绿；前端 typecheck/test/build 通过（类型跟随 JobDetailOut）；OpenAPI 25 条路径。Live=BLOCKED：真实提供方任务执行无凭据；后台工作循环/多进程属 T14 | 进入 T11：真实效果预览与按章处理 |
-| T11 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | 待填写 | 真实效果预览与按章处理 |
+| T11 | PASS | PASS | BLOCKED | NOT_APPLICABLE | `pytest backend/tests` → **287 passed**（新增 `test_annotations_projection.py` 4 项：FakeProvider 默认 UNKNOWN 时无颜色/编号、有明确归属时给场景内稳定色号且初读 horizon 之下不下发、投影只读且多次请求不新增标注/推理尝试、确定性 FakeProvider 端到端产生 S1 颜色）；`ruff` 全绿。前端 `vitest` → **41 passed**（`DocumentRenderer` 标注 6 项 + `PreviewPage` 4 项 + `ReaderPage` 新增 2 项）、typecheck/build 通过；Playwright → **12 passed**（新增 `preview.spec.ts` 3 项：TXT 估算→试运行着色→原文/标注切换零调用→正式处理 `calls=0` 且缓存命中窗口数=窗口总数；EPUB 预览着色且 ruby 仍在 `<rt>`；按章切换范围同步）。Live=BLOCKED：**没有真实提供方凭据，预览用的是显式启用的确定性 FakeProvider**（离线信号，不是真实效果） | 进入 T12：人工更正、分组修订与撤销后端；T16 仍需真实作品效果评测 |
 | T12 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 人工更正、分组修订与撤销 |
 | T13 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 待确认队列与阅读页确认抽屉 |
 | T14 | NOT_STARTED | NOT_STARTED | NOT_APPLICABLE | NOT_APPLICABLE | 待填写 | 暂停恢复、预算到顶与故障闭环 |
@@ -42,9 +42,12 @@ FakeProvider 或自造样例通过只记入 Offline。
   但**没有真实提供方凭据与预算**，真实模型兼容性未验证；T16 的效果评测同样未开始。
 - “真实联调”指本机真实前后端进程 + 真实浏览器 + 真实 TXT/EPUB 文件（含候选覆盖显示），
   仍不使用模型，因此只记入 Offline。
-- 导入、阅读、候选覆盖与模型配置已可用，但**仍没有任何识别结果**：场景、说话人分组、颜色/编号、
-  待确认队列要等 T07 起的适配器与 T09/T11/T12/T13。
+- T11 的 Live = BLOCKED：预览页与阅读页的着色链路已用**确定性 FakeProvider**离线验证，
+  但**没有真实提供方凭据与预算**，所以“真实效果预览”只是协议与渲染链路打通，不代表真实识别质量。
+- 导入、阅读、候选覆盖、模型配置、任务与用量、颜色/编号投影均已可用：预览页可做范围估算、小范围试运行、
+  原文/标注对比与按章处理，结果直接复用到正式阅读。
+  仍缺：人工更正与待确认队列（T12/T13）、导出（T15A/T15B）、真实作品效果评测（T16）。
 - `data/run/*.log` 是本地运行产物（已忽略提交），可用账本列出的命令复现。
 - 已知命令偏差见 README“已知命令偏差”与决策 0001/0003；EPUB 表示见 0005；前端结构见 0006；
   扫描与金标准见 0007；凭据处理见 0008；适配器与输出契约见 0009；上下文与预算见 0010；
-  场景/接受/身份修订见 0011；任务/缓存/用量见 0012。
+  场景/接受/身份修订见 0011；任务/缓存/用量见 0012；标注投影与预览见 0013。

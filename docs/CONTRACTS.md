@@ -356,3 +356,48 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 - 预算：调用前预留、调用后结算；超出 `max_input_tokens` → `BUDGET_EXHAUSTED` 且不再调用；
   未知 usage 保持 NULL 并单独计数，绝不按 0 计。
 - 未知结果：DISPATCHED 超租约 → `UNKNOWN_OUTCOME` + `NEEDS_RECONCILIATION`，**不自动重发**。
+## 20. 标注投影与预览（T11 已实现）
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /api/books/{id}/annotations?start_cp&end_cp&reading_mode&visible_horizon_cp` | 只读有效投影：范围内的标注条目 + 场景内图例 + 统计。**不写库、不调用模型** |
+
+查询与默认值：
+
+- `start_cp >= 0`；`end_cp` 省略时取 `book_version.canonical_length_cp`；要求 `start_cp < end_cp <= canonical_length_cp`，
+  否则 422 `VALIDATION_ERROR`。
+- `reading_mode=initial` 且未给 `visible_horizon_cp` 时，horizon 默认为请求范围末端：
+  范围内结果可见，范围之后不提前泄漏。
+- 书籍没有可用版本时返回 409。
+
+条目字段（`AnnotationItemOut`）：
+
+- `quote_id`、`start_cp`/`end_cp`（来自 `quotes`，前端按此在节点内分片着色）、`kind`、`assignment`、`basis`、
+  `status`、`source`、`speaker_group_id`、`label`、`color_index`、`visible_from_cp`、`stale`、`user_locked`、`withheld`。
+- **颜色与编号都来自场景内稳定分组**：`color_index` 按分组首次发言顺序在场景内取 0..N-1；
+  `label` 即 `speaker_groups.display_label`（S1、S2…），只在所属场景内有意义。
+- **`withheld=true`**：初读 horizon 之下的后文证据，`label` 与 `color_index` 均为 null（前端不着色、不显示编号）。
+- **UNKNOWN 不分配分组**：`speaker_group_id`/`label`/`color_index` 均为 null，前端只显示原文（无色无编号）。
+- `stale` 与 `user_locked` 原样下发，T12/T13 会在此基础上做更正与确认。
+
+图例与统计：
+
+- `legend` 只列出**本范围内实际出现**的分组（`group_id`/`label`/`scene_id`/`color_index`/`first_quote_id`/`quote_count`）。
+- `counts`：`total`/`accepted`/`provisional`/`unknown`/`stale`/`withheld`/`unprocessed_quotes`
+  （最后一项 = 范围内候选里还没有标注的对白数）。
+- `scenes`：与范围相交的场景摘要（`scene_id`/`status`/`start_cp`/`end_cp`）。
+
+前端约定（实施在 `frontend/src/`）：
+
+- 预览页与阅读页用**同一个**投影端点；预览任务（`mode=preview`）与正式任务（`mode=process`）
+  共享标注存储与缓存，没有第二套临时识别结果。
+- 编号渲染为真实文本节点 `〔S1〕`；跨节点的同一引语拆成多个 `span` 但共享 `data-quote-id`，
+  不插入跨块的非法 `span`。
+- 切换原文/标注视图、点击图例、切换颜色都只改显示，**调用数为零**。
+- 幂等键有 128 字符上限：前端用范围/预算/配置的短摘要构造键，同输入复用同一任务。
+
+测试专用开关（**不影响真实提供方**）：
+
+- `NDR_ALLOW_FAKE_PROVIDER=1` 才允许 `fake-provider` 协议。
+- `NDR_FAKE_PROVIDER_LABELS=deterministic` 让该适配器确定性地建一个分组并返回 `DIRECT` 归属，
+  用于离线验证“颜色/编号”链路；默认 `unknown`（全部标为未知，不假装知道说话人）。
