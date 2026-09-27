@@ -52,6 +52,7 @@ def book_out(book: Book, version: BookVersion | None) -> BookOut:
         source_sha256=book.source_sha256,
         import_status=book.import_status,
         read_position_cp=book.read_position_cp,
+        reading_mode=book.reading_mode,
         version=book.version,
         active_version_id=book.active_version_id,
         active_version=version_out(version) if version is not None else None,

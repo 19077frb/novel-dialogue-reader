@@ -94,14 +94,28 @@ def test_existing_database_upgrades_without_data_loss(tmp_settings: Settings) ->
         assert "review_items" not in tables_before
 
         with transaction(factory) as session:
-            book = Book(
-                title="迁移前的书",
-                format=BookFormat.TXT,
-                source_sha256="a" * 64,
+            # 注意：这里必须只写 0001 时代存在的列。ORM/Core 的表定义会带上后续迁移新增的列
+            # （例如 reading_mode），因此用原生 SQL 明确列出旧列——这正是本用例要覆盖的升级场景。
+            now = utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
+            book_id = "00000000-0000-4000-8000-000000000001"
+            session.execute(
+                text(
+                    "INSERT INTO books (id, title, format, source_sha256, import_status,"
+                    " read_position_cp, created_at, updated_at, version)"
+                    " VALUES (:id, :title, :format, :sha, :status, :cp, :created, :updated, :version)"
+                ),
+                {
+                    "id": book_id,
+                    "title": "迁移前的书",
+                    "format": "TXT",
+                    "sha": "a" * 64,
+                    "status": "PENDING",
+                    "cp": 0,
+                    "created": now,
+                    "updated": now,
+                    "version": 1,
+                },
             )
-            session.add(book)
-            session.flush()
-            book_id = book.id
 
         run_migrations(tmp_settings)
 

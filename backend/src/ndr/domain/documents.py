@@ -10,7 +10,15 @@ from datetime import datetime
 from pydantic import Field
 
 from .common import ApiModel
-from .enums import BookFormat, ContentNodeType, ImportStatus, JobKind, JobPurpose, JobState
+from .enums import (
+    BookFormat,
+    ContentNodeType,
+    ImportStatus,
+    JobKind,
+    JobPurpose,
+    JobState,
+    ReadingMode,
+)
 
 
 class BookVersionOut(ApiModel):
@@ -31,6 +39,7 @@ class BookOut(ApiModel):
     source_sha256: str
     import_status: ImportStatus
     read_position_cp: int = Field(ge=0)
+    reading_mode: ReadingMode = ReadingMode.INITIAL
     version: int = Field(ge=1)
     active_version_id: str | None = None
     active_version: BookVersionOut | None = None
@@ -69,6 +78,23 @@ class ContentResponse(ApiModel):
     end_cp: int = Field(ge=0)
     nodes: list[ContentNodeOut]
     next_cursor: str | None = None
+
+
+class ReadingProgressIn(ApiModel):
+    """保存阅读书签：不调用模型，只写位置与模式。"""
+
+    book_version_id: str
+    read_position_cp: int = Field(ge=0)
+    reading_mode: ReadingMode = ReadingMode.INITIAL
+    expected_version: int | None = None
+
+
+class ReadingProgressOut(ApiModel):
+    book_id: str
+    book_version_id: str
+    read_position_cp: int = Field(ge=0)
+    reading_mode: ReadingMode
+    version: int = Field(ge=1)
 
 
 class ImportResult(ApiModel):

@@ -3,3 +3,6 @@
 
 # 金标准样例必须保持字节不变：sha256 与码点偏移都基于这些字节计算。
 evaluation/examples/**/*.txt -text
+
+# E2E 二进制/多编码样例必须保持原始字节（含 GB18030 文本与 PNG）。
+frontend/e2e/fixtures/** -text

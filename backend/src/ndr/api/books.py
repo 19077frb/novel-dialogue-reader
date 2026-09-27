@@ -17,7 +17,14 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings
 from ..domain.common import CursorPage, DataEnvelope
-from ..domain.documents import BookOut, ChapterOut, ContentResponse, ImportResult
+from ..domain.documents import (
+    BookOut,
+    ChapterOut,
+    ContentResponse,
+    ImportResult,
+    ReadingProgressIn,
+    ReadingProgressOut,
+)
 from ..domain.enums import ErrorCode
 from ..ingest.encoding import DecodeFailure
 from ..ingest.epub import EpubError, EpubLimits
@@ -31,7 +38,8 @@ from ..ingest.query import (
 )
 from ..ingest.resources import get_resource_or_404, read_resource_bytes
 from ..ingest.service import import_epub, import_txt, record_failed_import
-from ..storage.transactions import transaction
+from ..storage.models import BookVersion
+from ..storage.transactions import apply_versioned_update, transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
 from .pagination import parse_limit
@@ -286,3 +294,50 @@ def get_resource_route(
             "X-Resource-Sha256": resource.sha256,
         },
     )
+
+@router.put(
+    "/{book_id}/reading-progress",
+    response_model=DataEnvelope[ReadingProgressOut],
+    summary="保存阅读位置与阅读模式（不调用模型）",
+)
+def save_reading_progress_route(
+    request: Request,
+    book_id: str,
+    payload: ReadingProgressIn,
+) -> DataEnvelope[ReadingProgressOut]:
+    """保存书签：只写数据库，不触发任何模型调用。"""
+
+    factory = request.app.state.session_factory
+    with transaction(factory) as session:
+        book = get_book_or_404(session, book_id)
+        version = session.get(BookVersion, payload.book_version_id)
+        if version is None or version.book_id != book.id:
+            raise ApiError.validation(
+                "book_version_id 不属于该书籍",
+                book_id=book_id,
+                book_version_id=payload.book_version_id,
+            )
+        if payload.read_position_cp > version.canonical_length_cp:
+            raise ApiError.validation(
+                "阅读位置超出该版本正文范围",
+                read_position_cp=payload.read_position_cp,
+                canonical_length_cp=version.canonical_length_cp,
+            )
+        new_version = apply_versioned_update(
+            session,
+            book,
+            expected_version=payload.expected_version,
+            changes={
+                "read_position_cp": payload.read_position_cp,
+                "read_position_version_id": version.id,
+                "reading_mode": payload.reading_mode,
+            },
+        )
+        result = ReadingProgressOut(
+            book_id=book.id,
+            book_version_id=version.id,
+            read_position_cp=book.read_position_cp,
+            reading_mode=book.reading_mode,
+            version=new_version,
+        )
+    return DataEnvelope(data=result, request_id=current_request_id(request))

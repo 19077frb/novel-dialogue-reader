@@ -256,6 +256,7 @@ class _RawBlock:
     media_type: str | None = None
     # "ok" / "missing"（包内缺失或未登记）/ "external"（外链，已单独告警）
     image_status: str | None = None
+    image_alt: str | None = None
     missing_src: str | None = None
     ruby: list[dict[str, Any]] = field(default_factory=list)
 
@@ -319,6 +320,7 @@ class _BlockBuilder:
             block.image_status = status
             block.resource_id = resource_id
             block.media_type = media_type
+            block.image_alt = alt
             if status != "ok":
                 block.missing_src = src
         self.blocks.append(block)
@@ -749,6 +751,7 @@ def parse_epub(
                     payload: dict[str, Any] = {
                         "resource_id": block.resource_id,
                         "media_type": block.media_type,
+                        "alt": block.image_alt or "",
                     }
                     chapter_nodes.append(
                         ParsedNode(
