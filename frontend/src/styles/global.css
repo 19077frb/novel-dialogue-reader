@@ -787,3 +787,12 @@ a {
   background: rgba(47, 111, 235, 0.18);
   color: inherit;
 }
+
+.ndr-recovery,
+.ndr-recompute-entry {
+  border-top: 1px solid var(--ndr-border);
+  margin-top: 10px;
+  padding-top: 10px;
+  display: grid;
+  gap: 6px;
+}

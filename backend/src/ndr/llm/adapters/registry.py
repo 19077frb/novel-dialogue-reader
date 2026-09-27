@@ -55,10 +55,12 @@ def build_adapter(
                 details={"protocol": spec.protocol},
                 retryable=False,
             )
+        # 仅测试：失败脚本可以来自全局配置，也可以来自该配置的生成参数（便于逐个用例切换）。
+        script_mode = spec.fake_script_mode or str((spec.params or {}).get("script") or "")
         return FakeProviderAdapter(
             model=spec.model,
             labeling_mode=spec.fake_labeling_mode,
-            script_mode=spec.fake_script_mode,
+            script_mode=script_mode,
         )
 
     if spec.protocol == "chat-completions-compatible":

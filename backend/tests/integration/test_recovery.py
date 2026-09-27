@@ -36,14 +36,21 @@ def factory(migrated_settings: Settings):
         engine.dispose()
 
 
-def _create_profile(client: TestClient, *, name: str, credential_mode: str = "none") -> str:
+def _create_profile(
+    client: TestClient,
+    *,
+    name: str,
+    credential_mode: str = "none",
+    protocol: str = "fake-provider",
+    model: str = "fake-model",
+) -> str:
     response = client.post(
         "/api/model-profiles",
         json={
             "name": name,
-            "protocol": "fake-provider",
+            "protocol": protocol,
             "base_url": "http://127.0.0.1:1",
-            "model": "fake-model",
+            "model": model,
             "credential_mode": credential_mode,
         },
     )
@@ -432,7 +439,10 @@ def test_missing_credential_is_explainable_and_recoverable(
     data = import_sample(fake_provider_client)
     book_id = data["book_id"]
     profile_id = _create_profile(
-        fake_provider_client, name="T14 缺 Key 提供方", credential_mode="session"
+        fake_provider_client,
+        name="T14 缺 Key 提供方",
+        credential_mode="session",
+        protocol="chat-completions-compatible",
     )
     job = _create_job(
         fake_provider_client, book_id=book_id, profile_id=profile_id, key="k-no-key"

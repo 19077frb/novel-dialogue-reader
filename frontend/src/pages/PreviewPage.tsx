@@ -321,6 +321,20 @@ export default function PreviewPage() {
         <section className="card">
           <h2>任务</h2>
           <JobPanel jobId={jobId} onTerminal={handleTerminal} />
+          <div className="ndr-recompute-entry" data-testid="recompute-entry">
+            <p className="hint">
+              任务**不会**自动重算：暂停/限流/预算到顶或失败后，都需要你显式重新发起。
+              已完成窗口命中缓存，不会重复计费；只有未完成的窗口会真正调用模型。
+            </p>
+            <button
+              type="button"
+              disabled={runDisabled}
+              onClick={() => jobMutation.mutate('process')}
+              data-testid="preview-recompute"
+            >
+              用当前预算重新处理此范围（可能计费）
+            </button>
+          </div>
         </section>
       )}
 

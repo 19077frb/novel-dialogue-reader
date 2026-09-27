@@ -32,7 +32,7 @@ from ..domain.enums import (
     JobState,
     ReadingMode,
 )
-from ..llm.adapter import ProviderAdapter
+from ..llm.adapter import FAKE_PROVIDER_PROTOCOL, PROTOCOL_CAPABILITIES, ProviderAdapter
 from ..llm.adapters import AdapterSpec, build_adapter
 from ..llm.errors import ProviderError, ProviderErrorKind
 from ..llm.prompts import LABELING_PROMPT_VERSION
@@ -287,8 +287,13 @@ def _build_adapter(
     credential_ref: str | None,
 ) -> ProviderAdapter:
     snapshot = snapshot or {}
+    protocol = str(snapshot.get("protocol", ""))
+    _ = PROTOCOL_CAPABILITIES.get(protocol)  # 协议必须已登记（未登记会在 build_adapter 被拒绝）
+    # 规则：**用户明确选择了密钥模式（session/system）却取不到密钥**才算缺凭据；
+    # `credential_mode=none`（本地无鉴权网关）与 fake-provider（永远不需要密钥）不拦。
     if (
-        credential_mode is not CredentialMode.NONE
+        protocol != FAKE_PROVIDER_PROTOCOL
+        and credential_mode is not CredentialMode.NONE
         and credential_ref
         and not credentials.has(mode=credential_mode, ref=credential_ref)
     ):

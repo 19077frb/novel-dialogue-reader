@@ -5,7 +5,13 @@
  * 结果直接落进同一份标注投影，不创建第二套临时识别存储。
  */
 import { apiData } from './client'
-import type { EstimateOut, JobDetailOut, ReadingMode, UsageOut } from './types'
+import type {
+  EstimateOut,
+  JobDetailOut,
+  JobRecoveryOut,
+  ReadingMode,
+  UsageOut,
+} from './types'
 
 export const jobKeys = {
   usage: (bookId: string) => ['usage', bookId] as const,
@@ -107,4 +113,36 @@ export function createJob(input: CreateJobInput, signal?: AbortSignal): Promise<
 
 export function fetchUsage(bookId: string, signal?: AbortSignal): Promise<UsageOut> {
   return apiData<UsageOut>(`/api/books/${bookId}/usage`, { signal })
+}
+/**
+ * 任务恢复（T14）：把非完成状态翻译成可执行动作。
+ *
+ * 只读接口；返回的 `paid` 标记该动作是否可能产生模型费用。
+ */
+export function fetchJobRecovery(jobId: string, signal?: AbortSignal): Promise<JobRecoveryOut> {
+  return apiData<JobRecoveryOut>(`/api/jobs/${jobId}/recovery`, { signal })
+}
+
+export function pauseJob(jobId: string, signal?: AbortSignal): Promise<JobDetailOut> {
+  return apiData<JobDetailOut>(`/api/jobs/${jobId}/pause`, { method: 'POST', signal })
+}
+
+export function resumeJob(jobId: string, signal?: AbortSignal): Promise<JobDetailOut> {
+  return apiData<JobDetailOut>(`/api/jobs/${jobId}/resume`, { method: 'POST', signal })
+}
+
+export function runJobNow(jobId: string, signal?: AbortSignal): Promise<JobDetailOut> {
+  return apiData<JobDetailOut>(`/api/jobs/${jobId}/run`, { method: 'POST', signal })
+}
+
+export function reconcileJob(
+  jobId: string,
+  action: 'retry' | 'keep_unknown',
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  return apiData<Record<string, unknown>>(`/api/jobs/${jobId}/reconcile`, {
+    method: 'POST',
+    body: { action },
+    signal,
+  })
 }
