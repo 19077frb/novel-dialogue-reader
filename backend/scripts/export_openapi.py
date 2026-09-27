@@ -43,7 +43,8 @@ def main() -> int:
         return 0
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    # 显式写 LF：与 .gitattributes 的 eol=lf 一致，避免检出后 --check 误报不一致。
+    target.write_text(content, encoding="utf-8", newline="\n")
     print(f"[export_openapi] 已写入 {target}")
     return 0
 

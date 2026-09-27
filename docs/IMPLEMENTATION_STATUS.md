@@ -43,3 +43,4 @@ FakeProvider 或自造样例通过只记入 Offline。
   不预先打勾。
 - 已知命令偏差（npm `--prefix … install`、受限沙箱中的 `uv run`）见 README“已知命令偏差”，
   并对应决策 0001。
+- data/run/*.log、data/run/dev-pids.json 等是本地运行产物（已忽略提交），用于当场核对；data/run/ 中的日志可用账本列出的命令复现。
