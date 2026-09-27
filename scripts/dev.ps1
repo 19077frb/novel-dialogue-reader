@@ -12,6 +12,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# 项目正文与文档都是 UTF-8：避免 Windows 默认编码（GBK）导致控制台乱码或读文件失败。
+$env:PYTHONUTF8 = '1'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $pidFile = Join-Path $repoRoot 'data\run\dev-pids.json'
 $script:started = @()

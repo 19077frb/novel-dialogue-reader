@@ -34,6 +34,8 @@ export default defineConfig({
         NDR_PORT: String(E2E_API_PORT),
         NDR_HOST: '127.0.0.1',
         NDR_DATA_DIR: E2E_DATA_DIR,
+        // E2E 使用隔离数据目录，启动时自动迁移到 head（默认行为仍是显式迁移）。
+        NDR_AUTO_MIGRATE: '1',
       },
     },
     {

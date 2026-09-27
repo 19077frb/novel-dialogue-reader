@@ -11,7 +11,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health */
+        /**
+         * 进程、数据库与版本状态（不调用模型）
+         * @description 独立响应体；不返回任意磁盘路径，也不触发任何模型调用。
+         */
         get: operations["health_api_health_get"];
         put?: never;
         post?: never;
@@ -24,7 +27,48 @@ export interface paths {
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: never;
+    schemas: {
+        /** DataEnvelope */
+        DataEnvelope: {
+            /** Data */
+            data: unknown;
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** ErrorBody */
+        ErrorBody: {
+            /**
+             * Code
+             * @description 稳定业务错误码，见 domain.enums.ErrorCode。
+             */
+            code: string;
+            /** Message */
+            message: string;
+            /** Details */
+            details?: {
+                [key: string]: unknown;
+            };
+        };
+        /** ErrorEnvelope */
+        ErrorEnvelope: {
+            error: components["schemas"]["ErrorBody"];
+            /** Request Id */
+            request_id: string;
+        };
+        /** CursorPage */
+        CursorPage: {
+            /** Items */
+            items: unknown[];
+            /**
+             * Next Cursor
+             * @default null
+             */
+            next_cursor: string | null;
+        };
+    };
     responses: never;
     parameters: never;
     requestBodies: never;

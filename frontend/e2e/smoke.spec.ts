@@ -12,8 +12,8 @@ test('首页显示后端 /api/health 返回的真实状态', async ({ page }) =>
   const status = page.getByTestId('health-ok')
   await expect(status).toBeVisible()
   await expect(status).toContainText('ok')
-  // T00 阶段数据库尚未建立，页面必须如实显示 NOT_INITIALIZED。
-  await expect(status).toContainText('NOT_INITIALIZED')
+  // E2E 后端使用隔离数据目录并自动迁移，因此页面必须如实显示 READY。
+  await expect(status).toContainText('READY')
 })
 
 test('经 Vite 代理的 /api/health 可用且不调用模型', async ({ request }) => {
@@ -23,5 +23,6 @@ test('经 Vite 代理的 /api/health 可用且不调用模型', async ({ request
   const body = await response.json()
   expect(body.status).toBe('ok')
   expect(body.app).toBe('novel-dialogue-reader')
-  expect(body.database.state).toBe('NOT_INITIALIZED')
+  expect(body.database.state).toBe('READY')
+  expect(body.database.revision).toBe(body.database.head_revision)
 })

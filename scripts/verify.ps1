@@ -10,6 +10,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
+# 项目正文与文档都是 UTF-8：避免 Windows 默认编码（GBK）造成误判。
+$env:PYTHONUTF8 = '1'
 
 $failures = @()
 
