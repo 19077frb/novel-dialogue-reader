@@ -8,9 +8,10 @@ import {
   fetchProfiles,
   fetchProtocols,
   profileKeys,
+  testConnection,
   updateProfile,
 } from '../api/profiles'
-import type { CredentialMode, ModelProfileOut } from '../api/types'
+import type { ConnectionTestOut, CredentialMode, ModelProfileOut } from '../api/types'
 
 type KeyAction = 'keep' | 'replace' | 'remove'
 
@@ -66,6 +67,7 @@ export default function ModelSettingsPage() {
   const [keyAction, setKeyAction] = useState<KeyAction>('replace')
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<{ target: string; data: ConnectionTestOut } | null>(null)
 
   const profiles = useQuery({
     queryKey: profileKeys.profiles(),
@@ -97,6 +99,26 @@ export default function ModelSettingsPage() {
       return null
     }
   }
+
+  const connectionTest = useMutation({
+    mutationFn: (payload: { profileId?: string; draftProfile?: Record<string, unknown> }) =>
+      testConnection(
+        payload.profileId
+          ? { profile_id: payload.profileId }
+          : { draft: payload.draftProfile as never },
+      ),
+    onSuccess: (data, variables) => {
+      setTestResult({
+        target: variables.profileId ? `配置 ${variables.profileId}` : '当前表单草稿',
+        data,
+      })
+      setError(null)
+    },
+    onError: (err: unknown) => {
+      setTestResult(null)
+      setError(describeError(err))
+    },
+  })
 
   // 参数校验在提交前完成：本地不合法就直接返回，不触发请求，也不会被 onError 覆盖提示。
   const save = useMutation({
@@ -312,6 +334,28 @@ export default function ModelSettingsPage() {
             <button type="submit" className="ndr-primary" data-testid="profile-save" disabled={save.isPending}>
               {editingId ? '保存修改' : '新建配置'}
             </button>
+            <button
+              type="button"
+              data-testid="profile-test-draft"
+              disabled={connectionTest.isPending}
+              onClick={() => {
+                const params = parseParams()
+                if (params === null) return
+                connectionTest.mutate({
+                  draftProfile: {
+                    name: form.name || '草稿',
+                    protocol: form.protocol,
+                    base_url: form.baseUrl,
+                    model: form.model,
+                    params,
+                    credential_mode: form.credentialMode,
+                    api_key: form.apiKey || null,
+                  },
+                })
+              }}
+            >
+              {connectionTest.isPending ? '正在测试…' : '测试当前填写内容'}
+            </button>
             {editingId && (
               <button type="button" onClick={resetForm} data-testid="profile-cancel">
                 取消编辑
@@ -319,6 +363,39 @@ export default function ModelSettingsPage() {
             )}
           </div>
         </form>
+
+        {testResult && (
+          <div className="ndr-connection-result" data-testid="connection-result">
+            <p className={testResult.data.ok ? 'status-ok' : 'status-error'}>
+              {testResult.target}：{testResult.data.ok ? '连接成功' : '连接失败'}
+              {testResult.data.latency_ms !== null ? `（${testResult.data.latency_ms} ms）` : ''}
+            </p>
+            <ul className="hint">
+              <li>适配器：{testResult.data.adapter}</li>
+              <li>
+                协议 / 模型：{testResult.data.protocol} / {testResult.data.model}
+              </li>
+              <li>
+                用量：
+                {testResult.data.usage_unknown
+                  ? '未知（提供方未返回 usage，不按 0 计）'
+                  : `输入 ${testResult.data.usage?.input_tokens ?? '?'} · 输出 ${
+                      testResult.data.usage?.output_tokens ?? '?'
+                    } · 合计 ${testResult.data.usage?.total_tokens ?? '?'}`}
+              </li>
+              {testResult.data.error_code && <li>错误码：{testResult.data.error_code}</li>}
+              <li>{testResult.data.detail}</li>
+            </ul>
+            {testResult.data.adapter === 'fake-provider' && (
+              <p className="status-error" data-testid="fake-provider-warning">
+                这是测试用适配器：没有访问任何真实服务，结果只验证界面流程，不代表模型可用。
+              </p>
+            )}
+            {testResult.data.ok && testResult.data.adapter !== 'fake-provider' && (
+              <p className="hint">连接成功只说明鉴权与 JSON 输出可解析，未评估小说标注效果。</p>
+            )}
+          </div>
+        )}
 
         {notice && (
           <p className="status-ok" data-testid="settings-notice">
@@ -375,6 +452,14 @@ export default function ModelSettingsPage() {
                   }}
                 >
                   编辑
+                </button>
+                <button
+                  type="button"
+                  disabled={connectionTest.isPending}
+                  onClick={() => connectionTest.mutate({ profileId: profile.id })}
+                  data-testid={`profile-test-${profile.id}`}
+                >
+                  测试连接
                 </button>
                 <button
                   type="button"

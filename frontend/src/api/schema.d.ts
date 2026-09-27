@@ -301,6 +301,29 @@ export interface paths {
         patch: operations["update_profile_route_api_model_profiles__profile_id__patch"];
         trace?: never;
     };
+    "/api/model-profiles/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 连接测试（微型结构化请求；不评估小说效果）
+         * @description 有预算的微型请求：检查鉴权与输出可解析。
+         *
+         *     网络调用**不在数据库事务里**：先写入 PREPARED 的推理尝试记录，再调用提供方，
+         *     最后回写结果；usage 缺失时保持 unknown，不写成 0。
+         */
+        post: operations["test_connection_route_api_model_profiles_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -395,6 +418,43 @@ export interface components {
             /** Source Href */
             source_href?: string | null;
         };
+        /**
+         * ConnectionTestIn
+         * @description 连接测试请求：已保存配置，或临时草稿（草稿不落库）。
+         */
+        ConnectionTestIn: {
+            /** Profile Id */
+            profile_id?: string | null;
+            draft?: components["schemas"]["ModelProfileCreate"] | null;
+        };
+        /** ConnectionTestOut */
+        ConnectionTestOut: {
+            /** Ok */
+            ok: boolean;
+            /** Protocol */
+            protocol: string;
+            /** Model */
+            model: string;
+            /** Adapter */
+            adapter: string;
+            /** Detail */
+            detail: string;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Usage Unknown
+             * @default true
+             */
+            usage_unknown: boolean;
+            /** Error Code */
+            error_code?: string | null;
+            /** Run Id */
+            run_id: string;
+        };
         /** ContentNodeOut */
         ContentNodeOut: {
             /** Node Id */
@@ -473,6 +533,15 @@ export interface components {
         /** DataEnvelope[BookOut] */
         DataEnvelope_BookOut_: {
             data: components["schemas"]["BookOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[ConnectionTestOut] */
+        DataEnvelope_ConnectionTestOut_: {
+            data: components["schemas"]["ConnectionTestOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -1647,6 +1716,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_ModelProfileOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_connection_route_api_model_profiles_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionTestIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ConnectionTestOut_"];
                 };
             };
             /** @description Validation Error */

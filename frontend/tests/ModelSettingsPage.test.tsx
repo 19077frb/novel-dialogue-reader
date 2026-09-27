@@ -17,6 +17,7 @@ vi.mock('../src/api/profiles', () => ({
   fetchProtocols: vi.fn(),
   createProfile: vi.fn(),
   updateProfile: vi.fn(),
+  testConnection: vi.fn(),
   deleteProfile: vi.fn(),
 }))
 
@@ -74,6 +75,7 @@ describe('ModelSettingsPage', () => {
     vi.mocked(profilesApi.fetchProtocols).mockReset()
     vi.mocked(profilesApi.createProfile).mockReset()
     vi.mocked(profilesApi.updateProfile).mockReset()
+    vi.mocked(profilesApi.testConnection).mockReset()
     vi.mocked(profilesApi.deleteProfile).mockReset()
     vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([])
     vi.mocked(profilesApi.fetchProtocols).mockResolvedValue(PROTOCOLS)
@@ -197,5 +199,115 @@ describe('ModelSettingsPage', () => {
 
     await waitFor(() => expect(profilesApi.deleteProfile).toHaveBeenCalledWith('p1'))
     expect(await screen.findByTestId('settings-notice')).toHaveTextContent('凭据引用也已清理')
+  })
+})
+
+describe('ModelSettingsPage / 连接测试（T07）', () => {
+  beforeEach(() => {
+    vi.mocked(profilesApi.fetchProfiles).mockReset()
+    vi.mocked(profilesApi.fetchProtocols).mockReset()
+    vi.mocked(profilesApi.createProfile).mockReset()
+    vi.mocked(profilesApi.updateProfile).mockReset()
+    vi.mocked(profilesApi.testConnection).mockReset()
+    vi.mocked(profilesApi.deleteProfile).mockReset()
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([])
+    vi.mocked(profilesApi.fetchProtocols).mockResolvedValue(PROTOCOLS)
+  })
+  it('测试已保存配置：显示成功、用量未知与“未评估效果”说明', async () => {
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile()])
+    vi.mocked(profilesApi.testConnection).mockResolvedValue({
+      ok: true,
+      protocol: 'chat-completions-compatible',
+      model: 'example-chat-model',
+      adapter: 'chat-completions',
+      detail: '连接成功，且返回结构可解析（未评估小说标注效果）。',
+      latency_ms: 123,
+      usage: { input_tokens: 12, output_tokens: 8, total_tokens: 20, unknown: false },
+      usage_unknown: false,
+      error_code: null,
+      run_id: 'run-1',
+    })
+
+    renderWithProviders(<ModelSettingsPage />)
+    await userEvent.click(await screen.findByTestId('profile-test-p1'))
+
+    const result = await screen.findByTestId('connection-result')
+    expect(result).toHaveTextContent('连接成功')
+    expect(result).toHaveTextContent('123 ms')
+    expect(result).toHaveTextContent('合计 20')
+    expect(result).toHaveTextContent('未评估小说标注效果')
+    expect(profilesApi.testConnection).toHaveBeenCalledWith({ profile_id: 'p1' })
+  })
+
+  it('失败结果展示稳定错误码，不显示成功文案', async () => {
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile()])
+    vi.mocked(profilesApi.testConnection).mockResolvedValue({
+      ok: false,
+      protocol: 'chat-completions-compatible',
+      model: 'example-chat-model',
+      adapter: 'chat-completions',
+      detail: 'PROVIDER_AUTH_FAILED: 提供方返回 401',
+      latency_ms: null,
+      usage: null,
+      usage_unknown: true,
+      error_code: 'PROVIDER_AUTH_FAILED',
+      run_id: 'run-2',
+    })
+
+    renderWithProviders(<ModelSettingsPage />)
+    await userEvent.click(await screen.findByTestId('profile-test-p1'))
+
+    const result = await screen.findByTestId('connection-result')
+    expect(result).toHaveTextContent('连接失败')
+    expect(result).toHaveTextContent('PROVIDER_AUTH_FAILED')
+    expect(result).toHaveTextContent('未知（提供方未返回 usage，不按 0 计）')
+  })
+
+  it('FakeProvider 结果会被明确标注为测试适配器', async () => {
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile({ protocol: 'fake-provider' })])
+    vi.mocked(profilesApi.testConnection).mockResolvedValue({
+      ok: true,
+      protocol: 'fake-provider',
+      model: 'fake-model',
+      adapter: 'fake-provider',
+      detail: 'FakeProvider 连接成功（仅测试用，未访问任何网络）。',
+      latency_ms: 0,
+      usage: { unknown: true },
+      usage_unknown: true,
+      error_code: null,
+      run_id: 'run-3',
+    })
+
+    renderWithProviders(<ModelSettingsPage />)
+    await userEvent.click(await screen.findByTestId('profile-test-p1'))
+
+    expect(await screen.findByTestId('fake-provider-warning')).toHaveTextContent('没有访问任何真实服务')
+  })
+
+  it('可以先用草稿测试（不保存配置），密钥只在请求体里', async () => {
+    vi.mocked(profilesApi.testConnection).mockResolvedValue({
+      ok: true,
+      protocol: 'chat-completions-compatible',
+      model: 'example-chat-model',
+      adapter: 'chat-completions',
+      detail: '连接成功',
+      latency_ms: 5,
+      usage: { unknown: true },
+      usage_unknown: true,
+      error_code: null,
+      run_id: 'run-4',
+    })
+
+    renderWithProviders(<ModelSettingsPage />)
+    await fillNewProfile()
+    await userEvent.click(screen.getByTestId('profile-test-draft'))
+
+    await waitFor(() => expect(profilesApi.testConnection).toHaveBeenCalled())
+    const payload = vi.mocked(profilesApi.testConnection).mock.calls[0][0]
+    expect(payload.profile_id).toBeUndefined()
+    expect(payload.draft).toMatchObject({ protocol: 'chat-completions-compatible', api_key: SECRET })
+    expect(profilesApi.createProfile).not.toHaveBeenCalled()
+    // 测试不会把密钥写进页面
+    expect(document.body.textContent).not.toContain(SECRET)
   })
 })

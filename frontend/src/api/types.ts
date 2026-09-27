@@ -23,6 +23,8 @@ export type ModelProfileCreate = components['schemas']['ModelProfileCreate']
 export type ModelProfilePatch = components['schemas']['ModelProfilePatch']
 export type ProtocolCapabilitiesOut = components['schemas']['ProtocolCapabilitiesOut']
 export type CredentialMode = components['schemas']['CredentialMode']
+export type ConnectionTestIn = components['schemas']['ConnectionTestIn']
+export type ConnectionTestOut = components['schemas']['ConnectionTestOut']
 
 export type BookFormat = BookOut['format']
 export type ContentNodeType = ContentNodeOut['node_type']

@@ -1,6 +1,8 @@
 /** 模型配置的查询与写操作（T06）。密钥只出现在创建/替换请求里，绝不进入查询缓存以外的状态。 */
 import { apiData } from './client'
 import type {
+  ConnectionTestIn,
+  ConnectionTestOut,
   ModelProfileCreate,
   ModelProfileOut,
   ModelProfilePatch,
@@ -54,4 +56,19 @@ export async function deleteProfile(profileId: string, signal?: AbortSignal): Pr
     const message = body?.error?.message ?? `删除失败（HTTP ${response.status}）`
     throw new Error(message)
   }
+}
+
+/**
+ * 连接测试：微型结构化请求，检查鉴权与输出可解析。
+ * 注意：成功**不代表**小说标注效果（效果评测属 T16）。
+ */
+export function testConnection(
+  payload: ConnectionTestIn,
+  signal?: AbortSignal,
+): Promise<ConnectionTestOut> {
+  return apiData<ConnectionTestOut>('/api/model-profiles/test', {
+    method: 'POST',
+    body: payload,
+    signal,
+  })
 }

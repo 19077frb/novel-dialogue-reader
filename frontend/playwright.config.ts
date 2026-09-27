@@ -41,6 +41,9 @@ export default defineConfig({
         NDR_DATA_DIR: E2E_DATA_DIR,
         // 测试绝不触碰真实系统凭据库：显式使用会话凭据后端。
         NDR_CREDENTIAL_BACKEND: 'session',
+        // 仅测试：允许 FakeProvider 用于验证连接测试界面（不会访问网络）。
+        NDR_ALLOW_FAKE_PROVIDER: '1',
+        NDR_LLM_TIMEOUT_SECONDS: '5',
         // E2E 使用隔离数据目录，启动时自动迁移到 head（默认行为仍是显式迁移）。
         NDR_AUTO_MIGRATE: '1',
       },

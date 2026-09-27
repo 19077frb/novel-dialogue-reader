@@ -497,3 +497,10 @@ a {
   border-color: var(--ndr-ok);
   color: var(--ndr-ok);
 }
+
+.ndr-connection-result {
+  border: 1px solid var(--ndr-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
