@@ -268,6 +268,7 @@ def _build_adapter(
             credential_mode=credential_mode,
             credential_ref=credential_ref,
             timeout_seconds=settings.llm_timeout_seconds,
+            fake_labeling_mode=settings.fake_provider_labels,
         ),
         credentials,
         allow_fake_provider=settings.allow_fake_provider,

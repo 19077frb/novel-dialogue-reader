@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 30.0
     allow_fake_provider: bool = False
 
+    # 仅测试：FakeProvider 的标注脚本模式。unknown=全部标为 UNKNOWN（默认）；
+    # deterministic=确定性地建一个分组并返回 DIRECT 归属，用于离线验证着色/编号链路。
+    # 只有在 NDR_ALLOW_FAKE_PROVIDER=1 且协议为 fake-provider 时才可能生效，绝不影响真实提供方。
+    fake_provider_labels: str = "unknown"
+
     # 凭据后端："system" 用系统凭据库（keyring），"session" 只用进程内会话密钥。
     # 测试/E2E 显式设为 session，避免触碰真实的系统凭据库。
     credential_backend: str = "system"

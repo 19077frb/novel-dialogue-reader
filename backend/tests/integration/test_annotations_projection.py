@@ -5,11 +5,13 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from ndr.app import create_app
 from ndr.config import Settings
 from ndr.domain.enums import AnnotationStatus, JobState
 from ndr.jobs.scheduler import run_job
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.storage.engine import create_db_engine, create_session_factory
+from ndr.storage.migrate import run_migrations
 from ndr.storage.models import Annotation, InferenceRun
 from ndr.storage.transactions import transaction
 
@@ -215,3 +217,57 @@ def test_projection_is_read_only_and_needs_no_model(
     finally:
         engine.dispose()
     assert before == after == (0, 0)
+
+
+def test_deterministic_fake_provider_produces_colored_projection(tmp_path) -> None:
+    """确定性 FakeProvider：建分组后给稳定颜色/编号，供前端离线验证着色链路。
+
+    这是测试专用脚本（NDR_ALLOW_FAKE_PROVIDER=1 + NDR_FAKE_PROVIDER_LABELS=deterministic）；
+    真实提供方不会走到这里，界面也不会把假结果当成真实成功。
+    """
+
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        credential_backend="session",
+        allow_fake_provider=True,
+        fake_provider_labels="deterministic",
+    )
+    run_migrations(settings)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        data = _import(client)
+        profile_id = _fake_profile(client)
+        job = client.post(
+            "/api/jobs",
+            json={
+                "book_id": data["book_id"],
+                "profile_id": profile_id,
+                "mode": "preview",
+                "range": {"start_cp": 0, "end_cp": len(SAMPLE)},
+                "idempotency_key": "k-deterministic",
+                "run_now": False,
+            },
+        ).json()["data"]
+
+        engine = create_db_engine(settings)
+        factory = create_session_factory(engine)
+        try:
+            outcome = run_job(
+                factory, settings, job_id=job["id"], credentials=app.state.credentials
+            )
+        finally:
+            engine.dispose()
+        assert outcome.state is JobState.COMPLETED
+        assert outcome.calls >= 1
+
+        payload = client.get(
+            f"/api/books/{data['book_id']}/annotations",
+            params={"start_cp": 0, "end_cp": len(SAMPLE)},
+        ).json()["data"]
+
+    colored = [item for item in payload["items"] if item["color_index"] is not None]
+    assert colored, payload["counts"]
+    assert {item["color_index"] for item in colored} == {0}
+    assert {item["label"] for item in colored} == {"S1"}
+    assert payload["counts"]["accepted"] >= 1
+    assert payload["legend"] and payload["legend"][0]["label"] == "S1"

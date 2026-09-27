@@ -221,6 +221,7 @@ async def test_connection_route(
                 credential_mode=profile.credential_mode,
                 credential_ref=profile.credential_ref,
                 timeout_seconds=settings.llm_timeout_seconds,
+                fake_labeling_mode=settings.fake_provider_labels,
             )
             snapshot = {
                 "profile_id": profile.id,
@@ -244,6 +245,7 @@ async def test_connection_route(
                 credential_mode=cleaned["credential_mode"],
                 credential_ref=cleaned["credential_ref"],
                 timeout_seconds=settings.llm_timeout_seconds,
+                fake_labeling_mode=settings.fake_provider_labels,
             )
             temp_ref = cleaned["credential_ref"]
             snapshot = {

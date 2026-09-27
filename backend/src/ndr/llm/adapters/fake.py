@@ -35,6 +35,8 @@ class FakeProviderAdapter:
     script: list[ScriptedResponse] = field(default_factory=list)
     # 可控 usage：默认 None（未知，不写 0）；测试可注入 {"input_tokens": ...} 验证结算
     usage: Mapping[str, Any] | None = None
+    # 仅测试：'unknown'（默认，全部标为 UNKNOWN）或 'deterministic'（确定性建立新分组）
+    labeling_mode: str = "unknown"
     capabilities: AdapterCapabilities = field(
         default_factory=lambda: PROTOCOL_CAPABILITIES[FAKE_PROVIDER_PROTOCOL]
     )
@@ -60,6 +62,8 @@ class FakeProviderAdapter:
                 },
                 ensure_ascii=False,
             )
+        if self.labeling_mode == "deterministic":
+            return self._deterministic_labels(payload)
         # 标注：把请求里的目标对白都标成 UNKNOWN（不假装知道说话人）
         targets = list((payload or {}).get("target_quote_ids", []))
         return {
@@ -76,6 +80,49 @@ class FakeProviderAdapter:
                 }
                 for quote_id in targets
             ],
+        }
+
+    def _deterministic_labels(self, payload: Mapping[str, Any] | None) -> dict[str, Any]:
+        """离线确定性脚本：第一句建立新分组，其余沿用同一分组（DIRECT 证据 → ACCEPTED）。
+
+        这是**测试/演示专用**的假结果，只在显式开启 FakeProvider（NDR_ALLOW_FAKE_PROVIDER=1）
+        且显式设置确定性模式时生效；真实提供方永远不会走到这里。
+        """
+
+        targets = [str(item) for item in (payload or {}).get("target_quote_ids", [])]
+        labels = [
+            {
+                "quote_id": quote_id,
+                "scene_ref": "scene_current",
+                "kind": "speech",
+                "assignment": "NEW" if index == 0 else "EXISTING",
+                "speaker_ref": "new1",
+                "basis": "DIRECT",
+                "evidence_refs": [],
+            }
+            for index, quote_id in enumerate(targets)
+        ]
+        new_speakers = (
+            [
+                {
+                    "temp_ref": "new1",
+                    "scene_ref": "scene_current",
+                    "first_quote_id": targets[0],
+                    "description": "确定性测试说话人",
+                    "evidence_refs": [],
+                }
+            ]
+            if targets
+            else []
+        )
+        return {
+            "schema_version": OUTPUT_SCHEMA_VERSION,
+            "scene_updates": [],
+            "gap_decisions": [],
+            "new_speakers": new_speakers,
+            "labels": labels,
+            "identity_proposals": [],
+            "needs_context": [],
         }
 
     async def test_connection(self) -> ConnectionTestResult:
