@@ -17,7 +17,8 @@ from ndr.storage.migrate import run_migrations
 def tmp_settings(tmp_path: Path) -> Settings:
     """隔离的数据目录，避免测试触碰真实书库。"""
 
-    return Settings(data_dir=tmp_path / "data")
+    # 测试绝不触碰真实的系统凭据库：显式使用会话凭据后端。
+    return Settings(data_dir=tmp_path / "data", credential_backend="session")
 
 
 @pytest.fixture()

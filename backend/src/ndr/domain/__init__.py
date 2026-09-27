@@ -51,6 +51,12 @@ from .enums import (
     SpeakerBasis,
     VisibilityPolicy,
 )
+from .profiles import (
+    ModelProfileCreate,
+    ModelProfileOut,
+    ModelProfilePatch,
+    ProtocolCapabilitiesOut,
+)
 
 __all__ = [
     "AnnotationSource",
@@ -82,6 +88,10 @@ __all__ = [
     "InferenceRunState",
     "JobKind",
     "JobOut",
+    "ModelProfileCreate",
+    "ModelProfileOut",
+    "ModelProfilePatch",
+    "ProtocolCapabilitiesOut",
     "JobPurpose",
     "JobState",
     "QuoteKind",

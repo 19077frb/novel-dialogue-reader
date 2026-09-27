@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # 单次导入的文件大小上限（字节）；超出返回 413。
     max_import_bytes: int = 50 * 1024 * 1024
 
+    # 凭据后端："system" 用系统凭据库（keyring），"session" 只用进程内会话密钥。
+    # 测试/E2E 显式设为 session，避免触碰真实的系统凭据库。
+    credential_backend: str = "system"
+
     # EPUB 解压与结构限制（DEVELOPMENT.md 4.1：限制值可配置并返回具体错误）。
     max_epub_entries: int = 2000
     max_epub_total_uncompressed_bytes: int = 200 * 1024 * 1024

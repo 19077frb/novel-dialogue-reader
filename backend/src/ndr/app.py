@@ -17,10 +17,12 @@ from .api.books import router as books_router
 from .api.errors import install_error_handlers, install_request_id_middleware
 from .api.health import router as health_router
 from .api.jobs import router as jobs_router
+from .api.model_profiles import router as model_profiles_router
 from .api.openapi import install_openapi
 from .api.quotes import quote_router
 from .api.quotes import router as quotes_router
 from .config import Settings, get_settings
+from .llm.credentials import CredentialService, SystemCredentialStore
 from .storage.engine import create_db_engine, create_session_factory
 from .storage.migrate import run_migrations
 
@@ -53,6 +55,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved
     app.state.engine = engine
     app.state.session_factory = session_factory
+    # 凭据服务：system 用系统凭据库；测试/E2E 用 NDR_CREDENTIAL_BACKEND=session 隔离。
+    app.state.credentials = CredentialService(
+        system=SystemCredentialStore(
+            enabled=resolved.credential_backend.lower() != "session"
+        )
+    )
     # 默认值：未进入 lifespan（例如直接构造 app）时健康检查仍可用。
     app.state.started_at = datetime.now(tz=UTC)
     app.state.started_monotonic = time.monotonic()
@@ -76,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(jobs_router, prefix="/api")
     app.include_router(quotes_router, prefix="/api")
     app.include_router(quote_router, prefix="/api")
+    app.include_router(model_profiles_router, prefix="/api")
     return app
 
 

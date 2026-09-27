@@ -29,6 +29,7 @@ STATUS_BY_CODE: dict[ErrorCode, int] = {
     ErrorCode.NOT_FOUND: 404,
     ErrorCode.VERSION_CONFLICT: 409,
     ErrorCode.IDEMPOTENCY_CONFLICT: 409,
+    ErrorCode.RESOURCE_CONFLICT: 409,
     ErrorCode.PAYLOAD_TOO_LARGE: 413,
     ErrorCode.UNSUPPORTED_MEDIA_TYPE: 415,
     ErrorCode.BUDGET_EXHAUSTED: 409,
