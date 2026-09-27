@@ -61,3 +61,23 @@ class ProtocolCapabilitiesOut(ApiModel):
     supports_max_tokens: bool
     requires_api_key: bool
     notes: str = ""
+
+
+class ConnectionTestIn(ApiModel):
+    """连接测试请求：已保存配置，或临时草稿（草稿不落库）。"""
+
+    profile_id: str | None = None
+    draft: ModelProfileCreate | None = None
+
+
+class ConnectionTestOut(ApiModel):
+    ok: bool
+    protocol: str
+    model: str
+    adapter: str
+    detail: str
+    latency_ms: int | None = None
+    usage: dict[str, Any] | None = None
+    usage_unknown: bool = True
+    error_code: str | None = None
+    run_id: str

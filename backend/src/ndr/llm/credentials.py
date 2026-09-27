@@ -54,6 +54,11 @@ class SessionCredentialStore:
     def delete(self, ref: str) -> None:
         self._secrets.pop(ref, None)
 
+    def refs(self) -> tuple[str, ...]:
+        """已保存的引用名（不含密钥），用于测试与诊断。"""
+
+        return tuple(sorted(self._secrets))
+
     def clear(self) -> None:
         self._secrets.clear()
 

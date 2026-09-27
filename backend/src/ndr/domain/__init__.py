@@ -52,6 +52,8 @@ from .enums import (
     VisibilityPolicy,
 )
 from .profiles import (
+    ConnectionTestIn,
+    ConnectionTestOut,
     ModelProfileCreate,
     ModelProfileOut,
     ModelProfilePatch,
@@ -69,6 +71,8 @@ __all__ = [
     "ChapterOut",
     "ContentNodeOut",
     "ContentNodeType",
+    "ConnectionTestIn",
+    "ConnectionTestOut",
     "ContentResponse",
     "CorrectionAction",
     "CorrectionTargetType",

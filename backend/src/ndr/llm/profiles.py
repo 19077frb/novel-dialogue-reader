@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -266,3 +267,36 @@ def delete_profile(session: Session, credentials: CredentialService, profile: Mo
     credentials.remove(ref=ref)
     session.delete(profile)
     session.flush()
+
+def create_profile_draft(
+    draft: Any, credentials: CredentialService
+) -> dict[str, Any]:
+    """准备一次性的“临时草稿”连接测试（不写数据库；密钥只进内存并即刻可用）。
+
+    返回适配器所需的字段；调用方在用完后必须 ``credentials.remove(ref=...)``。
+    """
+
+    protocol = ensure_known_protocol(draft.protocol)
+    base_url = normalize_base_url(draft.base_url)
+    model = (draft.model or "").strip()
+    if not model:
+        raise ApiError.validation("model 不能为空")
+    params = json.loads(normalize_params(draft.params))
+
+    credential_ref: str | None = None
+    mode = draft.credential_mode
+    if draft.api_key:
+        credential_ref = f"model-profile-draft/{uuid.uuid4().hex}"
+        result = credentials.store(mode=mode, ref=credential_ref, secret=draft.api_key)
+        mode = result.mode
+    else:
+        mode = CredentialMode.NONE
+
+    return {
+        "protocol": protocol,
+        "base_url": base_url,
+        "model": model,
+        "params": params,
+        "credential_mode": mode,
+        "credential_ref": credential_ref,
+    }

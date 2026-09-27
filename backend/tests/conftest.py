@@ -59,3 +59,17 @@ def migrated_client(migrated_settings: Settings) -> Iterator[TestClient]:
     app = create_app(migrated_settings)
     with TestClient(app) as test_client:
         yield test_client
+
+@pytest.fixture()
+def fake_provider_client(tmp_path: Path) -> Iterator[TestClient]:
+    """显式启用 FakeProvider 的隔离客户端（仅测试用；不发任何网络请求）。"""
+
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        credential_backend="session",
+        allow_fake_provider=True,
+    )
+    run_migrations(settings)
+    app = create_app(settings)
+    with TestClient(app) as test_client:
+        yield test_client

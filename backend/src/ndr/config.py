@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # 单次导入的文件大小上限（字节）；超出返回 413。
     max_import_bytes: int = 50 * 1024 * 1024
 
+    # 模型调用：超时与 FakeProvider 开关。FakeProvider 默认关闭，只在测试/演示时显式启用。
+    llm_timeout_seconds: float = 30.0
+    allow_fake_provider: bool = False
+
     # 凭据后端："system" 用系统凭据库（keyring），"session" 只用进程内会话密钥。
     # 测试/E2E 显式设为 session，避免触碰真实的系统凭据库。
     credential_backend: str = "system"

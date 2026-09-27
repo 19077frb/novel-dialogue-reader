@@ -89,6 +89,18 @@ class UsageRecord:
     unknown: bool = False
     raw: Mapping[str, Any] = field(default_factory=dict)
 
+    def as_dict(self) -> dict[str, Any]:
+        """序列化给 API/落库；未知项保持 null，不写成 0。"""
+
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "cost": self.cost,
+            "currency": self.currency,
+            "unknown": self.unknown,
+        }
+
 
 @runtime_checkable
 class ProviderAdapter(Protocol):

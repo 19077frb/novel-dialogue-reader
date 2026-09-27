@@ -35,6 +35,7 @@ STATUS_BY_CODE: dict[ErrorCode, int] = {
     ErrorCode.BUDGET_EXHAUSTED: 409,
     ErrorCode.PROVIDER_AUTH_FAILED: 502,
     ErrorCode.MODEL_NOT_FOUND: 502,
+    ErrorCode.PROVIDER_UNAVAILABLE: 502,
     ErrorCode.RATE_LIMITED: 429,
     ErrorCode.PROVIDER_TIMEOUT: 504,
     ErrorCode.INVALID_MODEL_OUTPUT: 502,
