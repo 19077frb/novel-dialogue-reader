@@ -445,12 +445,53 @@
         }
       }
     },
+    "/api/jobs": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "创建任务",
+        "operationId": "create_job_route_api_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_JobDetailOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/{job_id}": {
       "get": {
         "tags": [
           "jobs"
         ],
-        "summary": "任务状态",
+        "summary": "任务状态与用量",
         "operationId": "get_job_route_api_jobs__job_id__get",
         "parameters": [
           {
@@ -469,7 +510,185 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DataEnvelope_JobOut_"
+                  "$ref": "#/components/schemas/DataEnvelope_JobDetailOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{job_id}/pause": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Pause Job Route",
+        "operationId": "pause_job_route_api_jobs__job_id__pause_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_JobDetailOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{job_id}/resume": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Resume Job Route",
+        "operationId": "resume_job_route_api_jobs__job_id__resume_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_JobRunOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{job_id}/run": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "立即执行（测试/手动）",
+        "operationId": "run_job_route_api_jobs__job_id__run_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_JobRunOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{job_id}/reconcile": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Reconcile Job Route",
+        "operationId": "reconcile_job_route_api_jobs__job_id__reconcile_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_dict_"
                 }
               }
             }
@@ -1020,6 +1239,100 @@
           }
         }
       }
+    },
+    "/api/books/{book_id}/estimates": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "本地估算（不调用模型）",
+        "operationId": "estimate_route_api_books__book_id__estimates_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_EstimateOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/usage": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "按任务汇总用量",
+        "operationId": "usage_route_api_books__book_id__usage_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_UsageOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1204,6 +1517,43 @@
           "created_at"
         ],
         "title": "BookVersionOut"
+      },
+      "BudgetIn": {
+        "properties": {
+          "max_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Input Tokens"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
+          "max_rechecks": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Max Rechecks",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "BudgetIn"
       },
       "ChapterOut": {
         "properties": {
@@ -1722,6 +2072,25 @@
         ],
         "title": "DataEnvelope[CursorPage[QuoteOut]]"
       },
+      "DataEnvelope_EstimateOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EstimateOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[EstimateOut]"
+      },
       "DataEnvelope_ImportResult_": {
         "properties": {
           "data": {
@@ -1741,10 +2110,10 @@
         ],
         "title": "DataEnvelope[ImportResult]"
       },
-      "DataEnvelope_JobOut_": {
+      "DataEnvelope_JobDetailOut_": {
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/JobOut"
+            "$ref": "#/components/schemas/JobDetailOut"
           },
           "request_id": {
             "type": "string",
@@ -1758,7 +2127,26 @@
           "data",
           "request_id"
         ],
-        "title": "DataEnvelope[JobOut]"
+        "title": "DataEnvelope[JobDetailOut]"
+      },
+      "DataEnvelope_JobRunOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/JobRunOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[JobRunOut]"
       },
       "DataEnvelope_LocateOut_": {
         "properties": {
@@ -1855,6 +2243,46 @@
         ],
         "title": "DataEnvelope[ScanResultOut]"
       },
+      "DataEnvelope_UsageOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UsageOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[UsageOut]"
+      },
+      "DataEnvelope_dict_": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Data"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[dict]"
+      },
       "DataEnvelope_list_ChapterOut__": {
         "properties": {
           "data": {
@@ -1923,6 +2351,114 @@
           "request_id"
         ],
         "title": "DataEnvelope[list[ProtocolCapabilitiesOut]]"
+      },
+      "EstimateIn": {
+        "properties": {
+          "book_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Version Id"
+          },
+          "range": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Range"
+          },
+          "reading_mode": {
+            "$ref": "#/components/schemas/ReadingMode",
+            "default": "initial"
+          },
+          "visible_horizon_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible Horizon Cp"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/BudgetIn"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "EstimateIn"
+      },
+      "EstimateOut": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "window_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Window Count"
+          },
+          "target_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Target Count"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Output Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Tokens"
+          },
+          "estimator": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Estimator"
+          },
+          "policy": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Policy"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "book_version_id",
+          "window_count",
+          "target_count",
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "title": "EstimateOut"
       },
       "GapDecision": {
         "type": "string",
@@ -2117,18 +2653,90 @@
         "title": "ImportStatus",
         "description": "导入状态与推理状态分离。"
       },
-      "JobKind": {
-        "type": "string",
-        "enum": [
-          "IMPORT",
-          "INFERENCE",
-          "RECHECK",
-          "RECOMPUTE",
-          "EXPORT"
+      "JobCreate": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/JobKind",
+            "default": "INFERENCE"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/JobPurpose",
+            "description": "preview / process",
+            "default": "process"
+          },
+          "book_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Version Id"
+          },
+          "range": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Range",
+            "description": "{start_cp, end_cp, chapter_id?}"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "reading_mode": {
+            "$ref": "#/components/schemas/ReadingMode",
+            "default": "initial"
+          },
+          "visible_horizon_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible Horizon Cp"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/BudgetIn"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "run_now": {
+            "type": "boolean",
+            "title": "Run Now",
+            "description": "是否立即在后台执行（测试/E2E 可显式触发）",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "idempotency_key"
         ],
-        "title": "JobKind"
+        "title": "JobCreate"
       },
-      "JobOut": {
+      "JobDetailOut": {
         "properties": {
           "id": {
             "type": "string",
@@ -2207,14 +2815,54 @@
             ],
             "title": "Last Error"
           },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/JobWindowOut"
+            },
+            "type": "array",
+            "title": "Windows"
+          },
+          "remaining_windows": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Remaining Windows",
+            "default": 0
+          },
+          "windows_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Windows Total",
+            "default": 0
+          },
+          "calls": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Calls",
+            "default": 0
+          },
+          "cached_windows": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Cached Windows",
+            "default": 0
+          },
+          "unknown_usage_runs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unknown Usage Runs",
+            "default": 0
+          },
+          "usage": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Usage"
+          },
           "created_at": {
             "type": "string",
-            "format": "date-time",
             "title": "Created At"
           },
           "updated_at": {
             "type": "string",
-            "format": "date-time",
             "title": "Updated At"
           }
         },
@@ -2227,7 +2875,18 @@
           "created_at",
           "updated_at"
         ],
-        "title": "JobOut"
+        "title": "JobDetailOut"
+      },
+      "JobKind": {
+        "type": "string",
+        "enum": [
+          "IMPORT",
+          "INFERENCE",
+          "RECHECK",
+          "RECOMPUTE",
+          "EXPORT"
+        ],
+        "title": "JobKind"
       },
       "JobPurpose": {
         "type": "string",
@@ -2238,6 +2897,71 @@
         ],
         "title": "JobPurpose",
         "description": "INFERENCE 的目的；preview/process 共用同一识别引擎与缓存。"
+      },
+      "JobRunOut": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "windows_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Windows Total",
+            "default": 0
+          },
+          "windows_done": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Windows Done",
+            "default": 0
+          },
+          "cached_windows": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Cached Windows",
+            "default": 0
+          },
+          "calls": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Calls",
+            "default": 0
+          },
+          "unknown_runs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unknown Runs",
+            "default": 0
+          },
+          "budget_exhausted": {
+            "type": "boolean",
+            "title": "Budget Exhausted",
+            "default": false
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "usage": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Usage"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobRunOut"
       },
       "JobState": {
         "type": "string",
@@ -2253,6 +2977,47 @@
           "NEEDS_RECONCILIATION"
         ],
         "title": "JobState"
+      },
+      "JobWindowOut": {
+        "properties": {
+          "window_id": {
+            "type": "string",
+            "title": "Window Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "target_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Target Count"
+          },
+          "dependency_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependency Hash"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Attempts",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window_id",
+          "state",
+          "target_count"
+        ],
+        "title": "JobWindowOut"
       },
       "LocateOut": {
         "properties": {
@@ -2939,6 +3704,22 @@
         ],
         "title": "ReadingProgressOut"
       },
+      "ReconcileIn": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "retry",
+              "keep_unknown"
+            ],
+            "title": "Action",
+            "default": "keep_unknown"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ReconcileIn"
+      },
       "ScanResultOut": {
         "properties": {
           "book_id": {
@@ -3026,6 +3807,86 @@
           "detail"
         ],
         "title": "ScanWarningOut"
+      },
+      "UsageOut": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "runs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Runs"
+          },
+          "unknown_usage_runs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unknown Usage Runs"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Output Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Tokens"
+          },
+          "by_state": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By State"
+          },
+          "by_model": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Model"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "runs",
+          "unknown_usage_runs",
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "title": "UsageOut"
       },
       "ValidationError": {
         "properties": {

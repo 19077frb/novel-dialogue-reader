@@ -1,81 +1,75 @@
 # 开发交接
 
 更新时间：2026-09-28
-当前任务：T09 联合场景与匿名分组引擎（implementation / offline_verification 完成；live = BLOCKED）
-最近完成任务：T09（此前 T00～T08：骨架→模型迁移→TXT→EPUB→阅读器→候选与金标准→配置页→适配器与连接测试→上下文预算）
-下一任务与理由：T10 持久化任务、缓存与用量。T09 已把「一次模型输出 → 场景/分组/标注」这条路走通，
-T10 需要把它任务化：调度与窗口检查点、profile 快照、缓存指纹、用量与预算预留、幂等创建、状态查询，
-并复用 T08 的 `job_windows` 与 `dependency_hash`。
+当前任务：T10 持久化任务、缓存与用量（implementation / offline_verification 完成；live = BLOCKED）
+最近完成任务：T10（此前 T00～T09：骨架→迁移→TXT→EPUB→阅读器→候选与金标准→配置页→适配器→上下文预算→场景引擎）
+下一任务与理由：T11 真实效果预览与按章处理。T10 已提供任务/窗口/检查点/缓存/用量与暂停恢复，
+T11 需要用同一套 annotations 投影做预览页与按章处理界面（范围选择、估算、试运行、任务面板、原文/标注对比、图例与 usage）。
 
 ## 实际运行方式
 
 - 前置环境与已锁定版本：CPython 3.11.4；uv 0.9.0（`backend/uv.lock`）；Node.js 22.14.0 / npm 10.9.2；
   React 18.3 / Vite 5.4 / Vitest 2.1 / Playwright 1.63 + Chromium。
-- 启动命令与访问地址：`pwsh -File scripts/dev.ps1` → 后端 `http://127.0.0.1:8765`、
-  前端 `http://127.0.0.1:5173`（代理 `/api`）；模型配置页 `/settings/models`。
-- 数据目录、迁移版本与服务状态：`data/`（`NDR_DATA_DIR` 可覆盖），数据库 revision `0004`（= head）。
-  测试/E2E 用 `NDR_CREDENTIAL_BACKEND=session`；E2E 另开 `NDR_ALLOW_FAKE_PROVIDER=1`（仅测试）。
-- 验证命令：`pwsh -File scripts/verify.ps1`；E2E：`npm --prefix frontend run test:e2e`。
+- 启动命令与访问地址：`pwsh -File scripts/dev.ps1` → 后端 `http://127.0.0.1:8765`、前端 `http://127.0.0.1:5173`。
+- 数据目录与迁移：`data/`（`NDR_DATA_DIR` 可覆盖），数据库 revision `0004`（= head）。
+  测试/E2E：`NDR_CREDENTIAL_BACKEND=session`；E2E 另开 `NDR_ALLOW_FAKE_PROVIDER=1`。
+- 验证命令：`pwsh -File scripts/verify.ps1`。
 
 ## 本次改动
 
-- `ndr/scenes/`：
-  - `state.py`：`SceneState`（可序列化，`SCENE_STATE_VERSION="scene-state-1"`）与转移规则
-    （CONTINUE/UPDATE 不切、BREAK 关旧开新并清空参与者、UNCERTAIN 记 `PENDING_BOUNDARY` 与 `unresolved`）。
-  - `acceptance.py`：`acceptance-1` 冷启动策略（DIRECT→ACCEPTED、风格/指代→PROVISIONAL、
-    证据不足→UNKNOWN 且不建人、非 speech 无 speaker）与 `compute_visible_from_cp`（后端算可见时点）。
-  - `engine.py`：`apply_window` 按 §4.5 六步执行（解析→程序校验→锁定检查→可见时点→接受→事务落库），
-    写 scenes / speaker_groups / annotations / annotation_history / scene_memberships /
-    identity_revisions / review_items；支持身份合并（带证据才自动应用）。
-  - `runner.py`：`run_window` 组装提示 → 调用适配器 → 校验 → **有限重试（额外 1 次）** → 应用；
-    每次尝试记录 usage（T10 落库）。
-- `ndr/speakers/`：`groups.py`（匿名分组注册表：编号按首次可靠发言顺序、UNKNOWN 不建组、
-  临时引用映射）、`revisions.py`（身份修订接受策略：明确证据且不碰人工锁定才自动应用）。
-- 校验与适配器修正：`LabelingTargets` 允许 `EXISTING` 引用**同一窗口刚声明**的临时人物；
-  `RetryPolicy.should_retry` 改为“额外重试次数”语义；FakeProvider 修复重复取件 bug 并支持返回原始字符串
-  （模拟坏 JSON）；`run_window` 在校验前剥离适配器的 `_usage` 旁路字段。
-- 测试：`tests/unit/test_scene_state.py` 16 项、`tests/integration/test_attribution_engine.py` 9 项。
-- 文档：新增决策 0011；CONTRACTS 增加第 18 节（含 T10 需要落库的字段）；README 增加“场景与匿名分组（T09）”。
-- 本任务**不新增端点与迁移**。
+- `ndr/storage/cache.py`：语义缓存键（原文版本/目标 IDs/输入指纹/模型与参数/协议·提示·schema·策略版本/
+  依赖哈希/阅读模式/horizon；**排除** job_id 与 preview·process 目的）与 `ResultCacheStore`（不覆盖既有结果）。
+- `ndr/jobs/service.py`：幂等创建（同 key 同摘要复用、不同摘要 409）、本地估算（窗口数/目标数/token，
+  标注为启发式）、profile 快照（无密钥）、`usage_summary` 与 `spent_tokens`（未知用量单独计数）。
+- `ndr/jobs/scheduler.py`：`run_job`（窗口顺序执行、PREPARED→DISPATCHED→应用+结算、
+  缓存命中不调用、预算预留与 `BUDGET_EXHAUSTED`、暂停在窗口之间生效、超时→`NEEDS_RECONCILIATION`、
+  每窗口写检查点）、`reconcile_stale_runs`（重启后把超租约 DISPATCHED 标为未知结果）、
+  `reconcile_job`（显式 retry / keep_unknown）。
+- API：`POST /api/jobs`、`GET /api/jobs/{id}`（`JobDetailOut`，含窗口/用量/剩余）、
+  `POST /api/jobs/{id}/pause|resume|run|reconcile`；`POST /api/books/{id}/estimates`、
+  `GET /api/books/{id}/usage`（`api/estimates.py`）。
+- 前端：类型跟随新契约（`JobOut` → `JobDetailOut`、新增 `JobRunOut`/`EstimateOut`/`UsageOut`），
+  测试夹具同步更新。
+- 测试：`tests/integration/test_cache.py` 4 项、`tests/integration/test_jobs.py` 8 项；
+  `FakeProviderAdapter` 新增可控 `usage`（默认未知）。
+- 文档：决策 0012；CONTRACTS 第 19 节；README 增加“任务与用量（T10）”；OpenAPI/前端类型已重新生成（25 条路径）。
 
 ## 验证证据
 
-- `pytest backend/tests` → **271 passed**（T08 时 246；新增 16 + 9）；`ruff` 全绿；`scripts/verify.ps1` 退出码 0。
-- 门槛逐条核对（均以 FakeProvider 驱动、数据库真实事务）：
-  - **同一场景跨窗口保持身份**：窗口 1 建立 S1，窗口 2 用稳定 ID 继续标注 → 只有一个 `speaker_groups` 行，
-    两条标注 `speaker_id` 相同，`scene_id` 不变。
-  - **未知不制造新人**：三条证据不足的对白 → 全部 `UNKNOWN`、`speaker_groups` 为空、
-    产生 `UNKNOWN_SPEAKER` 待确认项。
-  - **UPDATE 不切场景**：UPDATE 后仍只有一个 `scenes` 行且状态 OPEN；BREAK 才关闭旧场景（写 `end_cp`）
-    并开新场景（`state.scene_ref` 采用模型声明的 `scene_2`）。
-  - **后文证据具备可见时点**：带证据的合并写 `identity_revisions.visible_from_cp = 揭示位置`，
-    合并后标注指向幸存分组；初读投影（T15）据此不会提前同色。
-  - 另有：F07 三人与连续同人、F14 锁定对白不被覆盖且不写历史、F13 坏 JSON 只重试一次并拒绝提交、
-    坏→好重试后接受、整书窗口规划回归。
-- **未验证（BLOCKED）**：真实模型效果（T16 的独立作品评测）、真实提供方联调（T07 已记录无凭据）。
+- `pytest backend/tests` → **283 passed**（T09 时 271；新增 4 + 8）；`ruff` 全绿；`scripts/verify.ps1` 退出码 0；
+  前端 typecheck / vitest（29）/ build 全部通过。
+- 门槛逐条核对：
+  - **已完成窗口不重复调用**：同一任务跑两次，第二次 `calls=0`，适配器调用列表长度不变。
+  - **未知远程结果不自动重发**：构造超租约的 DISPATCHED 尝试 → `reconcile_stale_runs` 标
+    `UNKNOWN_OUTCOME` 且任务/窗口 `NEEDS_RECONCILIATION`；再跑任务 `calls=0`；
+    只有显式 `POST /reconcile {"action":"retry"}` 才把窗口放回 QUEUED。
+  - **每个尝试可追溯用量**：`inference_runs` 逐次记录 state/usage/elapsed/error_code；
+    未知 usage 落 NULL 并计入 `unknown_usage_runs`，`GET /usage` 的 `total_tokens` 不把未知算进去。
+  - 另覆盖 F16（预览→处理命中缓存、发送次数不增加、重复点击同幂等键复用任务）、
+    F20（预算到顶不发调用、已知 usage 按口径结算）、暂停在窗口之间生效、估算纯本地。
+- 本轮修复的**真实缺陷**：`run_job` 无条件置 RUNNING 覆盖 PAUSING 导致暂停失效（改为保留 PAUSING）；
+  任务 API 草稿里的 `__import__` 取模型等临时写法清理；`JobOut`→`JobDetailOut` 契约变化后前端类型与夹具同步。
+- 未验证（BLOCKED）：真实提供方的任务执行（无凭据）；后台工作循环/多进程调度属 T14。
 
 ## 未完成与已知问题
 
-1. **界面还没有颜色/编号**：T09 只写数据；阅读页显示标注是 T11/T15，待确认队列是 T13。
-2. **接受策略未校准**：`cold_start=True` 固定生效；T16 拿到真实评测后才能放宽 COREFERENCE 等分支。
-3. **身份拆分（split）只记录不自动应用**：当前只在明确证据下自动合并；拆分留给 T12 的人工修订路径。
-4. **评审项没有去重策略细化**：同一 quote 的多个 reason 会各建一条；T13 需要在 UI 上合并展示。
-5. **`review_items.candidates_json` 结构随 reason 变化**：T13 需要按 reason 定义展示契约。
-6. **T10 尚未落地**：窗口/检查点/usage 仍未持久化到 `job_windows`/`jobs`/`inference_runs`。
-7. 已知环境事项：受限沙箱中 `uv run` 失败（脚本回退 `backend\.venv`）；`npm --prefix frontend install/ci`
-   须在 frontend 内执行；`alembic.ini` 保持 ASCII；脚本设置 `PYTHONUTF8=1`。
-8. `apply_patch` 与沙箱内命令执行器在本会话失效，文件改用 `.tools/newfile.ps1`（无 BOM UTF-8）。
-   注意：PowerShell 里不要把多行 here-string 直接当函数参数；提交信息不要带双引号；
-   **测试窗口里的目标必须全部被标注**（否则校验报 `missing_targets`，本任务踩过这个坑）。
+1. **后台执行是 FastAPI BackgroundTasks**：单进程、无租约续期，重启后的“孤儿”任务需要
+   `reconcile_stale_runs`（目前由测试/后续 T14 调用；T14 会加入启动扫描与 UI 入口）。
+2. **`POST /api/jobs/{id}/resume` 立即返回快照**（state=QUEUED），真实进度靠轮询 `GET /api/jobs/{id}`。
+3. **预算只按输入 token 预留**：输出按每条目标 20 token 粗估；真实分词器/价格资料接入后需重算（T16/T17）。
+4. **缓存不会过期**：依赖哈希变化会换键；手动清理接口留给 T14/T18。
+5. **界面还没有任务面板**：T11 接入预览页与任务轮询。
+6. 其余既有事项：`uv run` 在受限沙箱失败（脚本回退 venv）；`npm --prefix frontend install/ci` 需在包目录内执行；
+   `alembic.ini` 保持 ASCII；脚本设置 `PYTHONUTF8=1`；`apply_patch` 失效时用 `.tools/newfile.ps1`；
+   **测试窗口的目标必须全部被标注**（否则 `missing_targets`）。
 
 ## 后续约束
 
 - 必须保留的用户修改：`PLAN.md`、`DEVELOPMENT.md` 未改动；不得为通过检查而删减 TXT/EPUB、API 配置、
   真实预览、待定确认或导出功能。
-- 不可覆盖的内容：`evaluation/examples/**` 与 `frontend/e2e/fixtures/**` 的原始字节；
-  已发布迁移 `0001`～`0004` 不修改；**`user_locked` 的标注与用户密钥永不被自动结果覆盖或回传**。
-- 当前接口/schema/数据版本：API 契约版本 `1`；数据库 revision `0004`；输出契约 `schema_version="1.0"`；
+- 不可覆盖的内容：`evaluation/examples/**`、`frontend/e2e/fixtures/**` 的原始字节；已发布迁移 `0001`～`0004`；
+  **`user_locked` 标注与用户密钥**。
+- 当前版本号（都会进入缓存键/依赖哈希）：API 契约 `1`；数据库 `0004`；输出契约 `1.0`；
   提示词 `labeling-1`/`connection-1`；上下文 `context-1`；场景状态 `scene-state-1`；接受策略 `acceptance-1`；
-  引擎 `attribution-engine-1`；`SCANNER_VERSION=quote-scan-1`。**这些版本号进入缓存键/依赖哈希。**
-- 修改公共契约时同步 `docs/CONTRACTS.md`、`docs/openapi.json`、`frontend/src/api/schema.d.ts`、调用方与测试。
+  引擎 `attribution-engine-1`；调度器 `scheduler-1`；缓存 `cache-1`；扫描器 `quote-scan-1`。
 - 提交习惯：每完成一部分功能即用 git 提交。

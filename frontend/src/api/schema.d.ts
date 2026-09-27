@@ -146,6 +146,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 创建任务 */
+        post: operations["create_job_route_api_jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -153,10 +170,78 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 任务状态 */
+        /** 任务状态与用量 */
         get: operations["get_job_route_api_jobs__job_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Job Route */
+        post: operations["pause_job_route_api_jobs__job_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Job Route */
+        post: operations["resume_job_route_api_jobs__job_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 立即执行（测试/手动） */
+        post: operations["run_job_route_api_jobs__job_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile Job Route */
+        post: operations["reconcile_job_route_api_jobs__job_id__reconcile_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -324,6 +409,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/estimates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 本地估算（不调用模型） */
+        post: operations["estimate_route_api_books__book_id__estimates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 按任务汇总用量 */
+        get: operations["usage_route_api_books__book_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -402,6 +521,18 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** BudgetIn */
+        BudgetIn: {
+            /** Max Input Tokens */
+            max_input_tokens?: number | null;
+            /** Max Output Tokens */
+            max_output_tokens?: number | null;
+            /**
+             * Max Rechecks
+             * @default 0
+             */
+            max_rechecks: number;
         };
         /** ChapterOut */
         ChapterOut: {
@@ -584,6 +715,15 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[EstimateOut] */
+        DataEnvelope_EstimateOut_: {
+            data: components["schemas"]["EstimateOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[ImportResult] */
         DataEnvelope_ImportResult_: {
             data: components["schemas"]["ImportResult"];
@@ -593,9 +733,18 @@ export interface components {
              */
             request_id: string;
         };
-        /** DataEnvelope[JobOut] */
-        DataEnvelope_JobOut_: {
-            data: components["schemas"]["JobOut"];
+        /** DataEnvelope[JobDetailOut] */
+        DataEnvelope_JobDetailOut_: {
+            data: components["schemas"]["JobDetailOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[JobRunOut] */
+        DataEnvelope_JobRunOut_: {
+            data: components["schemas"]["JobRunOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -647,6 +796,27 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[UsageOut] */
+        DataEnvelope_UsageOut_: {
+            data: components["schemas"]["UsageOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[dict] */
+        DataEnvelope_dict_: {
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            };
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[list[ChapterOut]] */
         DataEnvelope_list_ChapterOut__: {
             /** Data */
@@ -676,6 +846,47 @@ export interface components {
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
              */
             request_id: string;
+        };
+        /** EstimateIn */
+        EstimateIn: {
+            /** Book Version Id */
+            book_version_id?: string | null;
+            /** Range */
+            range?: {
+                [key: string]: unknown;
+            };
+            /** @default initial */
+            reading_mode: components["schemas"]["ReadingMode"];
+            /** Visible Horizon Cp */
+            visible_horizon_cp?: number | null;
+            budget?: components["schemas"]["BudgetIn"];
+        };
+        /** EstimateOut */
+        EstimateOut: {
+            /** Book Id */
+            book_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Window Count */
+            window_count: number;
+            /** Target Count */
+            target_count: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Estimator */
+            estimator?: {
+                [key: string]: unknown;
+            };
+            /** Policy */
+            policy?: {
+                [key: string]: unknown;
+            };
+            /** Notes */
+            notes?: string[];
         };
         /**
          * GapDecision
@@ -748,13 +959,44 @@ export interface components {
          * @enum {string}
          */
         ImportStatus: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
-        /**
-         * JobKind
-         * @enum {string}
-         */
-        JobKind: "IMPORT" | "INFERENCE" | "RECHECK" | "RECOMPUTE" | "EXPORT";
-        /** JobOut */
-        JobOut: {
+        /** JobCreate */
+        JobCreate: {
+            /** Book Id */
+            book_id: string;
+            /** @default INFERENCE */
+            kind: components["schemas"]["JobKind"];
+            /**
+             * @description preview / process
+             * @default process
+             */
+            mode: components["schemas"]["JobPurpose"];
+            /** Book Version Id */
+            book_version_id?: string | null;
+            /**
+             * Range
+             * @description {start_cp, end_cp, chapter_id?}
+             */
+            range?: {
+                [key: string]: unknown;
+            };
+            /** Profile Id */
+            profile_id?: string | null;
+            /** @default initial */
+            reading_mode: components["schemas"]["ReadingMode"];
+            /** Visible Horizon Cp */
+            visible_horizon_cp?: number | null;
+            budget?: components["schemas"]["BudgetIn"];
+            /** Idempotency Key */
+            idempotency_key: string;
+            /**
+             * Run Now
+             * @description 是否立即在后台执行（测试/E2E 可显式触发）
+             * @default true
+             */
+            run_now: boolean;
+        };
+        /** JobDetailOut */
+        JobDetailOut: {
             /** Id */
             id: string;
             kind: components["schemas"]["JobKind"];
@@ -774,28 +1016,115 @@ export interface components {
             } | null;
             /** Last Error */
             last_error?: string | null;
+            /** Windows */
+            windows?: components["schemas"]["JobWindowOut"][];
             /**
-             * Created At
-             * Format: date-time
+             * Remaining Windows
+             * @default 0
              */
+            remaining_windows: number;
+            /**
+             * Windows Total
+             * @default 0
+             */
+            windows_total: number;
+            /**
+             * Calls
+             * @default 0
+             */
+            calls: number;
+            /**
+             * Cached Windows
+             * @default 0
+             */
+            cached_windows: number;
+            /**
+             * Unknown Usage Runs
+             * @default 0
+             */
+            unknown_usage_runs: number;
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            };
+            /** Created At */
             created_at: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
+            /** Updated At */
             updated_at: string;
         };
+        /**
+         * JobKind
+         * @enum {string}
+         */
+        JobKind: "IMPORT" | "INFERENCE" | "RECHECK" | "RECOMPUTE" | "EXPORT";
         /**
          * JobPurpose
          * @description INFERENCE 的目的；preview/process 共用同一识别引擎与缓存。
          * @enum {string}
          */
         JobPurpose: "preview" | "process" | "none";
+        /** JobRunOut */
+        JobRunOut: {
+            /** Job Id */
+            job_id: string;
+            state: components["schemas"]["JobState"];
+            /**
+             * Windows Total
+             * @default 0
+             */
+            windows_total: number;
+            /**
+             * Windows Done
+             * @default 0
+             */
+            windows_done: number;
+            /**
+             * Cached Windows
+             * @default 0
+             */
+            cached_windows: number;
+            /**
+             * Calls
+             * @default 0
+             */
+            calls: number;
+            /**
+             * Unknown Runs
+             * @default 0
+             */
+            unknown_runs: number;
+            /**
+             * Budget Exhausted
+             * @default false
+             */
+            budget_exhausted: boolean;
+            /** Errors */
+            errors?: string[];
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * JobState
          * @enum {string}
          */
         JobState: "QUEUED" | "RUNNING" | "PAUSING" | "PAUSED" | "PARTIAL" | "COMPLETED" | "FAILED" | "BUDGET_EXHAUSTED" | "NEEDS_RECONCILIATION";
+        /** JobWindowOut */
+        JobWindowOut: {
+            /** Window Id */
+            window_id: string;
+            state: components["schemas"]["JobState"];
+            /** Target Count */
+            target_count: number;
+            /** Dependency Hash */
+            dependency_hash?: string | null;
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number;
+        };
         /** LocateOut */
         LocateOut: {
             /** Book Id */
@@ -1047,6 +1376,15 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** ReconcileIn */
+        ReconcileIn: {
+            /**
+             * Action
+             * @default keep_unknown
+             * @enum {string}
+             */
+            action: "retry" | "keep_unknown";
+        };
         /** ScanResultOut */
         ScanResultOut: {
             /** Book Id */
@@ -1080,6 +1418,33 @@ export interface components {
             delimiter: string;
             /** Detail */
             detail: string;
+        };
+        /** UsageOut */
+        UsageOut: {
+            /** Book Id */
+            book_id: string;
+            /** Runs */
+            runs: number;
+            /** Unknown Usage Runs */
+            unknown_usage_runs: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /** By State */
+            by_state?: {
+                [key: string]: number;
+            };
+            /** By Model */
+            by_model?: {
+                [key: string]: number;
+            };
+            /** Currency */
+            currency?: string | null;
+            /** Cost */
+            cost?: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -1394,6 +1759,39 @@ export interface operations {
             };
         };
     };
+    create_job_route_api_jobs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_JobDetailOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_job_route_api_jobs__job_id__get: {
         parameters: {
             query?: never;
@@ -1411,7 +1809,135 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEnvelope_JobOut_"];
+                    "application/json": components["schemas"]["DataEnvelope_JobDetailOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_job_route_api_jobs__job_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_JobDetailOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_job_route_api_jobs__job_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_JobRunOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_job_route_api_jobs__job_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_JobRunOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcile_job_route_api_jobs__job_id__reconcile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReconcileIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_dict_"];
                 };
             };
             /** @description Validation Error */
@@ -1749,6 +2275,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_ConnectionTestOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    estimate_route_api_books__book_id__estimates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_EstimateOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_route_api_books__book_id__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_UsageOut_"];
                 };
             };
             /** @description Validation Error */

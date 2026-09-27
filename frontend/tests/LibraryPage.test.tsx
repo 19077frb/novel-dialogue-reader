@@ -62,6 +62,13 @@ describe('LibraryPage', () => {
       progress: { chapters: 3, nodes: 12 },
       checkpoint: null,
       last_error: null,
+      windows: [],
+      remaining_windows: 0,
+      windows_total: 0,
+      calls: 0,
+      cached_windows: 0,
+      unknown_usage_runs: 0,
+      usage: {},
       created_at: '2026-09-28T00:00:00+00:00',
       updated_at: '2026-09-28T00:00:01+00:00',
     })

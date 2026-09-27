@@ -59,8 +59,8 @@
 | `GET /api/books/{id}/resources/{resource_id}` | 受控登记资源（图片等，独立响应体） | **T03 已实现** |
 | `GET/POST/PATCH/DELETE /api/model-profiles*` | 非敏感配置与 has_key；keep/replace/remove 密钥 | **T06 已实现** |
 | `POST /api/model-profiles/test` | 有预算的微型连接测试（已存配置或草稿） | **T07 已实现** |
-| `POST /api/books/{id}/estimates` | 纯本地估算，说明依据 | T08 |
-| `GET /api/jobs/{id}` | 任务状态、进度与错误 | **T02 已实现**（最小轮询；调度/usage/恢复见 T10/T14） |
+| `POST /api/books/{id}/estimates` | 纯本地估算（窗口/目标/token），说明依据 | **T10 已实现** |
+| `POST /api/jobs`、`GET /api/jobs/{id}`、`pause`/`resume`/`run`/`reconcile` | 幂等创建、窗口检查点、用量、恢复与对账 | **T10 已实现**（后台工作循环见 T14） |
 | `GET /api/books/{id}/annotations` | 有效投影与图例，受 horizon 与阅读模式约束 | T11/T15 |
 | `GET /api/books/{id}/review-items`、`GET /api/review-items/{id}` | 待确认队列与详情 | T13 |
 | `GET /api/quotes/{id}` | 候选对白详情（含上下文与前置 Gap） | **T05 已实现**（主动标记见 T13） |
@@ -68,7 +68,7 @@
 | `POST /api/review-items/{id}/defer`、`POST /api/corrections/{id}/undo` | 延后与撤销（版本校验） | T12/T13 |
 | `POST /api/scenes/{id}/speaker-revisions` | merge/split 与影响范围 | T12 |
 | `POST /api/quotes/{id}/recheck` | 有上限的局部复核 | T14 |
-| `GET /api/books/{id}/usage` | 按任务/阶段/模型汇总，含未知用量标记 | T10 |
+| `GET /api/books/{id}/usage` | 按任务/阶段/模型汇总，含未知用量标记 | **T10 已实现** |
 | `/api/books/{id}/exports*`、`GET /api/exports/{id}/download` | 冻结快照、生成、校验与下载 | T15A/T15B |
 
 ## 5. 模型接入契约
@@ -334,3 +334,25 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 **T10 需要落库的字段**：窗口 → `job_windows`（`window_id`/`target_ids_json`/`dependency_hash`/`state`/
 `lease_until`），检查点 → `jobs.checkpoint_json`（含 `SceneState.snapshot()`），
 每次尝试 → `inference_runs`（`usage_json` 未知时为 NULL）。
+
+## 19. 任务、缓存与用量（T10 已实现）
+
+| 端点 | 说明 |
+| --- | --- |
+| `POST /api/jobs` | 202；`{book_id, mode: preview/process, range, profile_id, reading_mode, visible_horizon_cp, budget, idempotency_key, run_now}` |
+| `GET /api/jobs/{id}` | 任务状态 + 窗口列表 + usage + 剩余窗口（`JobDetailOut`；**旧的 `JobOut` 已被它取代**） |
+| `POST /api/jobs/{id}/pause` | RUNNING→PAUSING（当前窗口结束后 PAUSED）；QUEUED/PARTIAL→PAUSED |
+| `POST /api/jobs/{id}/resume` | 从检查点继续；PREPARED 的尝试可安全重试 |
+| `POST /api/jobs/{id}/run` | 立即执行（测试/手动触发；正常流程由后台任务执行） |
+| `POST /api/jobs/{id}/reconcile` | `{"action":"retry"\|"keep_unknown"}`：显式处理未知远程结果 |
+| `POST /api/books/{id}/estimates` | 纯本地估算（窗口数/目标数/token），不写库、不调用模型 |
+| `GET /api/books/{id}/usage` | 运行次数、未知用量次数、token 汇总、按状态/模型计数；缺价格资料时 `cost=null` |
+
+契约要点：
+
+- 幂等：同一 `idempotency_key` + 相同请求摘要 → 返回既有任务；摘要不同 → 409 `IDEMPOTENCY_CONFLICT`。
+- 窗口：`job_windows` 记录 `window_id`/`state`/`dependency_hash`；已完成窗口不会重复调用。
+- 缓存：键只含语义输入（决策 0012），**不含 job_id 与 preview/process 目的**。
+- 预算：调用前预留、调用后结算；超出 `max_input_tokens` → `BUDGET_EXHAUSTED` 且不再调用；
+  未知 usage 保持 NULL 并单独计数，绝不按 0 计。
+- 未知结果：DISPATCHED 超租约 → `UNKNOWN_OUTCOME` + `NEEDS_RECONCILIATION`，**不自动重发**。

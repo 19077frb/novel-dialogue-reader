@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { fetchJob, queryKeys } from '../api/books'
-import type { JobOut } from '../api/types'
+import type { JobDetailOut } from '../api/types'
 
 const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'])
 
-export function isTerminalJob(state: JobOut['state']): boolean {
+export function isTerminalJob(state: JobDetailOut['state']): boolean {
   return TERMINAL_STATES.has(state)
 }
 
@@ -15,7 +15,7 @@ export function JobPanel({ jobId }: { jobId: string }) {
     queryKey: queryKeys.job(jobId),
     queryFn: ({ signal }) => fetchJob(jobId, signal),
     refetchInterval: (query) => {
-      const data = query.state.data as JobOut | undefined
+      const data = query.state.data as JobDetailOut | undefined
       if (!data || isTerminalJob(data.state)) return false
       return 2000
     },

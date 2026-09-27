@@ -7,7 +7,7 @@ import type {
   CursorPageBook,
   CursorPageQuote,
   ImportResult,
-  JobOut,
+  JobDetailOut,
   QuoteDetailOut,
   ReadingMode,
   ReadingProgressOut,
@@ -116,8 +116,8 @@ export function saveReadingProgress(
   })
 }
 
-export function fetchJob(jobId: string, signal?: AbortSignal): Promise<JobOut> {
-  return apiData<JobOut>(`/api/jobs/${jobId}`, { signal })
+export function fetchJob(jobId: string, signal?: AbortSignal): Promise<JobDetailOut> {
+  return apiData<JobDetailOut>(`/api/jobs/${jobId}`, { signal })
 }
 
 /** 受控资源地址（图片等）；只读取后端已登记的包内资源。 */
