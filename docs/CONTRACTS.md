@@ -414,6 +414,7 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 | `POST /api/gaps/{id}/corrections` | Gap 更正：`CONTINUE`/`UPDATE`/`BREAK`/`UNCERTAIN`，返回场景修订影响（201） |
 | `POST /api/scenes/{id}/speaker-revisions` | 场景内 `MERGE`/`SPLIT`（201） |
 | `POST /api/corrections/{id}/undo` | 撤销一次人工更正（201；历史只追加） |
+| `POST /api/quotes/{id}/recheck` | 局部复核（202）：围绕当前场景创建真实 `RECHECK` 任务，必须显式给出 `profile_id` 与预算 |
 
 语义要点（DEVELOPMENT.md 3.4 / 5.3 / 6.4）：
 
@@ -438,3 +439,31 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
   原因值（`STALE_DEPENDENCY`…）与 `total`；前端不得自己推算。
 - `GET /api/quotes/{id}` 在 T05 的上下文/Gap 之上补充 `annotation`、`scene`、`scene_groups`、
   `review_items` 与 `can_correct`（未处理的对白 `annotation=null`）。
+
+## 22. 待确认队列与确认抽屉（T13 已实现）
+
+页面与组件：
+
+| 路由 | 组件 | 说明 |
+| --- | --- | --- |
+| `/books/:id/review` | `ReviewPage` | 待确认队列：章节/原因/状态筛选 + cursor 分页 + 权威计数 |
+| （抽屉，两个入口共用） | `QuoteDetailDrawer` | 阅读页点任意引语 / 队列项「查看并确认」都会打开同一个抽屉 |
+| | `QuoteContext` | 前后各 N 码点原文；「展开更多原文」只改 `context_window_cp`（本地只读） |
+| | `CorrectionForm` | 四种说话人更正（阅读页与队列共用同一表单） |
+| | `GapDecisionControls` | `CONTINUE`/`UPDATE`/`BREAK`/`UNCERTAIN`（场景边界问题只走 Gap 接口） |
+| | `RecheckPanel` | 局部复核：显式选择模型配置 + 上限后才会创建付费任务 |
+
+界面契约要点：
+
+- **入口覆盖**：阅读页的候选（虚线）与标注（着色）都可以点开抽屉，因此**未处理的对白**也能人工确认；
+  队列项从 `/review` 打开时会带上 `review_item_id`，展示原因/状态与「跳过（延后）」。
+- **免费 vs 付费分开**：「展开更多原文」只请求本地原文；「局部复核」是折叠区里的显式按钮，
+  会创建 `RECHECK` 任务并显示任务面板（真实 `calls`/缓存/用量），不复用「展开原文」的按钮。
+- **队列清空 ≠ 全部识别正确**：`/review` 顶部说明这一点，并显示 `counts`（按状态/原因）；
+  空结果页也重复说明，避免用户把「筛出来是空的」当成「整本书已确认」。
+- **权威计数**：更正后的提示（受影响条数、下游 stale 条数）都来自响应，前端不自行推算。
+- **冲突可见**：提交旧版本会得到 409，界面提示「已被其它操作更新」并刷新为最新状态，不静默失败。
+- **更正后同步刷新**：抽屉在成功后失效 `review-items` / `quote-detail` / `annotations` 查询，
+  阅读页颜色、图例、待确认数量与队列同时更新。
+- 提示文案使用中文；组件测试与 E2E 通过 `data-testid` 定位（`review-item`、`quote-detail-drawer`、
+  `correction-form`、`gap-decision-BREAK`、`drawer-defer`、`drawer-undo` 等）。
