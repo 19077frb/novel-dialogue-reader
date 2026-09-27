@@ -313,3 +313,24 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
 - `CONTEXT_POLICY_VERSION="context-1"`；窗口/计划的 `dependency_hash` 覆盖
   （原文版本、目标、证据、策略、提示版本、阅读模式、horizon、场景引用）。
   **T10 的缓存键必须包含这些字段**，horizon 或阅读模式变化不得复用旧结果。
+
+## 18. 场景状态、接受策略与身份修订（T09 已实现，内部契约）
+
+`ndr.scenes` / `ndr.speakers` 把「一个窗口的模型输出」变成持久标注；不新增 HTTP 端点。
+
+- **场景转移**：`CONTINUE` 不变；`UPDATE` 不切场景；`BREAK` 关闭当前场景（写 `end_cp`）并开新场景
+  （参与者清空、编号重新开始）；`UNCERTAIN` 标 `PENDING_BOUNDARY` 并把 Gap 记入 `unresolved`。
+- **状态传递**：`SceneState.snapshot()`（`scene-state-1`）随任务检查点传下去；重叠区同一 `quote_id`
+  只保留一份有效标注。
+- **接受策略**（`acceptance-1`）：`DIRECT` → `ACCEPTED`；`COREFERENCE`/`RESPONSE_LINK`/`STYLE_ONLY`
+  → `PROVISIONAL` + 待确认；`INSUFFICIENT`/`UNKNOWN` → `UNKNOWN` + 待确认且**不建新分组**；
+  非 speech 接受类型但 `speaker_ref` 恒为 null。
+- **可见时点**：后端取证据中最靠后的位置（`compute_visible_from_cp`）；模型自报的可见时点被 schema 拒绝。
+- **人工优先**：`user_locked` 的对白不采纳模型结果，也不写历史；只产生 `locked_quote_kept` 警告。
+- **身份修订**：`identity_proposals` 带 `evidence_refs` 视为直接证据；无证据/弱证据/牵涉人工锁定
+  一律进待确认队列；合并后标注指向幸存分组，历史留在 `annotation_history`。
+- **窗口内引用**：`EXISTING` 可以引用同一窗口里刚声明的临时人物（同一新声音的第二句）。
+
+**T10 需要落库的字段**：窗口 → `job_windows`（`window_id`/`target_ids_json`/`dependency_hash`/`state`/
+`lease_until`），检查点 → `jobs.checkpoint_json`（含 `SceneState.snapshot()`），
+每次尝试 → `inference_runs`（`usage_json` 未知时为 NULL）。
