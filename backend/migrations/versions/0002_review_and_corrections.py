@@ -1,6 +1,6 @@
 """0002 待确认队列与人工更正表（T12/T13 使用）
 
-Revision ID: 6e28b6f53fba
+Revision ID: 0002
 Revises: 0001
 Create Date: 2026-09-28 01:03:58.234417
 

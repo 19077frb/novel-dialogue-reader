@@ -1,8 +1,9 @@
 # 公共契约摘要（NDR）
 
 本文件是 DEVELOPMENT.md 第 3～6 节的可执行摘要，供前后端与后续任务对齐。
-**实现状态以 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 为准**：T00 只实现了
-`GET /api/health`，本文件其余条目是已冻结的契约，由后续任务逐项实现。
+**实现状态以 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 为准**：T00 实现了
+`GET /api/health`，T01 实现了数据库 schema、迁移、统一错误体与分页；端点清单中的业务接口
+仍由后续任务逐项实现。
 
 ## 1. 通用 HTTP 约定
 
@@ -41,7 +42,7 @@
 | 任务种类 | `IMPORT / INFERENCE / RECHECK / RECOMPUTE / EXPORT`（INFERENCE 的 purpose 为 `preview/process`） |
 | 任务状态 | `QUEUED / RUNNING / PAUSING / PAUSED / PARTIAL / COMPLETED / FAILED / BUDGET_EXHAUSTED / NEEDS_RECONCILIATION` |
 | 推理尝试 | `PREPARED / DISPATCHED / SUCCEEDED / FAILED / UNKNOWN_OUTCOME` |
-| 健康检查数据库 | `READY / NOT_INITIALIZED / ERROR` |
+| 健康检查数据库 | `READY / NOT_INITIALIZED / OUTDATED / ERROR`（T01 起由真实迁移状态决定） |
 
 `preview` 与 `process` 是任务目的，不是两套识别引擎：语义输入相同必须命中同一缓存。
 
@@ -102,3 +103,30 @@
 
 FakeProvider 的成功只证明业务/状态机；真实模型兼容性需要真实调用，跨作品准确率需要独立作品 +
 人工标注。两者记录为独立的 `live_verification`、`quality_evaluation` 状态，不得互相替代。
+
+## 9. 数据库 schema 与迁移（T01 起）
+
+- 表结构由 ``backend/src/ndr/storage/models/`` 的 SQLAlchemy 模型定义；迁移用
+  Alembic autogenerate 生成，**模型是唯一权威来源**，测试会比对模型与真实数据库列是否漂移。
+- 迁移只追加，不删库重建：``0001`` 核心表（书籍/版本、文档、引语、场景、标注、模型配置、任务），
+  ``0002`` 待确认队列与人工更正（T12/T13 使用）。
+- 命令（从项目根目录）：
+  ``uv run --project backend alembic -c backend/alembic.ini upgrade head``。
+  数据库路径由 ``NDR_DATA_DIR`` 推导，配置文件用 ``%(here)s`` 解析，不受 cwd 影响。
+- ``NDR_AUTO_MIGRATE=1`` 时应用启动会先迁移到 head（E2E 使用）；默认关闭，避免隐式改动用户书库。
+- 关键约束：``quotes`` 的位置+扫描器版本唯一（Quote ID 稳定派生）；``annotations.quote_id`` 唯一
+  （每个 quote 只有一个当前投影）；``review_items`` 的 quote_id/gap_id 恰好一个（CHECK）；
+  ``model_profiles`` 没有任何存放密钥的列；``inference_runs.usage_json`` 可为 NULL 表示未知用量，
+  绝不能写成 0。
+
+| 表 | 用途 | 首次落地 |
+| --- | --- | --- |
+| books / book_versions | 书籍元数据与不可变原文版本 | 0001 |
+| chapters / content_nodes / resources | 章节、统一文档树节点、登记资源 | 0001 |
+| quotes / gaps | 候选引语与相邻引语之间的叙述 | 0001 |
+| scenes / scene_memberships / speaker_groups / participants | 场景、归属历史、场景内匿名分组与参与者 | 0001 |
+| annotations / annotation_history / identity_revisions | 当前标注投影、旧结果快照、merge/split | 0001 |
+| model_profiles | 模型配置（不含明文密钥） | 0001 |
+| jobs / job_windows / inference_runs / result_cache | 任务、窗口、每次推理尝试与语义缓存 | 0001 |
+| review_items / corrections | 待确认队列与人工更正（含撤销留痕） | 0002 |
+| export_snapshots / export_artifacts | 导出快照与成品 | T15A |
