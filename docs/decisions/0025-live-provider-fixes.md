@@ -45,6 +45,20 @@
 | `deepseek-v4-pro` 全范围 37–6218 | **COMPLETED**：2 窗口 2 次调用、12926/9297 tokens、47 accepted / 45 unknown、`unknown_runs=0` |
 | 超时路径 | 30 秒默认超时确实产生 `PROVIDER_TIMEOUT` 并进入人工对账（不自动重发），改用 180 秒后完成 |
 
+## 补充：`undeclared_new_speaker` 的确定性补齐（同日）
+
+用户再次遇到同类失败（`deepseek-v4-flash` + 重读模式 + 37–6218，窗口 2 连续两次
+`对白 … 使用了未声明的临时人物 new1/new2`）：说明**纠错重发不足以让模型每次都守约**。
+
+因此增加「可确证的补齐」：标签已经明确 `assignment=NEW` + `speaker_ref`，缺的只是同一次输出里的
+`new_speakers` 声明——程序按该对白补一条声明（`first_quote_id` 取对白自身，`description` 标注程序补齐），
+并留下 `repaired_undeclared_speaker:<temp_ref>` 警告（任务进度里可见）。语义不明的引用
+（`EXISTING` + 未知说话人，例如 `speaker:某人`）仍判错并走纠错重发。
+
+复跑证据（同一模型、同一参数、同一范围与阅读模式）：任务 `010076f8-0db4-4610-97c4-63c9383e8826`
+**COMPLETED**（2 窗口、1 命中缓存、2 次真实调用、6992 入 + 5082 出 tokens），投影 92 条对白
+**全部 ACCEPTED**，形成 3 个说话人分组；原先卡住的窗口不再失败。
+
 ## 仍未验证
 
 - 其它网关/模型族（OpenAI 官方、兼容网关、本地 llama.cpp 等）未联调；

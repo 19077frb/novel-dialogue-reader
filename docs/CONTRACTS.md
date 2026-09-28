@@ -303,6 +303,10 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
   `EXISTING` 只能引用给定的 `existing_speaker_refs`（`S1`/`S2` 或分组 ID），人名只能写在 `description` 里。
 - **契约错误纠错重发（调度器）**：坏 JSON / 空内容 / 字段或引用不合法时，首次失败会带着具体问题
   （`_messages_for(correction=…)`）重发一次，两次都失败才把窗口标记失败；每次调用各写一条 `inference_runs`。
+- **可确证的遗漏由程序补齐**：标签写了 `assignment=NEW` + `speaker_ref` 但 `new_speakers` 里没有声明时，
+  解析阶段会自动补一条声明（`first_quote_id` 取该对白自身，`description` 注明「程序补齐声明」），
+  并在报告里留下 `repaired_undeclared_speaker:<temp_ref>` 警告（任务进度里可见）；
+  `assignment=EXISTING` 引用未知说话人属于语义不明，仍然判错、交给纠错重发。
 - **本地（非请求体）参数**：`params.timeout_seconds` 覆盖该配置的单次调用超时（默认取 `NDR_LLM_TIMEOUT_SECONDS`），
   不会发给提供方；推理模型常用的 `params.thinking` 等仍原样透传给提供方。
 - **空 `content` 必须给出可操作原因**：解析响应时同时看 `finish_reason` 与 `reasoning_content`——
