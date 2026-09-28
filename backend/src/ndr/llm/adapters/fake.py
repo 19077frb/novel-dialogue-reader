@@ -76,6 +76,8 @@ class FakeProviderAdapter:
             if isinstance(response, ProviderError):
                 raise response
             return response
+        if kind == "roster":
+            return self._roster_output()
         if kind == "connection":
             return json.dumps(
                 {
@@ -192,6 +194,38 @@ class FakeProviderAdapter:
             "needs_context": [],
         }
 
+    def _roster_output(self) -> dict[str, Any]:
+        """离线人物名单：仅测试/演示使用。
+
+        非确定性模式不编造人物（返回空名单，界面只能手动添加）；
+        ``deterministic`` 模式给出固定的两个候选，其中一个标记为本章第一视角候选，
+        让 E2E 能离线走通「分析本章人物 → 确认名单与主人公」这一步。
+        """
+
+        if self.labeling_mode != "deterministic":
+            return {"schema_version": OUTPUT_SCHEMA_VERSION, "characters": []}
+        return {
+            "schema_version": OUTPUT_SCHEMA_VERSION,
+            "characters": [
+                {
+                    "temp_ref": "c1",
+                    "name": "样例说话人甲",
+                    "aliases": [],
+                    "description": "确定性测试用人物：本章第一视角候选",
+                    "evidence_refs": ["L1"],
+                    "pov_candidate": True,
+                },
+                {
+                    "temp_ref": "c2",
+                    "name": "样例说话人乙",
+                    "aliases": [],
+                    "description": "确定性测试用人物：与甲交谈的另一人",
+                    "evidence_refs": ["L1"],
+                    "pov_candidate": False,
+                },
+            ],
+        }
+
     def _deterministic_labels(self, payload: Mapping[str, Any] | None) -> dict[str, Any]:
         """离线确定性脚本：第一句建立新分组，其余沿用同一分组（DIRECT 证据 → ACCEPTED）。
 
@@ -262,7 +296,10 @@ class FakeProviderAdapter:
     async def generate_labels(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         """返回脚本里的响应；字符串按模型原始输出原样返回（用于模拟坏 JSON）。"""
 
-        response = self._next(kind="labels", payload=payload)
+        # 人物名单分析与逐句标注走同一个适配器方法，用 task 区分：
+        # 失败脚本只作用于标注调用，人物名单不会“吃掉”限流/超时脚本。
+        kind = "roster" if str(payload.get("task") or "") == "roster" else "labels"
+        response = self._next(kind=kind, payload=payload)
         if isinstance(response, str):
             return response  # type: ignore[return-value]
         parsed = dict(response)

@@ -139,6 +139,7 @@ def run_character_roster_job(
         raw = asyncio.run(
             adapter.generate_labels(
                 {
+                    "task": "roster",
                     "messages": messages,
                     "max_tokens": ROSTER_MAX_TOKENS,
                     "json_object": True,
