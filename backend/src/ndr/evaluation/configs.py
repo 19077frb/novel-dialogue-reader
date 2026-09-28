@@ -22,7 +22,7 @@ class EvalConfig:
     label: str
     strategy: str
     scene_state: bool = True
-    prompt_version: str = "labeling-1"
+    prompt_version: str = "labeling-2"
     context_policy: str = "context-1"
     reading_mode: ReadingMode = ReadingMode.REREAD
     budget: dict = field(default_factory=dict)
@@ -61,7 +61,7 @@ def load_config(path: str | Path) -> EvalConfig:
         label=str(payload.get("label", payload["config_id"])),
         strategy=strategy,
         scene_state=bool(payload.get("scene_state", True)),
-        prompt_version=str(payload.get("prompt_version", "labeling-1")),
+        prompt_version=str(payload.get("prompt_version", "labeling-2")),
         context_policy=str(payload.get("context_policy", "context-1")),
         reading_mode=ReadingMode(str(payload.get("reading_mode", ReadingMode.REREAD.value))),
         budget=dict(payload.get("budget", {}) or {}),
