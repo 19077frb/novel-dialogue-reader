@@ -1,0 +1,26 @@
+{
+  "schema": "diagnostic-reference-1",
+  "purpose": "序幕末尾人物一致性诊断，非正式 evaluation manifest",
+  "review_status": "assistant_read_source_not_user_confirmed",
+  "book_version_id": "7b4cb090-0079-4057-974c-af06bd29746d",
+  "canonical_sha256": "e051496e6909d3f9c21b805cb07824bfd44769b3b24f0fb083d935a3252579a8",
+  "coordinate_system": "Unicode codepoints, end exclusive",
+  "baseline_job_id": "010076f8-0db4-4610-97c4-63c9383e8826",
+  "reference_speakers": {"A": "绫濑沙季", "B": "浅村悠太"},
+  "reference_basis": "核读完整店外交谈段，依据上下文、称呼、问答语义及叙述承接，不依据 S 编号",
+  "items": [
+    {"start_cp":5666,"end_cp":5692,"reference_speaker":"A","observed_label":"S2"},
+    {"start_cp":5700,"end_cp":5712,"reference_speaker":"B","observed_label":"S3"},
+    {"start_cp":5720,"end_cp":5742,"reference_speaker":"A","observed_label":"S1"},
+    {"start_cp":5750,"end_cp":5777,"reference_speaker":"B","observed_label":"S2"},
+    {"start_cp":5785,"end_cp":5829,"reference_speaker":"A","observed_label":"S2"},
+    {"start_cp":5837,"end_cp":5844,"reference_speaker":"B","observed_label":"S3"},
+    {"start_cp":5946,"end_cp":5973,"reference_speaker":"A","observed_label":"S1"},
+    {"start_cp":6098,"end_cp":6110,"reference_speaker":"B","observed_label":"S2"},
+    {"start_cp":6118,"end_cp":6132,"reference_speaker":"A","observed_label":"S1"},
+    {"start_cp":6140,"end_cp":6161,"reference_speaker":"B","observed_label":"S2"},
+    {"start_cp":6169,"end_cp":6180,"reference_speaker":"A","observed_label":"S3"}
+  ],
+  "baseline_pairwise": {"tp":8,"fp":8,"fn":17,"tn":22,"precision":0.5,"recall":0.32},
+  "limitations": ["仅11句局部样本","未经用户独立确认","不可外推全书准确率","无新模型调用"]
+}
