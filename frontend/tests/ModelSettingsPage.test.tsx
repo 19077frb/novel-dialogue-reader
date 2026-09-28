@@ -127,6 +127,29 @@ describe('ModelSettingsPage', () => {
     expect(profilesApi.createProfile).not.toHaveBeenCalled()
   })
 
+  it('思考模式按钮写入 thinking.type，并补足输出预算与超时', async () => {
+    renderWithProviders(<ModelSettingsPage />)
+    await fillNewProfile()
+
+    await userEvent.click(screen.getByTestId('thinking-adaptive'))
+    let parsed = JSON.parse((screen.getByTestId('profile-params') as HTMLTextAreaElement).value)
+    expect(parsed.thinking).toEqual({ type: 'adaptive' })
+    expect(parsed.max_tokens).toBeGreaterThanOrEqual(32000)
+    expect(parsed.timeout_seconds).toBeGreaterThanOrEqual(300)
+
+    await userEvent.click(screen.getByTestId('thinking-disabled'))
+    parsed = JSON.parse((screen.getByTestId('profile-params') as HTMLTextAreaElement).value)
+    expect(parsed.thinking).toEqual({ type: 'disabled' })
+    // 关闭思考不修改已有预算（保留上一次写入的值）
+    expect(parsed.max_tokens).toBeGreaterThanOrEqual(32000)
+
+    // 非法 JSON 时给出本地错误，不写入
+    await userEvent.clear(screen.getByTestId('profile-params'))
+    await userEvent.type(screen.getByTestId('profile-params'), 'not-json')
+    await userEvent.click(screen.getByTestId('thinking-enabled'))
+    expect(await screen.findByTestId('settings-error')).toHaveTextContent('不是合法 JSON')
+  })
+
   it('编辑时“保持不变”不发送密钥字段', async () => {
     vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile()])
     vi.mocked(profilesApi.updateProfile).mockResolvedValue(profile({ version: 2 }))

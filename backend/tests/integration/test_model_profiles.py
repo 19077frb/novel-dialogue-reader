@@ -37,6 +37,32 @@ def _create(client: TestClient, **overrides) -> dict:
     return response.json()["data"]
 
 
+def test_thinking_params_are_validated_locally(migrated_client: TestClient) -> None:
+    """`thinking` 必须是对象、`type` 只能是提供方接受的取值；写错在本地就拦下，不浪费真实调用。"""
+
+    for index, (bad_params, expected) in enumerate(
+        (
+            ({"thinking": "high"}, "thinking 需要对象形式"),
+            ({"thinking": {"type": "high"}}, "thinking.type 取值不合法"),
+        ),
+        start=1,
+    ):
+        response = migrated_client.post(
+            "/api/model-profiles",
+            json={**PROFILE, "name": f"坏思考配置-{index}", "params": bad_params},
+        )
+        assert response.status_code == 422, response.text
+        error = response.json()["error"]
+        assert error["code"] == "VALIDATION_ERROR"
+        assert expected in error["message"] or expected in json.dumps(error["details"], ensure_ascii=False)
+    for good_type in ("disabled", "enabled", "adaptive"):
+        response = migrated_client.post(
+            "/api/model-profiles",
+            json={**PROFILE, "name": f"思考配置-{good_type}", "params": {"thinking": {"type": good_type}}},
+        )
+        assert response.status_code == 201, response.text
+
+
 def test_create_profile_returns_no_secret(migrated_client: TestClient, migrated_settings: Settings) -> None:
     response = migrated_client.post(
         "/api/model-profiles", json={**PROFILE, "api_key": SECRET}

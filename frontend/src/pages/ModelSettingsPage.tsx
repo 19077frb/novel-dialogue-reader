@@ -100,6 +100,27 @@ export default function ModelSettingsPage() {
     }
   }
 
+  /** 思考模式快捷设置：写入 `thinking.type`，开启/自适应时同时补足输出预算与超时。 */
+  function applyThinkingMode(mode: 'disabled' | 'adaptive' | 'enabled') {
+    const parsed = parseParams()
+    if (!parsed) return
+    const current = parsed.thinking
+    const thinking: Record<string, unknown> =
+      current && typeof current === 'object' && !Array.isArray(current)
+        ? { ...(current as Record<string, unknown>) }
+        : {}
+    thinking.type = mode
+    parsed.thinking = thinking
+    if (mode !== 'disabled') {
+      const maxTokens = Number(parsed.max_tokens ?? 0)
+      if (!Number.isFinite(maxTokens) || maxTokens < 32000) parsed.max_tokens = 32000
+      const timeout = Number(parsed.timeout_seconds ?? 0)
+      if (!Number.isFinite(timeout) || timeout < 300) parsed.timeout_seconds = 300
+    }
+    setError(null)
+    setForm({ ...form, paramsText: JSON.stringify(parsed, null, 2) })
+  }
+
   const connectionTest = useMutation({
     mutationFn: (payload: { profileId?: string; draftProfile?: Record<string, unknown> }) =>
       testConnection(
@@ -268,6 +289,32 @@ export default function ModelSettingsPage() {
               onChange={(event) => setForm({ ...form, paramsText: event.target.value })}
             />
           </label>
+
+          <div className="ndr-form-actions" data-testid="thinking-modes">
+            {(
+              [
+                ['disabled', '关闭思考'],
+                ['adaptive', '自适应思考'],
+                ['enabled', '开启思考'],
+              ] as const
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                data-testid={`thinking-${mode}`}
+                onClick={() => applyThinkingMode(mode)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="hint" data-testid="thinking-hint">
+            思考模式会写入 <code>thinking.type</code>（提供方只接受 <code>enabled</code> /{' '}
+            <code>adaptive</code> / <code>disabled</code>，<code>high</code> 之类是强度不是类型）。
+            开启思考时推理 token 也计入 <code>max_tokens</code>，实测同一窗口「关闭 6.9 秒 / 2.5k 输出」
+            对「自适应 55 秒 / 14.5k 输出」，且更容易把每句都判成新人物；按钮会把{' '}
+            <code>max_tokens</code> 提到 32000、超时提到 300 秒，建议只在难窗口复核时开启。
+          </p>
 
           <fieldset>
             <legend>凭据</legend>

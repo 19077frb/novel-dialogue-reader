@@ -64,6 +64,31 @@ def normalize_base_url(raw: str) -> str:
     return value
 
 
+# 提供方（DeepSeek 兼容端点）当前接受的思考类型；high/medium/low 属于"强度"而不是"类型"
+KNOWN_THINKING_TYPES = ("adaptive", "disabled", "enabled")
+THINKING_HINT = 'thinking 需要对象形式，例如 {"thinking": {"type": "enabled"}}'
+
+
+def _check_thinking(params: dict[str, Any]) -> None:
+    """提前拦住把 `thinking` 写成字符串或把强度当类型的写法，避免一次无效的真实调用。"""
+
+    if "thinking" not in params:
+        return
+    thinking = params.get("thinking")
+    if not isinstance(thinking, dict):
+        raise ApiError.validation(THINKING_HINT, thinking=thinking)
+    thinking_type = thinking.get("type")
+    if thinking_type is None:
+        return
+    normalized = thinking_type.strip().lower() if isinstance(thinking_type, str) else ""
+    if normalized not in KNOWN_THINKING_TYPES:
+        raise ApiError.validation(
+            "thinking.type 取值不合法（high/low 是强度，不是类型）",
+            thinking_type=thinking_type,
+            supported=list(KNOWN_THINKING_TYPES),
+        )
+
+
 def normalize_params(params: dict[str, Any] | None) -> str:
     if not params:
         return "{}"
@@ -75,6 +100,7 @@ def normalize_params(params: dict[str, Any] | None) -> str:
             "params 里不能放密钥类字段；请使用 api_key 字段与凭据模式。",
             offending_keys=offenders,
         )
+    _check_thinking(params)
     return json.dumps(params, ensure_ascii=False, sort_keys=True)
 
 
