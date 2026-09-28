@@ -122,12 +122,22 @@ class ChatCompletionsAdapter:
         return headers
 
     def _payload(
-        self, messages: list[dict[str, str]], *, max_tokens: int, json_object: bool
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int,
+        json_object: bool,
+        max_tokens_override: int | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": self.model, "messages": messages}
         params = dict(self._params)
         if self.capabilities.supports_max_tokens:
-            payload["max_tokens"] = int(params.pop("max_tokens", max_tokens))
+            if isinstance(max_tokens_override, int) and max_tokens_override > 0:
+                # 显式覆盖优先于 profile 的 max_tokens（输出被截断时重试会提高上限）
+                payload["max_tokens"] = int(max_tokens_override)
+                params.pop("max_tokens", None)
+            else:
+                payload["max_tokens"] = int(params.pop("max_tokens", max_tokens))
         if self.capabilities.supports_temperature and "temperature" in params:
             payload["temperature"] = params.pop("temperature")
         if self.capabilities.supports_json_object and json_object:
@@ -180,6 +190,16 @@ class ChatCompletionsAdapter:
                 ProviderErrorKind.INVALID_OUTPUT, "提供方响应顶层不是对象"
             )
         return data, elapsed_ms
+
+    @staticmethod
+    def _finish_reason_of(data: Mapping[str, Any]) -> str | None:
+        """提供方的结束原因；`length` 表示输出被 max_tokens 截断。"""
+
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], Mapping):
+            reason = choices[0].get("finish_reason")
+            return reason if isinstance(reason, str) and reason else None
+        return None
 
     @staticmethod
     def _response_snippet(data: Mapping[str, Any]) -> str:
@@ -290,7 +310,10 @@ class ChatCompletionsAdapter:
                 + f": {issue.get('msg', '')}"
                 for issue in issues[:3]
             )
+            finish_reason = self._finish_reason_of(data)
             parts = [f"{ErrorCode.INVALID_MODEL_OUTPUT.value}: {exc.message}"]
+            if finish_reason:
+                parts.append(f"finish_reason={finish_reason}")
             if summary:
                 parts.append(f"问题：{summary}")
             parts.append(f"原始输出片段：{sanitize(text, limit=200) or '（空）'}")
@@ -320,10 +343,12 @@ class ChatCompletionsAdapter:
         messages = payload.get("messages")
         if not isinstance(messages, list):
             raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, "缺少 messages")
+        override = payload.get("max_tokens_override")
         request = self._payload(
             [dict(message) for message in messages],
             max_tokens=int(payload.get("max_tokens", CONNECTION_TEST_MAX_TOKENS)),
             json_object=bool(payload.get("json_object", True)),
+            max_tokens_override=override if isinstance(override, int) else None,
         )
         data, _elapsed = await self._post(request)
         usage = self.normalize_usage(data.get("usage")).as_dict()
@@ -337,10 +362,19 @@ class ChatCompletionsAdapter:
             # 与连接测试同一套解析：整段 JSON 或整段代码块都接受（DEVELOPMENT 4.5）
             parsed = load_json_object(text)
         except InvalidModelOutput as exc:
+            finish_reason = self._finish_reason_of(data)
+            message = exc.message
+            if finish_reason == "length":
+                message += "（提供方因输出上限被截断；重试会自动提高 max_tokens）"
             raise ProviderError(
                 ProviderErrorKind.INVALID_OUTPUT,
-                exc.message,
-                details={"body": sanitize(text), "usage": usage, **(exc.details or {})},
+                message,
+                details={
+                    "body": sanitize(text),
+                    "usage": usage,
+                    "finish_reason": finish_reason,
+                    **(exc.details or {}),
+                },
             ) from exc
         parsed.setdefault("_usage", self.normalize_usage(data.get("usage")).as_dict())
         return parsed

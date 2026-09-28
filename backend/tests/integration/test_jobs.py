@@ -147,6 +147,33 @@ def test_failed_model_output_error_keeps_raw_snippet(
         engine.dispose()
 
 
+def test_truncated_output_retry_raises_max_tokens(
+    fake_provider_client: TestClient, migrated_settings: Settings
+) -> None:
+    """首次被输出上限截断时，纠错重发要同时提高 max_tokens，而不是用同样预算再赌一次。"""
+
+    data = _import(fake_provider_client)
+    profile_id = _fake_profile(fake_provider_client)
+    job = _create_job(fake_provider_client, data["book_id"], profile_id, key="k-truncated")
+
+    truncated = ProviderError(
+        ProviderErrorKind.INVALID_OUTPUT,
+        "模型输出不是合法 JSON（提供方因输出上限被截断；重试会自动提高 max_tokens）",
+        details={"body": '{"schema_version":"1.0"', "finish_reason": "length"},
+    )
+    adapter = FakeProviderAdapter(script=[truncated], labeling_mode="deterministic")
+
+    outcome = _run_with_fake(migrated_settings, job["id"], adapter)
+
+    assert outcome.state is JobState.COMPLETED
+    assert len(adapter.calls) == 2
+    first = adapter.calls[0]["payload"]
+    second = adapter.calls[1]["payload"]
+    assert "max_tokens_override" not in first
+    assert second["max_tokens_override"] == 32000  # 800 → max(2×, 32000)
+    assert second["max_tokens_override"] > first["max_tokens"]
+
+
 def test_invalid_output_triggers_one_repair_retry(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:

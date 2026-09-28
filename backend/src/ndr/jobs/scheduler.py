@@ -202,6 +202,20 @@ def policy_for_job(job: Job) -> BudgetPolicy:
     return policy_for_version(_range_of(job).get("context_policy"))
 
 
+def _escalated_max_tokens(snapshot: dict[str, Any] | None, error: ProviderError) -> int | None:
+    """输出被截断（finish_reason=length）时，重试把 max_tokens 翻倍（上限 128k）。"""
+
+    details = getattr(error, "details", None)
+    if not isinstance(details, dict) or details.get("finish_reason") != "length":
+        return None
+    params = (snapshot or {}).get("params") or {}
+    try:
+        current = int(params.get("max_tokens") or LABELING_MAX_TOKENS)
+    except (TypeError, ValueError):
+        current = LABELING_MAX_TOKENS
+    return min(max(current * 2, 32000), 128000)
+
+
 def _strong_profile(session: Session, job: Job) -> ModelProfile | None:
     """成本路由用的强模型配置（任务范围里的 ``strong_profile_id``）；没有就不路由。"""
 
@@ -603,6 +617,7 @@ def _dispatch_with_bounded_retry(
     snapshot: dict[str, Any] | None,
     settings: Settings,
     correction: str | None = None,
+    max_tokens_override: int | None = None,
 ) -> tuple[Any, ProviderError | None, str, int]:
     """调用适配器；限流/暂时不可用按**有上限**的退避重试。
 
@@ -637,7 +652,13 @@ def _dispatch_with_bounded_retry(
         raw = None
         error = None
         try:
-            raw = _dispatch(adapter, window=window, state=state, correction=correction)
+            raw = _dispatch(
+                adapter,
+                window=window,
+                state=state,
+                correction=correction,
+                max_tokens_override=max_tokens_override,
+            )
         except ProviderError as exc:
             error = exc
         elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -1036,6 +1057,8 @@ def run_job(
         # 每次调用都单独写 inference_runs 并各自结算用量，不是只记最后一次。
         correction: str | None = None
         retry_correction: str | None = None
+        retry_max_tokens: int | None = None
+        attempt_max_tokens: int | None = None
         window_failed = False
         for attempt in range(2):
             raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
@@ -1047,6 +1070,7 @@ def run_job(
                 snapshot=window_snapshot,
                 settings=settings,
                 correction=correction,
+                max_tokens_override=attempt_max_tokens,
             )
 
             retry_correction = None
@@ -1084,6 +1108,7 @@ def run_job(
                         run.error_code = error.code.value
                         session.commit()
                         retry_correction = error.message
+                        retry_max_tokens = _escalated_max_tokens(window_snapshot, error)
                     else:
                         outcome.errors.append(f"{window.window_id}:{error.code.value}")
                         run.state = InferenceRunState.FAILED
@@ -1181,8 +1206,10 @@ def run_job(
                         break
 
             if retry_correction is not None:
-                # 带着具体问题重发一次：校验问题（如未声明的临时人物）或提供方错误原文都作为纠错提示
+                # 带着具体问题重发一次：校验问题（如未声明的临时人物）或提供方错误原文都作为提示；
+                # 上次若被输出上限截断，同时提高 max_tokens，避免用同样预算再截断一次。
                 correction = retry_correction
+                attempt_max_tokens = retry_max_tokens
                 continue
 
         if window_failed:
@@ -1232,6 +1259,7 @@ def _dispatch(
     window,  # noqa: ANN001
     state: SceneState,
     correction: str | None = None,
+    max_tokens_override: int | None = None,
 ) -> Any:
     # ``correction`` 用于「格式/契约错误后的有限纠错重发」（DEVELOPMENT 4.5：最多重试一次）
     payload = {
@@ -1242,6 +1270,8 @@ def _dispatch(
         "json_object": True,
         "target_quote_ids": list(window.target_quote_ids),
     }
+    if isinstance(max_tokens_override, int) and max_tokens_override > 0:
+        payload["max_tokens_override"] = int(max_tokens_override)
     return _restore_output_references(asyncio.run(adapter.generate_labels(payload)), window)
 
 

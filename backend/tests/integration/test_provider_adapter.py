@@ -259,6 +259,51 @@ def test_generate_labels_empty_content_keeps_response_snippet() -> None:
     assert error.details["body"]  # 脱敏后的响应片段
 
 
+def test_truncated_json_reports_finish_reason_and_honours_max_tokens_override() -> None:
+    """输出被 max_tokens 截断时：错误里要有 finish_reason，重试用的显式上限要盖过 profile 参数。"""
+
+    seen: dict[str, str] = {}
+    truncated = '{"schema_version":"1.0","gap_decisions":[{"gap_id"'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.content.decode("utf-8")
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"finish_reason": "length", "message": {"content": truncated}}],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 16000},
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = ChatCompletionsAdapter(
+        base_url="https://api.example.com/v1",
+        model="example-model",
+        api_key="sk-test-key",
+        params={"max_tokens": 16000},
+        client=client,
+        timeout_seconds=30.0,
+    )
+
+    with pytest.raises(ProviderError) as excinfo:
+        _run(
+            adapter.generate_labels(
+                {
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 800,
+                    "max_tokens_override": 64000,
+                }
+            )
+        )
+
+    error = excinfo.value
+    assert error.kind is ProviderErrorKind.INVALID_OUTPUT
+    assert error.details["finish_reason"] == "length"
+    assert "截断" in error.message
+    assert error.details["usage"]["output_tokens"] == 16000  # 失败也保留真实用量
+    assert json.loads(seen["body"])["max_tokens"] == 64000  # override 优先于 profile 的 16000
+
+
 def test_generate_labels_returns_parsed_object_and_surfaces_errors() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
