@@ -333,10 +333,15 @@ uv run --project backend python -m ndr.evaluation loss `
   **连接成功不代表小说标注效果**；效果评测需要真实作品与人工标注（T16）。
 - 测试用适配器（`fake-provider`）只有设置 `NDR_ALLOW_FAKE_PROVIDER=1` 才可用，界面上会明确标注
   “没有访问任何真实服务”。真实提供方失败时不会回退到它。
-- **推理模型（reasoning）可能把输出预算花在思考上**：那时 `content` 为空、`finish_reason=length`，
-  任务会失败并提示 `模型返回空内容`。处理办法：在「生成参数」里提高输出上限
-  （例如 `{"max_tokens": 4000}`，该参数会覆盖默认的 800），或改用非推理模型 / 按网关文档关闭思考。
-  失败信息里会带上 `finish_reason`、`reasoning_content` 线索与**脱敏后的原始响应片段**，便于确认原因。
+- **推理模型（reasoning）建议关掉思考并给足预算与超时**。本机用 DeepSeek 实测有效的写法（「生成参数」里填）：
+  `{"thinking": {"type": "disabled"}, "max_tokens": 8000, "timeout_seconds": 180}`
+  - `thinking: {"type": "disabled"}`：让模型直接产出 JSON，不再把 token 花在思考上
+    （同一窗口实测：38.7 秒后仍 `finish_reason=length`、`content` 为空 → 关掉思考后 3 秒返回有效 JSON）；
+  - `max_tokens`：**单次输出**上限，窗口里目标多时要给够，否则 JSON 会被截断（报「不是合法 JSON」）；
+  - `timeout_seconds`：**本地**参数（不会发给提供方），覆盖默认的 30 秒；大窗口 + 强模型建议 120–300 秒；
+  - 仍然失败时，任务错误会带 `finish_reason`、`reasoning_content` 线索与**脱敏响应片段**，可直接定位。
+- **契约错误会自动纠错重发一次**：模型偶尔写出不合法引用（例如用了没声明的 `new1`、自造 `speaker:某人`）时，
+  程序会带着具体问题重发一次；两次都失败才判定该窗口失败（每次调用都单独记账）。
 
 E2E/自动化若不想触碰真实的系统凭据库，可设置 `NDR_CREDENTIAL_BACKEND=session`。
 

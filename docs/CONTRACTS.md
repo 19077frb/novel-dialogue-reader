@@ -299,6 +299,12 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
   （例如内容被放在 `reasoning_content` 一类字段里）。提供方返回的 usage 照实回报，不因解析失败丢弃。
 - 连接测试提示词版本 `connection-2`（明确要求「不要代码块、不要前后文字」）；任务级失败信息
   （`job.last_error`）同样带上脱敏片段，避免只剩一个错误码。
+- 标注提示词版本 `labeling-2`：显式规定说话人引用的**唯一合法写法**——`NEW` 必须先声明 `temp_ref` 再用同名字符串，
+  `EXISTING` 只能引用给定的 `existing_speaker_refs`（`S1`/`S2` 或分组 ID），人名只能写在 `description` 里。
+- **契约错误纠错重发（调度器）**：坏 JSON / 空内容 / 字段或引用不合法时，首次失败会带着具体问题
+  （`_messages_for(correction=…)`）重发一次，两次都失败才把窗口标记失败；每次调用各写一条 `inference_runs`。
+- **本地（非请求体）参数**：`params.timeout_seconds` 覆盖该配置的单次调用超时（默认取 `NDR_LLM_TIMEOUT_SECONDS`），
+  不会发给提供方；推理模型常用的 `params.thinking` 等仍原样透传给提供方。
 - **空 `content` 必须给出可操作原因**：解析响应时同时看 `finish_reason` 与 `reasoning_content`——
   `finish_reason=length` 时提示「输出预算被用完，可在生成参数提高 max_tokens」；
   `reasoning_content` 有内容时提示「推理内容占了输出」。详情里带脱敏响应片段，
