@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-CONNECTION_PROMPT_VERSION = "connection-1"
+CONNECTION_PROMPT_VERSION = "connection-2"
 
 ECHO_OBJECT = {
     "schema_version": "1.0",
@@ -21,7 +21,8 @@ ECHO_OBJECT = {
 }
 
 SYSTEM_PROMPT = (
-    "你是协议自检助手。任务：原样输出给定的 JSON 对象，不要添加解释、注释或额外字段。"
+    "你是协议自检助手。任务：原样输出给定的 JSON 对象，不要添加解释、注释或额外字段，"
+    "不要使用 markdown 代码块，也不要在 JSON 前后写任何文字。"
 )
 
 USER_PROMPT = "请原样输出下面这个 JSON 对象：\n" + json.dumps(ECHO_OBJECT, ensure_ascii=False)

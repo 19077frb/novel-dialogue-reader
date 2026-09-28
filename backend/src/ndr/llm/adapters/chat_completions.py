@@ -25,9 +25,9 @@ from ..adapter import (
     TokenEstimate,
     UsageRecord,
 )
-from ..errors import ProviderError, ProviderErrorKind
+from ..errors import InvalidModelOutput, ProviderError, ProviderErrorKind
 from ..prompts.connection import CONNECTION_PROMPT_VERSION, build_connection_messages
-from ..schemas import LlmOutput
+from ..validation import load_json_object, parse_output
 
 
 def _is_cjk_like(char: str) -> bool:
@@ -45,7 +45,8 @@ def _is_cjk_like(char: str) -> bool:
 
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
-CONNECTION_TEST_MAX_TOKENS = 64
+# 连接测试要把「原样回显的小 JSON」装下：64 会让部分模型（尤其带缩进或代码块时）被截断成坏 JSON。
+CONNECTION_TEST_MAX_TOKENS = 256
 ERROR_BODY_SNIPPET_CHARS = 200
 
 _SENSITIVE_MARKERS = ("authorization", "api_key", "apikey", "bearer ", "sk-")
@@ -211,21 +212,48 @@ class ChatCompletionsAdapter:
                 adapter=self.name,
                 usage=None,
             )
-        text = self._content_of(data)
+
+        usage = self.normalize_usage(data.get("usage")).as_dict()
         try:
-            LlmOutput.model_validate_json(text)
-        except Exception as exc:  # noqa: BLE001 - 结果直接被拒绝，不吞掉原因
+            text = self._content_of(data)
+        except ProviderError as exc:
+            detail = f"{exc.code.value}: {exc.message}"
+            if exc.kind is ProviderErrorKind.INVALID_OUTPUT:
+                # 空 content / 结构异常时把响应片段带出来：真实提供方需要看原始返回才能定位
+                snippet = sanitize(json.dumps(data, ensure_ascii=False))
+                detail = f"{detail}；响应片段：{snippet or '（空）'}"
             return ConnectionTestResult(
                 ok=False,
                 protocol=self.protocol,
                 model=self.model,
-                detail=(
-                    f"{ErrorCode.INVALID_MODEL_OUTPUT.value}: 输出不符合 schema"
-                    f"（{type(exc).__name__}）"
-                ),
+                detail=detail,
                 latency_ms=elapsed_ms,
                 adapter=self.name,
-                usage=self.normalize_usage(data.get("usage")).as_dict(),
+                usage=usage,
+            )
+
+        try:
+            # 与标注链路共用同一种解析：整段 JSON 或整段 ```json 代码块都接受（DEVELOPMENT 4.5）
+            parse_output(text)
+        except InvalidModelOutput as exc:
+            issues = (exc.details or {}).get("issues") or []
+            summary = "；".join(
+                (".".join(str(part) for part in issue.get("loc", ())) or "root")
+                + f": {issue.get('msg', '')}"
+                for issue in issues[:3]
+            )
+            parts = [f"{ErrorCode.INVALID_MODEL_OUTPUT.value}: {exc.message}"]
+            if summary:
+                parts.append(f"问题：{summary}")
+            parts.append(f"原始输出片段：{sanitize(text, limit=200) or '（空）'}")
+            return ConnectionTestResult(
+                ok=False,
+                protocol=self.protocol,
+                model=self.model,
+                detail="；".join(parts),
+                latency_ms=elapsed_ms,
+                adapter=self.name,
+                usage=usage,
             )
         usage = self.normalize_usage(data.get("usage"))
         return ConnectionTestResult(
@@ -252,15 +280,14 @@ class ChatCompletionsAdapter:
         data, _elapsed = await self._post(request)
         text = self._content_of(data)
         try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError as exc:
+            # 与连接测试同一套解析：整段 JSON 或整段代码块都接受（DEVELOPMENT 4.5）
+            parsed = load_json_object(text)
+        except InvalidModelOutput as exc:
             raise ProviderError(
                 ProviderErrorKind.INVALID_OUTPUT,
-                "模型输出不是合法 JSON",
-                details={"body": sanitize(text)},
+                exc.message,
+                details={"body": sanitize(text), **(exc.details or {})},
             ) from exc
-        if not isinstance(parsed, dict):
-            raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, "模型输出顶层不是对象")
         parsed.setdefault("_usage", self.normalize_usage(data.get("usage")).as_dict())
         return parsed
 

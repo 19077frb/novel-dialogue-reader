@@ -909,7 +909,13 @@ def run_job(
                 if row is not None:
                     row.state = JobState.FAILED
                 job.state = JobState.PARTIAL if done else JobState.FAILED
-                job.last_error = f"{error.code.value}: {error.message}"
+                # 真实提供方返回坏结构时，把脱敏后的原始片段带进错误信息，避免只剩一个错误码无从定位
+                snippet = ""
+                if isinstance(getattr(error, "details", None), dict):
+                    raw = error.details.get("body") or error.details.get("snippet")
+                    if isinstance(raw, str) and raw.strip():
+                        snippet = f"；原始输出片段：{raw[:160]}"
+                job.last_error = f"{error.code.value}: {error.message}{snippet}"
                 session.commit()
                 outcome.state = job.state
                 break

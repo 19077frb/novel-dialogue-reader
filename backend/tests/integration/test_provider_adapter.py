@@ -121,6 +121,65 @@ def test_non_json_and_wrong_schema_are_rejected() -> None:
     assert result.detail.startswith(ErrorCode.INVALID_MODEL_OUTPUT.value)
 
 
+def test_connection_accepts_fenced_json_and_leaves_token_room() -> None:
+    """真实提供方常把 JSON 包在 ```json 代码块里：解析要接受，且不能再用 64 token 把它截断。"""
+
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.content.decode("utf-8")
+        fenced = "```json\n" + json.dumps(ECHO_OBJECT, ensure_ascii=False) + "\n```"
+        return httpx.Response(200, json={"choices": [{"message": {"content": fenced}}]})
+
+    result = _run(_adapter(handler).test_connection())
+
+    assert result.ok is True
+    assert json.loads(seen["body"])["max_tokens"] >= 128
+
+
+def test_truncated_model_output_is_reported_with_snippet() -> None:
+    """max_tokens 截断会得到不完整 JSON：失败详情必须带原始片段与解析原因，便于定位真实提供方。"""
+
+    truncated = json.dumps(ECHO_OBJECT, ensure_ascii=False)[:35]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": truncated}}],
+                "usage": {"prompt_tokens": 132, "completion_tokens": 64, "total_tokens": 196},
+            },
+        )
+
+    result = _run(_adapter(handler).test_connection())
+
+    assert result.ok is False
+    assert result.detail.startswith(ErrorCode.INVALID_MODEL_OUTPUT.value)
+    assert "原始输出片段" in result.detail
+    assert truncated[:20] in result.detail
+    # 真用量照实回报（不因为解析失败就丢掉提供方给的 usage）
+    assert result.usage is not None and result.usage["output_tokens"] == 64
+
+
+def test_empty_message_content_reports_response_snippet() -> None:
+    """有的兼容服务把内容放在别的字段：content 为空时要把响应片段带出来。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "", "reasoning_content": "thinking..."}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+            },
+        )
+
+    result = _run(_adapter(handler).test_connection())
+
+    assert result.ok is False
+    assert "响应片段" in result.detail
+    assert "reasoning_content" in result.detail
+
+
 def test_generate_labels_returns_parsed_object_and_surfaces_errors() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

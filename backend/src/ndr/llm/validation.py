@@ -88,23 +88,36 @@ def _strip_code_fence(text: str) -> str:
     raise InvalidModelOutput(f"不支持的代码块标记：{lines[0].strip()[:20]}")
 
 
+def load_json_object(payload: str) -> dict[str, Any]:
+    """把模型返回的**整段**文本解析成 JSON 对象。
+
+    只接受两种形态（DEVELOPMENT 4.5）：整段 JSON 对象，或整段被 ``` 包裹的 JSON 代码块；
+    绝不在长文本里“找看起来像 JSON 的片段”——那会把解释性文字当成数据。
+    """
+
+    text = _strip_code_fence(payload)
+    if not text:
+        raise InvalidModelOutput("模型返回空内容。")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise InvalidModelOutput(
+            "模型输出不是合法 JSON（不接受从长文本中截取片段）。",
+            details={
+                "reason": f"{exc.msg} at line {exc.lineno} column {exc.colno}",
+                "snippet": text[:200],
+            },
+        ) from exc
+    if not isinstance(data, dict):
+        raise InvalidModelOutput("模型输出的顶层必须是 JSON 对象。")
+    return data
+
+
 def parse_output(payload: str | Mapping[str, Any]) -> LlmOutput:
     """把模型输出解析成契约对象；坏 JSON/字段类型错都抛 :class:`InvalidModelOutput`。"""
 
     if isinstance(payload, str):
-        text = _strip_code_fence(payload)
-        if not text:
-            raise InvalidModelOutput("模型返回空内容。")
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise InvalidModelOutput(
-                "模型输出不是合法 JSON（不接受从长文本中截取片段）。",
-                details={"reason": f"{exc.msg} at line {exc.lineno} column {exc.colno}"},
-            ) from exc
-        if not isinstance(data, dict):
-            raise InvalidModelOutput("模型输出的顶层必须是 JSON 对象。")
-        payload = data
+        payload = load_json_object(payload)
 
     try:
         return LlmOutput.model_validate(payload)
