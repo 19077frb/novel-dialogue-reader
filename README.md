@@ -333,6 +333,10 @@ uv run --project backend python -m ndr.evaluation loss `
   **连接成功不代表小说标注效果**；效果评测需要真实作品与人工标注（T16）。
 - 测试用适配器（`fake-provider`）只有设置 `NDR_ALLOW_FAKE_PROVIDER=1` 才可用，界面上会明确标注
   “没有访问任何真实服务”。真实提供方失败时不会回退到它。
+- **推理模型（reasoning）可能把输出预算花在思考上**：那时 `content` 为空、`finish_reason=length`，
+  任务会失败并提示 `模型返回空内容`。处理办法：在「生成参数」里提高输出上限
+  （例如 `{"max_tokens": 4000}`，该参数会覆盖默认的 800），或改用非推理模型 / 按网关文档关闭思考。
+  失败信息里会带上 `finish_reason`、`reasoning_content` 线索与**脱敏后的原始响应片段**，便于确认原因。
 
 E2E/自动化若不想触碰真实的系统凭据库，可设置 `NDR_CREDENTIAL_BACKEND=session`。
 

@@ -299,6 +299,10 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
   （例如内容被放在 `reasoning_content` 一类字段里）。提供方返回的 usage 照实回报，不因解析失败丢弃。
 - 连接测试提示词版本 `connection-2`（明确要求「不要代码块、不要前后文字」）；任务级失败信息
   （`job.last_error`）同样带上脱敏片段，避免只剩一个错误码。
+- **空 `content` 必须给出可操作原因**：解析响应时同时看 `finish_reason` 与 `reasoning_content`——
+  `finish_reason=length` 时提示「输出预算被用完，可在生成参数提高 max_tokens」；
+  `reasoning_content` 有内容时提示「推理内容占了输出」。详情里带脱敏响应片段，
+  `job.last_error` 一并展示（模型配置页的生成参数 `max_tokens` 会覆盖标注默认的 800）。
 - `fake-provider` 只有设置 `NDR_ALLOW_FAKE_PROVIDER=1` 才可用，否则 422；界面会标注“测试用适配器”。
 - **连接成功只说明鉴权与 JSON 输出可解析，不代表小说标注效果**（效果评测属 T16）。
 

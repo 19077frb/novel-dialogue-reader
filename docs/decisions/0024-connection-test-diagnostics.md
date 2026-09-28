@@ -46,3 +46,19 @@
 - `pytest backend/tests` → **379 passed**（T19 时 376）；`ruff` 全绿。
 - **仍未验证**：该真实提供方在修复后的实际表现——需要用户重新点一次「连接测试」；
   若仍失败，界面现在会直接显示原始片段，足够定位（例如仍是截断、或字段不合法）。
+
+## 补充：`模型返回空内容`（同日，同一提供方的处理阶段）
+
+连接测试通过后，实际处理（`mode=process`）报 `INVALID_MODEL_OUTPUT: 模型返回空内容`。这条错误来自
+`_content_of`：`choices[0].message.content` 为空。常见原因有三类，都必须在错误里说清楚：
+
+1. **输出预算被推理吃掉**（`finish_reason=length`）：推理模型常把 `max_tokens` 花在思考上，
+   800 的默认上限不够 → 提示用户去「模型配置 → 生成参数」写 `{"max_tokens": 4000}`（会覆盖默认值）；
+2. **内容落在 `reasoning_content`**：网关把答案放进推理字段 → 提示换非推理模型或按网关文档关闭思考；
+3. **响应结构异常**（缺 `choices`/`message`）：直接给出脱敏响应片段。
+
+实现：`_content_of`（及结构异常分支）都会带上 `details.body`（脱敏截断的响应）、`finish_reason`、
+`reasoning_chars`/`reasoning_snippet`；调度器把它们写进 `job.last_error`，界面直接可见
+（`JobPanel` 一直会渲染 `last_error`）。测试：适配器 2 项 + 任务级 1 项，`pytest` → 382 passed。
+
+**仍未验证**：该提供方在提高 `max_tokens` 后的实际表现——需要用户改配置后重新处理一次。
