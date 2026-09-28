@@ -4,7 +4,7 @@ import type { AnnotationItemOut } from '../api/types'
 import { colorForIndex, labelText } from '../styles/palette'
 
 /**
- * 着色/编号层的**数据契约**（T11 起接入真实投影）。
+ * 着色/编号层的**数据契约**：颜色与编号全部来自后端标注投影。
  *
  * - 颜色与编号只来自后端 `GET /api/books/{id}/annotations`；没有标注就不显示任何颜色或编号。
  * - `withheld=true`（初读 horizon 之下的后文证据）不下发颜色与编号。

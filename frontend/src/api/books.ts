@@ -67,7 +67,7 @@ export interface GapQuery {
 
 /**
  * 候选引语（扫描器结果）。
- * 注意：这只是**候选**，不含任何说话人判断；着色/编号要等 T05 之后的标注投影。
+ * 注意：这只是**候选**，不含任何说话人判断；着色/编号来自 `GET /api/books/{id}/annotations` 的标注投影。
  */
 export function fetchQuotes(
   bookId: string,

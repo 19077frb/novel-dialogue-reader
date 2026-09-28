@@ -206,8 +206,8 @@ export default function ModelSettingsPage() {
         <h2>模型配置</h2>
         <p className="hint">
           在这里填写 API 根地址、模型名与密钥；不需要改源码。密钥只在提交时出现，
-          保存后接口只返回 <code>has_key</code>，不会回传密钥本身。
-          <strong>连接测试与实际识别调用在 T07 提供</strong>——本页不会发起任何真实请求。
+          保存后接口只返回 <code>has_key</code>，不会回传密钥本身。保存前可以用
+          「测试当前填写内容」验证连通性，保存后也可以随时「测试连接」；除连接测试外，本页不会发起调用。
         </p>
 
         <form

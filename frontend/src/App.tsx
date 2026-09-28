@@ -56,7 +56,7 @@ export default function App() {
         <div className="ndr-brand">
           <h1>轻小说对话辅助阅读器</h1>
           <p className="subtitle">
-            导入 TXT/EPUB 后即可阅读原文；着色、场景与待确认队列随 T05 起接入。
+            导入 TXT/EPUB 后即可阅读原文；识别说话人后按人物着色并编号，不确定的内容进入待确认队列。
           </p>
         </div>
         <nav className="ndr-app-nav" aria-label="主导航">

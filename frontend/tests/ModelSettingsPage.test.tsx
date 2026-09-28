@@ -81,12 +81,12 @@ describe('ModelSettingsPage', () => {
     vi.mocked(profilesApi.fetchProtocols).mockResolvedValue(PROTOCOLS)
   })
 
-  it('空状态说明可配置、并明确连接测试在 T07 提供', async () => {
+  it('空状态说明可配置，并提示连接测试的入口', async () => {
     renderWithProviders(<ModelSettingsPage />)
 
     expect(await screen.findByTestId('profiles-empty')).toHaveTextContent('不需要修改源码')
     await waitFor(() => expect(profilesApi.fetchProtocols).toHaveBeenCalled())
-    expect(screen.getByText(/连接测试与实际识别调用在 T07 提供/)).toBeInTheDocument()
+    expect(screen.getByText(/保存前可以用/)).toBeInTheDocument()
     expect(await screen.findByTestId('protocol-capabilities')).toHaveTextContent('json_schema：未声明')
   })
 

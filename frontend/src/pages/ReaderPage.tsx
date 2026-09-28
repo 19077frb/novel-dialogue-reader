@@ -34,7 +34,7 @@ export function findCurrentStartCp(nodes: HTMLElement[]): number | null {
 }
 
 /**
- * 阅读页：导入后即可阅读原文；T11 起接入**同一套标注投影**
+ * 阅读页：导入后即可阅读原文，并与预览页共用**同一套标注投影**
  * （`GET /api/books/{id}/annotations`）。翻页只查投影，不触发任何推理。
  */
 export default function ReaderPage() {
