@@ -33,6 +33,7 @@ class LabelingTargets:
     scene_refs: tuple[str, ...] = ("scene_current",)
     speaker_refs: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
+    confirmed_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -182,6 +183,89 @@ def repair_undeclared_speakers(
     return repaired, warnings
 
 
+def repair_confirmed_speakers_after_break(
+    output: LlmOutput, targets: LabelingTargets
+) -> tuple[LlmOutput, list[str]]:
+    """把新场景中“旧 S 编号 + 已确认姓名”改写为本场景临时人物。
+
+    这是可确定的结构修复：姓名必须来自用户确认名单。没有姓名或姓名不在名单中时
+    保持原样，随后由严格校验拒绝，避免凭旧编号猜人。
+    """
+
+    initial_scenes = set(targets.scene_refs)
+    new_scene_refs = {update.temp_ref for update in output.scene_updates}
+    confirmed = {name.strip().casefold() for name in targets.confirmed_names if name.strip()}
+    if not new_scene_refs or not confirmed:
+        return output, []
+
+    used_refs = {speaker.temp_ref for speaker in output.new_speakers}
+    replacements: dict[tuple[str, str, str], str] = {}
+    additions: list[NewSpeaker] = []
+    repaired_labels: list[QuoteLabel] = []
+    warnings: list[str] = []
+
+    def next_ref() -> str:
+        index = 1
+        while f"scene_new{index}" in used_refs:
+            index += 1
+        ref = f"scene_new{index}"
+        used_refs.add(ref)
+        return ref
+
+    for label in output.labels:
+        name_key = (label.speaker_name or "").strip().casefold()
+        should_repair = (
+            label.scene_ref in new_scene_refs
+            and label.scene_ref not in initial_scenes
+            and label.kind is QuoteKind.SPEECH
+            and label.assignment is Assignment.EXISTING
+            and label.speaker_ref in targets.speaker_refs
+            and name_key in confirmed
+        )
+        if not should_repair:
+            repaired_labels.append(label)
+            continue
+
+        key = (label.scene_ref, str(label.speaker_ref), name_key)
+        temp_ref = replacements.get(key)
+        first = temp_ref is None
+        if first:
+            temp_ref = next_ref()
+            replacements[key] = temp_ref
+            additions.append(
+                NewSpeaker(
+                    temp_ref=temp_ref,
+                    scene_ref=label.scene_ref,
+                    first_quote_id=label.quote_id,
+                    description="（程序按用户确认姓名重建新场景人物）",
+                    evidence_refs=list(label.evidence_refs),
+                )
+            )
+        repaired_labels.append(
+            label.model_copy(
+                update={
+                    "assignment": Assignment.NEW if first else Assignment.EXISTING,
+                    "speaker_ref": temp_ref,
+                }
+            )
+        )
+        warnings.append(
+            f"repaired_old_scene_speaker:{label.quote_id}:{label.speaker_ref}->{temp_ref}"
+        )
+
+    if not additions:
+        return output, []
+    return (
+        output.model_copy(
+            update={
+                "new_speakers": [*output.new_speakers, *additions],
+                "labels": repaired_labels,
+            }
+        ),
+        warnings,
+    )
+
+
 def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationReport:
     """按程序生成的允许集合校验输出；返回接受的对白标签与全部问题。"""
 
@@ -194,6 +278,8 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
 
     # 1) 场景声明
     new_scenes: set[str] = set()
+    scene_updates_by_gap: dict[str, str] = {}
+    scene_starts: dict[str, str] = {}
     break_gaps = {
         decision.gap_id
         for decision in output.gap_decisions
@@ -207,6 +293,24 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
                 )
             )
         new_scenes.add(update.temp_ref)
+        if update.after_gap_id in scene_updates_by_gap:
+            issues.append(
+                ValidationIssue(
+                    "duplicate_scene_update",
+                    f"Gap {update.after_gap_id} 声明了多个新场景",
+                    update.after_gap_id,
+                )
+            )
+        scene_updates_by_gap[update.after_gap_id] = update.temp_ref
+        if update.starts_at_quote_id in scene_starts:
+            issues.append(
+                ValidationIssue(
+                    "duplicate_scene_start",
+                    f"对白 {update.starts_at_quote_id} 被多个新场景作为起点",
+                    update.starts_at_quote_id,
+                )
+            )
+        scene_starts[update.starts_at_quote_id] = update.temp_ref
         if update.after_gap_id not in allowed_gaps:
             issues.append(
                 ValidationIssue(
@@ -231,7 +335,24 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
                     update.temp_ref,
                 )
             )
+    for gap_id in sorted(break_gaps):
+        if gap_id not in scene_updates_by_gap:
+            issues.append(
+                ValidationIssue(
+                    "break_without_scene_update",
+                    f"BREAK {gap_id} 缺少 scene_updates 声明；切场景后旧 S 编号失效",
+                    gap_id,
+                )
+            )
+
     allowed_scenes |= new_scenes
+    initial_scene = targets.scene_refs[0] if targets.scene_refs else "scene_current"
+    expected_scene_by_quote: dict[str, str] = {}
+    current_scene = initial_scene
+    for quote_id in targets.quote_ids:
+        if quote_id in scene_starts:
+            current_scene = scene_starts[quote_id]
+        expected_scene_by_quote[quote_id] = current_scene
 
     # 2) 新人物
     new_speakers: dict[str, str] = {}
@@ -307,18 +428,45 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
                 )
             )
             continue
+        expected_scene = expected_scene_by_quote.get(label.quote_id, initial_scene)
+        if label.scene_ref != expected_scene:
+            issues.append(
+                ValidationIssue(
+                    "speaker_scene_mismatch",
+                    (
+                        f"对白 {label.quote_id} 应属于 {expected_scene}，"
+                        f"不能继续使用 {label.scene_ref}"
+                    ),
+                    label.quote_id,
+                )
+            )
+            continue
         if label.kind is QuoteKind.SPEECH and label.assignment is not None:
             if label.assignment is Assignment.EXISTING:
-                # EXISTING 可以指向已建立的稳定分组，也可以指向**本次输出里刚声明**的临时人物
-                # （同一窗口里同一新声音的第二句就是这种情况）。
-                if (
-                    label.speaker_ref not in allowed_speakers
-                    and label.speaker_ref not in new_speakers
-                ):
+                # BREAK 后旧场景的 S1/S2 立即失效；新场景只能复用本次输出中
+                # 已经以 NEW 声明、且属于同一 scene_ref 的临时人物。
+                valid_existing = (
+                    label.speaker_ref in allowed_speakers
+                    if expected_scene == initial_scene
+                    else new_speakers.get(str(label.speaker_ref)) == expected_scene
+                )
+                if not valid_existing and label.speaker_ref in new_speakers:
+                    valid_existing = new_speakers[str(label.speaker_ref)] == expected_scene
+                if not valid_existing:
                     issues.append(
                         ValidationIssue(
-                            "unknown_speaker",
-                            f"对白 {label.quote_id} 引用了未知说话人 {label.speaker_ref}",
+                            (
+                                "old_scene_speaker"
+                                if expected_scene != initial_scene
+                                else "unknown_speaker"
+                            ),
+                            (
+                                f"对白 {label.quote_id} 在切场景后仍引用旧人物 "
+                                f"{label.speaker_ref}；"
+                                "请先用 NEW + new_speakers 在新场景重新声明"
+                                if expected_scene != initial_scene
+                                else f"对白 {label.quote_id} 引用了未知说话人 {label.speaker_ref}"
+                            ),
                             label.quote_id,
                         )
                     )
@@ -392,11 +540,25 @@ def parse_and_validate(
     try:
         output = parse_output(payload)
     except InvalidModelOutput as exc:
-        issue = ValidationIssue("invalid_output", str(exc))
+        message = str(exc)
+        schema_issues = exc.details.get("issues")
+        if isinstance(schema_issues, list) and schema_issues:
+            details: list[str] = []
+            for item in schema_issues[:5]:
+                if not isinstance(item, Mapping):
+                    continue
+                location = ".".join(str(part) for part in item.get("loc", ())) or "顶层"
+                reason = str(item.get("message") or item.get("type") or "字段无效")
+                details.append(f"{location}: {reason}")
+            if details:
+                message += " " + "；".join(details)
+        issue = ValidationIssue("invalid_output", message)
         return ValidationReport(
             ok=False, output=None, issues=(issue,), accepted_labels=(), _codes=("invalid_output",)
         )
     output, warnings = repair_undeclared_speakers(output, targets)
+    output, scene_warnings = repair_confirmed_speakers_after_break(output, targets)
+    warnings.extend(scene_warnings)
     report = validate_output(output, targets)
     if not warnings:
         return report

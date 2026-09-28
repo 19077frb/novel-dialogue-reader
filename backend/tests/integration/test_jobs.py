@@ -200,6 +200,28 @@ def test_invalid_output_triggers_one_repair_retry(
         engine.dispose()
 
 
+def test_equivalent_active_jobs_with_fresh_keys_are_coalesced(
+    fake_provider_client: TestClient,
+) -> None:
+    data = _import(fake_provider_client)
+    profile_id = _fake_profile(fake_provider_client)
+
+    first = _create_job(
+        fake_provider_client,
+        data["book_id"],
+        profile_id,
+        key="fresh-key-1",
+    )
+    second = _create_job(
+        fake_provider_client,
+        data["book_id"],
+        profile_id,
+        key="fresh-key-2",
+    )
+
+    assert second["id"] == first["id"]
+
+
 def test_idempotency_key_with_different_request_conflicts(
     fake_provider_client: TestClient,
 ) -> None:

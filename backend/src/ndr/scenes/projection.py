@@ -170,7 +170,12 @@ def build_projection(
     ordered_identities: list[str] = []
     for group in groups:
         name = (group.canonical_name or "").strip()
-        identity = f"name:{name.casefold()}" if name else f"group:{group.id}"
+        if group.character_id:
+            identity = f"character:{group.character_id}"
+        elif name:
+            identity = f"name:{name.casefold()}"
+        else:
+            identity = f"group:{group.id}"
         if identity not in color_by_identity:
             color_by_identity[identity] = len(color_by_identity)
             representative_by_identity[identity] = group

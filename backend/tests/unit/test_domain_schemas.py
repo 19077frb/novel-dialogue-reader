@@ -50,6 +50,7 @@ def test_enum_values_match_contract() -> None:
     assert {member.value for member in JobKind} == {
         "IMPORT",
         "INFERENCE",
+        "CHARACTER_ROSTER",
         "RECHECK",
         "RECOMPUTE",
         "EXPORT",

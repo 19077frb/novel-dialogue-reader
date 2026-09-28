@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from . import __version__
 from .api.annotations import router as annotations_router
 from .api.books import router as books_router
+from .api.characters import router as characters_router
 from .api.corrections import (
     book_router as corrections_book_router,
 )
@@ -112,6 +113,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health_router, prefix="/api")
     app.include_router(books_router, prefix="/api")
+    app.include_router(characters_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
     app.include_router(quotes_router, prefix="/api")
     app.include_router(quote_router, prefix="/api")

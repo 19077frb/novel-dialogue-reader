@@ -125,3 +125,21 @@ def output_json_schema() -> dict[str, Any]:
     """导出 JSON Schema（提示词与文档用；不带 ``$defs`` 内联引用问题）。"""
 
     return LlmOutput.model_json_schema(ref_template="#/$defs/{model}")
+
+
+class RosterCharacter(ApiModel):
+    """A candidate character proposed for one chapter."""
+
+    temp_ref: str = Field(min_length=1, max_length=64)
+    name: str | None = Field(default=None, max_length=128)
+    aliases: list[str] = Field(default_factory=list)
+    description: str = Field(default="", max_length=512)
+    evidence_refs: list[str] = Field(default_factory=list)
+    pov_candidate: bool = False
+
+
+class RosterOutput(ApiModel):
+    """Structured output for the chapter character-roster analysis pass."""
+
+    schema_version: Literal["1.0"] = OUTPUT_SCHEMA_VERSION
+    characters: list[RosterCharacter] = Field(default_factory=list)

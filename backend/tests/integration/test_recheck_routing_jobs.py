@@ -134,6 +134,43 @@ def _rows(settings: Settings, job_id: str) -> tuple[list, list, dict]:  # noqa: 
     return runs, windows, progress
 
 
+def test_job_budget_enables_recheck_without_context_2(
+    fake_provider_client: TestClient, migrated_settings: Settings
+) -> None:
+    data = _import(fake_provider_client)
+    profile_id = _profile(fake_provider_client)
+    job = _create_job(
+        fake_provider_client,
+        book_id=data["book_id"],
+        profile_id=profile_id,
+        key="k-budget-recheck",
+    )
+
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            row = session.get(Job, job["id"])
+            assert row is not None
+            row.budget_json = json.dumps(
+                {"max_input_tokens": 200_000, "max_rechecks": 2}
+            )
+        adapter = FakeProviderAdapter()
+        outcome = run_job(
+            factory,
+            migrated_settings,
+            job_id=job["id"],
+            adapter_factory=lambda job, snapshot: adapter,
+        )
+    finally:
+        engine.dispose()
+
+    assert outcome.state is JobState.COMPLETED
+    assert outcome.recheck_windows == 1
+    assert outcome.recheck_targets == 2
+    assert outcome.recheck_calls == 1
+    assert len(adapter.calls) == 2
+
+
 def test_context_2_rechecks_unresolved_targets_and_restores_evidence(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:

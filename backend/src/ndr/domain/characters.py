@@ -1,0 +1,66 @@
+"""API models for chapter character rosters."""
+
+from __future__ import annotations
+
+from pydantic import Field, model_validator
+
+from .common import ApiModel
+from .enums import CharacterRosterStatus
+
+
+class BookCharacterOut(ApiModel):
+    character_id: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    description: str = ""
+    user_confirmed: bool = False
+
+
+class RosterCharacterCandidate(ApiModel):
+    temp_ref: str = Field(min_length=1, max_length=64)
+    character_id: str | None = None
+    canonical_name: str | None = Field(default=None, max_length=128)
+    aliases: list[str] = Field(default_factory=list)
+    description: str = Field(default="", max_length=512)
+    evidence_refs: list[str] = Field(default_factory=list)
+    pov_candidate: bool = False
+
+
+class ChapterRosterOut(ApiModel):
+    chapter_id: str
+    book_version_id: str
+    status: CharacterRosterStatus
+    candidates: list[RosterCharacterCandidate] = Field(default_factory=list)
+    confirmed_characters: list[BookCharacterOut] = Field(default_factory=list)
+    pov_character_id: str | None = None
+    version: int = 1
+
+
+class RosterAnalyzeIn(ApiModel):
+    book_version_id: str | None = None
+    profile_id: str
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    run_now: bool = True
+
+
+class RosterConfirmCandidateIn(ApiModel):
+    temp_ref: str = Field(min_length=1, max_length=64)
+    accepted: bool = True
+    character_id: str | None = None
+    canonical_name: str | None = Field(default=None, max_length=128)
+    aliases: list[str] = Field(default_factory=list)
+    description: str = Field(default="", max_length=512)
+
+
+class RosterConfirmIn(ApiModel):
+    book_version_id: str | None = None
+    candidates: list[RosterConfirmCandidateIn] = Field(min_length=1)
+    pov_temp_ref: str | None = None
+    expected_version: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _check_unique_refs(self) -> RosterConfirmIn:
+        refs = [item.temp_ref for item in self.candidates]
+        if len(refs) != len(set(refs)):
+            raise ValueError("candidates 内的 temp_ref 不得重复")
+        return self

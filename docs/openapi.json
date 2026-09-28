@@ -445,6 +445,251 @@
         }
       }
     },
+    "/api/books/{book_id}/characters": {
+      "get": {
+        "tags": [
+          "characters"
+        ],
+        "summary": "全书人物表",
+        "operationId": "list_book_characters_route_api_books__book_id__characters_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "book_version_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Book Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_list_BookCharacterOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/chapters/{chapter_id}/character-roster/analyze": {
+      "post": {
+        "tags": [
+          "characters"
+        ],
+        "summary": "分析本章人物",
+        "operationId": "analyze_character_roster_route_api_books__book_id__chapters__chapter_id__character_roster_analyze_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chapter Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RosterAnalyzeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_JobDetailOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/chapters/{chapter_id}/character-roster": {
+      "get": {
+        "tags": [
+          "characters"
+        ],
+        "summary": "读取本章人物名单",
+        "operationId": "get_character_roster_route_api_books__book_id__chapters__chapter_id__character_roster_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chapter Id"
+            }
+          },
+          {
+            "name": "book_version_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Book Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ChapterRosterOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "characters"
+        ],
+        "summary": "确认本章人物与第一视角主人公",
+        "operationId": "confirm_character_roster_route_api_books__book_id__chapters__chapter_id__character_roster_put",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chapter Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RosterConfirmIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ChapterRosterOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs": {
       "post": {
         "tags": [
@@ -2656,6 +2901,42 @@
         ],
         "title": "Body_import_book_api_books_import_post"
       },
+      "BookCharacterOut": {
+        "properties": {
+          "character_id": {
+            "type": "string",
+            "title": "Character Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Aliases"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "user_confirmed": {
+            "type": "boolean",
+            "title": "User Confirmed",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "character_id",
+          "name"
+        ],
+        "title": "BookCharacterOut"
+      },
       "BookFormat": {
         "type": "string",
         "enum": [
@@ -2887,6 +3168,67 @@
           "end_cp"
         ],
         "title": "ChapterOut"
+      },
+      "ChapterRosterOut": {
+        "properties": {
+          "chapter_id": {
+            "type": "string",
+            "title": "Chapter Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CharacterRosterStatus"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/RosterCharacterCandidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "confirmed_characters": {
+            "items": {
+              "$ref": "#/components/schemas/BookCharacterOut"
+            },
+            "type": "array",
+            "title": "Confirmed Characters"
+          },
+          "pov_character_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pov Character Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "default": 1
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chapter_id",
+          "book_version_id",
+          "status"
+        ],
+        "title": "ChapterRosterOut"
+      },
+      "CharacterRosterStatus": {
+        "type": "string",
+        "enum": [
+          "DRAFT",
+          "CONFIRMED"
+        ],
+        "title": "CharacterRosterStatus"
       },
       "ConnectionTestIn": {
         "properties": {
@@ -3420,6 +3762,25 @@
         ],
         "title": "DataEnvelope[BookOut]"
       },
+      "DataEnvelope_ChapterRosterOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChapterRosterOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ChapterRosterOut]"
+      },
       "DataEnvelope_ConnectionTestOut_": {
         "properties": {
           "data": {
@@ -3915,6 +4276,29 @@
           "request_id"
         ],
         "title": "DataEnvelope[dict]"
+      },
+      "DataEnvelope_list_BookCharacterOut__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BookCharacterOut"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[list[BookCharacterOut]]"
       },
       "DataEnvelope_list_ChapterOut__": {
         "properties": {
@@ -4917,6 +5301,7 @@
         "enum": [
           "IMPORT",
           "INFERENCE",
+          "CHARACTER_ROSTER",
           "RECHECK",
           "RECOMPUTE",
           "EXPORT"
@@ -6349,6 +6734,210 @@
           "gap"
         ],
         "title": "ReviewTargetType"
+      },
+      "RosterAnalyzeIn": {
+        "properties": {
+          "book_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Version Id"
+          },
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "run_now": {
+            "type": "boolean",
+            "title": "Run Now",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_id",
+          "idempotency_key"
+        ],
+        "title": "RosterAnalyzeIn"
+      },
+      "RosterCharacterCandidate": {
+        "properties": {
+          "temp_ref": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Temp Ref"
+          },
+          "character_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Character Id"
+          },
+          "canonical_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Name"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Aliases"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512,
+            "title": "Description",
+            "default": ""
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Refs"
+          },
+          "pov_candidate": {
+            "type": "boolean",
+            "title": "Pov Candidate",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "temp_ref"
+        ],
+        "title": "RosterCharacterCandidate"
+      },
+      "RosterConfirmCandidateIn": {
+        "properties": {
+          "temp_ref": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Temp Ref"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted",
+            "default": true
+          },
+          "character_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Character Id"
+          },
+          "canonical_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Name"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Aliases"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512,
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "temp_ref"
+        ],
+        "title": "RosterConfirmCandidateIn"
+      },
+      "RosterConfirmIn": {
+        "properties": {
+          "book_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Version Id"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/RosterConfirmCandidateIn"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Candidates"
+          },
+          "pov_temp_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pov Temp Ref"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "candidates",
+          "expected_version"
+        ],
+        "title": "RosterConfirmIn"
       },
       "ScanResultOut": {
         "properties": {

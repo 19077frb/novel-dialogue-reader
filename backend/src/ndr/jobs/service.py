@@ -169,6 +169,21 @@ def create_inference_job(
             status_code=409,
         )
 
+    # Different UI events may arrive before React has disabled the button, or
+    # from two tabs. Reuse an equivalent active job even when each event has a
+    # fresh idempotency key; otherwise both jobs race to overwrite the same
+    # annotation projection.
+    active_duplicate = session.execute(
+        select(Job)
+        .where(
+            Job.request_digest == digest,
+            Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
+        )
+        .order_by(Job.created_at.desc())
+    ).scalars().first()
+    if active_duplicate is not None:
+        return active_duplicate, False
+
     job = Job(
         kind=kind,
         purpose=purpose,

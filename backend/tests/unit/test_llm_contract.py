@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,6 +26,7 @@ from ndr.llm.validation import (
     parse_and_validate,
     parse_output,
 )
+from ndr.scenes.runner import _restore_output_references
 
 TARGETS = LabelingTargets(
     quote_ids=("q1", "q2"),
@@ -127,6 +129,16 @@ def test_schema_rejects_extra_fields_and_inconsistent_assignment() -> None:
     assert parse_and_validate(payload, TARGETS).ok is False
 
 
+def test_schema_error_reports_the_failing_field_for_repair_prompt() -> None:
+    payload = _valid_output()
+    payload["type"] = "json_object"
+    report = parse_and_validate(payload, TARGETS)
+
+    assert report.ok is False
+    assert "type" in report.messages[0]
+    assert "Extra inputs are not permitted" in report.messages[0]
+
+
 def test_missing_targets_are_reported() -> None:
     payload = _valid_output()
     payload["labels"] = payload["labels"][:1]
@@ -170,7 +182,106 @@ def test_scene_update_requires_break_decision() -> None:
     assert "scene_update_without_break" in report.error_codes
 
     payload["gap_decisions"][0]["decision"] = "BREAK"
+    payload["new_speakers"][0]["scene_ref"] = "scene_2"
+    payload["labels"][1]["scene_ref"] = "scene_2"
     assert parse_and_validate(payload, TARGETS).ok is True
+
+
+def test_break_requires_new_scene_and_rejects_old_scene_speaker_refs() -> None:
+    payload = _valid_output()
+    payload["gap_decisions"][0]["decision"] = "BREAK"
+    report = parse_and_validate(payload, TARGETS)
+    assert "break_without_scene_update" in report.error_codes
+
+    payload["scene_updates"] = [
+        {
+            "temp_ref": "scene_2",
+            "after_gap_id": "g1",
+            "starts_at_quote_id": "q2",
+            "evidence_refs": ["p2"],
+        }
+    ]
+    payload["labels"][1].update(
+        {
+            "scene_ref": "scene_2",
+            "assignment": "EXISTING",
+            "speaker_ref": "speaker_a",
+        }
+    )
+    report = parse_and_validate(payload, TARGETS)
+    assert "old_scene_speaker" in report.error_codes
+
+
+def test_confirmed_name_repairs_old_scene_speaker_without_model_retry() -> None:
+    targets = LabelingTargets(
+        quote_ids=TARGETS.quote_ids,
+        gap_ids=TARGETS.gap_ids,
+        scene_refs=TARGETS.scene_refs,
+        speaker_refs=TARGETS.speaker_refs,
+        evidence_ids=TARGETS.evidence_ids,
+        confirmed_names=("角色甲",),
+    )
+    payload = _valid_output()
+    payload["gap_decisions"][0]["decision"] = "BREAK"
+    payload["scene_updates"] = [
+        {
+            "temp_ref": "scene_2",
+            "after_gap_id": "g1",
+            "starts_at_quote_id": "q2",
+            "evidence_refs": ["p2"],
+        }
+    ]
+    payload["new_speakers"] = []
+    payload["labels"][1].update(
+        {
+            "scene_ref": "scene_2",
+            "assignment": "EXISTING",
+            "speaker_ref": "speaker_a",
+            "speaker_name": "角色甲",
+        }
+    )
+
+    report = parse_and_validate(payload, targets)
+
+    assert report.ok is True
+    assert any(item.startswith("repaired_old_scene_speaker:q2") for item in report.warnings)
+    assert report.output is not None
+    repaired = report.output.labels[1]
+    assert repaired.assignment.value == "NEW"
+    assert repaired.speaker_ref == report.output.new_speakers[0].temp_ref
+    assert report.output.new_speakers[0].scene_ref == "scene_2"
+
+
+def test_gap_id_used_as_scene_start_is_repaired_to_next_target() -> None:
+    kind = lambda value: SimpleNamespace(value=value)  # noqa: E731
+    window = SimpleNamespace(
+        target_quote_ids=("quote-1", "quote-2"),
+        fragments=(
+            SimpleNamespace(
+                fragment_id="quote-1", kind=kind("target_quote"), start_cp=10, end_cp=20
+            ),
+            SimpleNamespace(fragment_id="gap-1", kind=kind("inner_gap"), start_cp=20, end_cp=30),
+            SimpleNamespace(
+                fragment_id="quote-2", kind=kind("target_quote"), start_cp=30, end_cp=40
+            ),
+        ),
+    )
+    raw = {
+        "scene_updates": [
+            {
+                "temp_ref": "scene_2",
+                "after_gap_id": "G1",
+                "starts_at_quote_id": "G1",
+                "evidence_refs": [],
+            }
+        ]
+    }
+
+    restored = _restore_output_references(raw, window)
+
+    assert restored["scene_updates"][0]["after_gap_id"] == "gap-1"
+    assert restored["scene_updates"][0]["starts_at_quote_id"] == "quote-2"
+    assert restored["_reference_repairs"] == ["repaired_scene_start:gap-1->quote-2"]
 
 
 def test_undeclared_new_speaker_is_repaired_with_warning() -> None:
@@ -240,6 +351,9 @@ def test_prompt_versions_and_data_isolation() -> None:
     assert '"text":' in user
     assert '"speaker_ref":"S1"' in user
     assert '"name":"绫濑沙季"' in user
+    assert "最小合法 JSON 格式示例" in user
+    assert '"quote_id":"q1"' in user
+    assert '"identity_proposals":[]' in user
     # 正文里的分隔标记被转义，无法跳出数据块
     assert user.count(DATA_DELIMITER) == 2
     assert "NDR_DATA_ESCAPED" in user

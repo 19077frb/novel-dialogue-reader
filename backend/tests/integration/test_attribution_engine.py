@@ -25,11 +25,12 @@ from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.llm.validation import RetryPolicy
 from ndr.scenes.engine import apply_window
 from ndr.scenes.runner import run_window
-from ndr.scenes.state import SceneState
+from ndr.scenes.state import ConfirmedCharacter, SceneState
 from ndr.storage.engine import create_db_engine, create_session_factory
 from ndr.storage.models import (
     Annotation,
     AnnotationHistory,
+    BookCharacter,
     BookVersion,
     IdentityRevision,
     ReviewItem,
@@ -254,6 +255,73 @@ def test_three_speakers_and_consecutive_same_speaker(
     assert all(item.status is AnnotationStatus.ACCEPTED for item in annotations.values())
 
 
+def test_confirmed_identity_wins_when_model_name_conflicts(
+    migrated_client: TestClient, migrated_settings: Settings
+) -> None:
+    _import(migrated_client)
+
+    def body(session, inputs, version):  # noqa: ANN001, ANN202
+        target = _targets(inputs)[0]
+        window = _window(inputs, [target])
+        session.add_all(
+            [
+                BookCharacter(
+                    id="char-yuta",
+                    book_version_id=version.id,
+                    canonical_name="浅村悠太",
+                    aliases_json="[]",
+                    description="用户确认的主人公",
+                    source="USER",
+                    user_confirmed=True,
+                ),
+                BookCharacter(
+                    id="char-maaya",
+                    book_version_id=version.id,
+                    canonical_name="奈良坂真绫",
+                    aliases_json="[]",
+                    description="用户确认的同学",
+                    source="USER",
+                    user_confirmed=True,
+                ),
+            ]
+        )
+        session.flush()
+        state = SceneState(
+            confirmed_characters=[
+                ConfirmedCharacter("char-yuta", "浅村悠太", description="用户确认的主人公"),
+                ConfirmedCharacter("char-maaya", "奈良坂真绫", description="用户确认的同学"),
+            ],
+            pov_character_id="char-yuta",
+        )
+        state.add_speaker(
+            first_quote_id=target,
+            canonical_name="浅村悠太",
+            description="用户确认的主人公",
+        )
+        state.sync_confirmed_participants()
+        output = {
+            "schema_version": "1.0",
+            "labels": [
+                _speech(
+                    target,
+                    assignment="EXISTING",
+                    speaker_ref="S1",
+                    speaker_name="奈良坂真绫",
+                )
+            ],
+        }
+        result = _apply(session, output=output, window=window, state=state, inputs=inputs)
+        group = session.execute(select(SpeakerGroup)).scalar_one()
+        return result, group
+
+    result, group = _with_session(migrated_settings, body)
+    assert result.validation_ok is True
+    assert group.character_id == "char-yuta"
+    assert group.canonical_name == "浅村悠太"
+    assert group.description == "用户确认的主人公"
+    assert any(item.startswith("confirmed_identity_conflict:S1:奈良坂真绫") for item in result.warnings)
+
+
 def test_update_keeps_scene_and_break_opens_new_scene(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
@@ -290,7 +358,13 @@ def test_update_keeps_scene_and_break_opens_new_scene(
                     "evidence_refs": [],
                 }
             ],
-            "labels": [_thought(target) for target in targets],
+            "labels": [
+                {
+                    **_thought(target),
+                    "scene_ref": "scene_2" if target == targets[-1] else "scene_current",
+                }
+                for target in targets
+            ],
         }
         second = _apply(session, output=break_output, window=window, state=state, inputs=inputs)
         assert second.validation_ok is True, second.validation_codes

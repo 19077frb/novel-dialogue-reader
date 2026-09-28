@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as annotationsApi from '../src/api/annotations'
 import * as booksApi from '../src/api/books'
+import * as charactersApi from '../src/api/characters'
 import * as jobsApi from '../src/api/jobs'
 import * as profilesApi from '../src/api/profiles'
 import type {
   AnnotationsResponse,
   BookOut,
   ChapterOut,
+  ChapterRosterOut,
   ContentNodeOut,
   EstimateOut,
   JobDetailOut,
@@ -38,6 +40,26 @@ vi.mock('../src/api/books', () => ({
   fetchJob: vi.fn(),
 }))
 
+vi.mock('../src/api/characters', () => ({
+  characterKeys: {
+    book: (bookId: string, versionId: string | null | undefined) => [
+      'book-characters',
+      bookId,
+      versionId ?? 'active',
+    ],
+    roster: (
+      bookId: string,
+      versionId: string | null | undefined,
+      chapterId: string | null,
+    ) => ['character-roster', bookId, versionId ?? 'active', chapterId],
+    rosterJob: (jobId: string | null) => ['character-roster-job', jobId],
+  },
+  fetchBookCharacters: vi.fn(),
+  fetchCharacterRoster: vi.fn(),
+  analyzeCharacterRoster: vi.fn(),
+  confirmCharacterRoster: vi.fn(),
+}))
+
 vi.mock('../src/api/annotations', () => ({
   annotationKeys: {
     range: (
@@ -57,6 +79,8 @@ vi.mock('../src/api/jobs', () => ({
   createJob: vi.fn(),
   fetchUsage: vi.fn(),
   shortHash: (value: string) => String(value.length),
+  freshIdempotencyKey: (scope: string, value: string) =>
+    `${scope}:${value.length}:test-nonce`,
 }))
 
 vi.mock('../src/api/profiles', () => ({
@@ -156,6 +180,34 @@ const ANNOTATIONS = {
   scenes: [],
 } as unknown as AnnotationsResponse
 
+const ROSTER = {
+  chapter_id: 'c1',
+  book_version_id: 'v1',
+  status: 'CONFIRMED',
+  candidates: [
+    {
+      temp_ref: 'c1',
+      character_id: 'char1',
+      canonical_name: 'Speaker',
+      aliases: [],
+      description: '',
+      evidence_refs: ['q1'],
+      pov_candidate: true,
+    },
+  ],
+  confirmed_characters: [
+    {
+      character_id: 'char1',
+      name: 'Speaker',
+      aliases: [],
+      description: '',
+      user_confirmed: true,
+    },
+  ],
+  pov_character_id: 'char1',
+  version: 2,
+} as ChapterRosterOut
+
 const ESTIMATE = {
   book_id: 'b1',
   book_version_id: 'v1',
@@ -211,6 +263,10 @@ describe('PreviewPage', () => {
     vi.mocked(booksApi.fetchQuotes).mockReset()
     vi.mocked(booksApi.fetchJob).mockReset()
     vi.mocked(annotationsApi.fetchAnnotations).mockReset()
+    vi.mocked(charactersApi.fetchBookCharacters).mockReset()
+    vi.mocked(charactersApi.fetchCharacterRoster).mockReset()
+    vi.mocked(charactersApi.analyzeCharacterRoster).mockReset()
+    vi.mocked(charactersApi.confirmCharacterRoster).mockReset()
     vi.mocked(jobsApi.estimateRange).mockReset()
     vi.mocked(jobsApi.createJob).mockReset()
     vi.mocked(jobsApi.fetchUsage).mockReset()
@@ -252,6 +308,8 @@ describe('PreviewPage', () => {
     })
     vi.mocked(booksApi.fetchJob).mockResolvedValue(JOB)
     vi.mocked(annotationsApi.fetchAnnotations).mockResolvedValue(ANNOTATIONS)
+    vi.mocked(charactersApi.fetchBookCharacters).mockResolvedValue(ROSTER.confirmed_characters ?? [])
+    vi.mocked(charactersApi.fetchCharacterRoster).mockResolvedValue(ROSTER)
     vi.mocked(jobsApi.estimateRange).mockResolvedValue(ESTIMATE)
     vi.mocked(jobsApi.createJob).mockResolvedValue(JOB)
     vi.mocked(jobsApi.fetchUsage).mockResolvedValue(USAGE)

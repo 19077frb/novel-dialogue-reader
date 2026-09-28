@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from ..base import Base
 from .book import Book, BookVersion, Chapter, ContentNode, Resource
+from .characters import BookCharacter, ChapterCharacterRoster
 from .dialogue import Gap, Participant, Quote, Scene, SceneMembership, SpeakerGroup
 from .exports import ExportArtifact, ExportSnapshot
 from .jobs import InferenceRun, Job, JobWindow, ResultCache
@@ -20,8 +21,10 @@ __all__ = [
     "AnnotationHistory",
     "Base",
     "Book",
+    "BookCharacter",
     "BookVersion",
     "Chapter",
+    "ChapterCharacterRoster",
     "ContentNode",
     "Correction",
     "ExportArtifact",

@@ -7,14 +7,15 @@ import { fetchBook, fetchChapters, fetchContent, fetchQuotes, queryKeys } from '
 import {
   createJob,
   estimateRange,
+  freshIdempotencyKey,
   fetchUsage,
   jobKeys,
-  shortHash,
   type BudgetInput,
 } from '../api/jobs'
 import { fetchProfiles, profileKeys } from '../api/profiles'
 import type { AnnotationItemOut, EstimateOut, JobDetailOut, ReadingMode } from '../api/types'
 import { BudgetForm } from '../components/BudgetForm'
+import { CharacterRosterPanel } from '../components/CharacterRosterPanel'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
 import { EstimateSummary } from '../components/EstimateSummary'
@@ -54,6 +55,7 @@ export default function PreviewPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
+  const [rosterConfirmed, setRosterConfirmed] = useState(false)
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -151,7 +153,7 @@ export default function PreviewPage() {
     mutationFn: () =>
       estimateRange(bookId as string, {
         bookVersionId: book.data?.active_version_id ?? null,
-        range: { startCp: range.startCp, endCp: resolvedEnd },
+        range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
         readingMode,
         visibleHorizonCp: null,
         budget,
@@ -169,16 +171,25 @@ export default function PreviewPage() {
         bookId: bookId as string,
         mode,
         bookVersionId: book.data?.active_version_id ?? null,
-        range: { startCp: range.startCp, endCp: resolvedEnd },
+        range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
         profileId: profileId || null,
         readingMode,
         visibleHorizonCp: null,
         budget,
         // 同输入 → 同幂等键（用短摘要，避免超过后端 128 字符上限）：重复点击复用同一任务。
         // preview 与 process 的键不同，但缓存键相同：预览过的范围正式处理时不会重复调用模型。
-        idempotencyKey: `${mode}:${bookId}:${shortHash(
-          JSON.stringify({ start: range.startCp, end: resolvedEnd, readingMode, profileId, budget }),
-        )}`,
+        idempotencyKey: freshIdempotencyKey(
+          `${mode}:${bookId}`,
+          JSON.stringify({
+            bookVersionId: book.data?.active_version_id ?? null,
+            chapterId: range.chapterId,
+            start: range.startCp,
+            end: resolvedEnd,
+            readingMode,
+            profileId,
+            budget,
+          }),
+        ),
         runNow: true,
       }),
     onSuccess: (job) => {
@@ -211,7 +222,12 @@ export default function PreviewPage() {
     target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }, [])
 
-  const runDisabled = !rangeValid || profileId === '' || jobMutation.isPending
+  const handleRosterConfirmedChange = useCallback((confirmed: boolean) => {
+    setRosterConfirmed(confirmed)
+  }, [])
+
+  const runDisabled =
+    !rangeValid || profileId === '' || !rosterConfirmed || jobMutation.isPending
 
   if (!bookId) return <p className="status-error">缺少书籍 ID。</p>
 
@@ -321,6 +337,14 @@ export default function PreviewPage() {
         )}
         {estimate && <EstimateSummary estimate={estimate} />}
       </section>
+
+      <CharacterRosterPanel
+        bookId={bookId}
+        bookVersionId={book.data?.active_version_id ?? null}
+        chapterId={range.chapterId}
+        profileId={profileId}
+        onConfirmedChange={handleRosterConfirmedChange}
+      />
 
       {jobId && (
         <section className="card">

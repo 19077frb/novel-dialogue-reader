@@ -924,3 +924,48 @@ textarea:focus-visible {
   margin: 0;
   line-height: 1.9;
 }
+/* ---------- 章节人物确认（两段式处理） ---------- */
+
+.ndr-character-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.ndr-character-card {
+  border: 1px solid var(--ndr-border);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  background: color-mix(in srgb, var(--ndr-panel) 88%, transparent);
+}
+
+.ndr-character-card label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: var(--ndr-muted);
+}
+
+.ndr-character-card .ndr-radio-row {
+  align-items: center;
+}
+
+.ndr-character-card input,
+.ndr-character-card select,
+.ndr-character-card textarea {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ndr-border);
+  background: transparent;
+  color: inherit;
+  width: 100%;
+}
+
+.ndr-character-card input[type='checkbox'],
+.ndr-character-card input[type='radio'] {
+  width: auto;
+}

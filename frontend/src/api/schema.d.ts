@@ -146,6 +146,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/characters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全书人物表 */
+        get: operations["list_book_characters_route_api_books__book_id__characters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/chapters/{chapter_id}/character-roster/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 分析本章人物 */
+        post: operations["analyze_character_roster_route_api_books__book_id__chapters__chapter_id__character_roster_analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/chapters/{chapter_id}/character-roster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读取本章人物名单 */
+        get: operations["get_character_roster_route_api_books__book_id__chapters__chapter_id__character_roster_get"];
+        /** 确认本章人物与第一视角主人公 */
+        put: operations["confirm_character_roster_route_api_books__book_id__chapters__chapter_id__character_roster_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs": {
         parameters: {
             query?: never;
@@ -876,6 +928,25 @@ export interface components {
              */
             title?: string | null;
         };
+        /** BookCharacterOut */
+        BookCharacterOut: {
+            /** Character Id */
+            character_id: string;
+            /** Name */
+            name: string;
+            /** Aliases */
+            aliases?: string[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * User Confirmed
+             * @default false
+             */
+            user_confirmed: boolean;
+        };
         /**
          * BookFormat
          * @enum {string}
@@ -960,6 +1031,30 @@ export interface components {
             /** Source Href */
             source_href?: string | null;
         };
+        /** ChapterRosterOut */
+        ChapterRosterOut: {
+            /** Chapter Id */
+            chapter_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            status: components["schemas"]["CharacterRosterStatus"];
+            /** Candidates */
+            candidates?: components["schemas"]["RosterCharacterCandidate"][];
+            /** Confirmed Characters */
+            confirmed_characters?: components["schemas"]["BookCharacterOut"][];
+            /** Pov Character Id */
+            pov_character_id?: string | null;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+        };
+        /**
+         * CharacterRosterStatus
+         * @enum {string}
+         */
+        CharacterRosterStatus: "DRAFT" | "CONFIRMED";
         /**
          * ConnectionTestIn
          * @description 连接测试请求：已保存配置，或临时草稿（草稿不落库）。
@@ -1139,6 +1234,15 @@ export interface components {
         /** DataEnvelope[BookOut] */
         DataEnvelope_BookOut_: {
             data: components["schemas"]["BookOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[ChapterRosterOut] */
+        DataEnvelope_ChapterRosterOut_: {
+            data: components["schemas"]["ChapterRosterOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -1376,6 +1480,16 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[list[BookCharacterOut]] */
+        DataEnvelope_list_BookCharacterOut__: {
+            /** Data */
+            data: components["schemas"]["BookCharacterOut"][];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -1778,7 +1892,7 @@ export interface components {
          * JobKind
          * @enum {string}
          */
-        JobKind: "IMPORT" | "INFERENCE" | "RECHECK" | "RECOMPUTE" | "EXPORT";
+        JobKind: "IMPORT" | "INFERENCE" | "CHARACTER_ROSTER" | "RECHECK" | "RECOMPUTE" | "EXPORT";
         /**
          * JobPurpose
          * @description INFERENCE 的目的；preview/process 共用同一识别引擎与缓存。
@@ -2370,6 +2484,75 @@ export interface components {
          * @enum {string}
          */
         ReviewTargetType: "quote" | "gap";
+        /** RosterAnalyzeIn */
+        RosterAnalyzeIn: {
+            /** Book Version Id */
+            book_version_id?: string | null;
+            /** Profile Id */
+            profile_id: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /**
+             * Run Now
+             * @default true
+             */
+            run_now: boolean;
+        };
+        /** RosterCharacterCandidate */
+        RosterCharacterCandidate: {
+            /** Temp Ref */
+            temp_ref: string;
+            /** Character Id */
+            character_id?: string | null;
+            /** Canonical Name */
+            canonical_name?: string | null;
+            /** Aliases */
+            aliases?: string[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Evidence Refs */
+            evidence_refs?: string[];
+            /**
+             * Pov Candidate
+             * @default false
+             */
+            pov_candidate: boolean;
+        };
+        /** RosterConfirmCandidateIn */
+        RosterConfirmCandidateIn: {
+            /** Temp Ref */
+            temp_ref: string;
+            /**
+             * Accepted
+             * @default true
+             */
+            accepted: boolean;
+            /** Character Id */
+            character_id?: string | null;
+            /** Canonical Name */
+            canonical_name?: string | null;
+            /** Aliases */
+            aliases?: string[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
+        /** RosterConfirmIn */
+        RosterConfirmIn: {
+            /** Book Version Id */
+            book_version_id?: string | null;
+            /** Candidates */
+            candidates: components["schemas"]["RosterConfirmCandidateIn"][];
+            /** Pov Temp Ref */
+            pov_temp_ref?: string | null;
+            /** Expected Version */
+            expected_version: number;
+        };
         /** ScanResultOut */
         ScanResultOut: {
             /** Book Id */
@@ -2874,6 +3057,145 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_ReadingProgressOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_book_characters_route_api_books__book_id__characters_get: {
+        parameters: {
+            query?: {
+                book_version_id?: string | null;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_list_BookCharacterOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_character_roster_route_api_books__book_id__chapters__chapter_id__character_roster_analyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                chapter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RosterAnalyzeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_JobDetailOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_character_roster_route_api_books__book_id__chapters__chapter_id__character_roster_get: {
+        parameters: {
+            query?: {
+                book_version_id?: string | null;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+                chapter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ChapterRosterOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_character_roster_route_api_books__book_id__chapters__chapter_id__character_roster_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                chapter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RosterConfirmIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ChapterRosterOut_"];
                 };
             };
             /** @description Validation Error */

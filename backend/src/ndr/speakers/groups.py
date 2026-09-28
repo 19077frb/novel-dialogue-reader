@@ -43,10 +43,18 @@ class SpeakerRegistry:
         if existing is not None:
             return existing
         named = self.state.find_by_name(canonical_name)
+        if named is None:
+            confirmed = self.state._confirmed_by_name(canonical_name)
+            if confirmed is not None:
+                named = self.state.find_by_character(confirmed.character_id)
         if named is not None:
             named.temp_ref = temp_ref
             if description and not named.description:
                 named.description = description
+            confirmed = self.state._confirmed_by_name(canonical_name)
+            if confirmed is not None:
+                named.character_id = confirmed.character_id
+                named.canonical_name = confirmed.canonical_name
             self.state.remember_character(named.canonical_name, named.description)
             return named
         return self.state.add_speaker(

@@ -105,6 +105,36 @@ def _restore_output_references(raw: Any, window) -> Any:  # noqa: ANN001
         payload[collection] = normalized
     if isinstance(payload.get("needs_context"), list):
         payload["needs_context"] = [restore(ref) for ref in payload["needs_context"]]
+
+    # DeepSeek 偶尔把 after_gap_id 原样填进 starts_at_quote_id。若两者确实是
+    # 同一个已发送 Gap，可由位置唯一推出 Gap 后第一条目标对白，无需再次付费重试。
+    fragments = {str(item.fragment_id): item for item in window.fragments}
+    targets = set(str(item) for item in window.target_quote_ids)
+    reference_repairs: list[str] = []
+    for update in payload.get("scene_updates", []) or []:
+        if not isinstance(update, dict):
+            continue
+        gap_id = str(update.get("after_gap_id", ""))
+        starts_at = str(update.get("starts_at_quote_id", ""))
+        gap = fragments.get(gap_id)
+        if starts_at != gap_id or gap is None:
+            continue
+        candidates = sorted(
+            (
+                item
+                for item in window.fragments
+                if str(item.fragment_id) in targets and item.start_cp >= gap.end_cp
+            ),
+            key=lambda item: item.start_cp,
+        )
+        if candidates:
+            quote_id = str(candidates[0].fragment_id)
+            update["starts_at_quote_id"] = quote_id
+            reference_repairs.append(
+                f"repaired_scene_start:{gap_id}->{quote_id}"
+            )
+    if reference_repairs:
+        payload["_reference_repairs"] = reference_repairs
     return payload
 
 
@@ -116,6 +146,7 @@ def _messages_for(
     correction: str | None = None,
 ) -> list[dict[str, str]]:
     stable_to_alias, _alias_to_stable = _reference_aliases(window)
+    state.sync_confirmed_participants()
 
     def alias(ref: str) -> str:
         return stable_to_alias.get(ref, ref)
@@ -133,13 +164,38 @@ def _messages_for(
     speaker_records = [
         {
             "speaker_ref": slot.display_label,
+            "character_id": slot.character_id,
             "canonical_name": slot.canonical_name or None,
             "description": slot.description or "未说明",
             "first_quote_id": stable_to_alias.get(slot.first_quote_id),
+            "is_pov": slot.character_id is not None
+            and slot.character_id == state.pov_character_id,
             "evidence_refs": [alias(ref) for ref in slot.evidence_refs if ref in stable_to_alias],
         }
         for slot in state.participants
     ]
+    confirmed_records = [
+        {
+            "character_id": item.character_id,
+            "name": item.canonical_name,
+            "aliases": list(item.aliases),
+            "description": item.description,
+        }
+        for item in state.confirmed_characters
+    ]
+    pov_character = next(
+        (
+            {
+                "character_id": item.character_id,
+                "name": item.canonical_name,
+                "aliases": list(item.aliases),
+                "description": item.description,
+            }
+            for item in state.confirmed_characters
+            if item.character_id == state.pov_character_id
+        ),
+        None,
+    )
     messages = build_labeling_messages(
         context_lines=(),
         context_records=context_records,
@@ -156,6 +212,8 @@ def _messages_for(
             {"name": name, "description": description}
             for name, description in state.known_characters.items()
         ],
+        confirmed_characters=confirmed_records,
+        pov_character=pov_character,
         evidence_ids=[alias(ref) for ref in window.fragment_ids],
         locked_summary=locked_summary or state.prompt_state(max_chars=600),
     )
@@ -253,6 +311,10 @@ async def run_window(
                 dependency_hash=dependency_hash or window.dependency_hash,
                 run_id=run_id,
             )
+            if isinstance(raw, Mapping):
+                repairs = raw.get("_reference_repairs")
+                if isinstance(repairs, list):
+                    result.application.warnings.extend(str(item) for item in repairs)
             return result
 
         result.application.validation_ok = False
@@ -278,4 +340,10 @@ def _targets_for(window, state: SceneState):  # noqa: ANN001, ANN202
         scene_refs=(state.scene_ref,),
         speaker_refs=tuple(slot.display_label for slot in state.participants),
         evidence_ids=tuple(window.fragment_ids),
+        confirmed_names=tuple(
+            name
+            for character in state.confirmed_characters
+            for name in (character.canonical_name, *character.aliases)
+            if name
+        ),
     )

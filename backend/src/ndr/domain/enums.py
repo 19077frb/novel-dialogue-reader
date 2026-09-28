@@ -129,6 +129,15 @@ class IdentityOperation(StrEnum):
     SPLIT = "SPLIT"
 
 
+class CharacterRosterStatus(StrEnum):
+    DRAFT = "DRAFT"
+    CONFIRMED = "CONFIRMED"
+
+
+class CharacterSource(StrEnum):
+    MODEL = "MODEL"
+    USER = "USER"
+
 class CorrectionTargetType(StrEnum):
     QUOTE = "quote"
     GAP = "gap"
@@ -152,6 +161,7 @@ class CorrectionAction(StrEnum):
 class JobKind(StrEnum):
     IMPORT = "IMPORT"
     INFERENCE = "INFERENCE"
+    CHARACTER_ROSTER = "CHARACTER_ROSTER"
     RECHECK = "RECHECK"
     RECOMPUTE = "RECOMPUTE"
     EXPORT = "EXPORT"

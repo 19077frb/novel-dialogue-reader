@@ -17,7 +17,7 @@ from ndr.domain.enums import (
 )
 from ndr.llm.schemas import QuoteLabel
 from ndr.scenes.acceptance import compute_visible_from_cp, decide_acceptance
-from ndr.scenes.state import SceneState
+from ndr.scenes.state import ConfirmedCharacter, SceneState
 from ndr.speakers.groups import SpeakerRegistry
 from ndr.speakers.revisions import (
     IdentityProposalView,
@@ -81,6 +81,7 @@ def test_break_closes_scene_and_starts_a_new_one() -> None:
     assert state.end_cp is None
     assert state.status is SceneStatus.OPEN
     assert state.participants == []  # 新场景重新编号
+    assert state.recent_turns == []
     assert state.last_quote_id == "q5"
     assert state.version == 2
 
@@ -102,6 +103,48 @@ def test_confirmed_character_memory_survives_scene_break() -> None:
     )
     assert state.participants == []
     assert state.known_characters == {"绫濑沙季": "义妹"}
+
+
+def test_confirmed_roster_is_catalog_and_active_speakers_keep_unique_labels() -> None:
+    characters = [
+        ConfirmedCharacter(f"c{index}", name, description=f"user-confirmed-{index}")
+        for index, name in enumerate(
+            ("Yuta", "Saki", "Maaya", "Maru"),
+            start=1,
+        )
+    ]
+    state = SceneState(confirmed_characters=characters)
+    state.sync_confirmed_participants()
+
+    # A chapter roster does not mean that everybody is present in every scene.
+    assert state.participants == []
+
+    for index, character in enumerate(characters, start=1):
+        slot = state.add_speaker(
+            first_quote_id=f"q{index}",
+            canonical_name=character.canonical_name,
+            description="model-description",
+        )
+        assert slot.character_id == character.character_id
+
+    assert [slot.display_label for slot in state.participants] == ["S1", "S2", "S3", "S4"]
+    assert len({slot.display_label for slot in state.participants}) == 4
+
+    # Reconcile duplicate labels and restore user-confirmed identity metadata.
+    state.participants[1].display_label = "S1"
+    state.participants[1].description = "wrong-model-description"
+    state.sync_confirmed_participants()
+    assert [slot.display_label for slot in state.participants] == ["S1", "S2", "S3", "S4"]
+    assert state.participants[1].description == "user-confirmed-2"
+
+    state.apply_gap(
+        decision=GapDecision.BREAK,
+        gap_id="g1",
+        next_quote_id="q5",
+        next_quote_start_cp=100,
+        position_cp=90,
+    )
+    assert state.participants == []
 
 
 def test_uncertain_keeps_scene_open_with_pending_boundary() -> None:
@@ -131,6 +174,7 @@ def test_snapshot_round_trip_preserves_state() -> None:
         temp_ref="new1", first_quote_id="q1", description="义妹", canonical_name="绫濑沙季"
     )
     slot.group_id = "g-1"
+    state.remember_turn(quote_id="q1", slot=slot)
     state.unresolved.append("g7")
 
     restored = SceneState.from_snapshot(state.snapshot())
@@ -144,8 +188,12 @@ def test_snapshot_round_trip_preserves_state() -> None:
     assert restored.participants[0].description == "义妹"
     assert restored.participants[0].canonical_name == "绫濑沙季"
     assert restored.known_characters == {"绫濑沙季": "义妹"}
+    assert restored.recent_turns == [
+        {"quote_id": "q1", "speaker_ref": "S1", "speaker_name": "绫濑沙季"}
+    ]
+    assert "最近已确认轮次=S1:绫濑沙季" in restored.prompt_state()
     assert restored.label_map()["new1"] == "S1"
-    assert restored.snapshot()["state_version"] == "scene-state-2"
+    assert restored.snapshot()["state_version"] == "scene-state-5"
 
 
 def test_prompt_state_is_bounded() -> None:

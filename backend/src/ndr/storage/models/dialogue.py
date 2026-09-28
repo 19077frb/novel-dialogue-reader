@@ -119,6 +119,9 @@ class SpeakerGroup(IdMixin, TimestampMixin, VersionMixin, Base):
     display_label: Mapped[str] = mapped_column(String(32), nullable=False)
     canonical_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    character_id: Mapped[str | None] = mapped_column(
+        ForeignKey("book_characters.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     evidence_refs_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
 

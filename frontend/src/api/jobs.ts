@@ -18,6 +18,7 @@ export const jobKeys = {
 }
 
 export interface RangeInput {
+  chapterId: string | null
   startCp: number
   endCp: number | null
 }
@@ -60,6 +61,24 @@ export function shortHash(value: string): string {
   return hash.toString(36)
 }
 
+let idempotencySequence = 0
+
+/**
+ * Create a key for one user-triggered execution.
+ *
+ * The content hash keeps diagnostics readable, while the nonce makes an
+ * intentional re-run a new request. A single mutation keeps this key for its
+ * one HTTP request, so transport retries remain idempotent.
+ */
+export function freshIdempotencyKey(scope: string, value: string): string {
+  idempotencySequence = (idempotencySequence + 1) >>> 0
+  const randomPart =
+    globalThis.crypto?.randomUUID?.() ??
+    Math.random().toString(36).slice(2)
+  const nonce = `${Date.now().toString(36)}-${idempotencySequence.toString(36)}-${randomPart}`
+  return `${scope}:${shortHash(value)}:${nonce}`.slice(0, 128)
+}
+
 export function estimateRange(
   bookId: string,
   input: EstimateInput,
@@ -70,7 +89,11 @@ export function estimateRange(
     signal,
     body: {
       book_version_id: input.bookVersionId ?? null,
-      range: { start_cp: input.range.startCp, end_cp: input.range.endCp },
+      range: {
+        chapter_id: input.range.chapterId,
+        start_cp: input.range.startCp,
+        end_cp: input.range.endCp,
+      },
       reading_mode: input.readingMode,
       visible_horizon_cp: input.visibleHorizonCp ?? null,
       budget: budgetPayload(input.budget),
@@ -100,7 +123,11 @@ export function createJob(input: CreateJobInput, signal?: AbortSignal): Promise<
       kind: 'INFERENCE',
       mode: input.mode,
       book_version_id: input.bookVersionId ?? null,
-      range: { start_cp: input.range.startCp, end_cp: input.range.endCp },
+      range: {
+        chapter_id: input.range.chapterId,
+        start_cp: input.range.startCp,
+        end_cp: input.range.endCp,
+      },
       profile_id: input.profileId ?? null,
       reading_mode: input.readingMode,
       visible_horizon_cp: input.visibleHorizonCp ?? null,

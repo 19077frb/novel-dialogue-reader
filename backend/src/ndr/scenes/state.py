@@ -4,28 +4,58 @@
 
 - **UPDATE 不切场景**；只有 BREAK 关闭当前场景并开新场景。
 - **UNCERTAIN 不强制切开**：标为 `PENDING_BOUNDARY`，把未解决问题留给下一窗口。
-- 长时间不发言的角色仍留在场景里（沉默不是离场），因此参与者只在 BREAK 时清空。
+- 长时间不发言的角色仍留在场景里（沉默不是离场），因此匿名参与者只在 BREAK 时清空。
+- 用户确认过的人物是章节级身份；场景切换后必须重新进入场景状态，只是展示编号换新。
 - 展示编号（S1/S2…）按**首次可靠发言顺序**分配，只在场景内有意义。
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..domain.enums import GapDecision, SceneStatus
 
-SCENE_STATE_VERSION = "scene-state-2"
+SCENE_STATE_VERSION = "scene-state-5"
+
+
+@dataclass(frozen=True)
+class ConfirmedCharacter:
+    """用户确认过的全书人物；跨场景保持同一个 character_id。"""
+
+    character_id: str
+    canonical_name: str
+    aliases: tuple[str, ...] = ()
+    description: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "character_id": self.character_id,
+            "canonical_name": self.canonical_name,
+            "aliases": list(self.aliases),
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> ConfirmedCharacter:
+        return cls(
+            character_id=str(payload.get("character_id", "")),
+            canonical_name=str(payload.get("canonical_name", "")),
+            aliases=tuple(str(item) for item in payload.get("aliases", [])),
+            description=str(payload.get("description", "")),
+        )
 
 
 @dataclass
 class SpeakerSlot:
-    """场景内的一个匿名分组。"""
+    """场景内的一个匿名分组；可能已关联到全书稳定人物。"""
 
     display_label: str
     first_quote_id: str
-    group_id: str | None = None  # 已落库的稳定 ID（新分组在提交后才拿到）
-    temp_ref: str | None = None  # 模型给的临时引用（new1…），用于本次输出解析
+    group_id: str | None = None
+    character_id: str | None = None
+    temp_ref: str | None = None
     description: str = ""
     canonical_name: str = ""
     evidence_refs: tuple[str, ...] = ()
@@ -35,6 +65,7 @@ class SpeakerSlot:
             "display_label": self.display_label,
             "first_quote_id": self.first_quote_id,
             "group_id": self.group_id,
+            "character_id": self.character_id,
             "temp_ref": self.temp_ref,
             "description": self.description,
             "canonical_name": self.canonical_name,
@@ -44,8 +75,6 @@ class SpeakerSlot:
 
 @dataclass
 class SceneTransition:
-    """一次 Gap 决策带来的场景变化。"""
-
     decision: GapDecision
     gap_id: str
     closed_scene: bool = False
@@ -63,7 +92,10 @@ class SceneState:
     end_gap_id: str | None = None
     last_quote_id: str | None = None
     last_speaker_ref: str | None = None
+    recent_turns: list[dict[str, str]] = field(default_factory=list)
     participants: list[SpeakerSlot] = field(default_factory=list)
+    confirmed_characters: list[ConfirmedCharacter] = field(default_factory=list)
+    pov_character_id: str | None = None
     known_characters: dict[str, str] = field(default_factory=dict)
     unresolved: list[str] = field(default_factory=list)
     version: int = 1
@@ -75,8 +107,6 @@ class SceneState:
         return self.status in {SceneStatus.OPEN, SceneStatus.PENDING_BOUNDARY}
 
     def label_map(self) -> dict[str, str]:
-        """把「稳定 ID / 临时引用」都映射到展示标签，供提示与图例使用。"""
-
         mapping: dict[str, str] = {}
         for slot in self.participants:
             if slot.group_id:
@@ -100,6 +130,26 @@ class SceneState:
                 return slot
         return None
 
+    def find_by_character(self, character_id: str | None) -> SpeakerSlot | None:
+        if not character_id:
+            return None
+        return next(
+            (slot for slot in self.participants if slot.character_id == character_id),
+            None,
+        )
+
+    def _confirmed_by_name(self, value: str | None) -> ConfirmedCharacter | None:
+        key = (value or "").strip().casefold()
+        if not key:
+            return None
+        for character in self.confirmed_characters:
+            if key in {
+                character.canonical_name.strip().casefold(),
+                *(alias.strip().casefold() for alias in character.aliases),
+            }:
+                return character
+        return None
+
     def find_by_name(self, canonical_name: str | None) -> SpeakerSlot | None:
         key = (canonical_name or "").strip().casefold()
         if not key:
@@ -120,6 +170,20 @@ class SceneState:
         old_description = self.known_characters.get(name, "")
         self.known_characters[name] = description.strip() or old_description
 
+    def remember_turn(self, *, quote_id: str, slot: SpeakerSlot | None) -> None:
+        """保留少量已落库轮次，帮助下一窗口延续同一组对话人。"""
+
+        if slot is None:
+            return
+        self.recent_turns.append(
+            {
+                "quote_id": quote_id,
+                "speaker_ref": slot.display_label,
+                "speaker_name": slot.canonical_name or slot.description or "未说明",
+            }
+        )
+        self.recent_turns = self.recent_turns[-8:]
+
     def add_speaker(
         self,
         *,
@@ -128,22 +192,77 @@ class SceneState:
         canonical_name: str = "",
         evidence_refs: tuple[str, ...] = (),
         temp_ref: str | None = None,
+        character_id: str | None = None,
     ) -> SpeakerSlot:
+        confirmed = self._confirmed_by_name(canonical_name)
         slot = SpeakerSlot(
             display_label=self.next_label(),
             first_quote_id=first_quote_id,
+            character_id=character_id or (confirmed.character_id if confirmed else None),
             temp_ref=temp_ref,
             description=description,
-            canonical_name=canonical_name.strip(),
+            canonical_name=(confirmed.canonical_name if confirmed else canonical_name).strip(),
             evidence_refs=evidence_refs,
         )
         self.participants.append(slot)
         self.remember_character(slot.canonical_name, slot.description)
         return slot
 
-    def prompt_state(self, *, max_chars: int = 300) -> str:
-        """给提示用的紧凑状态文本（受 state_tokens 限制，不无限累积摘要）。"""
+    def sync_confirmed_participants(self) -> None:
+        """Reconcile active scene slots with user-confirmed chapter identities.
 
+        The confirmed roster is a chapter-wide identity catalog, not an
+        attendance list. Missing people are therefore not inserted into every
+        scene. A person enters the active scene only after the model identifies
+        their first utterance as NEW; add_speaker then links the name back to
+        the stable confirmed character_id.
+        """
+
+        reconciled: list[SpeakerSlot] = []
+        seen_character_ids: set[str] = set()
+        for slot in self.participants:
+            authoritative = next(
+                (
+                    character
+                    for character in self.confirmed_characters
+                    if character.character_id == slot.character_id
+                ),
+                None,
+            )
+            if authoritative is None:
+                authoritative = self._confirmed_by_name(slot.canonical_name)
+            if authoritative is not None:
+                # User-confirmed identity is authoritative, but do not create
+                # an active participant merely because it appears in the
+                # chapter roster.
+                if authoritative.character_id in seen_character_ids:
+                    continue
+                slot.character_id = authoritative.character_id
+                slot.canonical_name = authoritative.canonical_name
+                if authoritative.description:
+                    slot.description = authoritative.description
+                seen_character_ids.add(authoritative.character_id)
+            reconciled.append(slot)
+
+        # Repair repeated labels left by older checkpoints while preserving the
+        # first occurrence and active-scene order.
+        unique: list[SpeakerSlot] = []
+        used_labels: set[str] = set()
+        for slot in reconciled:
+            if slot.display_label in used_labels:
+                used = {item.display_label for item in unique}
+                index = 1
+                while f"S{index}" in used:
+                    index += 1
+                slot.display_label = f"S{index}"
+            used_labels.add(slot.display_label)
+            unique.append(slot)
+        self.participants = unique
+
+        for character in self.confirmed_characters:
+            self.remember_character(character.canonical_name, character.description)
+
+    def prompt_state(self, *, max_chars: int = 300) -> str:
         labels = "、".join(
             f"{slot.display_label}:{slot.canonical_name or slot.description or '未说明'}"
             for slot in self.participants
@@ -154,13 +273,27 @@ class SceneState:
             f"场景 {self.scene_ref} 状态={self.status.value}；"
             f"最近发言人={last_speaker}；分组成员={labels}"
         )
+        pov = next(
+            (
+                character
+                for character in self.confirmed_characters
+                if character.character_id == self.pov_character_id
+            ),
+            None,
+        )
+        if pov is not None:
+            text += f"；本章第一视角人物={pov.canonical_name}"
+        if self.recent_turns:
+            turns = "→".join(
+                f"{item.get('speaker_ref', '?')}:{item.get('speaker_name', '未说明')}"
+                for item in self.recent_turns
+            )
+            text += f"；最近已确认轮次={turns}"
         if self.unresolved:
             text += f"；未解决={'、'.join(self.unresolved[:5])}"
         return text[:max_chars]
 
     def clear_request_aliases(self) -> None:
-        """请求内的 ``newN`` 不跨窗口复用；稳定 group_id 与展示标签继续保留。"""
-
         for slot in self.participants:
             slot.temp_ref = None
 
@@ -175,34 +308,31 @@ class SceneState:
         next_quote_start_cp: int | None,
         position_cp: int,
     ) -> SceneTransition:
-        """按 Gap 决策更新状态；BREAK 时关闭当前场景并把状态复位成新场景。"""
-
         if decision is GapDecision.BREAK:
             self.status = SceneStatus.CLOSED
             self.end_cp = position_cp
             self.end_gap_id = gap_id
-            closed = True
             self.scene_id = None
             self.start_cp = next_quote_start_cp if next_quote_start_cp is not None else position_cp
             self.end_cp = None
             self.status = SceneStatus.OPEN
-            self.participants = []  # 新场景重新编号（编号只在场景内有意义）
+            self.participants = []
+            self.sync_confirmed_participants()
             self.last_speaker_ref = None
+            self.recent_turns = []
             self.unresolved = []
             self.version += 1
             self.last_quote_id = next_quote_id
             return SceneTransition(
-                decision=decision, gap_id=gap_id, closed_scene=closed, opened_scene=True
+                decision=decision, gap_id=gap_id, closed_scene=True, opened_scene=True
             )
 
         if decision is GapDecision.UNCERTAIN:
             self.status = SceneStatus.PENDING_BOUNDARY
             if gap_id not in self.unresolved:
-                # 待定边界要留在状态里，下一窗口才能补证据（F06）
                 self.unresolved.append(gap_id)
             return SceneTransition(decision=decision, gap_id=gap_id, pending_boundary=True)
 
-        # CONTINUE / UPDATE：都不切场景（UPDATE 只是更新状态）
         self.status = SceneStatus.OPEN
         self.last_quote_id = next_quote_id or self.last_quote_id
         return SceneTransition(decision=decision, gap_id=gap_id)
@@ -220,7 +350,10 @@ class SceneState:
             "end_gap_id": self.end_gap_id,
             "last_quote_id": self.last_quote_id,
             "last_speaker_ref": self.last_speaker_ref,
+            "recent_turns": [dict(item) for item in self.recent_turns],
             "participants": [slot.as_dict() for slot in self.participants],
+            "confirmed_characters": [item.as_dict() for item in self.confirmed_characters],
+            "pov_character_id": self.pov_character_id,
             "known_characters": dict(self.known_characters),
             "unresolved": list(self.unresolved),
             "version": self.version,
@@ -239,6 +372,17 @@ class SceneState:
             end_gap_id=payload.get("end_gap_id"),
             last_quote_id=payload.get("last_quote_id"),
             last_speaker_ref=payload.get("last_speaker_ref"),
+            recent_turns=[
+                {str(key): str(value) for key, value in item.items()}
+                for item in payload.get("recent_turns", [])
+                if isinstance(item, dict)
+            ][-8:],
+            confirmed_characters=[
+                ConfirmedCharacter.from_dict(item)
+                for item in payload.get("confirmed_characters", [])
+                if isinstance(item, dict)
+            ],
+            pov_character_id=payload.get("pov_character_id"),
             known_characters=dict(payload.get("known_characters", {})),
             unresolved=list(payload.get("unresolved", [])),
             version=int(payload.get("version", 1)),
@@ -249,6 +393,7 @@ class SceneState:
                     display_label=str(slot.get("display_label", "S?")),
                     first_quote_id=str(slot.get("first_quote_id", "")),
                     group_id=slot.get("group_id"),
+                    character_id=slot.get("character_id"),
                     temp_ref=slot.get("temp_ref"),
                     description=str(slot.get("description", "")),
                     canonical_name=str(slot.get("canonical_name", "")),

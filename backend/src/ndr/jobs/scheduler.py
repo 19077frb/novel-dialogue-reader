@@ -15,13 +15,14 @@ import asyncio
 import json
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..characters.service import confirmed_roster_context
 from ..config import Settings
 from ..context.budget import DEFAULT_POLICY, BudgetPolicy, estimate_tokens, policy_for_version
 from ..context.recheck import plan_recheck, route_window
@@ -32,6 +33,7 @@ from ..domain.enums import (
     AnnotationStatus,
     CredentialMode,
     InferenceRunState,
+    JobKind,
     JobState,
     ReadingMode,
 )
@@ -43,9 +45,10 @@ from ..llm.validation import parse_and_validate
 from ..scenes.acceptance import ACCEPTANCE_POLICY_VERSION
 from ..scenes.engine import apply_window
 from ..scenes.runner import _messages_for, _restore_output_references, _targets_for
-from ..scenes.state import SceneState
+from ..scenes.state import ConfirmedCharacter, SceneState
 from ..storage.cache import CacheKeyParts, ResultCacheStore, compute_cache_key, fingerprint
 from ..storage.models import Annotation, BookVersion, InferenceRun, Job, JobWindow, ModelProfile
+from .roster import run_character_roster_job
 from .service import (
     credential_mode_of,
     credential_reference,
@@ -62,6 +65,14 @@ DEFAULT_LEASE_SECONDS = 900
 LABELING_MAX_TOKENS = 800
 OUTPUT_BASE_TOKENS = 256
 OUTPUT_TOKENS_PER_TARGET = 128
+
+def _json_list(raw: str | None) -> list[str]:
+    try:
+        value = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    return [str(item) for item in value] if isinstance(value, list) else []
+
 
 def _output_token_reserve(snapshot: dict[str, Any] | None, target_count: int) -> int:
     """按契约规模预留输出，并受配置的 max_tokens 上限约束。"""
@@ -151,6 +162,40 @@ def _load_state(job: Job) -> SceneState:
     return SceneState.from_snapshot(_json_of(job.checkpoint_json).get("scene_state"))
 
 
+def _apply_confirmed_roster(
+    session: Session,
+    job: Job,
+    version: BookVersion,
+    state: SceneState,
+) -> tuple[bool, str | None]:
+    """把用户确认的人物与 POV 注入场景状态；返回是否可继续。"""
+
+    chapter_id = _range_of(job).get("chapter_id")
+    if not chapter_id:
+        return True, None
+    roster, characters = confirmed_roster_context(session, version, str(chapter_id))
+    if roster is None:
+        return False, "请先分析并确认本章人物，再选择本章主人公"
+    if roster.status.value != "CONFIRMED":
+        return False, "请先完成本章人物确认并选择本章主人公"
+    if not characters:
+        return False, "本章已确认人物为空，请重新确认"
+    state.confirmed_characters = [
+        ConfirmedCharacter(
+            character_id=character.id,
+            canonical_name=character.canonical_name or "",
+            aliases=tuple(_json_list(character.aliases_json)),
+            description=character.description or "",
+        )
+        for character in characters
+    ]
+    state.pov_character_id = roster.pov_character_id
+    state.sync_confirmed_participants()
+    if state.pov_character_id not in {item.character_id for item in state.confirmed_characters}:
+        return False, "本章主人公不在已确认人物中，请重新确认"
+    return True, None
+
+
 def policy_for_job(job: Job) -> BudgetPolicy:
     """任务范围的 ``context_policy`` 选择版本化的上下文策略；缺省一律保守的 ``context-1``。"""
 
@@ -167,7 +212,7 @@ def _strong_profile(session: Session, job: Job) -> ModelProfile | None:
 
 
 def _unresolved_targets(session: Session, window) -> list[str]:  # noqa: ANN001
-    """首次结果里「未解决」（UNKNOWN 且未被用户锁定）的目标，按窗口顺序返回。"""
+    """Return unresolved and low-confidence targets in window order."""
 
     quote_ids = list(window.target_quote_ids)
     if not quote_ids:
@@ -175,13 +220,14 @@ def _unresolved_targets(session: Session, window) -> list[str]:  # noqa: ANN001
     rows = session.execute(
         select(Annotation).where(
             Annotation.quote_id.in_(quote_ids),
-            Annotation.status == AnnotationStatus.UNKNOWN,
+            Annotation.status.in_(
+                (AnnotationStatus.UNKNOWN, AnnotationStatus.PROVISIONAL)
+            ),
             Annotation.user_locked.is_(False),
         )
     ).scalars()
     unresolved = {row.quote_id for row in rows}
     return [quote_id for quote_id in quote_ids if quote_id in unresolved]
-
 
 def _plan(
     session: Session,
@@ -291,6 +337,11 @@ def _apply_payload(
     ``repair_warnings`` 记录「程序补齐的模型遗漏」（例如只写 NEW 却没声明 temp_ref）。
     """
 
+    reference_repairs = (
+        [str(item) for item in raw.get("_reference_repairs", [])]
+        if isinstance(raw, dict) and isinstance(raw.get("_reference_repairs"), list)
+        else []
+    )
     payload = (
         {key: value for key, value in raw.items() if not str(key).startswith("_")}
         if isinstance(raw, dict)
@@ -346,7 +397,7 @@ def _apply_payload(
         dependency_hash=window.dependency_hash,
         created_run_id=run_id,
     )
-    return True, [], [], list(report.warnings)
+    return True, [], [], [*reference_repairs, *report.warnings]
 
 
 def _run_recheck(
@@ -655,6 +706,19 @@ def run_job(
         if job.state in STOP_STATES:
             outcome.state = job.state
             return outcome
+        if job.kind is JobKind.CHARACTER_ROSTER:
+            roster_outcome = run_character_roster_job(
+                session_factory,
+                settings,
+                job_id=job_id,
+                credentials=credentials,
+            )
+            return JobRunOutcome(
+                job_id=job_id,
+                state=roster_outcome.state,
+                calls=roster_outcome.calls,
+                errors=list(roster_outcome.errors),
+            )
         if not job.book_version_id:
             job.state = JobState.FAILED
             job.last_error = "任务缺少书籍版本"
@@ -670,6 +734,29 @@ def run_job(
             return outcome
 
         policy = requested_policy or policy_for_job(job)
+        if requested_policy is None:
+            configured_rechecks = int(_budget_of(job).get("max_rechecks", 0) or 0)
+            if configured_rechecks > 0:
+                policy = replace(
+                    policy,
+                    recheck_max_targets=max(
+                        policy.recheck_max_targets,
+                        configured_rechecks,
+                    ),
+                )
+        if job.kind in {JobKind.INFERENCE, JobKind.RECHECK, JobKind.RECOMPUTE}:
+            state = _load_state(job)
+            roster_ok, roster_error = _apply_confirmed_roster(session, job, version, state)
+            if not roster_ok:
+                job.state = JobState.FAILED
+                job.last_error = roster_error
+                job.progress_json = json.dumps(
+                    {"stage": "roster_not_confirmed"}, ensure_ascii=False
+                )
+                session.commit()
+                outcome.state = JobState.FAILED
+                outcome.errors.append("roster_not_confirmed")
+                return outcome
         # 不要覆盖 PAUSING：让窗口之间的暂停检查有机会生效
         if job.state is not JobState.PAUSING:
             job.state = JobState.RUNNING
@@ -684,6 +771,17 @@ def run_job(
             policy=policy,
         )
         state = _load_state(job)
+        roster_ok, roster_error = _apply_confirmed_roster(session, job, version, state)
+        if not roster_ok:
+            job.state = JobState.FAILED
+            job.last_error = roster_error
+            job.progress_json = json.dumps(
+                {"stage": "roster_not_confirmed"}, ensure_ascii=False
+            )
+            session.commit()
+            outcome.state = JobState.FAILED
+            outcome.errors.append("roster_not_confirmed")
+            return outcome
         snapshot = _json_of(job.profile_snapshot_json) or None
         profile = profile_for_job(session, job)
         credential_mode = credential_mode_of(profile)
@@ -801,6 +899,17 @@ def run_job(
             spent = spent_tokens(session, job_id)
             job_snapshot = job
             state = _load_state(job)
+            roster_ok, roster_error = _apply_confirmed_roster(session, job, version, state)
+            if not roster_ok:
+                job.state = JobState.FAILED
+                job.last_error = roster_error
+                job.progress_json = json.dumps(
+                    {"stage": "roster_not_confirmed"}, ensure_ascii=False
+                )
+                session.commit()
+                outcome.state = JobState.FAILED
+                outcome.errors.append("roster_not_confirmed")
+                return outcome
             session.commit()
 
         # 预算预留（含输出预留；未知用量也按此保守口径）
@@ -859,6 +968,7 @@ def run_job(
                 job = session.get(Job, job_id)
                 assert job is not None
                 state = _load_state(job)
+                _apply_confirmed_roster(session, job, version, state)
                 ok, codes, messages, repair_warnings = _apply_payload(
                     session,
                     window=window,
@@ -998,6 +1108,7 @@ def run_job(
                     known_usage = bool(usage) and not usage.get("unknown")
                     run.usage_json = json.dumps(usage, ensure_ascii=False) if known_usage else None
                     state = _load_state(job)
+                    _apply_confirmed_roster(session, job, version, state)
                     ok, codes, messages, repair_warnings = _apply_payload(
                         session,
                         window=window,

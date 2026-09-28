@@ -13,6 +13,7 @@ from .labeling import (
     build_labeling_messages,
     escape_data_markers,
 )
+from .roster import ROSTER_PROMPT_VERSION, build_roster_messages
 
 __all__ = [
     "CONNECTION_PROMPT_VERSION",
@@ -20,5 +21,7 @@ __all__ = [
     "LABELING_PROMPT_VERSION",
     "build_connection_messages",
     "build_labeling_messages",
+    "ROSTER_PROMPT_VERSION",
+    "build_roster_messages",
     "escape_data_markers",
 ]

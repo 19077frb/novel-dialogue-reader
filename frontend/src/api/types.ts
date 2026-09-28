@@ -5,6 +5,12 @@
 import type { components } from './schema'
 
 export type BookOut = components['schemas']['BookOut']
+export type BookCharacterOut = components['schemas']['BookCharacterOut']
+export type RosterCharacterCandidate = components['schemas']['RosterCharacterCandidate']
+export type ChapterRosterOut = components['schemas']['ChapterRosterOut']
+export type RosterAnalyzeIn = components['schemas']['RosterAnalyzeIn']
+export type RosterConfirmCandidateIn = components['schemas']['RosterConfirmCandidateIn']
+export type RosterConfirmIn = components['schemas']['RosterConfirmIn']
 export type BookVersionOut = components['schemas']['BookVersionOut']
 export type ChapterOut = components['schemas']['ChapterOut']
 export type ContentNodeOut = components['schemas']['ContentNodeOut']

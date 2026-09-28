@@ -154,13 +154,15 @@ def _ensure_group(
         if row is not None:
             row.canonical_name = slot.canonical_name or None
             row.description = slot.description or None
+            row.character_id = slot.character_id
         return slot.group_id
     row = SpeakerGroup(
         scene_id=scene_id,
-        first_quote_id=slot.first_quote_id,
+        first_quote_id=slot.first_quote_id or None,
         display_label=slot.display_label,
         canonical_name=slot.canonical_name or None,
         description=slot.description or None,
+        character_id=slot.character_id,
         evidence_refs_json=json.dumps(list(slot.evidence_refs), ensure_ascii=False),
     )
     session.add(row)
@@ -309,6 +311,7 @@ def apply_window(
     """应用一次模型输出：校验 → 锁定检查 → 可见时点 → 接受策略 → 落库。"""
 
     state = state or SceneState()
+    state.sync_confirmed_participants()
     registry = SpeakerRegistry(state)
     quote_positions = dict(quote_positions or {})
     gap_positions = dict(gap_positions or {})
@@ -398,7 +401,6 @@ def apply_window(
             application.warnings.append(f"locked_quote_kept:{label.quote_id}")
             continue
 
-        decision_out = decide_acceptance(label, cold_start=cold_start)
         evidence_ids = list(label.evidence_refs)
         visible_from_cp = compute_visible_from_cp(
             evidence_positions=[evidence_positions.get(ref, 0) for ref in evidence_ids],
@@ -432,8 +434,42 @@ def apply_window(
                     application.created_group_ids.append(speaker_id)
             elif label.assignment is Assignment.EXISTING:
                 slot = registry.resolve(label.speaker_ref)
-                if slot is not None and label.speaker_name:
-                    slot.canonical_name = label.speaker_name.strip()
+                if slot is not None:
+                    authoritative = next(
+                        (
+                            character
+                            for character in state.confirmed_characters
+                            if character.character_id == slot.character_id
+                        ),
+                        None,
+                    )
+                    if authoritative is not None:
+                        # speaker_ref 已指向用户确认人物时，姓名与说明只能来自确认名单。
+                        # 模型即使返回另一个已确认姓名，也只记录冲突，不反向改写。
+                        incoming = state._confirmed_by_name(label.speaker_name)
+                        if label.speaker_name and (
+                            incoming is None
+                            or incoming.character_id != authoritative.character_id
+                        ):
+                            application.warnings.append(
+                                "confirmed_identity_conflict:"
+                                f"{label.speaker_ref}:{label.speaker_name}"
+                                f"->{authoritative.canonical_name}"
+                            )
+                        slot.canonical_name = authoritative.canonical_name
+                        if authoritative.description:
+                            slot.description = authoritative.description
+                    elif label.speaker_name:
+                        incoming = state._confirmed_by_name(label.speaker_name)
+                        if incoming is not None:
+                            slot.character_id = incoming.character_id
+                            slot.canonical_name = incoming.canonical_name
+                            if incoming.description:
+                                slot.description = incoming.description
+                        else:
+                            slot.canonical_name = label.speaker_name.strip()
+                    if not slot.first_quote_id:
+                        slot.first_quote_id = label.quote_id
                     state.remember_character(slot.canonical_name, slot.description)
                     _ensure_group(session, state=state, slot=slot, scene_id=scene_id)
                 speaker_id, warning = _resolve_speaker(
@@ -442,13 +478,32 @@ def apply_window(
                 if warning:
                     application.warnings.append(warning)
 
+        stored_label = label
+        if (
+            label.kind is QuoteKind.SPEECH
+            and label.assignment in {Assignment.EXISTING, Assignment.NEW}
+            and speaker_id is None
+        ):
+            # 防御性不变量：声称已识别人但解析不到场景内分组时，绝不能保存成
+            # ACCEPTED + 空 speaker_id。降级为 UNKNOWN，交给有限复核或人工确认。
+            application.warnings.append(f"speaker_resolution_failed:{label.quote_id}")
+            stored_label = label.model_copy(
+                update={
+                    "assignment": Assignment.UNKNOWN,
+                    "speaker_ref": None,
+                    "speaker_name": None,
+                    "basis": SpeakerBasis.INSUFFICIENT,
+                }
+            )
+        decision_out = decide_acceptance(stored_label, cold_start=cold_start)
+
         annotation, replaced = _record_annotation(
             session,
             quote_id=label.quote_id,
             scene_id=scene_id,
-            kind=label.kind,
-            assignment=label.assignment,
-            basis=label.basis,
+            kind=stored_label.kind,
+            assignment=stored_label.assignment,
+            basis=stored_label.basis,
             speaker_id=speaker_id,
             status=decision_out.status,
             source=source,
@@ -471,8 +526,10 @@ def apply_window(
                 gap_id=None,
                 reason=decision_out.review_reason,
                 candidates={
-                    "basis": label.basis.value if label.basis else None,
-                    "assignment": label.assignment.value if label.assignment else None,
+                    "basis": stored_label.basis.value if stored_label.basis else None,
+                    "assignment": (
+                        stored_label.assignment.value if stored_label.assignment else None
+                    ),
                     "reason": decision_out.reason,
                 },
                 annotation_version=annotation.version,
@@ -482,9 +539,11 @@ def apply_window(
             # 理论上被上面的 locked 检查拦住；这里再兜一次，绝不覆盖用户结果
             application.warnings.append(f"locked_annotation_kept:{label.quote_id}")
 
-        if label.kind is QuoteKind.SPEECH:
+        if stored_label.kind is QuoteKind.SPEECH:
+            resolved_slot = state.find(speaker_id)
+            state.remember_turn(quote_id=stored_label.quote_id, slot=resolved_slot)
             state.last_speaker_ref = speaker_id or state.last_speaker_ref
-        state.last_quote_id = label.quote_id
+        state.last_quote_id = stored_label.quote_id
 
     for gap_decision in parsed.gap_decisions:
         if gap_decision.decision is GapDecision.UNCERTAIN:
@@ -596,6 +655,8 @@ def _apply_identity_proposal(
                 continue
             survivor_key = survivor.group_id or survivor.temp_ref
             victim_key = victim.group_id
+            if survivor.character_id is not None:
+                victim.character_id = survivor.character_id
             if victim_key and survivor_key and victim_key != survivor_key:
                 # 当前投影指向幸存分组；旧值已经写入 annotation_history
                 for annotation in session.execute(

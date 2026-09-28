@@ -42,7 +42,7 @@ export function BudgetForm({ value, onChange }: BudgetFormProps) {
         />
       </label>
       <label>
-        最多复核次数
+        每个窗口最多复核的待定对白数
         <input
           type="number"
           min={0}
