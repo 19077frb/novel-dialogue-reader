@@ -161,11 +161,34 @@ def test_scene_update_requires_break_decision() -> None:
     assert parse_and_validate(payload, TARGETS).ok is True
 
 
-def test_undeclared_new_speaker_is_rejected() -> None:
+def test_undeclared_new_speaker_is_repaired_with_warning() -> None:
+    """真实模型高频遗漏：写了 assignment=NEW 却忘了声明 temp_ref。
+
+    这种遗漏是**可确证**的（标签已明确说这是新人物），程序补齐声明并留下 warning；
+    语义不明的引用（EXISTING + 未知说话人）仍然判错。
+    """
+
     payload = _valid_output()
     payload["new_speakers"] = []
     report = parse_and_validate(payload, TARGETS)
-    assert "undeclared_new_speaker" in report.error_codes
+
+    assert report.ok is True
+    assert report.error_codes == []
+    assert any(w.startswith("repaired_undeclared_speaker:") for w in report.warnings)
+    assert report.output is not None
+    repaired = report.output.new_speakers
+    assert [item.temp_ref for item in repaired] == ["new1"]
+    new_label = next(item for item in payload["labels"] if item["assignment"] == "NEW")
+    assert repaired[0].first_quote_id == new_label["quote_id"]
+    assert repaired[0].description  # 说明这是程序补齐的声明，可追溯
+
+
+def test_unknown_existing_speaker_is_still_rejected() -> None:
+    payload = _valid_output()
+    payload["labels"][0]["assignment"] = "EXISTING"
+    payload["labels"][0]["speaker_ref"] = "speaker:某人"  # 自造引用：语义不明，必须拒绝
+    report = parse_and_validate(payload, TARGETS)
+    assert "unknown_speaker" in report.error_codes
 
 
 def test_retry_policy_is_bounded_and_skips_provider_errors() -> None:

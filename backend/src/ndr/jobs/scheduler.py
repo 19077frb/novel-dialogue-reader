@@ -262,8 +262,12 @@ def _apply_payload(
     raw: Any,
     run_id: str | None,
     cache_key: str,
-) -> tuple[bool, list[str], list[str]]:
-    """校验并应用一次输出；成功时写缓存。返回 ``(ok, validation_codes, validation_messages)``。"""
+) -> tuple[bool, list[str], list[str], list[str]]:
+    """校验并应用一次输出；成功时写缓存。
+
+    返回 ``(ok, validation_codes, validation_messages, repair_warnings)``；
+    ``repair_warnings`` 记录「程序补齐的模型遗漏」（例如只写 NEW 却没声明 temp_ref）。
+    """
 
     payload = (
         {key: value for key, value in raw.items() if not str(key).startswith("_")}
@@ -272,7 +276,7 @@ def _apply_payload(
     )
     report = parse_and_validate(payload, _targets_for(window, state))
     if not report.ok or report.output is None:
-        return False, report.error_codes, report.messages
+        return False, report.error_codes, report.messages, list(report.warnings)
     quote_positions, gap_positions, evidence_positions = _positions(inputs, window)
     # F14：人工确认过的对白（user_locked）不能被模型结果覆盖，也不能被自动 merge/split。
     locked_quote_ids = {
@@ -320,7 +324,7 @@ def _apply_payload(
         dependency_hash=window.dependency_hash,
         created_run_id=run_id,
     )
-    return True, [], []
+    return True, [], [], list(report.warnings)
 
 
 def _run_recheck(
@@ -425,7 +429,7 @@ def _run_recheck(
             job = session.get(Job, job_id)
             assert job is not None
             state = _load_state(job)
-            ok, _codes, _messages = _apply_payload(
+            ok, _codes, _messages, _repair_warnings = _apply_payload(
                 session,
                 window=recheck_window,
                 inputs=inputs,
@@ -811,7 +815,7 @@ def run_job(
                 job = session.get(Job, job_id)
                 assert job is not None
                 state = _load_state(job)
-                ok, codes, messages = _apply_payload(
+                ok, codes, messages, repair_warnings = _apply_payload(
                     session,
                     window=window,
                     inputs=inputs,
@@ -947,7 +951,7 @@ def run_job(
                     calls += 1
                     usage = raw.get("_usage") if isinstance(raw, dict) else None
                     state = _load_state(job)
-                    ok, codes, messages = _apply_payload(
+                    ok, codes, messages, repair_warnings = _apply_payload(
                         session,
                         window=window,
                         inputs=inputs,
@@ -962,7 +966,13 @@ def run_job(
                         if attempt == 0:
                             # 记下失败尝试，带着具体问题重发一次（不把窗口标记为终态失败）
                             session.commit()
-                            retry_correction = "；".join(messages)[:800] or "；".join(codes)
+                            hint = "；".join(messages)[:800] or "；".join(codes)
+                            if "undeclared_new_speaker" in codes:
+                                hint += (
+                                    "；请在同一次输出的 new_speakers 中声明这些 temp_ref"
+                                    "（first_quote_id 用该对白自己的 id），不要只写 NEW"
+                                )
+                            retry_correction = hint
                         else:
                             if row is not None:
                                 row.state = JobState.FAILED
@@ -1004,6 +1014,7 @@ def run_job(
                                 "unknown_runs": outcome.unknown_runs,
                                 "strong_windows": outcome.strong_windows,
                                 "route": route.as_dict(),
+                                "repairs": list(repair_warnings[:5]),
                             },
                             ensure_ascii=False,
                         )

@@ -19,7 +19,7 @@ from pydantic import ValidationError
 
 from ..domain.enums import Assignment, GapDecision, QuoteKind
 from .errors import InvalidModelOutput, ProviderError, ProviderErrorKind
-from .schemas import LlmOutput, QuoteLabel
+from .schemas import LlmOutput, NewSpeaker, QuoteLabel
 
 MAX_LABEL_ATTEMPTS = 2
 
@@ -48,6 +48,7 @@ class ValidationReport:
     output: LlmOutput | None
     issues: tuple[ValidationIssue, ...] = ()
     accepted_labels: tuple[QuoteLabel, ...] = ()
+    warnings: tuple[str, ...] = ()
     _codes: tuple[str, ...] = field(default=(), repr=False)
 
     @property
@@ -133,6 +134,52 @@ def parse_output(payload: str | Mapping[str, Any]) -> LlmOutput:
         raise InvalidModelOutput(
             "模型输出不符合 schema。", details={"issues": issues}
         ) from exc
+
+
+REPAIR_DESCRIPTION = "（程序补齐声明：模型只写了 assignment=NEW，未声明 new_speakers）"
+
+
+def repair_undeclared_speakers(
+    output: LlmOutput, targets: LabelingTargets
+) -> tuple[LlmOutput, list[str]]:
+    """补齐「用了 NEW 但忘记声明 temp_ref」的输出（真实模型的高频遗漏）。
+
+    只做**可确证的补齐**：标签已经明确写了 `assignment=NEW` 与 `speaker_ref`，缺的只是同一次输出里的
+    `new_speakers` 声明；声明的 `first_quote_id` 取该标签自身，`description` 明确标注是程序补齐。
+    `assignment=EXISTING` 引用未知说话人属于**语义不明**（已有分组还是笔误），
+    不在这里修，交给纠错重发。
+    """
+
+    declared = {speaker.temp_ref for speaker in output.new_speakers}
+    existing = set(targets.speaker_refs)
+    missing: dict[str, str] = {}  # temp_ref -> scene_ref
+    for label in output.labels:
+        if label.kind is not QuoteKind.SPEECH or label.assignment is not Assignment.NEW:
+            continue
+        ref = label.speaker_ref
+        if not ref or ref in declared or ref in existing or ref in missing:
+            continue
+        missing[ref] = label.scene_ref
+    if not missing:
+        return output, []
+
+    first_quote_of: dict[str, str] = {}
+    for label in output.labels:
+        if label.assignment is Assignment.NEW and label.speaker_ref in missing:
+            first_quote_of.setdefault(str(label.speaker_ref), label.quote_id)
+
+    additions = [
+        NewSpeaker(
+            temp_ref=ref,
+            scene_ref=scene_ref,
+            first_quote_id=first_quote_of.get(ref, ""),
+            description=REPAIR_DESCRIPTION,
+        )
+        for ref, scene_ref in missing.items()
+    ]
+    repaired = output.model_copy(update={"new_speakers": [*output.new_speakers, *additions]})
+    warnings = [f"repaired_undeclared_speaker:{ref}" for ref in missing]
+    return repaired, warnings
 
 
 def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationReport:
@@ -349,4 +396,15 @@ def parse_and_validate(
         return ValidationReport(
             ok=False, output=None, issues=(issue,), accepted_labels=(), _codes=("invalid_output",)
         )
-    return validate_output(output, targets)
+    output, warnings = repair_undeclared_speakers(output, targets)
+    report = validate_output(output, targets)
+    if not warnings:
+        return report
+    return ValidationReport(
+        ok=report.ok,
+        output=report.output,
+        issues=report.issues,
+        accepted_labels=report.accepted_labels,
+        warnings=tuple(warnings),
+        _codes=report._codes,
+    )
