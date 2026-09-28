@@ -3,7 +3,7 @@
   "label": "B1 固定窗口 + 完整上下文（LLM 批量标签）",
   "strategy": "llm",
   "scene_state": false,
-  "prompt_version": "labeling-1",
+  "prompt_version": "labeling-2",
   "context_policy": "context-1",
   "reading_mode": "reread",
   "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 0},

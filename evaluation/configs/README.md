@@ -16,7 +16,7 @@
   "label": "……",
   "strategy": "llm",              // rule_baseline | llm
   "scene_state": true,            // 是否使用持续场景状态
-  "prompt_version": "labeling-1",
+  "prompt_version": "labeling-2",
   "context_policy": "context-1",     // T17：context-1 保守 / context-2 长 Gap 保守筛选
   "reading_mode": "reread",
   "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 0},   // T17：max_rechecks → recheck_max_targets

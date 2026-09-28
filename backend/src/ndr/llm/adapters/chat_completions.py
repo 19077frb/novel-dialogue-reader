@@ -97,7 +97,16 @@ class ChatCompletionsAdapter:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self._api_key = api_key
-        self._params = dict(params or {})
+        params = dict(params or {})
+        # 本地参数：per-profile 超时（推理模型/大窗口可能远超默认 30 秒）。不进入请求体。
+        local_timeout = params.pop("timeout_seconds", None)
+        if (
+            isinstance(local_timeout, (int, float))
+            and not isinstance(local_timeout, bool)
+            and float(local_timeout) > 0
+        ):
+            timeout_seconds = float(local_timeout)
+        self._params = params
         self._timeout = timeout_seconds
         self._client = client
         self.prompt_version = CONNECTION_PROMPT_VERSION

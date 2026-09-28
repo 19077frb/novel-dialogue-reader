@@ -126,15 +126,13 @@ def test_failed_model_output_error_keeps_raw_snippet(
     profile_id = _fake_profile(fake_provider_client)
     job = _create_job(fake_provider_client, data["book_id"], profile_id, key="k-snippet")
 
-    adapter = FakeProviderAdapter(
-        script=[
-            ProviderError(
-                ProviderErrorKind.INVALID_OUTPUT,
-                "模型返回空内容",
-                details={"body": '{"choices": [{"finish_reason": "length", "message": {"content": ""}}]}'},
-            )
-        ]
+    failure = ProviderError(
+        ProviderErrorKind.INVALID_OUTPUT,
+        "模型返回空内容",
+        details={"body": '{"choices": [{"finish_reason": "length", "message": {"content": ""}}]}'},
     )
+    # 连续两次坏输出（首次 + 纠错重发各一次）才允许失败：证明重发是有上限的
+    adapter = FakeProviderAdapter(script=[failure, failure])
     outcome = _run_with_fake(migrated_settings, job["id"], adapter)
     assert outcome.state is JobState.FAILED
 
@@ -145,6 +143,59 @@ def test_failed_model_output_error_keeps_raw_snippet(
             assert stored is not None and stored.last_error is not None
             assert "原始输出片段" in stored.last_error
             assert "finish_reason" in stored.last_error
+    finally:
+        engine.dispose()
+
+
+def test_invalid_output_triggers_one_repair_retry(
+    fake_provider_client: TestClient, migrated_settings: Settings
+) -> None:
+    """契约错误（DEVELOPMENT 4.5）最多纠错重发一次：一次坏输出后第二次成功，窗口仍完成。"""
+
+    data = _import(fake_provider_client)
+    profile_id = _fake_profile(fake_provider_client)
+    job = _create_job(fake_provider_client, data["book_id"], profile_id, key="k-retry")
+
+    bad_output = {
+        "schema_version": "1.0",
+        "scene_updates": [],
+        "gap_decisions": [],
+        # 未声明就使用 NEW（真实模型常见错误）→ 触发一次纠错重发
+        "new_speakers": [],
+        "labels": [
+            {
+                "quote_id": "q-not-sent",
+                "scene_ref": "scene_current",
+                "kind": "speech",
+                "assignment": "NEW",
+                "speaker_ref": "new1",
+                "basis": "DIRECT",
+                "evidence_refs": [],
+            }
+        ],
+    }
+    adapter = FakeProviderAdapter(script=[bad_output], labeling_mode="deterministic")
+
+    outcome = _run_with_fake(migrated_settings, job["id"], adapter)
+
+    assert outcome.state is JobState.COMPLETED
+    assert outcome.calls == 2  # 首次 + 一次纠错重发
+    assert len(adapter.calls) == 2
+
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            runs = list(
+                session.execute(
+                    select(InferenceRun)
+                    .where(InferenceRun.job_id == job["id"])
+                    .order_by(InferenceRun.created_at)
+                ).scalars()
+            )
+            assert [run.state for run in runs] == [
+                InferenceRunState.FAILED,
+                InferenceRunState.SUCCEEDED,
+            ]
     finally:
         engine.dispose()
 

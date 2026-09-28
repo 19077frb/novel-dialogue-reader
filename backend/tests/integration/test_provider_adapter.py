@@ -137,6 +137,34 @@ def test_connection_accepts_fenced_json_and_leaves_token_room() -> None:
     assert json.loads(seen["body"])["max_tokens"] >= 128
 
 
+def test_profile_timeout_override_is_local_and_effective() -> None:
+    """`params.timeout_seconds` 是本地覆盖：既生效，又不会被发进请求体。"""
+
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.content.decode("utf-8")
+        return httpx.Response(200, json=VALID_BODY)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = ChatCompletionsAdapter(
+        base_url="https://api.example.com/v1",
+        model="example-model",
+        api_key="sk-test-key",
+        params={"timeout_seconds": 5, "temperature": 0.2},
+        client=client,
+        timeout_seconds=30.0,
+    )
+
+    result = _run(adapter.test_connection())
+
+    assert result.ok is True
+    assert adapter._timeout == 5.0  # noqa: SLF001 - 断言本地覆盖确实生效
+    body = json.loads(seen["body"])
+    assert "timeout_seconds" not in body  # 本地参数不发给提供方
+    assert body["temperature"] == 0.2
+
+
 def test_truncated_model_output_is_reported_with_snippet() -> None:
     """max_tokens 截断会得到不完整 JSON：失败详情必须带原始片段与解析原因，便于定位真实提供方。"""
 

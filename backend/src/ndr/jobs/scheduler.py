@@ -262,8 +262,8 @@ def _apply_payload(
     raw: Any,
     run_id: str | None,
     cache_key: str,
-) -> tuple[bool, list[str]]:
-    """校验并应用一次输出；成功时写缓存。返回 ``(ok, validation_codes)``。"""
+) -> tuple[bool, list[str], list[str]]:
+    """校验并应用一次输出；成功时写缓存。返回 ``(ok, validation_codes, validation_messages)``。"""
 
     payload = (
         {key: value for key, value in raw.items() if not str(key).startswith("_")}
@@ -272,7 +272,7 @@ def _apply_payload(
     )
     report = parse_and_validate(payload, _targets_for(window, state))
     if not report.ok or report.output is None:
-        return False, report.error_codes
+        return False, report.error_codes, report.messages
     quote_positions, gap_positions, evidence_positions = _positions(inputs, window)
     # F14：人工确认过的对白（user_locked）不能被模型结果覆盖，也不能被自动 merge/split。
     locked_quote_ids = {
@@ -320,7 +320,7 @@ def _apply_payload(
         dependency_hash=window.dependency_hash,
         created_run_id=run_id,
     )
-    return True, []
+    return True, [], []
 
 
 def _run_recheck(
@@ -425,7 +425,7 @@ def _run_recheck(
             job = session.get(Job, job_id)
             assert job is not None
             state = _load_state(job)
-            ok, _codes = _apply_payload(
+            ok, _codes, _messages = _apply_payload(
                 session,
                 window=recheck_window,
                 inputs=inputs,
@@ -517,6 +517,7 @@ def _dispatch_with_bounded_retry(
     state: SceneState,
     snapshot: dict[str, Any] | None,
     settings: Settings,
+    correction: str | None = None,
 ) -> tuple[Any, ProviderError | None, str, int]:
     """调用适配器；限流/暂时不可用按**有上限**的退避重试。
 
@@ -551,7 +552,7 @@ def _dispatch_with_bounded_retry(
         raw = None
         error = None
         try:
-            raw = _dispatch(adapter, window=window, state=state)
+            raw = _dispatch(adapter, window=window, state=state, correction=correction)
         except ProviderError as exc:
             error = exc
         elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -810,7 +811,7 @@ def run_job(
                 job = session.get(Job, job_id)
                 assert job is not None
                 state = _load_state(job)
-                ok, codes = _apply_payload(
+                ok, codes, messages = _apply_payload(
                     session,
                     window=window,
                     inputs=inputs,
@@ -843,7 +844,11 @@ def run_job(
                         {"stage": "running", "windows_done": done, "cached_windows": cached},
                         ensure_ascii=False,
                     )
-                job.last_error = None if ok else f"缓存结果未通过校验：{codes}"
+                if ok:
+                    job.last_error = None
+                else:
+                    problems = "；".join(messages[:3])
+                    job.last_error = f"缓存结果未通过校验：{codes}；问题：{problems}"
                 session.commit()
             if ok:
                 # T17：首次结果落地后按策略做有限局部复核（默认关闭）
@@ -868,114 +873,151 @@ def run_job(
             strong_used += 1
             outcome.strong_windows += 1
 
-        raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
-            session_factory,
-            window_adapter,
-            job_id=job_id,
-            window=window,
-            state=state,
-            snapshot=window_snapshot,
-            settings=settings,
-        )
-
-        with session_factory() as session:
-            job = session.get(Job, job_id)
-            assert job is not None
-            run = session.get(InferenceRun, run_id)
-            assert run is not None
-            run.elapsed_ms = elapsed_ms
-            row = session.execute(
-                select(JobWindow).where(
-                    JobWindow.job_id == job_id, JobWindow.window_id == window.window_id
-                )
-            ).scalar_one_or_none()
-
-            if error is not None:
-                outcome.errors.append(f"{window.window_id}:{error.code.value}")
-                if error.kind is ProviderErrorKind.TIMEOUT:
-                    # 超时可能已经计费且结果未知：不自动重发，交人工对账（F15/F20）
-                    run.state = InferenceRunState.UNKNOWN_OUTCOME
-                    run.error_code = error.code.value
-                    if row is not None:
-                        row.state = JobState.NEEDS_RECONCILIATION
-                    job.state = JobState.NEEDS_RECONCILIATION
-                    job.last_error = f"{error.code.value}: {error.message}"
-                    session.commit()
-                    outcome.state = JobState.NEEDS_RECONCILIATION
-                    outcome.unknown_runs += 1
-                    return outcome
-                run.state = InferenceRunState.FAILED
-                run.error_code = error.code.value
-                if row is not None:
-                    row.state = JobState.FAILED
-                job.state = JobState.PARTIAL if done else JobState.FAILED
-                # 真实提供方返回坏结构时，把脱敏后的原始片段带进错误信息，避免只剩一个错误码无从定位
-                snippet = ""
-                if isinstance(getattr(error, "details", None), dict):
-                    raw = error.details.get("body") or error.details.get("snippet")
-                    if isinstance(raw, str) and raw.strip():
-                        snippet = f"；原始输出片段：{raw[:160]}"
-                job.last_error = f"{error.code.value}: {error.message}{snippet}"
-                session.commit()
-                outcome.state = job.state
-                break
-
-            calls += 1
-            usage = raw.get("_usage") if isinstance(raw, dict) else None
-            state = _load_state(job)
-            ok, codes = _apply_payload(
-                session,
+        # 每个窗口最多两次调用：首次 + 一次「纠错重发」
+        # （DEVELOPMENT 4.5：格式/契约错误最多重试一次）。
+        # 每次调用都单独写 inference_runs 并各自结算用量，不是只记最后一次。
+        correction: str | None = None
+        retry_correction: str | None = None
+        window_failed = False
+        for attempt in range(2):
+            raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
+                session_factory,
+                window_adapter,
+                job_id=job_id,
                 window=window,
-                inputs=inputs,
                 state=state,
-                raw=raw,
-                run_id=run_id,
-                cache_key=cache_key,
+                snapshot=window_snapshot,
+                settings=settings,
+                correction=correction,
             )
-            if not ok:
-                run.state = InferenceRunState.FAILED
-                run.error_code = "INVALID_MODEL_OUTPUT"
-                if row is not None:
-                    row.state = JobState.FAILED
-                job.state = JobState.PARTIAL if done else JobState.FAILED
-                job.last_error = f"模型输出未通过校验：{codes}"
-                session.commit()
-                outcome.state = job.state
-                break
 
-            run.state = InferenceRunState.SUCCEEDED
-            known_usage = bool(usage) and not usage.get("unknown")
-            run.usage_json = json.dumps(usage, ensure_ascii=False) if known_usage else None
-            if not known_usage:
-                outcome.unknown_runs += 1
-            if row is not None:
-                row.state = JobState.COMPLETED
-            done += 1
-            job.checkpoint_json = json.dumps(
-                {
-                    "scheduler_version": SCHEDULER_VERSION,
-                    "scene_state": state.snapshot(),
-                    "last_window_id": window.window_id,
-                    "windows_done": done,
-                    "calls": calls,
-                    "unknown_runs": outcome.unknown_runs,
-                },
-                ensure_ascii=False,
-            )
-            job.progress_json = json.dumps(
-                {
-                    "stage": "running",
-                    "windows_done": done,
-                    "calls": calls,
-                    "cached_windows": cached,
-                    "unknown_runs": outcome.unknown_runs,
-                    "strong_windows": outcome.strong_windows,
-                    "route": route.as_dict(),
-                },
-                ensure_ascii=False,
-            )
-            job.last_error = None
-            session.commit()
+            retry_correction = None
+            with session_factory() as session:
+                job = session.get(Job, job_id)
+                assert job is not None
+                run = session.get(InferenceRun, run_id)
+                assert run is not None
+                run.elapsed_ms = elapsed_ms
+                row = session.execute(
+                    select(JobWindow).where(
+                        JobWindow.job_id == job_id, JobWindow.window_id == window.window_id
+                    )
+                ).scalar_one_or_none()
+
+                if error is not None:
+                    if error.kind is ProviderErrorKind.TIMEOUT:
+                        # 超时可能已经计费且结果未知：不自动重发，交人工对账（F15/F20）
+                        outcome.errors.append(f"{window.window_id}:{error.code.value}")
+                        run.state = InferenceRunState.UNKNOWN_OUTCOME
+                        run.error_code = error.code.value
+                        if row is not None:
+                            row.state = JobState.NEEDS_RECONCILIATION
+                        job.state = JobState.NEEDS_RECONCILIATION
+                        job.last_error = f"{error.code.value}: {error.message}"
+                        session.commit()
+                        outcome.state = JobState.NEEDS_RECONCILIATION
+                        outcome.unknown_runs += 1
+                        return outcome
+
+                    # 格式/契约类错误（坏 JSON、空内容、字段不合法）允许一次纠错重发
+                    if error.kind is ProviderErrorKind.INVALID_OUTPUT and attempt == 0:
+                        run.state = InferenceRunState.FAILED
+                        run.error_code = error.code.value
+                        session.commit()
+                        retry_correction = error.message
+                    else:
+                        outcome.errors.append(f"{window.window_id}:{error.code.value}")
+                        run.state = InferenceRunState.FAILED
+                        run.error_code = error.code.value
+                        if row is not None:
+                            row.state = JobState.FAILED
+                        job.state = JobState.PARTIAL if done else JobState.FAILED
+                        # 真实提供方返回坏结构时带上脱敏片段，避免只剩一个错误码无从定位
+                        snippet = ""
+                        if isinstance(getattr(error, "details", None), dict):
+                            raw_body = error.details.get("body") or error.details.get("snippet")
+                            if isinstance(raw_body, str) and raw_body.strip():
+                                snippet = f"；原始输出片段：{raw_body[:160]}"
+                        job.last_error = f"{error.code.value}: {error.message}{snippet}"
+                        session.commit()
+                        outcome.state = job.state
+                        window_failed = True
+                        break
+                else:
+                    calls += 1
+                    usage = raw.get("_usage") if isinstance(raw, dict) else None
+                    state = _load_state(job)
+                    ok, codes, messages = _apply_payload(
+                        session,
+                        window=window,
+                        inputs=inputs,
+                        state=state,
+                        raw=raw,
+                        run_id=run_id,
+                        cache_key=cache_key,
+                    )
+                    if not ok:
+                        run.state = InferenceRunState.FAILED
+                        run.error_code = "INVALID_MODEL_OUTPUT"
+                        if attempt == 0:
+                            # 记下失败尝试，带着具体问题重发一次（不把窗口标记为终态失败）
+                            session.commit()
+                            retry_correction = "；".join(messages)[:800] or "；".join(codes)
+                        else:
+                            if row is not None:
+                                row.state = JobState.FAILED
+                            job.state = JobState.PARTIAL if done else JobState.FAILED
+                            problems = "；".join(messages[:3])
+                            job.last_error = f"模型输出未通过校验：{codes}；问题：{problems}"
+                            session.commit()
+                            outcome.state = job.state
+                            window_failed = True
+                            break
+                    else:
+                        run.state = InferenceRunState.SUCCEEDED
+                        known_usage = bool(usage) and not usage.get("unknown")
+                        run.usage_json = (
+                            json.dumps(usage, ensure_ascii=False) if known_usage else None
+                        )
+                        if not known_usage:
+                            outcome.unknown_runs += 1
+                        if row is not None:
+                            row.state = JobState.COMPLETED
+                        done += 1
+                        job.checkpoint_json = json.dumps(
+                            {
+                                "scheduler_version": SCHEDULER_VERSION,
+                                "scene_state": state.snapshot(),
+                                "last_window_id": window.window_id,
+                                "windows_done": done,
+                                "calls": calls,
+                                "unknown_runs": outcome.unknown_runs,
+                            },
+                            ensure_ascii=False,
+                        )
+                        job.progress_json = json.dumps(
+                            {
+                                "stage": "running",
+                                "windows_done": done,
+                                "calls": calls,
+                                "cached_windows": cached,
+                                "unknown_runs": outcome.unknown_runs,
+                                "strong_windows": outcome.strong_windows,
+                                "route": route.as_dict(),
+                            },
+                            ensure_ascii=False,
+                        )
+                        job.last_error = None
+                        session.commit()
+                        break
+
+            if retry_correction is not None:
+                # 带着具体问题重发一次：校验问题（如未声明的临时人物）或提供方错误原文都作为纠错提示
+                correction = retry_correction
+                continue
+
+        if window_failed:
+            break
 
         # T17：有限局部复核（默认关闭；只有策略显式开启才会多花一次调用）
         if not _maybe_recheck(window, window_adapter, window_snapshot):
@@ -1015,9 +1057,18 @@ def run_job(
     return outcome
 
 
-def _dispatch(adapter: ProviderAdapter, *, window, state: SceneState) -> Any:  # noqa: ANN001
+def _dispatch(
+    adapter: ProviderAdapter,
+    *,
+    window,  # noqa: ANN001
+    state: SceneState,
+    correction: str | None = None,
+) -> Any:
+    # ``correction`` 用于「格式/契约错误后的有限纠错重发」（DEVELOPMENT 4.5：最多重试一次）
     payload = {
-        "messages": _messages_for(window=window, state=state, locked_summary=None),
+        "messages": _messages_for(
+            window=window, state=state, locked_summary=None, correction=correction
+        ),
         "max_tokens": LABELING_MAX_TOKENS,
         "json_object": True,
         "target_quote_ids": list(window.target_quote_ids),

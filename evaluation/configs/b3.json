@@ -3,7 +3,7 @@
   "label": "B3 长 Gap 保守筛选（context-2，无复核）",
   "strategy": "llm",
   "scene_state": true,
-  "prompt_version": "labeling-1",
+  "prompt_version": "labeling-2",
   "context_policy": "context-2",
   "reading_mode": "reread",
   "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 0},

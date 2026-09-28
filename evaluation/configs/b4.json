@@ -3,7 +3,7 @@
   "label": "B4 B3 + 有限局部复核（recheck_max_targets=3）",
   "strategy": "llm",
   "scene_state": true,
-  "prompt_version": "labeling-1",
+  "prompt_version": "labeling-2",
   "context_policy": "context-2",
   "reading_mode": "reread",
   "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 3},
