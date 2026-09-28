@@ -1,7 +1,7 @@
 # 标注指南（金标准）
 
 适用范围：为“轻小说对话辅助阅读器”制作人工金标准，用于评价对白提取、场景边界与场景内匿名分组。
-本文件不描述产品功能是否已实现；实现状态见 [docs/IMPLEMENTATION_STATUS.md](../docs/IMPLEMENTATION_STATUS.md)。
+本文件只描述标注规范，不描述产品功能是否已实现；实现与维护约定见 [DEVELOPMENT.md](../DEVELOPMENT.md)。
 
 ## 1. 基本约定
 

@@ -1,559 +1,199 @@
-# 轻小说对话辅助阅读器（Novel Dialogue Reader）
+# 轻小说对话辅助阅读器
 
-为中文轻小说译本的对白添加颜色/编号，帮助读者辨认说话人；原文不可变，识别结果单独保存，
-不确定的对白交给用户确认。产品目标见 [PLAN.md](PLAN.md)，实现规格见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+一个本地运行的轻小说阅读与对白标注工具。它使用大语言模型判断对白说话人，以不同颜色和人物标签呈现结果，并允许用户确认或修正不确定内容。
 
-> **当前状态（2026-09-28）**：**T00–T19 全部完成**（骨架 → TXT/EPUB 导入 → 阅读器 → 候选/Gap →
-> 模型配置与适配器 → 上下文预算 → 场景与匿名分组 → 任务/缓存/用量 → 标注投影与预览 → 人工更正与撤销 →
-> 确认队列 → 暂停/预算/故障恢复 → 初读身份与码点定位 → 导出后端与导出界面 → 评测工具 →
-> 上下文压缩/局部复核/成本路由 → 完整联调与发布检查 → 启动交付）。
->
-> 结论口径：**工程交付完成，真实验证（live / quality）待完成**——本机没有真实提供方凭据、网络受限，
-> 也没有人工确认的真实作品样本，因此**没有任何准确率数字**：B1–B4 全部 `NOT_RUN`，
-> `quality_evidence=false`、`targets_met=null`；功能与稳定性有可复现证据。
-> 进度见 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)，发布前四类结果见
-> [docs/verification-report.md](docs/verification-report.md)，交接见 [docs/HANDOFF.md](docs/HANDOFF.md)。
+## 主要功能
 
-## 运行前提
+- 导入 TXT 和 EPUB，保留章节、段落、注音与本地插图。
+- 按章节建立人物表，并由用户确认本章主视角人物。
+- 识别对白说话人，处理叙述、心理描写和长对话场景。
+- 在同一章节内合并同一人物的颜色；能够确认身份时显示人物姓名。
+- 支持预览、按章处理、暂停恢复、有限复核和 token 预算。
+- 提供待确认队列和人工更正，用户确认的结果优先于模型输出。
+- 导出带颜色或人物标签的 EPUB 和离线 HTML。
+- 原文、数据库和导出文件默认只保存在本机。
 
-- Python 3.11+（本机验证于 CPython 3.11.4；见 [决策 0001](docs/decisions/0001-runtime-baseline-and-python-version.md)）
-- [uv](https://docs.astral.sh/uv/) 0.9.0（后端依赖与 `uv.lock`）
-- Node.js 22.14.0 / npm 10.9.2
-- 本地服务只监听回环地址：后端 `127.0.0.1:8765`，开发前端 `127.0.0.1:5173`
+## 技术栈
+
+- 后端：Python 3.11、FastAPI、SQLAlchemy、Alembic、SQLite
+- 前端：React、TypeScript、Vite
+- 模型接口：兼容 OpenAI Chat Completions 的 API，例如 DeepSeek
+
+## 环境要求
+
+- Windows 10/11
+- Python 3.11 或更高版本
+- [uv](https://docs.astral.sh/uv/)
+- Node.js 22 和 npm 10
 
 ## 安装
 
+克隆仓库后，在项目根目录运行：
+
 ```powershell
 uv sync --project backend --all-groups
-Push-Location frontend; npm ci; Pop-Location
-uv run --project backend alembic -c backend/alembic.ini upgrade head   # 初始化数据库
+Push-Location frontend
+npm ci
+Pop-Location
 ```
 
-首次安装（尚无 `package-lock.json`）时用 `npm install` 代替 `npm ci`；两者都必须在 `frontend`
-目录内执行，原因见“已知命令偏差”。
-
-## 依赖检查（T19）
-
-`scripts/dev.ps1` 与 `scripts/serve.ps1` 启动前会检查依赖，缺什么就给出可执行提示：
-
-| 依赖 | 要求 | 检查方式 |
-| --- | --- | --- |
-| Python | 3.11+（本机 3.11.4） | `uv run --project backend python -c "import sys"` 或 `backend\.venv` 存在 |
-| uv | 0.9.0（`backend/uv.lock`） | `Get-Command uv`；缺失/不可用时回退 `backend\.venv\Scripts\python.exe` |
-| Node.js / npm | 22.14.0 / 10.9.2 | `Get-Command node`、`Get-Command npm` |
-| 前端依赖 | `frontend/node_modules` | 缺失时脚本自动 `npm install`（有 lockfile 时可用 `npm ci`） |
-| EPUBCheck（可选） | `tools/epubcheck/epubcheck.jar` | 缺失时导出仍可用，标准检查状态如实为 `NOT_RUN` |
-
-## 初始化与迁移（T19）
-
-```powershell
-# 1) 依赖
-uv sync --project backend --all-groups
-Push-Location frontend; npm ci; Pop-Location      # 首次无 lockfile 时用 npm install
-
-# 2) 数据库（默认 data\ndr.sqlite3；也可先设置 NDR_DATA_DIR 指向别处）
-uv run --project backend alembic -c backend/alembic.ini upgrade head
-uv run --project backend alembic -c backend/alembic.ini current      # 应为 0005
-
-# 3) 启动（开发：后端 8765 + 前端 5173）
-pwsh -File scripts/dev.ps1
-```
-
-`GET /api/health` 返回 `database.state`（`READY` = 已迁移到 head）与 `revision`/`head_revision`，可用来确认初始化成功。
-
-## 生产（同源单端口）启动（T19）
-
-```powershell
-pwsh -File scripts/serve.ps1                 # 迁移 → 构建前端 → 单端口 127.0.0.1:8765 同时提供 API 与页面
-pwsh -File scripts/serve.ps1 -SkipBuild      # 复用已有 frontend/dist
-pwsh -File scripts/serve.ps1 -Port 8800 -DataDir D:\ndr-data
-pwsh -File scripts/serve.ps1 -Stop
-```
-
-- 后端设置 `NDR_STATIC_DIR=frontend/dist` 后把前端构建产物挂在 `/`；深链接（如 `/books/<id>/read`）
-  回退到 `index.html` 交给前端路由，`/api/**` 始终是 JSON 契约（未知路径仍是契约 404）。
-- 单端口部署不需要 CORS，也不会额外暴露端口。
-- 仅离线演示/验收时可加 `-AllowFakeProvider`（不联网的假提供方）：**它不代表真实模型能力**，报告与界面都会如实标注。
-
-## 示例配置（不含密钥）（T19）
-
-```powershell
-Copy-Item .env.example .env      # 可选；不复制也能跑（全部有默认值）
-```
-
-- [`.env.example`](.env.example) 列出全部 `NDR_*` 开关（数据目录、端口、CORS、凭据后端、模型超时与限流退避、
-  导入/EPUB 限制等），**不含任何密钥**，`.env` 已被 `.gitignore` 忽略。
-- 模型密钥只从界面「模型配置」填写，由后端写入系统凭据库或会话内存；数据库、日志、导出件里都没有密钥明文
-  （`test_model_profiles.py` 有断言）。
-
-## 双击启动（Windows，最省事）
-
-在仓库根目录（`F:\Code\novel-dialogue-reader`）里双击：
-
-| 文件 | 作用 |
-| --- | --- |
-| `start.bat` | 迁移 → （必要时）构建前端 → 单端口启动，并自动打开浏览器 `http://127.0.0.1:8765` |
-| `stop.bat` | 停止 `start.bat` 启动的后端（`start.bat` 的窗口会自己关掉） |
-
-- 窗口保持打开期间就是服务运行期间；也可以在那个窗口按 `Ctrl+C` 停止。
-- 端口被占用时换端口：`start.bat 8800`（也可以在命令行里这样运行）。
-- 已经启动过时再次双击 `start.bat` 不会再起一份服务，只会打开浏览器页面。
-- 双击启动用的是**同源单端口**模式（页面与 API 都在 8765）；要改代码请用下面的开发模式。
-- 设了环境变量 `NDR_NO_BROWSER=1` 时不会自动开浏览器（自动化/远程桌面下有用）。
-- 只装了系统自带的 **Windows PowerShell 5.1** 也能用：`start.bat` 会优先找 PowerShell 7（`pwsh`），
-  找不到就用 `powershell.exe`，并在窗口里打印实际使用的解释器；脚本文件都用 **UTF-8（带 BOM）** 保存，
-  避免 5.1 按 GBK 读取造成中文乱码与语法错误。
+如果仓库中没有 `package-lock.json`，将 `npm ci` 改为 `npm install`。
 
 ## 启动
 
-```powershell
-pwsh -File scripts/dev.ps1          # 检查依赖 → 执行迁移 → 后台启动前后端
-pwsh -File scripts/dev.ps1 -Stop    # 结束由本脚本启动的进程
-```
+### 最简单的方式
 
-或分别手动启动：
+在 Windows 资源管理器中双击 `start.bat`。脚本会自动执行数据库迁移、构建前端并打开：
 
-```powershell
-uv run --project backend python -m ndr                      # 后端 http://127.0.0.1:8765
-npm --prefix frontend run dev -- --host 127.0.0.1           # 前端 http://127.0.0.1:5173（代理 /api）
-```
+<http://127.0.0.1:8765>
 
-打开 http://127.0.0.1:5173 应看到页面显示后端 `GET /api/health` 返回的真实状态：应用/契约版本，
-以及数据库迁移状态（`READY` = 已迁移到仓库 head）。该路径不调用任何模型。
+停止服务时双击 `stop.bat`，或在启动窗口中按 `Ctrl+C`。
 
-## 界面（T04）
-
-打开 http://127.0.0.1:5173 ：
-
-- **书架**（`/library`）：拖放或选择本机的 TXT/EPUB 导入，可选编码与书名；导入失败会给出可用的编码候选与
-  （标注为有损的）预演，并可一键换编码重试。书架卡片显示格式、正文长度与导入警告。
-- **阅读**（`/books/:id/read`）：左侧目录（EPUB 为 spine 顺序）、正文按节点渲染，
-  ruby 注音用 `<ruby>/<rt>` 显示、插图通过受控资源端点加载；切换章节或滚动会保存阅读位置，
-  重新打开会回到书签所在章节。**不需要填写任何 API 配置**。
-
-- **识别结果**：预览页或正式处理完成后，对白按说话人着色并带编号（如 `〔S1〕`）；颜色被覆盖时靠编号辨认，
-  编号是真实文本节点，不依赖颜色。未处理或未解决的对白保持原样，并进入待确认队列。
-- **确认与人工更正**：阅读页点击已着色对白打开抽屉（原文/上下文/当前标注/候选说话人），可确认、改判、
-  标记未知、拆分/合并说话人并撤销；更正不调用模型，也不会被后续自动结果覆盖（`user_locked`）。
-- **导出**：阅读页/预览页右上角「导出」可在界面内完成范围、样式、初读策略、样张、生成与下载（EPUB/HTML）。
-- 「导入 + 阅读」不需要任何 API 配置；识别相关功能需要至少一个可用的模型配置。
-
-## 上下文与预算（T08）
-
-模型一次只看一个**处理窗口**（调用边界，不等于场景边界）：
-
-- 正文预算默认 2500 token，另计提示预留 900 与输出预留 800（PLAN 7.3 的初始实验配置）；
-  相邻窗口带约 200 token 重叠并携带上一窗口的接力点，长场景因此可以跨窗口延续。
-- 证据保留顺序：目标对白 → 目标之间的叙述 Gap（必留） → 场景状态/已确认结果 → 两端重叠 → 外层 Gap；
-  预算不足时先丢可选片段，**目标对白绝不截断**。
-- 单条对白本身超预算时，它会独立成窗口并标为 `oversized_quote`（保留待定，不会截断后猜测）。
-- 初读（`initial`）只用读到的位置以内的原文；重读（`reread`）才能用后文证据。
-- token 用启发式估算（CJK 约 1 token/字），置信度标为低；接入真实分词器前不作为计费依据。
-
-## 任务与用量（T10）
-
-正式处理是一个**任务**（`POST /api/jobs`）：按窗口顺序执行，每个窗口完成即写检查点，可暂停/恢复；
-再次运行会跳过已完成窗口。
-
-- 先“预览”再“处理”同一范围会**命中缓存**，不会重复调用模型（发送次数可核对）。
-- 预算按窗口预留、按提供方 usage 结算；到顶即停并标为 `BUDGET_EXHAUSTED`。
-- 提供方没返回 usage 时记为**未知**（不按 0 计），`GET /api/books/{id}/usage` 单独列出。
-- 请求发出后进程中断/超时：该次尝试记为未知结果，任务进入 `NEEDS_RECONCILIATION`，
-  需要显式选择重试或保留未知——**不会自动重发**、不会盲目重复计费。
-- `POST /api/books/{id}/estimates` 只做本地估算（窗口数/token），不发任何请求。
-
-## 预览与按章处理（T11）
-
-在阅读页顶部点“预览与处理”进入 `/books/:bookId/preview`：
-
-- **范围**：按章选择或直接填码点范围；估算只走本接口，不发任何模型请求。
-- **试运行**：用 `mode=preview` 创建任务，结果写进与正式阅读**相同**的标注投影（没有另一套临时识别存储）。
-- **正式处理**：同范围再次处理会**命中缓存**，任务面板里的真实调用次数保持 0、缓存命中窗口数等于窗口总数。
-- **原文 / 标注切换**与图例点击只是前端显示，**不会调用模型**；编号是真实文本节点 `〔S1〕`，不是 CSS 伪元素。
-- 初读模式下，可见时点晚于当前范围的证据**不下发颜色与编号**（切到“重读”可显示全部有效投影）。
-- 未知（UNKNOWN）不显示颜色也不显示编号：未知对白不等于新人。
-- 阅读页（`/books/:bookId/read`）用同一套投影着色，可一键关闭标注；候选虚线覆盖与标注是两层不同的信息。
-
-## 人工更正与待确认队列（T12）
-
-不需要等模型自己改对：普通对白和待确认项都能人工修正，**这些操作不调用模型**（不产生费用）。
-
-- 更正动作：指定已有说话人（`assign_existing`）、新建说话人（`create_speaker`）、改类型
-  （`set_kind`）、锁定为未知（`mark_unknown`）；Gap 可确认 `CONTINUE/UPDATE/BREAK/UNCERTAIN`；
-  同一场景内还能把两个分组 `MERGE` 或把一个分组 `SPLIT`。
-- 人工确认的结果会**锁定**（`user_locked`）：之后的模型结果与自动合并都不会覆盖它。
-- 锁定未知 ≠ 跳过：未知只是「这句还不知道是谁」，不会因此新建人物。
-- 撤销走 `POST /api/corrections/{id}/undo`：目标仍停在这次更正的版本上才允许，
-  否则返回 409（另一处已更新），**不会**回滚掉较新的修改；历史只追加，不做硬删除。
-- 更正会影响同一推理窗口的其它对白：它们被标为 `stale` 并进入 `STALE_DEPENDENCY` 待确认项，
-  等用户重新确认（界面在 T13 接入）。
-- 队列接口：`GET /api/books/{id}/review-items`（按章节/场景/原因/状态过滤）、
-  `GET /api/review-items/{id}`、`POST /api/quotes/{id}/review-items`（主动标记，幂等）、
-  `POST /api/review-items/{id}/defer`（只延后）。
-
-## 评测工具（T16）
-
-效果数字必须来自真实调用与人工标注，因此当前**没有**效果结论；但评测工具已经就绪：
+也可以在 PowerShell 中运行：
 
 ```powershell
-# 只校验清单与金标准（不加载模型、不联网）
-uv run --project backend python -m ndr.evaluation validate --manifest evaluation/manifests/dev.json
-
-# B0 规则基线（离线）：真实指标，但不是效果数字
-uv run --project backend python -m ndr.evaluation run `
-  --manifest evaluation/manifests/dev.json --config evaluation/configs/b0.json `
-  --output evaluation/reports/dev-b0-offline.json
-
-# B1/B2/B3/B4 需要真实模型：必须显式允许并指定配置（B3=上下文压缩，B4=B3+有限复核）
-uv run --project backend python -m ndr.evaluation run `
-  --manifest evaluation/manifests/dev.json --config evaluation/configs/b2.json `
-  --profile-id <model-profile-id> --allow-live --output evaluation/reports/dev-b2-live.json
-
-# T17 离线证据账：压缩实际丢掉了哪些原文、是否删到金标准 must_keep（不加载模型）
-uv run --project backend python -m ndr.evaluation loss `
-  --manifest evaluation/manifests/dev.json --context-policy context-2 `
-  --output evaluation/reports/dev-context-loss.json
+.\start.bat
 ```
 
-- 指标：提取 precision/recall/F1、错误切断/连接、**已接受准确率**、**覆盖率**、同人 pairwise F1、
-  未知强标率、新人物误建/漏建、每万字用量，并按作品与难例类别分组；退化预测（全拒答/全合并）会被标记。
-- 目标（PLAN）：已接受准确率 ≥97%、覆盖率 ≥70%；**样本不足或没有已接受样本时报告 `targets_met=null`**，
-  不宣布达标。测试用 FakeProvider 的结果一律 `quality_evidence=false`。
-- 口径、清单格式与复现说明见 `evaluation/manifests/README.md`、`evaluation/configs/README.md`、
-  `evaluation/reports/README.md`；T17 的压缩/复核/路由消融口径与门槛见 `evaluation/ablations.md`。
-- T17：上下文策略默认仍是 `context-1`（完整 Gap）；`context-2`（长 Gap 保守筛选）、有限局部复核
-  与强模型路由默认关闭，只有拿到真实对比证据才应改变默认——账本里如实标注「优化未验证」。
-
-## 导出界面（T15B）
-
-阅读页与预览页右上角都有「导出」按钮，打开的对话框里可以完成全流程（不需要命令行）：
-
-- **范围**：整本，或只勾选若干章节（文件名会带「（节选）」）。
-- **样式**：颜色 + 编号（默认）/ 仅颜色 / 仅编号；颜色被覆盖或灰度打印时，编号仍然可读。
-- **初读策略**：初读安全（只到当前阅读位置为止的证据）/ 重读（全部有效投影）。
-- **样张**：来自后端导出渲染器，在沙箱容器里展示（不是阅读页截图）；同时显示覆盖统计与警告
-  （未处理 / 未知 / 暂定 / 过期 / 初读遮断各多少条）。
-- **生成与下载**：点「生成 EPUB/HTML」后显示内部检查逐项结果与标准检查状态，然后下载；
-  文件保存在数据目录里，**重复下载不会重新生成**；期间做了人工更正会提示「已生成的文件仍使用旧快照」。
-- 导出本身**不调用模型**；未处理/未知/过期的对白在成品里保持原样。
-
-验证状态（如实记录）：内部结构检查与 HTML 断网可读已通过；**EPUBCheck 未运行**（本机没有 jar），
-**独立 EPUB 阅读器试读未做**（本机未安装阅读器，也无法联网安装）。
-
-## 导出 EPUB / HTML（T15A）
-
-命令行与界面之外的导出能力（T15B 会把界面接上）：
-
-- `POST /api/books/{id}/exports/preview` 冻结一次快照并返回**后端样张**（不调用模型）：
-  可看到覆盖统计（未知/暂定/过期/未处理）与警告，再决定是否生成。
-- `POST /api/books/{id}/exports` 生成 `epub` 或 `html`：**幂等**（同一快照+格式+样式复用已有产物），
-  文件写在 `data/exports/<artifact_id>/`，**从不覆盖原书**。
-- 样式：`color_and_label` / `color_only` / `label_only`。未知、未处理、过期与初读遮断的对白保持原样，
-  不加颜色也不加编号；编号是真实文本 `〔S1〕`，灰度打印也能读。
-- 成品可离线打开：EPUB 带 `mimetype`（第一项、不压缩）、container/OPF/nav/图片，无远程引用、无脚本；
-  HTML 是单文件（CSS 内联、图片内联为 `data:` URL）。
-- 校验分两层：内部检查（结构、mimetype、资源闭合、外部引用、正文逐段一致性）永远运行；
-  EPUBCheck 需要本地 jar，缺席时如实报 `NOT_RUN`，不会伪装成 PASS。
-- 命令行：
-
-  ```powershell
-  uv run --project backend python backend/scripts/validate_exports.py `
-    --epub evaluation/examples/exports/minimal-txt-001-annotated.epub `
-    --html evaluation/examples/exports/minimal-txt-001-annotated.html `
-    --expected-text-file evaluation/examples/minimal-txt-001/text.txt `
-    --epubcheck-jar tools/epubcheck/epubcheck.jar
-  ```
-
-  原创样例与校验清单见 `evaluation/examples/exports/`。
-
-## 初读与后文证据（T15）
-
-- 阅读页在初读模式下按「本章末端」提交 `visible_horizon_cp`，页面上会写明
-  「只显示到位置 X 为止的证据（N 条后文证据暂不显示；M 处身份合并在后文才揭示）」；
-  切到**重读**则显示全部有效投影。
-- **后文才揭示的身份不会提前同色**：如果模型在第十章才发现第一章的两个声音是同一个人，
-  初读第一章时它们仍是各自的颜色与编号（图例也分开列），读到证据之后（或重读）才会合并。
-- **emoji 与扩展汉字按码点定位**：`😀`、`𠮷` 在 JavaScript 里占 2 个 UTF-16 单元但只占 1 个码点，
-  渲染器统一做码点换算，因此颜色、编号与候选一定落在正确的字上。
-- 处理任务完成后会刷新整族投影查询，回阅读页立刻能看到新的颜色（不再需要手动刷新）。
-
-## 暂停、预算与故障恢复（T14）
-
-任务面板（预览页与阅读页抽屉里的局部复核）现在把**非完成状态**翻译成可执行动作：
-
-- **暂停**：`RUNNING` 时只请求暂停，当前窗口返回后进入「已暂停」；界面会说明「不承诺远程请求已停止计费」。
-- **继续**：已完成窗口直接复用，只有未完成窗口会真正调用模型（面板显示真实调用次数与缓存命中窗口数）。
-- **预算到顶**：到顶后不再发任何调用。预算属于创建任务时的快照，不会偷偷放宽——
-  用更大的预算重新点「用当前预算重新处理此范围」即可（已完成窗口命中缓存）。
-- **提供方超时 / 进程中断**：结果未知的尝试记为「未知结果」，任务进入「待人工对账」；
-  系统**不会自动重发**，你可以在面板里选「保留未知结果」（免费）或「确认重发这些窗口」（可能计费）。
-- **限流 / 暂时不可用**：只有「确定没有被处理」的错误会按有上限的指数退避自动重试（默认最多 2 次，
-  上限 30 秒），每次尝试都留记录；超时不在此列。
-- **缺 Key**：任务会明确失败并给出「去补充模型凭据」入口，而不是卡在「执行中」；原文始终可读。
-- **进程重启**：启动时自动扫描——超租约的请求标为未知结果、暂停中的任务转为已暂停、
-  中断的任务转为部分完成（已完成窗口保持有效），不会把 RUNNING 直接重发。
-
-## 待确认队列与确认抽屉（T13）
-
-阅读页顶部会显示待确认数量，点进去就是 `/books/:id/review`：
-
-- **任意对白都能确认**：点阅读页里着色的对白或未处理的候选虚线，都会打开同一个确认抽屉
-  （查看原文上下文、当前编号/状态、已有说话人、主动标记、跳过）。
-- **四种更正**：指定已有说话人、新建说话人、改类型、锁定为未知；更正后阅读页颜色、图例与数量立刻更新。
-- **跳过（延后）不是确认**：它只把项目移到 `DEFERRED`，在队列里把状态切到「已跳过」就能找回。
-- **场景边界走 Gap 更正**：队列里的 Gap 项就地选择继续/推进/断开/待定，不会误用说话人确认。
-- **队列清空 ≠ 全部识别正确**：队列只列出已知问题项；请结合统计里的未知/暂定/过期数量一起判断。
-- **展开原文与模型复核是两件事**：「展开更多原文」只读本地原文；
-  「局部复核」需要先选模型配置与 token 上限，会创建真实 `RECHECK` 任务并显示任务面板（可能产生费用）。
-- 提交旧版本会得到 409：界面提示「已被其它操作更新」并刷新为最新状态，不会静默覆盖别人的修改。
-
-## 场景与匿名分组（T09）
-
-模型结果不会直接变成「谁在说话」，而是先过一遍保守的接受策略：
-
-- 直接证据的归属才会被接受；指代/承接/风格类依据先标为**暂定**并进入待确认队列。
-- 证据不足或多条短对白无法判断时标为**未知**——未知不会新建人物，也不会把几句未知并成同一个人。
-- 编号 S1、S2… 只在所属场景内有意义：场景延续时沿用同一编号，只有明确的场景切换（BREAK）才重新编号。
-- 后文才揭示的身份会记录可见时点，因此**初读时不会提前把两个声音合成一个颜色**。
-- 用户确认过的对白（锁定）永远不会被后来的自动结果覆盖。
-
-（颜色/编号自 T11 起在阅读页与预览页显示；待确认队列在 T13 接入。）
-
-## 模型配置（T06）
-
-打开 http://127.0.0.1:5173/settings/models ，填写名称、协议、Base URL（API 根路径）、模型名与密钥即可，
-不需要改源码：
-
-- 凭据模式：**仅本会话**（进程内存，退出即失效）或**系统凭据库**（keyring / Windows 凭据管理器）。
-  系统凭据库不可用时会自动降级为会话密钥并在页面给出警告，**不会明文写入文件**。
-- 保存后接口只返回 `has_key`；页面与 API 都不回显密钥。编辑时可选择“保持不变 / 替换密钥 / 清除密钥”。
-- Base URL 必须是 API 根路径（例如 `https://api.example.com/v1`）；填成完整端点会被拒绝并提示。
-- **连接测试**：保存配置后点“测试连接”（或先用“测试当前填写内容”测草稿）。它发送的是**微型结构化请求**，
-  只检查鉴权与 JSON 输出可解析，并显示真实用量（提供方未返回 usage 时显示“未知”，不按 0 计）。
-  **连接成功不代表小说标注效果**；效果评测需要真实作品与人工标注（T16）。
-- 测试用适配器（`fake-provider`）只有设置 `NDR_ALLOW_FAKE_PROVIDER=1` 才可用，界面上会明确标注
-  “没有访问任何真实服务”。真实提供方失败时不会回退到它。
-- **推理模型（reasoning）建议关掉思考并给足预算与超时**。本机用 DeepSeek 实测有效的写法（「生成参数」里填）：
-  `{"thinking": {"type": "disabled"}, "max_tokens": 8000, "timeout_seconds": 180}`
-  - `thinking: {"type": "disabled"}`：让模型直接产出 JSON，不再把 token 花在思考上
-    （同一窗口实测：38.7 秒后仍 `finish_reason=length`、`content` 为空 → 关掉思考后 3 秒返回有效 JSON）；
-  - `max_tokens`：**单次输出**上限，窗口里目标多时要给够，否则 JSON 会被截断（报「不是合法 JSON」）；
-  - `timeout_seconds`：**本地**参数（不会发给提供方），覆盖默认的 30 秒；大窗口 + 强模型建议 120–300 秒；
-  - 仍然失败时，任务错误会带 `finish_reason`、`reasoning_content` 线索与**脱敏响应片段**，可直接定位。
-- **契约错误会自动纠错重发一次**：模型偶尔写出不合法引用时，程序会带着具体问题重发一次；
-  两次都失败才判定该窗口失败（每次调用都单独记账）。
-- **可确证的遗漏会自动补齐**：如果标签写了 `NEW` 却忘了在 `new_speakers` 里声明（真实模型的高频遗漏），
-  程序按该对白补一条声明并在进度里留下 `repaired_undeclared_speaker:*` 记录；
-  自造的说话人引用（`EXISTING` + 未知 ID）仍会判错并重发，不会猜。
-
-E2E/自动化若不想触碰真实的系统凭据库，可设置 `NDR_CREDENTIAL_BACKEND=session`。
-
-## 候选引语与金标准（T05）
-
-导入后会自动扫描**候选引语**与它们之间的 **Gap**（不调用模型、不做说话人判断）：
+更换端口：
 
 ```powershell
-$bookId = (Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books").data.items[0].id
-Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId/quotes"            | ConvertTo-Json -Depth 5
-Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId/gaps"              | ConvertTo-Json -Depth 5
-Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId/locate?start_cp=0&end_cp=20"
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8765/api/books/$bookId/quotes/scan"
+.\start.bat 8800
 ```
 
-- 阅读页会把候选画成**虚线**（可一键关闭），并明确标注“尚未判定说话人”；颜色/编号自 T11 起由后端投影下发（见“预览与按章处理”）。
-- 候选 ID 由（原文版本 + 位置 + 扫描器版本）稳定派生；重新扫描幂等，但**已有用户标注时返回 409**，
-  不会覆盖人工结果。
-- 异常引号不会吞章：单条候选超过长度/跨段/嵌套上限会被丢弃并在扫描警告里说明。
-
-金标准（评测用）工具有三个子命令，全部离线、不需要模型：
+### 单端口启动
 
 ```powershell
-# 校验（结构 + 引用 + 范围 + 扫描器覆盖率）
-uv run --project backend python backend/scripts/gold_standard.py validate `
-  --gold evaluation/examples/minimal-txt-001/gold.json `
-  --text evaluation/examples/minimal-txt-001/text.txt
-
-# 生成可填写的标注模板（模板不是金标准）
-uv run --project backend python backend/scripts/gold_standard.py template --text .\我的小说.txt --out .\gold-template.json
-
-# 只看候选扫描结果（离线 sanity check）
-uv run --project backend python backend/scripts/gold_standard.py scan --text .\我的小说.txt
+pwsh -File scripts/serve.ps1
 ```
 
-## 数据库与迁移
-
-- 数据库默认位于 `data/ndr.sqlite3`（`NDR_DATA_DIR` 可覆盖），不提交。
-- schema 由 `backend/src/ndr/storage/models/` 的 SQLAlchemy 模型定义，迁移在 `backend/migrations/versions/`；
-  模型是唯一权威来源，测试会比对模型与实际数据库列是否漂移。
-- `0001` 建立核心表（书籍/版本、章节/节点/资源、引语/Gap、场景/分组、标注/历史/身份修订、
-  模型配置、任务/窗口/推理尝试/缓存），`0002` 建立待确认队列与人工更正表。
-- 迁移只追加。结构变化请新增 `000N_*.py`，不要修改已发布的迁移或用删库重建代替升级。
-- 迁移命令（从项目根目录）：
+常用参数：
 
 ```powershell
-uv run --project backend alembic -c backend/alembic.ini upgrade head   # 升级到 head（可重复执行）
-uv run --project backend alembic -c backend/alembic.ini current        # 查看当前版本
+pwsh -File scripts/serve.ps1 -Port 8800
+pwsh -File scripts/serve.ps1 -DataDir D:\novel-dialogue-data
+pwsh -File scripts/serve.ps1 -SkipBuild
+pwsh -File scripts/serve.ps1 -Stop
 ```
 
-- 应用默认**不会**自动迁移（避免隐式改动用户数据）；需要时用 `NDR_AUTO_MIGRATE=1` 显式开启
-  （E2E 用隔离数据目录时使用）。
+### 开发模式
 
-### 数据与版本升级（T19）
-
-1. **先备份数据目录**（默认 `data\`：原文、SQLite、导出成品都在里面）：
-   `Copy-Item -Recurse -Force data ("data-backup-" + (Get-Date -Format yyyyMMdd-HHmmss))`。
-2. 同步依赖（`uv sync --project backend --all-groups`）；生产用 `scripts/serve.ps1` 会自动重建前端。
-3. 执行迁移（可重复运行，只追加）：`uv run --project backend alembic -c backend/alembic.ini upgrade head`。
-4. 校验：`GET /api/health` 的 `database.state=READY` 且 `revision=head_revision`；打开书架确认书籍与人工确认仍在。
-5. 回滚：若必须回退版本，先停服务，再用备份目录替换 `data\`（不要手工改表）。
-
-自动化升级测试：`backend/tests/integration/test_upgrade_preserves_data.py` 验证「导入的书 + `user_locked` 人工确认 +
-标注历史 + 待确认队列」在重跑/升级迁移后原样保留且接口仍可用；`test_schema.py::test_existing_database_upgrades_without_data_loss`
-覆盖 `0001 → head` 的真实升级路径。
-
-## 导入与阅读（T02/T03）
-
-无模型也能跑通导入与整本阅读（`GET /api/books/{id}/content` 返回结构化节点，前端在 T04 接入）：
+开发模式会分别启动后端和 Vite 前端：
 
 ```powershell
-# 导入 TXT 或 EPUB（TXT 的 encoding 可省略：按 utf-8 → gb18030 → big5 严格检测）
-$r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8765/api/books/import -Form @{ file = Get-Item .\我的小说.txt }
-$bookId = $r.data.book_id
-
-Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId"                       | ConvertTo-Json -Depth 6
-Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId/chapters"              | ConvertTo-Json -Depth 6
-Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/books/$bookId/content?limit=200"     | ConvertTo-Json -Depth 6
-Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/jobs/$($r.data.job_id)"              | ConvertTo-Json -Depth 6
+pwsh -File scripts/dev.ps1
 ```
 
-- 选错编码不会被静默接受：返回 422，`details.candidates` 列出可用编码，`details.preview` 是**有损**预演
-  （`preview_is_lossy: true`），并带上失败的 `job_id`；正文里绝不会出现替换符 U+FFFD。
-- 重复导入同一份文件复用同一本书与同一版本；换编码生成新版本并切换活动版本。
-- 落盘位置（数据目录内，API 不暴露路径）：`books/<book_id>/source.*`（原始字节，不可变）与
-  `books/<book_id>/versions/<version_id>/canonical.txt`（规范化全文，LF）。
-- EPUB：按 spine 顺序阅读，标题取自 nav/NCX 目录；ruby 的注音（rt）不进入正文，
-  存在节点 `payload.ruby` 里；插图是零长度 `image` 节点，图片通过
-  `GET /api/books/{id}/resources/{resource_id}` 读取（只读包内已登记资源，不下载外链）。
-## 验证
+- 前端：<http://127.0.0.1:5173>
+- 后端：<http://127.0.0.1:8765>
+- 健康检查：<http://127.0.0.1:8765/api/health>
+
+停止开发服务：
+
+```powershell
+pwsh -File scripts/dev.ps1 -Stop
+```
+
+## 首次使用
+
+1. 在书架页面导入 TXT 或 EPUB。
+2. 打开“模型配置”，填写 API 根地址、模型名称和 API Key，并测试连接。
+3. 进入书籍的预览与处理页面，选择章节。
+4. 确认或修改章节人物表，并选择本章主视角人物。
+5. 设置处理预算和阅读模式，然后开始识别。
+6. 在阅读页检查颜色和人物标签；通过待确认队列修正不确定结果。
+7. 从阅读页或预览页导出 EPUB 或 HTML。
+
+### DeepSeek 配置示例
+
+- 协议：`chat-completions-compatible`
+- Base URL：`https://api.deepseek.com`
+- 模型：填写账号当前可用的模型名称
+- API Key：在界面中填写
+
+对于支持思考模式的模型，可以在“生成参数”中使用：
+
+```json
+{
+  "thinking": {
+    "type": "disabled"
+  },
+  "max_tokens": 8000,
+  "timeout_seconds": 180
+}
+```
+
+Base URL 应填写 API 根地址，不要包含 `/chat/completions`。模型能力和兼容格式可能变化，请以提供方当前文档为准。
+
+## 数据与隐私
+
+运行数据默认保存在仓库根目录的 `data/`，包括：
+
+- 导入的原始书籍
+- SQLite 数据库
+- 解析后的正文和资源
+- 导出的 EPUB/HTML
+- 运行日志
+
+`data/`、`.env`、数据库、日志、模型密钥和构建产物已在 `.gitignore` 中排除。模型密钥通过系统凭据库或当前进程内存保存，不应写入源码或提交到 Git。
+
+升级或切换版本前，建议先备份整个 `data/` 目录。
+
+## 环境配置
+
+所有配置都有默认值。需要自定义时：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+常用变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `NDR_HOST` | `127.0.0.1` | 后端监听地址 |
+| `NDR_PORT` | `8765` | 后端端口 |
+| `NDR_DATA_DIR` | `<仓库>/data` | 本地数据目录 |
+| `NDR_CREDENTIAL_BACKEND` | `system` | `system` 使用系统凭据库，`session` 只在当前进程保存密钥 |
+| `NDR_LLM_TIMEOUT_SECONDS` | `30` | 模型请求默认超时 |
+| `NDR_AUTO_MIGRATE` | `0` | 是否在应用启动时自动迁移数据库 |
+
+完整示例见 [`.env.example`](.env.example)。
+
+## 测试
+
+运行后端静态检查、后端测试、OpenAPI 一致性检查、前端类型检查、前端测试和生产构建：
 
 ```powershell
 pwsh -File scripts/verify.ps1
 ```
 
-等价的分项命令：
+单独运行：
 
 ```powershell
 uv run --project backend ruff check backend/src backend/tests backend/scripts
 uv run --project backend pytest backend/tests
-uv run --project backend python backend/scripts/export_openapi.py --output docs/openapi.json --check
 npm --prefix frontend run typecheck
-npm --prefix frontend run check:api     # 前端 API 类型与 docs/openapi.json 逐字节一致（T18）
 npm --prefix frontend run test -- --run
 npm --prefix frontend run build
-npm --prefix frontend run test:e2e      # Playwright：独立数据目录/端口，真实浏览器
-uv run --project backend python backend/scripts/export_openapi.py --output docs/openapi.json
-npm --prefix frontend run generate:api
 ```
 
-发布前的四类结果（功能 / 稳定性 / live / 质量）、报告索引、已修问题与残余阻塞见
-`docs/verification-report.md`；验证口径见 `docs/decisions/0022-release-verification-scope.md`。
-**当前 live 与 quality 都是 BLOCKED**：本机没有真实提供方凭据、网络受限、也没有人工确认的真实作品样本。
-
-## 未完成项与复现步骤（T19）
-
-**工程交付完成；真实联调（live）与效果评测（quality）未完成**——缺的不是代码，而是外部条件：
-
-| 未完成项 | 原因（有证据） | 补齐方式 |
-| --- | --- | --- |
-| 真实提供方端到端试用 | 环境无任何提供方密钥、仓库无凭据、网络 6 秒超时 | 配置真实模型后：`python -m ndr.evaluation run --manifest evaluation/manifests/dev.json --config evaluation/configs/b2.json --profile-id <id> --allow-live` |
-| 真实作品效果评测（B1–B4） | 无人工确认样本；报告全部 `NOT_RUN` | 按 `evaluation/annotation-guide.md` 标注真实作品并建清单后跑 B1–B4 |
-| 上下文压缩/复核/路由收益 | 需要真实对比数据 | 按 `evaluation/ablations.md` 跑 B2/B3/B4，并用 `python -m ndr.evaluation loss` 记录压缩丢失 |
-| EPUBCheck 标准检查 | 无 jar 且网络受限；导出状态如实 `NOT_RUN` | 放入 `tools/epubcheck/epubcheck.jar` 后重新导出 |
-| ≥2 款独立 EPUB 阅读器试读 | 本机未安装任何独立阅读器 | 安装后按 `evaluation/examples/exports/README.md` 试读并记录版本/设置 |
-| 真实提供方限流与超时 | 只用 MockTransport/FakeProvider 验证过 | 真实联调时按 `docs/CONTRACTS.md` 第 23 节核对错误码与恢复动作 |
-
-从零复现（本机已实测，命令与断言见 `docs/verification-report.md` 第 9 节）：
-
-```powershell
-# 1) 全新数据目录 + 同源启动（含迁移；-AllowFakeProvider 仅用于离线演示）
-$tmp = Join-Path $env:TEMP ("ndr-demo-" + (Get-Date -Format yyyyMMddHHmmss))
-pwsh -File scripts/serve.ps1 -DataDir $tmp -Port 8899 -SkipBuild -AllowFakeProvider
-
-# 2) 浏览器全流程（导入 → 处理 → 确认 → 导出 EPUB/HTML → 下载件离线可读）
-cd frontend
-$env:NDR_E2E_BACKEND_CMD = '..\backend\.venv\Scripts\python.exe -m ndr'
-npx playwright test
-
-# 3) 全量检查
-pwsh -File scripts/verify.ps1
-```
-
-## 配置
-
-环境变量（前缀 `NDR_`，也可写入仓库根 `.env`，该文件已被忽略）：
-
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `NDR_HOST` | `127.0.0.1` | 后端监听地址，默认仅回环 |
-| `NDR_PORT` | `8765` | 后端端口 |
-| `NDR_DATA_DIR` | `<仓库>/data` | 原文、SQLite、导出与日志目录，不提交 |
-| `NDR_ENVIRONMENT` | `local` | 健康检查中回显的运行环境 |
-| `NDR_CORS_ORIGINS` | `["http://127.0.0.1:5173","http://localhost:5173"]` | 允许的开发前端来源（JSON 数组） |
-| `NDR_AUTO_MIGRATE` | `false` | 启动时自动迁移到 head（仅建议测试/演示使用） |
-| `NDR_ALLOW_FAKE_PROVIDER` | `false` | 允许测试用 `fake-provider` 适配器（绝不访问网络；界面上会明确标注） |
-| `NDR_FAKE_PROVIDER_LABELS` | `unknown` | 仅测试：`unknown` 全部标为未知；`deterministic` 确定性建分组，用于离线验证着色链路 |
-
-前端 `VITE_API_BASE` 可覆盖 API 根地址；开发环境留空并使用 Vite 的 `/api` 代理。
-
-**不要把 API Key 写进 `.env` 或任何提交文件**：模型凭据在 T06/T07 通过系统凭据库或会话密钥管理，
-`model_profiles` 表没有任何存放密钥的列（有测试守住这一点）。
-
-## 目录
+## 项目结构
 
 ```text
-backend/src/ndr/
-  app.py config.py         应用工厂与 NDR_* 配置
-  api/                     HTTP 层：健康检查、错误契约、分页、OpenAPI、依赖
-  domain/                  枚举与 API schema（契约由后端定义）
-  storage/                 ORM 模型、引擎、事务/版本校验、迁移执行
-backend/migrations/        Alembic 迁移（0001 核心表、0002 待确认与更正）
-backend/tests/             pytest：unit/ 与 integration/
-backend/scripts/           export_openapi.py 等运维脚本
-frontend/src/              React + TypeScript 前端（页面与组件随任务补齐）
-frontend/tests/            Vitest + React Testing Library
-frontend/e2e/              Playwright（独立数据目录与端口）
-docs/                      CONTRACTS、IMPLEMENTATION_STATUS、HANDOFF、decisions、openapi.json
-evaluation/                金标准 schema、原创样例、标注指南
-scripts/                   dev.ps1、verify.ps1
-data/                      运行数据（忽略提交）
+backend/              FastAPI 后端、数据库迁移和测试
+frontend/             React 前端、组件测试和端到端测试
+scripts/              启动、停止和验证脚本
+docs/openapi.json     生成的 API 定义
+evaluation/           评测工具、样例和标注说明
+data/                 本地运行数据，不提交到 Git
 ```
 
-## 已知命令偏差（相对 DEVELOPMENT.md 2.3）
+开发约定和关键架构边界见 [DEVELOPMENT.md](DEVELOPMENT.md)。自动化修改规则见 [AGENTS.md](AGENTS.md)。
 
-1. `npm --prefix frontend ci` / `npm --prefix frontend install` 在本仓库不生效：仓库根目录没有
-   `package.json`，npm 10.9.2 会把安装目标解析到根目录并报 ENOENT。安装类命令请在 `frontend`
-   目录内执行（`Push-Location frontend`）。`npm --prefix frontend run <script>` 正常可用。
-2. 受限沙箱（如某些自动化环境）中 `uv run` 可能因无法打开 uv 缓存中的 `.git` 标记而失败。
-   `scripts/verify.ps1` 与 `scripts/dev.ps1` 会自动回退到已同步的 `backend\.venv`；
-   请勿据此认为 `uv` 命令本身有误。
-3. npm 依赖缓存写在 `frontend/.npm-cache`（由 `frontend/.npmrc` 指定，已忽略提交）；
-   uv 缓存写在 `.uv-cache`（`backend/pyproject.toml` 的 `[tool.uv] cache-dir`）。
-4. 项目正文与文档都是 UTF-8，而 Windows 默认编码可能是 GBK：`scripts/*.ps1` 会设置
-   `PYTHONUTF8=1`；`backend/alembic.ini` 因此保持纯 ASCII（Alembic 用平台编码读配置）。
+## 已知限制
 
-## 隐私与安全
-
-- 原文、数据库、导出成品与日志都在 `data/`，已忽略提交。
-- API 只监听回环地址；跨域仅允许配置的本地前端来源。
-- 未经用户明确操作，不发起真实模型调用；测试默认使用 FakeProvider（T07 引入）。
-
-## E2E 样例文件
-
-`frontend/e2e/fixtures/` 里的样例由脚本生成（原创内容，含 GB18030 文本与真实 1×1 PNG）：
-
-```powershell
-uv run --project backend python backend/scripts/make_e2e_fixtures.py
-```
-
-E2E 每次运行使用独立数据目录 `frontend/.e2e/data-<runId>`（`e2e/global-setup.ts` 尽力清理旧目录），
-后端以 `NDR_AUTO_MIGRATE=1` 在测试端口启动，绝不接触 `data/` 里的用户书库。
+- 对白归属取决于文本线索和所选模型，结果仍需要人工复核。
+- 无引号对白、复杂嵌套引用和极长章节可能需要手动修正。
+- EPUB 的复杂 CSS 不保证完全还原，但正文、章节和本地资源会被保留。
+- 当前以本地单用户使用为目标，没有账号系统或云端同步。

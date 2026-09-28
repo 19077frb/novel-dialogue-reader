@@ -1,6 +1,6 @@
 """轻小说对话辅助阅读器后端包。
 
-实现规格见仓库根目录的 PLAN.md 与 DEVELOPMENT.md。
+实现规格见仓库根目录的 DEVELOPMENT.md。
 """
 
 from __future__ import annotations
