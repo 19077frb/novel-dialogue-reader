@@ -292,6 +292,13 @@ uv run --project backend python backend/scripts/gold_standard.py template --text
   网络调用在数据库事务之外；未知用量保持 NULL 且 `usage_unknown=true`。
 - 上游错误映射为稳定错误码（`PROVIDER_AUTH_FAILED`/`MODEL_NOT_FOUND`/`RATE_LIMITED`/
   `PROVIDER_UNAVAILABLE`/`PROVIDER_TIMEOUT`/`INVALID_MODEL_OUTPUT`）；详情脱敏截断。
+- **输出解析与标注链路同一套规则**（DEVELOPMENT 4.5）：整段 JSON 或整段 ```json 代码块都接受，
+  但不接受「从解释性长文里截取看起来像 JSON 的片段」；`max_tokens=256`，避免小 JSON 被截断成坏结构。
+- `INVALID_MODEL_OUTPUT` 的 `detail` 必须能定位问题：给出解析/校验问题（最多 3 条，loc + message）
+  与**脱敏后的原始输出片段**（截断 200 字符）；`content` 为空时给出响应片段
+  （例如内容被放在 `reasoning_content` 一类字段里）。提供方返回的 usage 照实回报，不因解析失败丢弃。
+- 连接测试提示词版本 `connection-2`（明确要求「不要代码块、不要前后文字」）；任务级失败信息
+  （`job.last_error`）同样带上脱敏片段，避免只剩一个错误码。
 - `fake-provider` 只有设置 `NDR_ALLOW_FAKE_PROVIDER=1` 才可用，否则 422；界面会标注“测试用适配器”。
 - **连接成功只说明鉴权与 JSON 输出可解析，不代表小说标注效果**（效果评测属 T16）。
 

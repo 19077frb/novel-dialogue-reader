@@ -76,7 +76,7 @@
 - 不可覆盖的内容：`evaluation/examples/**`、`frontend/e2e/fixtures/**` 的原始字节；已发布迁移 `0001`～`0005`；
   **`user_locked` 标注与用户密钥**；审计类表只追加；**已有评测报告不要改写**（要保留历史结论）。
 - 当前版本号（进入缓存键/依赖哈希）：API 契约 `1`；数据库 `0005`；输出契约 `1.0`；
-  提示词 `labeling-1`/`connection-1`；上下文 `context-1`（默认）/`context-2`（压缩）；复核策略 `recheck-1`；
+  提示词 `labeling-1`/`connection-2`；上下文 `context-1`（默认）/`context-2`（压缩）；复核策略 `recheck-1`；
   路由策略 `routing-1`；场景状态 `scene-state-1`；接受策略 `acceptance-1`；
   引擎 `attribution-engine-1`；调度器 `scheduler-1`；缓存 `cache-1`；扫描器 `quote-scan-1`；
   更正服务 `correction-1`、恢复服务 `recovery-1`、导出快照 `export-snapshot-1`、导出器 `exporter-1`、

@@ -43,6 +43,11 @@ FakeProvider 或自造样例通过只记入 Offline。
 
 ## 说明
 
+- 2026-09-28 真实提供方联调发现并修复（T07 范围）：连接测试在真实模型上可能因 `max_tokens=64`
+  把回显 JSON 截断，或模型把 JSON 包进 ```json 代码块，从而被判成 `INVALID_MODEL_OUTPUT`。
+  现在连接测试与标注链路共用「整段 JSON 或整段代码块」解析、上限提到 256，失败详情带校验问题与
+  脱敏原始片段（空 `content` 给响应片段），任务失败信息同样带片段；新增 3 项测试（后端 379 passed）。
+
 - T00～T06、T08 的 Live 为 NOT_APPLICABLE：这些任务不涉及真实模型或真实阅读器。
 - T09 的 Live = BLOCKED：场景/分组/接受策略用 FakeProvider 离线验证，真实模型效果未验证（属 T16）。
 - T07 的 Live = BLOCKED：适配器、错误映射与连接测试已用 MockTransport/FakeProvider 离线验证，
