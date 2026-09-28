@@ -193,7 +193,12 @@ export function CharacterRosterPanel({
   }
 
   if (!chapterId) {
-    return <p className="hint">请先选择章节，再识别人物。</p>
+    return (
+      <p className="hint" data-testid="roster-no-chapter">
+        当前不是单章范围：整本或自定义码点范围不使用「本章人物」名单。
+        需要确认人物与本章主人公时，请先在处理范围里选择具体章节。
+      </p>
+    )
   }
 
   return (
@@ -233,7 +238,11 @@ export function CharacterRosterPanel({
         </div>
       </div>
 
-      {roster.isPending && <p className="hint">正在读取人物名单…</p>}
+      {roster.isPending && (
+        <p className="hint" data-testid="roster-loading">
+          正在读取人物名单…
+        </p>
+      )}
       {roster.isError && <p className="status-error">人物名单读取失败。</p>}
       {error && (
         <p className="status-error" data-testid="roster-error">

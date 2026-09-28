@@ -226,8 +226,14 @@ export default function PreviewPage() {
     setRosterConfirmed(confirmed)
   }, [])
 
+  // 本章人物是逐句归属的前置：只有选中单一章节时才要求先确认名单与主人公；
+  // 整本或自定义码点范围没有“本章”，后端也不会注入章节人物名单。
+  const rosterRequired = range.chapterId !== null
   const runDisabled =
-    !rangeValid || profileId === '' || !rosterConfirmed || jobMutation.isPending
+    !rangeValid ||
+    profileId === '' ||
+    (rosterRequired && !rosterConfirmed) ||
+    jobMutation.isPending
 
   if (!bookId) return <p className="status-error">缺少书籍 ID。</p>
 
