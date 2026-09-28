@@ -1,4 +1,4 @@
-# 开发启动脚本：检查依赖 → 迁移（若已建立）→ 后台启动后端与前端 → 打印访问地址。
+﻿# 开发启动脚本：检查依赖 → 迁移（若已建立）→ 后台启动后端与前端 → 打印访问地址。
 # 只处理本脚本启动的进程；Ctrl+C 或 -Stop 时结束它们。
 #
 #   pwsh -File scripts/dev.ps1            # 启动后端(8765) + 前端(5173)
@@ -17,6 +17,40 @@ $env:PYTHONUTF8 = '1'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $pidFile = Join-Path $repoRoot 'data\run\dev-pids.json'
 $script:started = @()
+
+function Stop-ListenerOnPort([int]$port, [string[]]$allowed) {
+    # uv run 会把 python 变成非子进程：停止时按端口兜底清理，且只动白名单里的进程名。
+    $owners = @()
+    try {
+        $owners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+    }
+    catch { $owners = @() }
+    if ($owners.Count -eq 0) {
+        $owners = @(netstat -ano | Select-String -Pattern (":{0}\s" -f $port) |
+            ForEach-Object { ($_ -split '\s+')[-1] } |
+            Where-Object { $_ -match '^\d+$' } | Select-Object -Unique)
+    }
+    foreach ($owner in @($owners)) {
+        $proc = Get-Process -Id $owner -ErrorAction SilentlyContinue
+        if ($null -eq $proc) { continue }
+        if ($allowed -notcontains $proc.ProcessName) { continue }
+        Write-Host ("停止端口 {0} 上的 {1} (PID {2})" -f $port, $proc.ProcessName, $owner)
+        Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-BackendServerInvoker([string]$repoRoot) {
+    # 长期运行的服务优先直接用 venv 解释器：记录的 PID 就是服务本身，停止时能杀干净。
+    $venvPython = Join-Path $repoRoot 'backend\.venv\Scripts\python.exe'
+    if (Test-Path $venvPython) {
+        return [pscustomobject]@{ Exe = $venvPython; Args = @() }
+    }
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
+        return [pscustomobject]@{ Exe = 'uv'; Args = @('run', '--project', 'backend', 'python') }
+    }
+    throw '未找到后端运行环境，请先运行：uv sync --project backend --all-groups'
+}
 
 function Save-Started {
     if ($script:started.Count -eq 0) { return }
@@ -37,6 +71,9 @@ function Stop-DevProcesses {
         }
     }
     Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+    # 兜底：uv run 可能留下孤儿 python；前端 npm.cmd 也可能留下 node
+    Stop-ListenerOnPort 8765 @('python', 'pythonw', 'uv')
+    Stop-ListenerOnPort 5173 @('node')
 }
 
 if ($Stop) {
@@ -103,8 +140,9 @@ try {
 
     if (-not $SkipBackend) {
         Write-Host '启动后端 127.0.0.1:8765 …'
-        $backend = Start-Process -FilePath $backendInvoker.Exe `
-            -ArgumentList @($backendInvoker.Args + @('-m', 'ndr')) `
+        $serverInvoker = Get-BackendServerInvoker $repoRoot
+        $backend = Start-Process -FilePath $serverInvoker.Exe `
+            -ArgumentList @($serverInvoker.Args + @('-m', 'ndr')) `
             -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
         $script:started += [pscustomobject]@{ name = 'backend'; pid = $backend.Id }
         Save-Started

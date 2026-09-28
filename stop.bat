@@ -13,9 +13,12 @@ if not exist "scripts\serve.ps1" (
 set "PS="
 for %%I in (pwsh.exe) do if not defined PS set "PS=%%~$PATH:I"
 if not defined PS if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "PS=%ProgramFiles%\PowerShell\7\pwsh.exe"
+if not defined PS if exist "%ProgramFiles(x86)%\PowerShell\7\pwsh.exe" set "PS=%ProgramFiles(x86)%\PowerShell\7\pwsh.exe"
+if not defined PS if exist "%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe" set "PS=%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe"
+if not defined PS if exist "%ProgramFiles%\PowerShell\7-preview\pwsh.exe" set "PS=%ProgramFiles%\PowerShell\7-preview\pwsh.exe"
 if not defined PS if exist "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not defined PS (
-  echo [ERROR] PowerShell not found.
+  echo [ERROR] No PowerShell found.
   pause
   exit /b 1
 )

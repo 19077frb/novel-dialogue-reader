@@ -1,4 +1,4 @@
-# 验证脚本：只运行已建立的检查；任何一项失败即返回非零。
+﻿# 验证脚本：只运行已建立的检查；任何一项失败即返回非零。
 #
 #   pwsh -File scripts/verify.ps1
 #   pwsh -File scripts/verify.ps1 -SkipFrontend

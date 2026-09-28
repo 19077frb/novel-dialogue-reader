@@ -1,6 +1,6 @@
 @echo off
 rem Double-click launcher for the Novel Dialogue Reader (single-port, same-origin mode).
-rem This file is intentionally ASCII-only; Chinese messages come from scripts\serve.ps1 (pwsh, UTF-8).
+rem ASCII-only on purpose: Chinese messages come from scripts\serve.ps1 (UTF-8 with BOM).
 chcp 65001 >nul
 setlocal EnableExtensions
 cd /d "%~dp0"
@@ -19,12 +19,16 @@ if not exist "scripts\serve.ps1" (
   exit /b 1
 )
 
+rem --- pick a PowerShell host: prefer PowerShell 7 (pwsh), fall back to Windows PowerShell 5.1 ---
 set "PS="
 for %%I in (pwsh.exe) do if not defined PS set "PS=%%~$PATH:I"
 if not defined PS if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "PS=%ProgramFiles%\PowerShell\7\pwsh.exe"
+if not defined PS if exist "%ProgramFiles(x86)%\PowerShell\7\pwsh.exe" set "PS=%ProgramFiles(x86)%\PowerShell\7\pwsh.exe"
+if not defined PS if exist "%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe" set "PS=%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe"
+if not defined PS if exist "%ProgramFiles%\PowerShell\7-preview\pwsh.exe" set "PS=%ProgramFiles%\PowerShell\7-preview\pwsh.exe"
 if not defined PS if exist "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not defined PS (
-  echo [ERROR] PowerShell not found. Install PowerShell 7, then run:
+  echo [ERROR] No PowerShell found. Install PowerShell 7, then run:
   echo         pwsh -File scripts\serve.ps1
   pause
   exit /b 1
@@ -62,7 +66,8 @@ if not defined NDR_NO_BROWSER (
   start "" /min "%PS%" -NoProfile -ExecutionPolicy Bypass -Command "for ($i=0; $i -lt 120; $i++) { try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:%PORT%/api/health' -TimeoutSec 2 -UseBasicParsing; if ($r.StatusCode -eq 200) { break } } catch {}; Start-Sleep -Milliseconds 750 }; Start-Process 'http://127.0.0.1:%PORT%/'"
 )
 
-echo Starting the server; the browser will open when it is ready.
+echo Starting the server with: %PS%
+echo The browser will open when the server is ready.
 echo Keep this window open while reading.
 echo Stop with Ctrl+C in this window, or double-click stop.bat.
 echo.
