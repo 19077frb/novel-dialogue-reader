@@ -56,10 +56,12 @@ if not errorlevel 1 (
 )
 
 set "SERVE_ARGS=-Port %PORT%"
-if exist "frontend\dist\index.html" (
-  set "SERVE_ARGS=%SERVE_ARGS% -SkipBuild"
+rem 前端源码比 dist 新时必须重建，否则界面还是旧的（-SkipBuild 会跳过构建）
+"%PS%" -NoProfile -ExecutionPolicy Bypass -Command "$needs=1; if (Test-Path 'frontend/dist/index.html') { $dist=(Get-Item 'frontend/dist/index.html').LastWriteTime; $src=Get-ChildItem -Recurse -File 'frontend/src','frontend/index.html','frontend/package.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if ($src -and $src.LastWriteTime -le $dist) { $needs=0 } }; exit $needs" >nul 2>nul
+if errorlevel 1 (
+  echo Frontend is missing or newer than the build: rebuilding, this may take a minute...
 ) else (
-  echo First run: building the frontend, this may take a minute...
+  set "SERVE_ARGS=%SERVE_ARGS% -SkipBuild"
 )
 
 if not defined NDR_NO_BROWSER (
