@@ -208,7 +208,9 @@ class FakeProviderAdapter:
                 "assignment": "NEW" if index == 0 else "EXISTING",
                 "speaker_ref": "new1",
                 "basis": "DIRECT",
-                "evidence_refs": [],
+                # FakeProvider 的确定性模式显式使用另一条目标作为独立证据，
+                # 以测试 ACCEPTED/导出链路；单目标窗口没有独立证据，保持暂定。
+                "evidence_refs": [targets[(index + 1) % len(targets)]] if len(targets) > 1 else [],
             }
             for index, quote_id in enumerate(targets)
         ]

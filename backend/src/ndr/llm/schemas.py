@@ -54,6 +54,11 @@ class QuoteLabel(ApiModel):
     kind: QuoteKind
     assignment: Assignment | None = None
     speaker_ref: str | None = None
+    speaker_name: str | None = Field(
+        default=None,
+        max_length=128,
+        description="仅在原文明示真实姓名时填写；不确定时为 null",
+    )
     basis: SpeakerBasis | None = None
     evidence_refs: list[str] = Field(default_factory=list)
 
@@ -67,6 +72,8 @@ class QuoteLabel(ApiModel):
             if self.assignment is Assignment.UNKNOWN:
                 if self.speaker_ref is not None:
                     raise ValueError("assignment=UNKNOWN 时 speaker_ref 必须为 null")
+                if self.speaker_name is not None:
+                    raise ValueError("assignment=UNKNOWN 时 speaker_name 必须为 null")
             elif not self.speaker_ref:
                 raise ValueError("assignment=EXISTING/NEW 时必须给出 speaker_ref")
         else:
@@ -74,6 +81,8 @@ class QuoteLabel(ApiModel):
                 raise ValueError("非 speech 的 assignment 必须为 null")
             if self.speaker_ref is not None:
                 raise ValueError("非 speech 的 speaker_ref 必须为 null")
+            if self.speaker_name is not None:
+                raise ValueError("非 speech 的 speaker_name 必须为 null")
         return self
 
 

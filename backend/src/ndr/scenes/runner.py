@@ -51,6 +51,63 @@ class WindowRunResult:
         }
 
 
+def _reference_aliases(window) -> tuple[dict[str, str], dict[str, str]]:  # noqa: ANN001
+    """建立窗口内短引用；返回 stable→alias 与 alias→stable。"""
+
+    stable_to_alias: dict[str, str] = {}
+    for index, quote_id in enumerate(window.target_quote_ids, start=1):
+        stable_to_alias[str(quote_id)] = f"Q{index}"
+    gap_index = evidence_index = 0
+    for fragment in window.fragments:
+        ref = str(fragment.fragment_id)
+        if ref in stable_to_alias:
+            continue
+        if fragment.kind.value in {"inner_gap", "outer_gap"}:
+            gap_index += 1
+            stable_to_alias[ref] = f"G{gap_index}"
+        else:
+            evidence_index += 1
+            stable_to_alias[ref] = f"E{evidence_index}"
+    return stable_to_alias, {alias: stable for stable, alias in stable_to_alias.items()}
+
+
+def _restore_output_references(raw: Any, window) -> Any:  # noqa: ANN001
+    """把模型使用的 Q/G/E 短引用还原为数据库稳定 ID。"""
+
+    if not isinstance(raw, Mapping):
+        return raw
+    _stable_to_alias, alias_to_stable = _reference_aliases(window)
+
+    def restore(value: Any) -> Any:
+        return alias_to_stable.get(str(value), value) if isinstance(value, str) else value
+
+    payload = dict(raw)
+    field_map = {
+        "scene_updates": ("after_gap_id", "starts_at_quote_id"),
+        "gap_decisions": ("gap_id",),
+        "new_speakers": ("first_quote_id",),
+        "labels": ("quote_id",),
+        "identity_proposals": (),
+    }
+    for collection, scalar_fields in field_map.items():
+        normalized: list[Any] = []
+        for item in payload.get(collection, []) or []:
+            if not isinstance(item, Mapping):
+                normalized.append(item)
+                continue
+            record = dict(item)
+            for field_name in scalar_fields:
+                if field_name in record:
+                    record[field_name] = restore(record[field_name])
+            if isinstance(record.get("evidence_refs"), list):
+                record["evidence_refs"] = [restore(ref) for ref in record["evidence_refs"]]
+            normalized.append(record)
+        payload[collection] = normalized
+    if isinstance(payload.get("needs_context"), list):
+        payload["needs_context"] = [restore(ref) for ref in payload["needs_context"]]
+    return payload
+
+
 def _messages_for(
     *,
     window,  # noqa: ANN001 - ProcessingWindow
@@ -58,25 +115,53 @@ def _messages_for(
     locked_summary: str | None,
     correction: str | None = None,
 ) -> list[dict[str, str]]:
+    stable_to_alias, _alias_to_stable = _reference_aliases(window)
+
+    def alias(ref: str) -> str:
+        return stable_to_alias.get(ref, ref)
+
+    context_records = [
+        {
+            "ref": alias(fragment.fragment_id),
+            "kind": fragment.kind.value,
+            "start_cp": fragment.start_cp,
+            "end_cp": fragment.end_cp,
+            "text": fragment.text,
+        }
+        for fragment in window.fragments
+    ]
+    speaker_records = [
+        {
+            "speaker_ref": slot.display_label,
+            "canonical_name": slot.canonical_name or None,
+            "description": slot.description or "未说明",
+            "first_quote_id": stable_to_alias.get(slot.first_quote_id),
+            "evidence_refs": [alias(ref) for ref in slot.evidence_refs if ref in stable_to_alias],
+        }
+        for slot in state.participants
+    ]
     messages = build_labeling_messages(
-        context_lines=[fragment.text for fragment in window.fragments],
-        target_ids=list(window.target_quote_ids),
+        context_lines=(),
+        context_records=context_records,
+        target_ids=[alias(ref) for ref in window.target_quote_ids],
         gap_ids=[
-            fragment.fragment_id
+            alias(fragment.fragment_id)
             for fragment in window.fragments
             if fragment.kind.value in {"inner_gap", "outer_gap"}
         ],
         scene_ref=state.scene_ref,
-        speaker_refs=[
-            ref
-            for slot in state.participants
-            for ref in (slot.group_id, slot.temp_ref)
-            if ref
+        speaker_refs=[slot.display_label for slot in state.participants],
+        speaker_records=speaker_records,
+        known_characters=[
+            {"name": name, "description": description}
+            for name, description in state.known_characters.items()
         ],
-        evidence_ids=list(window.fragment_ids),
+        evidence_ids=[alias(ref) for ref in window.fragment_ids],
         locked_summary=locked_summary or state.prompt_state(max_chars=600),
     )
     if correction:
+        for stable, short in stable_to_alias.items():
+            correction = correction.replace(stable, short)
         messages = [
             *messages,
             {
@@ -134,7 +219,7 @@ async def run_window(
             "target_quote_ids": list(window.target_quote_ids),
         }
         try:
-            raw = await adapter.generate_labels(payload)
+            raw = _restore_output_references(await adapter.generate_labels(payload), window)
         except ProviderError as exc:
             result.error_code = exc.code.value
             result.application.warnings.append(f"{exc.code.value}: {exc.message}")
@@ -191,11 +276,6 @@ def _targets_for(window, state: SceneState):  # noqa: ANN001, ANN202
             if fragment.kind.value in {"inner_gap", "outer_gap"}
         ),
         scene_refs=(state.scene_ref,),
-        speaker_refs=tuple(
-            ref
-            for slot in state.participants
-            for ref in (slot.group_id, slot.temp_ref)
-            if ref
-        ),
+        speaker_refs=tuple(slot.display_label for slot in state.participants),
         evidence_ids=tuple(window.fragment_ids),
     )

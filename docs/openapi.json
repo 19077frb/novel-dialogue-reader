@@ -2336,7 +2336,7 @@
               }
             ],
             "title": "Label",
-            "description": "展示编号（S1/S2…），仅在可见时有值"
+            "description": "已确认真实姓名优先，否则为场景内编号；仅在可见时有值"
           },
           "color_index": {
             "anyOf": [
@@ -6520,7 +6520,8 @@
           },
           "label": {
             "type": "string",
-            "title": "Label"
+            "title": "Label",
+            "description": "已确认真实姓名优先，否则为场景内编号 S1/S2…"
           },
           "scene_id": {
             "type": "string",
@@ -6541,7 +6542,7 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Color Index",
-            "description": "场景内稳定色号（0..N-1）"
+            "description": "按已确认人物身份统一的稳定色号（0..N-1）"
           },
           "first_quote_id": {
             "anyOf": [

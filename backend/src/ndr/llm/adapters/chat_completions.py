@@ -326,7 +326,13 @@ class ChatCompletionsAdapter:
             json_object=bool(payload.get("json_object", True)),
         )
         data, _elapsed = await self._post(request)
-        text = self._content_of(data)
+        usage = self.normalize_usage(data.get("usage")).as_dict()
+        try:
+            text = self._content_of(data)
+        except ProviderError as exc:
+            # 请求已得到提供方响应时，内容异常也要保留真实 usage，供任务层结算。
+            exc.details.setdefault("usage", usage)
+            raise
         try:
             # 与连接测试同一套解析：整段 JSON 或整段代码块都接受（DEVELOPMENT 4.5）
             parsed = load_json_object(text)
@@ -334,7 +340,7 @@ class ChatCompletionsAdapter:
             raise ProviderError(
                 ProviderErrorKind.INVALID_OUTPUT,
                 exc.message,
-                details={"body": sanitize(text), **(exc.details or {})},
+                details={"body": sanitize(text), "usage": usage, **(exc.details or {})},
             ) from exc
         parsed.setdefault("_usage", self.normalize_usage(data.get("usage")).as_dict())
         return parsed

@@ -34,6 +34,7 @@ class SpeakerRegistry:
         temp_ref: str,
         first_quote_id: str,
         description: str = "",
+        canonical_name: str = "",
         evidence_refs: tuple[str, ...] = (),
     ) -> SpeakerSlot:
         """把模型声明的临时人物（new1…）落成场景内的新分组。"""
@@ -41,9 +42,17 @@ class SpeakerRegistry:
         existing = self.state.find(temp_ref)
         if existing is not None:
             return existing
+        named = self.state.find_by_name(canonical_name)
+        if named is not None:
+            named.temp_ref = temp_ref
+            if description and not named.description:
+                named.description = description
+            self.state.remember_character(named.canonical_name, named.description)
+            return named
         return self.state.add_speaker(
             first_quote_id=first_quote_id,
             description=description,
+            canonical_name=canonical_name,
             evidence_refs=evidence_refs,
             temp_ref=temp_ref,
         )

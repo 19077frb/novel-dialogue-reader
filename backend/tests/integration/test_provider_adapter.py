@@ -274,11 +274,18 @@ def test_generate_labels_returns_parsed_object_and_surfaces_errors() -> None:
     assert parsed["_usage"]["total_tokens"] == 4
 
     def broken(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"choices": [{"message": {"content": "不是 JSON"}}]})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "不是 JSON"}}],
+                "usage": {"prompt_tokens": 9, "completion_tokens": 3, "total_tokens": 12},
+            },
+        )
 
     with pytest.raises(ProviderError) as excinfo:
         _run(_adapter(broken).generate_labels({"messages": [{"role": "user", "content": "x"}]}))
     assert excinfo.value.kind is ProviderErrorKind.INVALID_OUTPUT
+    assert excinfo.value.details["usage"]["total_tokens"] == 12
 
 
 def test_error_details_never_contain_the_key() -> None:

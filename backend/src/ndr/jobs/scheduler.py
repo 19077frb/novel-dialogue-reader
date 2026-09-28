@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
-from ..context.budget import DEFAULT_POLICY, BudgetPolicy, policy_for_version
+from ..context.budget import DEFAULT_POLICY, BudgetPolicy, estimate_tokens, policy_for_version
 from ..context.recheck import plan_recheck, route_window
 from ..context.service import load_window_inputs, plan_range
 from ..context.window_builder import plan_windows
@@ -40,8 +40,9 @@ from ..llm.adapters import AdapterSpec, build_adapter
 from ..llm.errors import ProviderError, ProviderErrorKind
 from ..llm.prompts import LABELING_PROMPT_VERSION
 from ..llm.validation import parse_and_validate
+from ..scenes.acceptance import ACCEPTANCE_POLICY_VERSION
 from ..scenes.engine import apply_window
-from ..scenes.runner import _messages_for, _targets_for
+from ..scenes.runner import _messages_for, _restore_output_references, _targets_for
 from ..scenes.state import SceneState
 from ..storage.cache import CacheKeyParts, ResultCacheStore, compute_cache_key, fingerprint
 from ..storage.models import Annotation, BookVersion, InferenceRun, Job, JobWindow, ModelProfile
@@ -59,7 +60,20 @@ SCHEDULER_VERSION = "scheduler-1"
 AUTO_RETRY_KINDS = {ProviderErrorKind.RATE_LIMITED, ProviderErrorKind.UNAVAILABLE}
 DEFAULT_LEASE_SECONDS = 900
 LABELING_MAX_TOKENS = 800
-OUTPUT_TOKENS_PER_TARGET = 20
+OUTPUT_BASE_TOKENS = 256
+OUTPUT_TOKENS_PER_TARGET = 128
+
+def _output_token_reserve(snapshot: dict[str, Any] | None, target_count: int) -> int:
+    """按契约规模预留输出，并受配置的 max_tokens 上限约束。"""
+
+    params = (snapshot or {}).get("params", {}) or {}
+    try:
+        requested_max = max(0, int(params.get("max_tokens", LABELING_MAX_TOKENS)))
+    except (TypeError, ValueError):
+        requested_max = LABELING_MAX_TOKENS
+    structural_estimate = OUTPUT_BASE_TOKENS + OUTPUT_TOKENS_PER_TARGET * target_count
+    return min(requested_max, structural_estimate)
+
 
 TERMINAL_STATES = {
     JobState.COMPLETED,
@@ -222,23 +236,31 @@ def ensure_windows(
 
 
 def _cache_key_for(
-    *, job: Job, version: BookVersion, window, snapshot: dict[str, Any] | None  # noqa: ANN001
+    *,
+    job: Job,
+    version: BookVersion,
+    window,  # noqa: ANN001
+    snapshot: dict[str, Any] | None,
+    state: SceneState,
 ) -> str:
     snapshot = snapshot or {}
+    # 缓存必须覆盖实际发给模型的动态人物状态，而不只是预先规划的正文片段。
+    messages = _messages_for(window=window, state=state, locked_summary=None)
     return compute_cache_key(
         CacheKeyParts(
             book_version_id=version.id,
             target_ids=list(window.target_quote_ids),
-            input_fingerprint=fingerprint([fragment.text for fragment in window.fragments]),
+            input_fingerprint=fingerprint(messages),
             model=str(snapshot.get("model", "")),
             params=snapshot.get("params", {}) or {},
-            protocol_version=str(snapshot.get("protocol", "")),
+            protocol_version=f"{snapshot.get('protocol', '')}:{snapshot.get('base_url', '')}",
             prompt_version=LABELING_PROMPT_VERSION,
             schema_version="1.0",
             policy_version=window.policy_version,
             dependency_hash=window.dependency_hash,
             reading_mode=_reading_mode_of(job).value,
             visible_horizon_cp=window.visible_horizon_cp,
+            acceptance_policy_version=ACCEPTANCE_POLICY_VERSION,
         )
     )
 
@@ -378,11 +400,15 @@ def _run_recheck(
         with session_factory() as session:
             job = session.get(Job, job_id)
             assert job is not None
+            state = _load_state(job)
             cache_key = _cache_key_for(
-                job=job, version=version, window=recheck_window, snapshot=snapshot
+                job=job,
+                version=version,
+                window=recheck_window,
+                snapshot=snapshot,
+                state=state,
             )
             cached_result = ResultCacheStore(session).get(cache_key)
-            state = _load_state(job)
 
         raw: Any = None
         run_id: str | None = None
@@ -410,8 +436,7 @@ def _run_recheck(
                             if timeout
                             else InferenceRunState.FAILED
                         )
-                        if not timeout:
-                            run.usage_json = None
+                        run.usage_json = _usage_json_from_error(error)
                     if timeout:
                         failed_job = session.get(Job, job_id)
                         if failed_job is not None:
@@ -442,13 +467,11 @@ def _run_recheck(
                 run = session.get(InferenceRun, run_id)
                 if run is not None:
                     run.elapsed_ms = elapsed_ms
+                    usage = raw.get("_usage") if isinstance(raw, dict) else None
+                    known_usage = bool(usage) and not usage.get("unknown")
+                    run.usage_json = json.dumps(usage, ensure_ascii=False) if known_usage else None
                     if ok:
                         run.state = InferenceRunState.SUCCEEDED
-                        usage = raw.get("_usage") if isinstance(raw, dict) else None
-                        known_usage = bool(usage) and not usage.get("unknown")
-                        run.usage_json = (
-                            json.dumps(usage, ensure_ascii=False) if known_usage else None
-                        )
                     else:
                         run.state = InferenceRunState.FAILED
                         run.error_code = "INVALID_MODEL_OUTPUT"
@@ -510,6 +533,13 @@ def backoff_seconds(attempt: int, settings: Settings) -> int:
     base = max(0, int(settings.rate_limit_backoff_base_seconds))
     cap = max(0, int(settings.rate_limit_backoff_max_seconds))
     return min(base * (2 ** max(0, attempt - 1)), cap)
+
+
+def _usage_json_from_error(error: ProviderError) -> str | None:
+    usage = error.details.get("usage") if isinstance(error.details, dict) else None
+    if not isinstance(usage, dict) or usage.get("unknown"):
+        return None
+    return json.dumps(usage, ensure_ascii=False)
 
 
 def _dispatch_with_bounded_retry(
@@ -575,7 +605,7 @@ def _dispatch_with_bounded_retry(
                 failed_run.state = InferenceRunState.FAILED
                 failed_run.error_code = error.code.value
                 failed_run.elapsed_ms = elapsed_ms
-                failed_run.usage_json = None
+                failed_run.usage_json = _usage_json_from_error(error)
             job = session.get(Job, job_id)
             if job is not None:
                 job.progress_json = json.dumps(
@@ -774,9 +804,19 @@ def run_job(
             session.commit()
 
         # 预算预留（含输出预留；未知用量也按此保守口径）
-        reserve = window.budget["total_tokens"] + OUTPUT_TOKENS_PER_TARGET * len(
-            window.target_quote_ids
+        target_count = len(window.target_quote_ids)
+        output_reserve = max(
+            _output_token_reserve(snapshot, target_count),
+            _output_token_reserve(strong_snapshot, target_count)
+            if strong_snapshot is not None
+            else 0,
         )
+        planned_reserve = window.budget["total_tokens"] + output_reserve
+        actual_prompt_tokens = sum(
+            estimate_tokens(message["content"])
+            for message in _messages_for(window=window, state=state, locked_summary=None)
+        )
+        reserve = max(planned_reserve, actual_prompt_tokens + output_reserve)
         max_input = _budget_of(job_snapshot).get("max_input_tokens")
         if max_input is not None and spent["input_tokens"] + reserve > int(max_input):
             with session_factory() as session:
@@ -804,7 +844,11 @@ def run_job(
         window_snapshot = strong_snapshot if route.strong else snapshot
 
         cache_key = _cache_key_for(
-            job=job_snapshot, version=version, window=window, snapshot=window_snapshot
+            job=job_snapshot,
+            version=version,
+            window=window,
+            snapshot=window_snapshot,
+            state=state,
         )
 
         # 缓存命中：不调用模型，也不新增推理尝试
@@ -909,6 +953,7 @@ def run_job(
                 ).scalar_one_or_none()
 
                 if error is not None:
+                    run.usage_json = _usage_json_from_error(error)
                     if error.kind is ProviderErrorKind.TIMEOUT:
                         # 超时可能已经计费且结果未知：不自动重发，交人工对账（F15/F20）
                         outcome.errors.append(f"{window.window_id}:{error.code.value}")
@@ -950,6 +995,8 @@ def run_job(
                 else:
                     calls += 1
                     usage = raw.get("_usage") if isinstance(raw, dict) else None
+                    known_usage = bool(usage) and not usage.get("unknown")
+                    run.usage_json = json.dumps(usage, ensure_ascii=False) if known_usage else None
                     state = _load_state(job)
                     ok, codes, messages, repair_warnings = _apply_payload(
                         session,
@@ -1084,7 +1131,7 @@ def _dispatch(
         "json_object": True,
         "target_quote_ids": list(window.target_quote_ids),
     }
-    return asyncio.run(adapter.generate_labels(payload))
+    return _restore_output_references(asyncio.run(adapter.generate_labels(payload)), window)
 
 
 def reconcile_stale_runs(

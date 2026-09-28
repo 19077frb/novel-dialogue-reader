@@ -150,11 +150,17 @@ def _ensure_group(
     scene_id: str,
 ) -> str:
     if slot.group_id:
+        row = session.get(SpeakerGroup, slot.group_id)
+        if row is not None:
+            row.canonical_name = slot.canonical_name or None
+            row.description = slot.description or None
         return slot.group_id
     row = SpeakerGroup(
         scene_id=scene_id,
         first_quote_id=slot.first_quote_id,
         display_label=slot.display_label,
+        canonical_name=slot.canonical_name or None,
+        description=slot.description or None,
         evidence_refs_json=json.dumps(list(slot.evidence_refs), ensure_ascii=False),
     )
     session.add(row)
@@ -320,7 +326,7 @@ def apply_window(
         speaker_refs=tuple(
             ref
             for slot in state.participants
-            for ref in (slot.group_id, slot.temp_ref)
+            for ref in (slot.display_label, slot.group_id)
             if ref
         ),
         evidence_ids=tuple(window.fragment_ids),
@@ -404,17 +410,19 @@ def apply_window(
         speaker_id: str | None = None
         if label.kind is QuoteKind.SPEECH and label.assignment is not None:
             if label.assignment is Assignment.NEW and label.speaker_ref:
+                declaration = next(
+                    (
+                        speaker
+                        for speaker in parsed.new_speakers
+                        if speaker.temp_ref == label.speaker_ref
+                    ),
+                    None,
+                )
                 slot = registry.register_temp_speaker(
                     temp_ref=label.speaker_ref,
                     first_quote_id=label.quote_id,
-                    description=next(
-                        (
-                            speaker.description
-                            for speaker in parsed.new_speakers
-                            if speaker.temp_ref == label.speaker_ref
-                        ),
-                        "",
-                    ),
+                    description=declaration.description if declaration else "",
+                    canonical_name=label.speaker_name or "",
                     evidence_refs=tuple(evidence_ids),
                 )
                 speaker_id = _ensure_group(
@@ -423,6 +431,11 @@ def apply_window(
                 if speaker_id not in application.created_group_ids:
                     application.created_group_ids.append(speaker_id)
             elif label.assignment is Assignment.EXISTING:
+                slot = registry.resolve(label.speaker_ref)
+                if slot is not None and label.speaker_name:
+                    slot.canonical_name = label.speaker_name.strip()
+                    state.remember_character(slot.canonical_name, slot.description)
+                    _ensure_group(session, state=state, slot=slot, scene_id=scene_id)
                 speaker_id, warning = _resolve_speaker(
                     registry, label=label, visible_from_cp=visible_from_cp
                 )
@@ -524,6 +537,8 @@ def apply_window(
         "locked_skipped": len(application.skipped_locked_quote_ids),
         "groups": len(state.participants),
     }
+    # new1/new2 是单次模型响应内的临时引用；带到下一窗口会误指旧人物。
+    state.clear_request_aliases()
     return application
 
 

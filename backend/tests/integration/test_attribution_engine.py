@@ -105,13 +105,22 @@ def _thought(quote_id: str) -> dict:
     )
 
 
-def _speech(quote_id: str, *, assignment: str, speaker_ref: str | None, basis: str = "DIRECT") -> dict:
+def _speech(
+    quote_id: str,
+    *,
+    assignment: str,
+    speaker_ref: str | None,
+    basis: str = "DIRECT",
+    evidence_ref: str | None = None,
+    speaker_name: str | None = None,
+) -> dict:
     return _label(
         quote_id,
         assignment=assignment,
         speaker_ref=speaker_ref,
         basis=basis,
-        evidence_refs=[quote_id],
+        speaker_name=speaker_name,
+        evidence_refs=[evidence_ref or quote_id],
     )
 
 
@@ -216,9 +225,15 @@ def test_three_speakers_and_consecutive_same_speaker(
                 },
             ],
             "labels": [
-                _speech(targets[0], assignment="NEW", speaker_ref="new1"),
-                _speech(targets[1], assignment="EXISTING", speaker_ref="new1"),
-                _speech(targets[2], assignment="NEW", speaker_ref="new2"),
+                _speech(
+                    targets[0],
+                    assignment="NEW",
+                    speaker_ref="new1",
+                    speaker_name="绫濑沙季",
+                    evidence_ref=targets[1],
+                ),
+                _speech(targets[1], assignment="EXISTING", speaker_ref="new1", evidence_ref=targets[0]),
+                _speech(targets[2], assignment="NEW", speaker_ref="new2", evidence_ref=targets[1]),
             ],
         }
         result = _apply(session, output=output, window=window, state=SceneState(), inputs=inputs)
@@ -232,6 +247,8 @@ def test_three_speakers_and_consecutive_same_speaker(
     targets, groups, annotations = _with_session(migrated_settings, body)
 
     assert [group.display_label for group in groups] == ["S1", "S2"]
+    assert groups[0].canonical_name == "绫濑沙季"
+    assert groups[0].description == "少女"
     assert annotations[targets[0]].speaker_id == annotations[targets[1]].speaker_id
     assert annotations[targets[2]].speaker_id != annotations[targets[0]].speaker_id
     assert all(item.status is AnnotationStatus.ACCEPTED for item in annotations.values())

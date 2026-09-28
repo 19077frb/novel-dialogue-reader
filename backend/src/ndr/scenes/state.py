@@ -15,7 +15,7 @@ from typing import Any
 
 from ..domain.enums import GapDecision, SceneStatus
 
-SCENE_STATE_VERSION = "scene-state-1"
+SCENE_STATE_VERSION = "scene-state-2"
 
 
 @dataclass
@@ -27,6 +27,7 @@ class SpeakerSlot:
     group_id: str | None = None  # 已落库的稳定 ID（新分组在提交后才拿到）
     temp_ref: str | None = None  # 模型给的临时引用（new1…），用于本次输出解析
     description: str = ""
+    canonical_name: str = ""
     evidence_refs: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
@@ -36,6 +37,7 @@ class SpeakerSlot:
             "group_id": self.group_id,
             "temp_ref": self.temp_ref,
             "description": self.description,
+            "canonical_name": self.canonical_name,
             "evidence_refs": list(self.evidence_refs),
         }
 
@@ -62,6 +64,7 @@ class SceneState:
     last_quote_id: str | None = None
     last_speaker_ref: str | None = None
     participants: list[SpeakerSlot] = field(default_factory=list)
+    known_characters: dict[str, str] = field(default_factory=dict)
     unresolved: list[str] = field(default_factory=list)
     version: int = 1
 
@@ -97,11 +100,32 @@ class SceneState:
                 return slot
         return None
 
+    def find_by_name(self, canonical_name: str | None) -> SpeakerSlot | None:
+        key = (canonical_name or "").strip().casefold()
+        if not key:
+            return None
+        return next(
+            (
+                slot
+                for slot in self.participants
+                if slot.canonical_name.strip().casefold() == key
+            ),
+            None,
+        )
+
+    def remember_character(self, canonical_name: str | None, description: str = "") -> None:
+        name = (canonical_name or "").strip()
+        if not name:
+            return
+        old_description = self.known_characters.get(name, "")
+        self.known_characters[name] = description.strip() or old_description
+
     def add_speaker(
         self,
         *,
         first_quote_id: str,
         description: str = "",
+        canonical_name: str = "",
         evidence_refs: tuple[str, ...] = (),
         temp_ref: str | None = None,
     ) -> SpeakerSlot:
@@ -110,24 +134,35 @@ class SceneState:
             first_quote_id=first_quote_id,
             temp_ref=temp_ref,
             description=description,
+            canonical_name=canonical_name.strip(),
             evidence_refs=evidence_refs,
         )
         self.participants.append(slot)
+        self.remember_character(slot.canonical_name, slot.description)
         return slot
 
     def prompt_state(self, *, max_chars: int = 300) -> str:
         """给提示用的紧凑状态文本（受 state_tokens 限制，不无限累积摘要）。"""
 
         labels = "、".join(
-            f"{slot.display_label}:{slot.description or '未说明'}" for slot in self.participants
+            f"{slot.display_label}:{slot.canonical_name or slot.description or '未说明'}"
+            for slot in self.participants
         ) or "（本场景还没有已建立的分组）"
+        last_slot = self.find(self.last_speaker_ref)
+        last_speaker = last_slot.display_label if last_slot else "未知"
         text = (
             f"场景 {self.scene_ref} 状态={self.status.value}；"
-            f"最近发言={self.last_quote_id or '无'}；分组成员={labels}"
+            f"最近发言人={last_speaker}；分组成员={labels}"
         )
         if self.unresolved:
             text += f"；未解决={'、'.join(self.unresolved[:5])}"
         return text[:max_chars]
+
+    def clear_request_aliases(self) -> None:
+        """请求内的 ``newN`` 不跨窗口复用；稳定 group_id 与展示标签继续保留。"""
+
+        for slot in self.participants:
+            slot.temp_ref = None
 
     # ---------- 转移 ----------
 
@@ -186,6 +221,7 @@ class SceneState:
             "last_quote_id": self.last_quote_id,
             "last_speaker_ref": self.last_speaker_ref,
             "participants": [slot.as_dict() for slot in self.participants],
+            "known_characters": dict(self.known_characters),
             "unresolved": list(self.unresolved),
             "version": self.version,
         }
@@ -203,6 +239,7 @@ class SceneState:
             end_gap_id=payload.get("end_gap_id"),
             last_quote_id=payload.get("last_quote_id"),
             last_speaker_ref=payload.get("last_speaker_ref"),
+            known_characters=dict(payload.get("known_characters", {})),
             unresolved=list(payload.get("unresolved", [])),
             version=int(payload.get("version", 1)),
         )
@@ -214,6 +251,7 @@ class SceneState:
                     group_id=slot.get("group_id"),
                     temp_ref=slot.get("temp_ref"),
                     description=str(slot.get("description", "")),
+                    canonical_name=str(slot.get("canonical_name", "")),
                     evidence_refs=tuple(slot.get("evidence_refs", [])),
                 )
             )

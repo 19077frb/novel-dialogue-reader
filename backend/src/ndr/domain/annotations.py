@@ -17,10 +17,10 @@ from .enums import (
 
 class SpeakerLegendItemOut(ApiModel):
     group_id: str
-    label: str
+    label: str = Field(description="已确认真实姓名优先，否则为场景内编号 S1/S2…")
     scene_id: str
     scene_ref: str | None = None
-    color_index: int = Field(ge=0, description="场景内稳定色号（0..N-1）")
+    color_index: int = Field(ge=0, description="按已确认人物身份统一的稳定色号（0..N-1）")
     first_quote_id: str | None = None
     description: str = ""
     quote_count: int = Field(ge=0, default=0)
@@ -37,7 +37,10 @@ class AnnotationItemOut(ApiModel):
     status: AnnotationStatus
     source: str
     speaker_group_id: str | None = None
-    label: str | None = Field(default=None, description="展示编号（S1/S2…），仅在可见时有值")
+    label: str | None = Field(
+        default=None,
+        description="已确认真实姓名优先，否则为场景内编号；仅在可见时有值",
+    )
     color_index: int | None = Field(default=None, ge=0)
     visible_from_cp: int | None = None
     stale: bool = False

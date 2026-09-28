@@ -331,7 +331,10 @@ def spent_tokens(session: Session, job_id: str) -> dict[str, int]:
     unknown_runs = 0
     for run in rows:
         if not run.usage_json:
-            if run.state.value in {"DISPATCHED", "UNKNOWN_OUTCOME", "SUCCEEDED"}:
+            # INVALID_MODEL_OUTPUT 表示提供方通常已经生成过内容；缺 usage 不能按零费用处理。
+            if run.state.value in {"DISPATCHED", "UNKNOWN_OUTCOME", "SUCCEEDED"} or (
+                run.state.value == "FAILED" and run.error_code == "INVALID_MODEL_OUTPUT"
+            ):
                 unknown_runs += 1
             continue
         try:

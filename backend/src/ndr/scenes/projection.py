@@ -2,7 +2,7 @@
 
 规则（DEVELOPMENT.md 6.3 / 6.5）：
 
-- 颜色与编号都来自**场景内稳定分组**；同一场景内同一分组永远同色同编号。
+- 已确认真实姓名的分组按人物身份跨场景共享颜色；未确认姓名的场景分组保持隔离。
 - 初读（`initial`）模式下，`visible_from_cp` 晚于 `visible_horizon_cp` 的标注
   **不下发颜色与编号**（`withheld=true`），避免用后文证据提前同色；重读（`reread`）不限制。
 - 未知（UNKNOWN）不下发分组，也不分配颜色；没有标注的候选计入 `unprocessed_quotes`。
@@ -122,6 +122,7 @@ def build_projection(
         for row in session.execute(
             select(Quote).where(
                 Quote.book_version_id == book_version_id,
+                Quote.nesting_depth == 0,
                 Quote.start_cp < end_cp,
                 Quote.end_cp > start_cp,
             )
@@ -146,16 +147,37 @@ def build_projection(
         ).scalars()
     )
 
-    # 场景内稳定色号：按分组的首次发言位置排序
+    # 已确认真实姓名是章节/书籍级身份键：跨场景的同名人物共享颜色。
+    # 没有姓名的分组仍以 group_id 隔离，绝不因为都叫 S1 就误合并。
+    first_quote_ids = [group.first_quote_id for group in groups if group.first_quote_id]
+    first_positions = {
+        quote_id: start_cp
+        for quote_id, start_cp in session.execute(
+            select(Quote.id, Quote.start_cp).where(Quote.id.in_(first_quote_ids or [""]))
+        )
+    }
+    groups.sort(
+        key=lambda group: (
+            first_positions.get(group.first_quote_id or "", 2**63 - 1),
+            group.id,
+        )
+    )
+    identity_by_group: dict[str, str] = {}
     color_by_group: dict[str, int] = {}
     label_by_group: dict[str, str] = {}
-    scene_of_group: dict[str, str] = {}
+    color_by_identity: dict[str, int] = {}
+    representative_by_identity: dict[str, SpeakerGroup] = {}
+    ordered_identities: list[str] = []
     for group in groups:
-        scene_groups = [item for item in groups if item.scene_id == group.scene_id]
-        index = scene_groups.index(group)
-        color_by_group[group.id] = index
-        label_by_group[group.id] = group.display_label
-        scene_of_group[group.id] = group.scene_id
+        name = (group.canonical_name or "").strip()
+        identity = f"name:{name.casefold()}" if name else f"group:{group.id}"
+        if identity not in color_by_identity:
+            color_by_identity[identity] = len(color_by_identity)
+            representative_by_identity[identity] = group
+            ordered_identities.append(identity)
+        identity_by_group[group.id] = identity
+        color_by_group[group.id] = color_by_identity[identity]
+        label_by_group[group.id] = name or group.display_label
 
     counts = {
         "total": 0,
@@ -167,7 +189,7 @@ def build_projection(
         "unprocessed_quotes": max(0, len(quote_rows) - len(annotations)),
     }
     items: list[AnnotationItemOut] = []
-    quote_count_by_group: dict[str, int] = {}
+    quote_count_by_identity: dict[str, int] = {}
     for annotation in annotations:
         quote = quote_rows.get(annotation.quote_id)
         if quote is None:
@@ -202,7 +224,9 @@ def build_projection(
         label = None if (withheld or group_id is None) else label_by_group.get(group_id)
         color_index = None if (withheld or group_id is None) else color_by_group.get(group_id)
         if group_id and not withheld:
-            quote_count_by_group[group_id] = quote_count_by_group.get(group_id, 0) + 1
+            identity = identity_by_group.get(group_id)
+            if identity:
+                quote_count_by_identity[identity] = quote_count_by_identity.get(identity, 0) + 1
 
         items.append(
             AnnotationItemOut(
@@ -225,18 +249,23 @@ def build_projection(
             )
         )
 
-    legend = [
-        SpeakerLegendItemOut(
-            group_id=group.id,
-            label=group.display_label,
-            scene_id=group.scene_id,
-            color_index=color_by_group[group.id],
-            first_quote_id=group.first_quote_id,
-            quote_count=quote_count_by_group.get(group.id, 0),
+    legend = []
+    for identity in ordered_identities:
+        quote_count = quote_count_by_identity.get(identity, 0)
+        if quote_count <= 0:
+            continue
+        group = representative_by_identity[identity]
+        legend.append(
+            SpeakerLegendItemOut(
+                group_id=group.id,
+                label=(group.canonical_name or "").strip() or group.display_label,
+                scene_id=group.scene_id,
+                color_index=color_by_identity[identity],
+                first_quote_id=group.first_quote_id,
+                description=group.description or "",
+                quote_count=quote_count,
+            )
         )
-        for group in groups
-        if quote_count_by_group.get(group.id, 0) > 0  # 只列出本范围内真的出现过的分组
-    ]
     scene_summaries = [
         {
             "scene_id": scene.id,

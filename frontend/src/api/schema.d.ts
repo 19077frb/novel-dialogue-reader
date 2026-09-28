@@ -751,7 +751,7 @@ export interface components {
             speaker_group_id?: string | null;
             /**
              * Label
-             * @description 展示编号（S1/S2…），仅在可见时有值
+             * @description 已确认真实姓名优先，否则为场景内编号；仅在可见时有值
              */
             label?: string | null;
             /** Color Index */
@@ -2437,7 +2437,10 @@ export interface components {
         SpeakerLegendItemOut: {
             /** Group Id */
             group_id: string;
-            /** Label */
+            /**
+             * Label
+             * @description 已确认真实姓名优先，否则为场景内编号 S1/S2…
+             */
             label: string;
             /** Scene Id */
             scene_id: string;
@@ -2445,7 +2448,7 @@ export interface components {
             scene_ref?: string | null;
             /**
              * Color Index
-             * @description 场景内稳定色号（0..N-1）
+             * @description 按已确认人物身份统一的稳定色号（0..N-1）
              */
             color_index: number;
             /** First Quote Id */

@@ -85,6 +85,25 @@ def test_break_closes_scene_and_starts_a_new_one() -> None:
     assert state.version == 2
 
 
+def test_confirmed_character_memory_survives_scene_break() -> None:
+    state = SceneState(scene_id="sc1")
+    SpeakerRegistry(state).register_temp_speaker(
+        temp_ref="new1",
+        first_quote_id="q1",
+        canonical_name="绫濑沙季",
+        description="义妹",
+    )
+    state.apply_gap(
+        decision=GapDecision.BREAK,
+        gap_id="g1",
+        next_quote_id="q2",
+        next_quote_start_cp=100,
+        position_cp=90,
+    )
+    assert state.participants == []
+    assert state.known_characters == {"绫濑沙季": "义妹"}
+
+
 def test_uncertain_keeps_scene_open_with_pending_boundary() -> None:
     state = SceneState(scene_id="sc1")
     registry = SpeakerRegistry(state)
@@ -109,7 +128,7 @@ def test_snapshot_round_trip_preserves_state() -> None:
     state = SceneState(scene_id="sc1", start_cp=10, last_quote_id="q3")
     registry = SpeakerRegistry(state)
     slot = registry.register_temp_speaker(
-        temp_ref="new1", first_quote_id="q1", description="门外的声音"
+        temp_ref="new1", first_quote_id="q1", description="义妹", canonical_name="绫濑沙季"
     )
     slot.group_id = "g-1"
     state.unresolved.append("g7")
@@ -122,9 +141,11 @@ def test_snapshot_round_trip_preserves_state() -> None:
     assert restored.unresolved == ["g7"]
     assert [item.display_label for item in restored.participants] == ["S1"]
     assert restored.participants[0].group_id == "g-1"
-    assert restored.participants[0].description == "门外的声音"
+    assert restored.participants[0].description == "义妹"
+    assert restored.participants[0].canonical_name == "绫濑沙季"
+    assert restored.known_characters == {"绫濑沙季": "义妹"}
     assert restored.label_map()["new1"] == "S1"
-    assert restored.snapshot()["state_version"] == "scene-state-1"
+    assert restored.snapshot()["state_version"] == "scene-state-2"
 
 
 def test_prompt_state_is_bounded() -> None:
@@ -157,24 +178,32 @@ def test_labels_follow_first_speech_order_and_reuse_gaps() -> None:
 # ---------- 接受策略 ----------
 
 
-def test_direct_speech_is_accepted() -> None:
-    decision = decide_acceptance(_speech_label())
+def test_direct_speech_requires_independent_evidence() -> None:
+    decision = decide_acceptance(_speech_label(evidence_refs=["p1"]))
     assert decision.status is AnnotationStatus.ACCEPTED
     assert decision.needs_review is False
 
+    for evidence in ([], ["q1"]):
+        unverified = decide_acceptance(_speech_label(evidence_refs=evidence))
+        assert unverified.status is AnnotationStatus.PROVISIONAL
+        assert unverified.needs_review is True
+        assert unverified.reason == "unverified_direct_basis"
 
-def test_style_only_and_coreference_stay_provisional_on_cold_start() -> None:
+
+def test_linked_speech_is_accepted_but_style_and_empty_evidence_need_review() -> None:
     style = decide_acceptance(_speech_label(basis="STYLE_ONLY"))
     assert style.status is AnnotationStatus.PROVISIONAL
     assert style.needs_review is True
     assert style.review_reason is ReviewReason.LOW_CONFIDENCE
 
-    coref = decide_acceptance(_speech_label(basis="COREFERENCE"))
-    assert coref.status is AnnotationStatus.PROVISIONAL
-    assert coref.needs_review is True
+    for basis in ("COREFERENCE", "RESPONSE_LINK"):
+        linked = decide_acceptance(_speech_label(basis=basis, evidence_refs=["q2"]))
+        assert linked.status is AnnotationStatus.ACCEPTED
+        assert linked.needs_review is False
 
-    calibrated = decide_acceptance(_speech_label(basis="COREFERENCE"), cold_start=False)
-    assert calibrated.status is AnnotationStatus.ACCEPTED
+        unverified = decide_acceptance(_speech_label(basis=basis, evidence_refs=[]))
+        assert unverified.status is AnnotationStatus.PROVISIONAL
+        assert unverified.needs_review is True
 
 
 def test_unknown_and_insufficient_never_create_people() -> None:
@@ -202,6 +231,34 @@ def test_non_speech_types_are_accepted_without_speaker() -> None:
         decision = decide_acceptance(label)
         assert decision.status is AnnotationStatus.ACCEPTED
         assert decision.reason == "non_speech_type"
+
+
+def test_unknown_kind_is_not_counted_as_accepted() -> None:
+    label = QuoteLabel.model_validate(
+        {
+            "quote_id": "q9",
+            "scene_ref": "scene_current",
+            "kind": "unknown",
+            "assignment": None,
+            "speaker_ref": None,
+            "basis": None,
+            "evidence_refs": [],
+        }
+    )
+    decision = decide_acceptance(label)
+    assert decision.status is AnnotationStatus.UNKNOWN
+    assert decision.needs_review is True
+
+
+def test_request_aliases_are_cleared_between_windows() -> None:
+    state = SceneState()
+    first = SpeakerRegistry(state).register_temp_speaker(temp_ref="new1", first_quote_id="q1")
+    first.group_id = "stable-1"
+    state.clear_request_aliases()
+    second = SpeakerRegistry(state).register_temp_speaker(temp_ref="new1", first_quote_id="q2")
+    assert second is not first
+    assert first.temp_ref is None
+    assert second.first_quote_id == "q2"
 
 
 def test_visible_from_uses_latest_evidence_position() -> None:

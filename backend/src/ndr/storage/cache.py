@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .models import ResultCache
 
-CACHE_SCHEMA_VERSION = "cache-1"
+CACHE_SCHEMA_VERSION = "cache-2"
 
 
 def fingerprint(payload: Any) -> str:
@@ -45,6 +45,7 @@ class CacheKeyParts:
     dependency_hash: str
     reading_mode: str
     visible_horizon_cp: int | None
+    acceptance_policy_version: str = "acceptance-1"
     cache_schema_version: str = CACHE_SCHEMA_VERSION
 
     def as_dict(self) -> dict[str, Any]:
@@ -61,6 +62,7 @@ class CacheKeyParts:
             "dependency_hash": self.dependency_hash,
             "reading_mode": self.reading_mode,
             "visible_horizon_cp": self.visible_horizon_cp,
+            "acceptance_policy_version": self.acceptance_policy_version,
             "cache_schema_version": self.cache_schema_version,
         }
 

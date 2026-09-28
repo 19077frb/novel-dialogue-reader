@@ -74,6 +74,23 @@ def _create_and_run(client: TestClient, settings: Settings, book_id: str, profil
     return job["id"]
 
 
+def test_nested_quotes_are_not_counted_as_unprocessed_targets(
+    fake_provider_client: TestClient,
+) -> None:
+    sample = "第一章\n「她说『明天见』，然后离开了。」\n"
+    response = fake_provider_client.post(
+        "/api/books/import",
+        files={"file": ("nested.txt", sample.encode("utf-8"), "text/plain")},
+    )
+    data = response.json()["data"]
+    payload = fake_provider_client.get(
+        f"/api/books/{data['book_id']}/annotations",
+        params={"start_cp": 0, "end_cp": len(sample)},
+    ).json()["data"]
+    assert payload["counts"]["total"] == 0
+    assert payload["counts"]["unprocessed_quotes"] == 1
+
+
 def test_projection_reports_unknown_without_colors(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
@@ -126,9 +143,29 @@ def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
             session.add(scene)
             session.flush()
             group = SpeakerGroup(
-                scene_id=scene.id, first_quote_id=quotes[0].id, display_label="S1"
+                scene_id=scene.id,
+                first_quote_id=quotes[0].id,
+                display_label="S1",
+                canonical_name="绫濑沙季",
+                description="义妹",
             )
             session.add(group)
+            session.flush()
+            second_scene = Scene(
+                book_version_id=version.id,
+                start_cp=quotes[2].start_cp,
+                status=__import__("ndr.domain.enums", fromlist=["SceneStatus"]).SceneStatus.OPEN,
+            )
+            session.add(second_scene)
+            session.flush()
+            same_person = SpeakerGroup(
+                scene_id=second_scene.id,
+                first_quote_id=quotes[2].id,
+                display_label="S1",
+                canonical_name="绫濑沙季",
+                description="同一人物在新场景再次出现",
+            )
+            session.add(same_person)
             session.flush()
             session.add(
                 Annotation(
@@ -156,6 +193,19 @@ def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
                     visible_from_cp=len(SAMPLE),  # 后文才揭示
                 )
             )
+            session.add(
+                Annotation(
+                    quote_id=quotes[2].id,
+                    scene_id=second_scene.id,
+                    kind="speech",
+                    assignment="EXISTING",
+                    basis="COREFERENCE",
+                    speaker_id=same_person.id,
+                    status=AnnotationStatus.ACCEPTED,
+                    source="MODEL",
+                    visible_from_cp=quotes[0].end_cp,
+                )
+            )
     finally:
         engine.dispose()
 
@@ -163,11 +213,13 @@ def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
         f"/api/books/{book_id}/annotations",
         params={"start_cp": 0, "end_cp": len(SAMPLE)},
     ).json()["data"]
-    assert full["counts"]["accepted"] == 2
-    assert [item["color_index"] for item in full["items"]] == [0, 0]
-    assert [item["label"] for item in full["items"]] == ["S1", "S1"]
-    assert full["legend"][0]["label"] == "S1"
-    assert full["legend"][0]["quote_count"] == 2
+    assert full["counts"]["accepted"] == 3
+    assert [item["color_index"] for item in full["items"]] == [0, 0, 0]
+    assert [item["label"] for item in full["items"]] == ["绫濑沙季"] * 3
+    assert len(full["legend"]) == 1
+    assert full["legend"][0]["label"] == "绫濑沙季"
+    assert full["legend"][0]["description"] == "义妹"
+    assert full["legend"][0]["quote_count"] == 3
 
     # 初读：horizon 卡在第一条之后 → 第二条证据尚未出现，不下发颜色/编号
     early = fake_provider_client.get(
@@ -177,7 +229,7 @@ def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
     assert early["counts"]["withheld"] == 1
     withheld = [item for item in early["items"] if item["withheld"]]
     assert withheld and withheld[0]["label"] is None and withheld[0]["color_index"] is None
-    assert early["legend"][0]["quote_count"] == 1
+    assert early["legend"][0]["quote_count"] == 2
 
 
 def test_projection_is_read_only_and_needs_no_model(
