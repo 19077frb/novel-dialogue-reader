@@ -12,6 +12,7 @@ from ndr.config import Settings
 from ndr.domain.enums import InferenceRunState, JobState
 from ndr.jobs.scheduler import reconcile_stale_runs, run_job
 from ndr.llm.adapters.fake import FakeProviderAdapter
+from ndr.llm.errors import ProviderError, ProviderErrorKind
 from ndr.storage.engine import create_db_engine, create_session_factory
 from ndr.storage.models import InferenceRun, Job, JobWindow
 from ndr.storage.transactions import transaction
@@ -114,6 +115,38 @@ def test_preview_then_process_reuses_cache_and_idempotency(
     # 重复点击（同幂等键 + 同请求摘要）→ 同一个任务，不新建
     again = _create_job(fake_provider_client, book_id, profile_id, key="k-process", mode="process")
     assert again["id"] == process["id"]
+
+
+def test_failed_model_output_error_keeps_raw_snippet(
+    fake_provider_client: TestClient, migrated_settings: Settings
+) -> None:
+    """真实提供方返回空内容/坏结构时，任务错误信息必须带脱敏片段（决策 0024）。"""
+
+    data = _import(fake_provider_client)
+    profile_id = _fake_profile(fake_provider_client)
+    job = _create_job(fake_provider_client, data["book_id"], profile_id, key="k-snippet")
+
+    adapter = FakeProviderAdapter(
+        script=[
+            ProviderError(
+                ProviderErrorKind.INVALID_OUTPUT,
+                "模型返回空内容",
+                details={"body": '{"choices": [{"finish_reason": "length", "message": {"content": ""}}]}'},
+            )
+        ]
+    )
+    outcome = _run_with_fake(migrated_settings, job["id"], adapter)
+    assert outcome.state is JobState.FAILED
+
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            stored = session.get(Job, job["id"])
+            assert stored is not None and stored.last_error is not None
+            assert "原始输出片段" in stored.last_error
+            assert "finish_reason" in stored.last_error
+    finally:
+        engine.dispose()
 
 
 def test_idempotency_key_with_different_request_conflicts(

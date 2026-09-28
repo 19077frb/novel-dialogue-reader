@@ -173,16 +173,36 @@ class ChatCompletionsAdapter:
         return data, elapsed_ms
 
     @staticmethod
-    def _content_of(data: Mapping[str, Any]) -> str:
+    def _response_snippet(data: Mapping[str, Any]) -> str:
+        """脱敏后的响应片段：真实提供方出错时，这是唯一能定位问题的线索。"""
+
+        try:
+            return sanitize(json.dumps(data, ensure_ascii=False))
+        except (TypeError, ValueError):
+            return ""
+
+    @classmethod
+    def _content_of(cls, data: Mapping[str, Any]) -> str:
+        snippet = cls._response_snippet(data)
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
-            raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, "响应缺少 choices")
+            raise ProviderError(
+                ProviderErrorKind.INVALID_OUTPUT, "响应缺少 choices", details={"body": snippet}
+            )
         first = choices[0]
         if not isinstance(first, Mapping):
-            raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, "choices[0] 结构异常")
+            raise ProviderError(
+                ProviderErrorKind.INVALID_OUTPUT,
+                "choices[0] 结构异常",
+                details={"body": snippet},
+            )
         message = first.get("message")
         if not isinstance(message, Mapping):
-            raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, "choices[0].message 缺失")
+            raise ProviderError(
+                ProviderErrorKind.INVALID_OUTPUT,
+                "choices[0].message 缺失",
+                details={"body": snippet},
+            )
         content = message.get("content")
         if isinstance(content, list):
             # 某些兼容服务返回分片数组
@@ -192,7 +212,26 @@ class ChatCompletionsAdapter:
         else:
             text = content if isinstance(content, str) else ""
         if not text.strip():
-            raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, "模型返回空内容")
+            # 空内容的真实原因要写在错误里：finish_reason / reasoning_content 都是常见线索
+            finish_reason = first.get("finish_reason")
+            reasoning = message.get("reasoning_content")
+            details: dict[str, Any] = {"body": snippet}
+            hint = "模型返回空内容"
+            if isinstance(finish_reason, str) and finish_reason:
+                details["finish_reason"] = finish_reason
+            if isinstance(reasoning, str) and reasoning.strip():
+                details["reasoning_chars"] = len(reasoning)
+                details["reasoning_snippet"] = sanitize(reasoning, limit=120)
+                hint += (
+                    "：正文为空，但 reasoning_content 有内容（推理内容占了输出；"
+                    "可换非推理模型，或按网关文档关闭思考/提高输出上限）"
+                )
+            if finish_reason == "length":
+                hint += (
+                    "；finish_reason=length 表示输出预算被用完（推理模型常把 token 花在思考上），"
+                    "可在「模型配置 → 生成参数」里提高 max_tokens（例如 {\"max_tokens\": 4000}）"
+                )
+            raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, hint, details=details)
         return text
 
     async def test_connection(self) -> ConnectionTestResult:

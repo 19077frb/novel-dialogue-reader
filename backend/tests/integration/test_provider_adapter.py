@@ -180,6 +180,57 @@ def test_empty_message_content_reports_response_snippet() -> None:
     assert "reasoning_content" in result.detail
 
 
+def test_empty_content_with_finish_reason_length_is_actionable() -> None:
+    """推理模型把输出预算花在思考上时 content 为空：错误信息要指出 finish_reason 与可行做法。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": "", "reasoning_content": "先想一想要不要回答……"},
+                    }
+                ],
+                "usage": {"prompt_tokens": 900, "completion_tokens": 800, "total_tokens": 1700},
+            },
+        )
+
+    result = _run(_adapter(handler).test_connection())
+
+    assert result.ok is False
+    assert "finish_reason=length" in result.detail
+    assert "max_tokens" in result.detail  # 告诉用户去哪里提高输出上限
+
+
+def test_generate_labels_empty_content_keeps_response_snippet() -> None:
+    """标注链路同样要带原始片段与线索（任务错误信息会展示它）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"finish_reason": "length", "message": {"content": "", "reasoning_content": "x" * 30}}
+                ]
+            },
+        )
+
+    with pytest.raises(ProviderError) as excinfo:
+        _run(
+            _adapter(handler).generate_labels(
+                {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 800}
+            )
+        )
+
+    error = excinfo.value
+    assert error.kind is ProviderErrorKind.INVALID_OUTPUT
+    assert "reasoning_content" in error.message
+    assert "finish_reason=length" in error.message
+    assert error.details["body"]  # 脱敏后的响应片段
+
+
 def test_generate_labels_returns_parsed_object_and_surfaces_errors() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
