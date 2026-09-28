@@ -1,11 +1,11 @@
-"""模型适配器接口与协议能力（DEVELOPMENT.md 5.4）。
+"""模型适配器接口与协议能力。
 
-T06 只**定义契约**：接口方法、能力声明与结果数据结构。T07 实现真实
+本层只**定义契约**：接口方法、能力声明与结果数据结构。实现真实
 ``chat-completions-compatible`` 适配器与仅测试用的 FakeProvider。
 
 设计要点：
 
-- 适配器只负责协议与解析，不负责重试/预算/落库（那是 T10 的任务层）。
+- 适配器只负责协议与解析，不负责重试/预算/落库。
 - ``capabilities`` 必须如实声明，不假设所有兼容服务都支持 json_schema、temperature 等参数。
 - 凭据只通过 :class:`~ndr.llm.credentials.CredentialService` 读取，适配器不接触磁盘。
 """
@@ -30,7 +30,7 @@ class AdapterCapabilities:
 
 CHAT_COMPLETIONS_COMPATIBLE = AdapterCapabilities(
     protocol="chat-completions-compatible",
-    # 兼容服务不保证支持严格 json_schema；T07 会按实际提供方文档核对后再打开。
+    # 兼容服务不保证支持严格 json_schema；应按实际提供方文档核对后再打开。
     supports_json_schema=False,
     supports_json_object=True,
     supports_temperature=True,
@@ -104,7 +104,7 @@ class UsageRecord:
 
 @runtime_checkable
 class ProviderAdapter(Protocol):
-    """适配器接口（T07 实现；T06 的配置页只依赖能力声明）。"""
+    """适配器接口。"""
 
     name: str
     protocol: str

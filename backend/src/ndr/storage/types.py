@@ -1,7 +1,7 @@
 """自定义列类型。
 
 SQLite 不保存时区信息，因此统一在写入时转成 UTC 并去掉 tzinfo，读出时补回 UTC，
-保证 API 层始终输出带时区的 ISO 8601 时间（DEVELOPMENT.md 3.1）。
+保证 API 层始终输出带时区的 ISO 8601 时间。
 """
 
 from __future__ import annotations

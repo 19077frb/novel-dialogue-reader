@@ -1,4 +1,4 @@
-"""cursor/limit 分页（DEVELOPMENT.md 5.1）。
+"""cursor/limit 分页。
 
 列表统一返回 ``{"items": [...], "next_cursor": ...}``；cursor 是后端生成的不透明字符串，
 客户端不得解析或构造。

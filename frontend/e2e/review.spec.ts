@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * T13：待确认队列与阅读页确认抽屉。
+ * 待确认队列与阅读页确认抽屉。
  *
  * 真实后端 + 真实 Chromium + 隔离数据目录；模型侧是显式启用的确定性 FakeProvider
  * （不访问网络）。覆盖：普通对白入口（含未处理对白）、待定入口、空候选、旧版本 409、
@@ -62,7 +62,7 @@ async function processFirstChapter(page: Page, profileLabel: string) {
 
 test.describe('待确认队列与确认抽屉', () => {
   test('阅读页入口：标记待确认、锁定未知、撤销，并同步阅读页颜色', async ({ page }) => {
-    const profileName = 'T13 确认提供方 A'
+    const profileName = '确认流程提供方 A'
     await createFakeProfile(page, profileName)
     await importSample(page)
     await openReader(page)
@@ -136,7 +136,7 @@ test.describe('待确认队列与确认抽屉', () => {
     page,
   }) => {
     // 专用夹具 + 只处理第一章，保证第二章确实没有标注
-    const profileName = 'T13 空候选提供方'
+    const profileName = '空候选提供方'
     await createFakeProfile(page, profileName)
     await importFile(page, 'sample-review.txt')
     await openReader(page, 'sample-review')

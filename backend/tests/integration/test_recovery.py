@@ -1,4 +1,4 @@
-"""T14 集成测试：进程重启恢复、未知结果、预算到顶、限流退避与缺凭据（F15 / F20）。
+"""集成测试：进程重启恢复、未知结果、预算到顶、限流退避与缺凭据。
 
 三条门槛都在这里被验证：
 
@@ -193,12 +193,12 @@ def _content_readable(client: TestClient, book_id: str) -> bool:
 def test_restart_marks_unknown_then_requires_explicit_retry(
     fake_provider_client: TestClient, migrated_settings: Settings, factory
 ) -> None:
-    """F15：重启后未知结果不自动重发；显式 reconcile 才能回到队列。"""
+    """重启后未知结果不自动重发；显式 reconcile 才能回到队列。"""
 
     app_settings = fake_provider_client.app.state.settings
     data = import_sample(fake_provider_client)
     book_id = data["book_id"]
-    profile_id = _create_profile(fake_provider_client, name="T14 恢复提供方")
+    profile_id = _create_profile(fake_provider_client, name="恢复提供方")
     job = _create_job(
         fake_provider_client, book_id=book_id, profile_id=profile_id, key="k-restart"
     )
@@ -260,7 +260,7 @@ def test_startup_keeps_completed_windows_and_labels_interrupted_work(
 
     data = import_sample(fake_provider_client)
     book_id = data["book_id"]
-    profile_id = _create_profile(fake_provider_client, name="T14 中断提供方")
+    profile_id = _create_profile(fake_provider_client, name="中断提供方")
     app_settings = fake_provider_client.app.state.settings
     job = _create_job(
         fake_provider_client, book_id=book_id, profile_id=profile_id, key="k-interrupted"
@@ -283,12 +283,12 @@ def test_startup_keeps_completed_windows_and_labels_interrupted_work(
 def test_budget_exhausted_points_at_explicit_recompute(
     fake_provider_client: TestClient, migrated_settings: Settings, factory
 ) -> None:
-    """F20：预算到顶不发调用；恢复动作是「用新预算重新处理」（默认不自动付费重算）。"""
+    """预算到顶不发调用；恢复动作是「用新预算重新处理」（默认不自动付费重算）。"""
 
     app_settings = fake_provider_client.app.state.settings
     data = import_sample(fake_provider_client)
     book_id = data["book_id"]
-    profile_id = _create_profile(fake_provider_client, name="T14 预算提供方")
+    profile_id = _create_profile(fake_provider_client, name="预算提供方")
     job = _create_job(
         fake_provider_client,
         book_id=book_id,
@@ -343,7 +343,7 @@ def test_rate_limit_retries_are_bounded(
     app_settings.rate_limit_backoff_base_seconds = 0  # 测试不真等
     data = import_sample(fake_provider_client)
     book_id = data["book_id"]
-    profile_id = _create_profile(fake_provider_client, name="T14 限流提供方")
+    profile_id = _create_profile(fake_provider_client, name="限流提供方")
 
     job = _create_job(
         fake_provider_client, book_id=book_id, profile_id=profile_id, key="k-rate-limit"
@@ -365,7 +365,7 @@ def test_rate_limit_retries_are_bounded(
     # （换一个模型名 → 缓存键不同，确保真的会调用适配器）
     app_settings.rate_limit_max_retries = 0
     strict_profile = _create_profile(
-        fake_provider_client, name="T14 限流提供方（不重试）"
+        fake_provider_client, name="限流提供方（不重试）"
     )
     fake_provider_client.patch(
         f"/api/model-profiles/{strict_profile}", json={"model": "fake-model-strict"}
@@ -401,7 +401,7 @@ def test_provider_timeout_is_unknown_outcome_not_auto_resent(
     app_settings = fake_provider_client.app.state.settings
     data = import_sample(fake_provider_client)
     book_id = data["book_id"]
-    profile_id = _create_profile(fake_provider_client, name="T14 超时提供方")
+    profile_id = _create_profile(fake_provider_client, name="超时提供方")
     job = _create_job(
         fake_provider_client, book_id=book_id, profile_id=profile_id, key="k-timeout"
     )
@@ -440,7 +440,7 @@ def test_missing_credential_is_explainable_and_recoverable(
     book_id = data["book_id"]
     profile_id = _create_profile(
         fake_provider_client,
-        name="T14 缺 Key 提供方",
+        name="缺 Key 提供方",
         credential_mode="session",
         protocol="chat-completions-compatible",
     )

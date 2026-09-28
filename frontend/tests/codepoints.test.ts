@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { cpLength, sliceByCodepoints, utf16IndexForCp } from '../src/text/codepoints'
 
-/** F11：emoji 与扩展汉字在 UTF-16 里占 2 个单元、1 个码点。 */
+/** emoji 与扩展汉字在 UTF-16 里占 2 个单元、1 个码点。 */
 describe('码点与 UTF-16 映射', () => {
   it('cpLength 按码点数而不是 UTF-16 单元数', () => {
     expect(cpLength('abc')).toBe(3)

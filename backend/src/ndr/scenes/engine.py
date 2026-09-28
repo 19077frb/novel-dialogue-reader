@@ -1,15 +1,15 @@
-"""单窗口推理流程（DEVELOPMENT.md 4.5 / 4.6，T09）。
+"""单窗口推理流程。
 
 顺序严格按 4.5：
 
-1. 解析 JSON/schema（T07 的 `parse_output`，不执行模型输出）。
+1. 解析 JSON/schema。
 2. 程序校验：目标覆盖、唯一 ID、场景/分组一致性、临时引用与证据存在性。
 3. 校验人工锁定：锁定的对白**不采纳**模型结果（模型结果只进历史或被丢弃）。
 4. 由后端按证据计算可见时点（模型自报不可信）。
 5. 冷启动保守接受策略：ACCEPTED / PROVISIONAL / UNKNOWN。
 6. 一个事务内提交：场景、分组、标注（含历史）、归属、Gap 转移、身份修订、待确认项。
 
-引擎不调用网络：调用方（T10）负责发请求，把输出交给这里。
+引擎不调用网络：调用方负责发请求，把输出交给这里。
 """
 
 from __future__ import annotations
@@ -645,7 +645,7 @@ def _apply_identity_proposal(
     if scene_id is None:
         return None, True
 
-    # T15：记录「哪一句原本属于哪个分组」，初读投影才能在证据出现之前还原旧分组（F17）
+    # 记录「哪一句原本属于哪个分组」，初读投影才能在证据出现之前还原旧分组
     absorbed_quote_map: dict[str, str] = {}
     if proposal.operation is IdentityOperation.MERGE and len(proposal.input_refs) >= 2:
         survivor = state.find(proposal.input_refs[0])

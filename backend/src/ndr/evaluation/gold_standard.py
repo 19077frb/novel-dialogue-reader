@@ -1,4 +1,4 @@
-"""金标准文件的导入/导出与范围检查（DEVELOPMENT.md 7.3 / T05）。
+"""金标准文件的导入/导出与范围检查。
 
 职责：
 
@@ -6,7 +6,7 @@
 - ``validate_schema``：用 ``evaluation/schemas/gold-standard.schema.json`` 做结构校验。
 - ``check_references``：引用完整性、范围合法性、resolvable 与分组的一致性等**跨字段**检查
   （JSON Schema 表达不了的部分）。
-- ``check_against_scanner``：金标准对白是否被候选扫描器找到（覆盖率，T16 会用）。
+- ``check_against_scanner``：金标准对白是否被候选扫描器找到。
 - ``build_template``：用扫描器输出生成可填写的金标准骨架（人工标注的起点）。
 
 全部检查只读文件，不触碰数据库、不调用模型。

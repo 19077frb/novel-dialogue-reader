@@ -1,6 +1,6 @@
 """ORM 模型包；导入即把全部表注册到 ``Base.metadata``（Alembic autogenerate 依赖这一点）。
 
-表结构与约束见 DEVELOPMENT.md 3.2；迁移只追加，不删库重建。
+表结构与约束见 DEVELOPMENT.md；迁移只追加，不删库重建。
 """
 
 from __future__ import annotations

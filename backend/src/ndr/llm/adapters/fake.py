@@ -1,4 +1,4 @@
-"""仅测试/演示用的 FakeProvider（T07）。
+"""仅测试/演示用的 FakeProvider。
 
 - **不发任何网络请求**；只能通过显式开关启用（见 registry 与 NDR_ALLOW_FAKE_PROVIDER）。
 - 可以按脚本返回：正常 JSON、坏 JSON、错 ID、上游错误或超时，用于验证调用方的校验与重试策略。
@@ -112,7 +112,7 @@ class FakeProviderAdapter:
         }
 
     def _split_then_merge_labels(self, payload: Mapping[str, Any] | None) -> dict[str, Any]:
-        """仅测试（F17）：先判成两个声音，再用**窗口末尾的证据**提议合并。
+        """仅测试：先判成两个声音，再用**窗口末尾的证据**提议合并。
 
         证据在窗口最后一句上，所以 `visible_from_cp` 落在窗口末端：初读 horizon 在此之前时，
         投影会把合并还原成两个分组；读到证据之后（或重读）才显示为同一个人。

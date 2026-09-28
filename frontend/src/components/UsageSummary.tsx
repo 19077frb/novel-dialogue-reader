@@ -1,7 +1,7 @@
 import type { UsageOut } from '../api/types'
 
 /**
- * 用量汇总（T11）：直接显示后端结算结果。
+ * 用量汇总：直接显示后端结算结果。
  * 未知用量的尝试单独计数，绝不按 0 计入 token；缺价格资料时不显示金额。
  */
 export function UsageSummary({ usage }: { usage: UsageOut }) {

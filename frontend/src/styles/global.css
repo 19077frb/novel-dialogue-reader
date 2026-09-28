@@ -150,7 +150,7 @@ a {
 
 /* ---------- 应用外壳 ---------- */
 
-/* T18 可访问性：跳转到主内容的键盘入口（默认藏在视口外，聚焦时出现） */
+/* 可访问性：跳转到主内容的键盘入口（默认藏在视口外，聚焦时出现） */
 .ndr-skip-link {
   position: absolute;
   left: -9999px;
@@ -536,7 +536,7 @@ textarea:focus-visible {
   padding: 10px 12px;
   margin-top: 10px;
 }
-/* ---------- 标注投影（T11） ---------- */
+/* ---------- 标注投影 ---------- */
 
 .ndr-annotation {
   /* 颜色由内联 style 提供（来自后端投影）；这里只做可读性增强 */
@@ -592,7 +592,7 @@ textarea:focus-visible {
   grid-template-columns: max-content 1fr max-content 1fr;
 }
 
-/* ---------- 预览与按章处理页（T11） ---------- */
+/* ---------- 预览与按章处理页 ---------- */
 
 .ndr-preview-nav a {
   margin-left: 12px;
@@ -674,7 +674,7 @@ textarea:focus-visible {
   }
 }
 
-/* ---------- 待确认队列与确认抽屉（T13） ---------- */
+/* ---------- 待确认队列与确认抽屉 ---------- */
 
 .ndr-review-filters {
   display: grid;
@@ -829,7 +829,7 @@ textarea:focus-visible {
   gap: 6px;
 }
 
-/* ---------- 导出对话框（T15B） ---------- */
+/* ---------- 导出对话框 ---------- */
 
 .ndr-dialog-backdrop {
   position: fixed;

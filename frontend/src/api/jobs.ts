@@ -1,5 +1,5 @@
 /**
- * 任务、估算与用量（T10 契约，T11 预览页使用）。
+ * 任务、估算与用量。
  *
  * 预览与正式处理共用同一套 `POST /api/jobs`（`mode: preview | process`），
  * 结果直接落进同一份标注投影，不创建第二套临时识别存储。
@@ -142,7 +142,7 @@ export function fetchUsage(bookId: string, signal?: AbortSignal): Promise<UsageO
   return apiData<UsageOut>(`/api/books/${bookId}/usage`, { signal })
 }
 /**
- * 任务恢复（T14）：把非完成状态翻译成可执行动作。
+ * 任务恢复：把非完成状态翻译成可执行动作。
  *
  * 只读接口；返回的 `paid` 标记该动作是否可能产生模型费用。
  */

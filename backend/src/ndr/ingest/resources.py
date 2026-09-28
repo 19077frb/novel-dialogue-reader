@@ -1,4 +1,4 @@
-"""受控资源读取（T03）。
+"""受控资源读取。
 
 资源只来自数据库登记项，并只从该书籍版本的源文件（EPUB 包）内读取：
 - 条目名必须与登记的相对路径一致，且经过与导入相同的越界校验；
@@ -70,7 +70,7 @@ def read_resource_bytes(
     try:
         source_path = resolve_within(settings, version.source_path)
     except UnsafePathError:
-        # 源文件路径越界（例如库被手动改过）：拒绝读取，不回显磁盘路径（T18 资源边界）
+        # 源文件路径越界（例如库被手动改过）：拒绝读取，不回显磁盘路径
         raise ApiError(
             ErrorCode.NOT_FOUND,
             "该版本的源文件路径无效",

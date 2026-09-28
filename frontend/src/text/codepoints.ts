@@ -1,5 +1,5 @@
 /**
- * 码点 ↔ UTF-16 映射（DEVELOPMENT.md 4.1）。
+ * 码点 ↔ UTF-16 映射。
  *
  * 后端所有坐标都是**码点**（canonical 全文按码点计数），而 JavaScript 字符串下标是
  * **UTF-16 单元**：`'😀'.length === 2`、`'𠮷'.length === 2`。直接 `text.slice(cp, cp)`

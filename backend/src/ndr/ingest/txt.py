@@ -1,4 +1,4 @@
-"""TXT → 统一文档树（DEVELOPMENT.md 4.1）。
+"""TXT → 统一文档树。
 
 规范：
 

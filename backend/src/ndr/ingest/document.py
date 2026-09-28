@@ -94,5 +94,5 @@ class ParsedBook:
         return None
 
 
-# 兼容 T02 的命名。
+# 兼容旧版命名。
 ParsedTxt = ParsedBook

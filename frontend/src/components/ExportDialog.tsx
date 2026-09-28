@@ -1,5 +1,5 @@
 /**
- * 导出对话框（T15B）：范围 → 样式 → 初读策略 → 后端样张 → 生成 → 校验 → 下载。
+ * 导出对话框：范围 → 样式 → 初读策略 → 后端样张 → 生成 → 校验 → 下载。
  *
  * - 样张来自后端导出渲染器，放在**沙箱 iframe**（`sandbox=""`，无脚本）里展示，
  *   不是阅读页截图，也不执行任何脚本。
@@ -51,7 +51,7 @@ export function ExportDialog({
   const [generatedSnapshotHash, setGeneratedSnapshotHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // T18 可访问性：对话框要有 role/aria-modal/标题关联，打开时把焦点移进来，
+  // 可访问性：对话框要有 role/aria-modal/标题关联，打开时把焦点移进来，
   // Escape 关闭，关闭后把焦点还给触发它的按钮（键盘用户不会「丢失焦点」）。
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement | null>(null)

@@ -73,7 +73,7 @@ const RECOVERY = {
   updated_at: '2026-09-28T00:00:00+00:00',
 } as unknown as JobRecoveryOut
 
-describe('JobPanel（T14 恢复动作）', () => {
+describe('JobPanel', () => {
   beforeEach(() => {
     vi.mocked(booksApi.fetchJob).mockReset()
     vi.mocked(jobsApi.fetchJobRecovery).mockReset()

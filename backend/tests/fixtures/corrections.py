@@ -1,6 +1,6 @@
-"""T12 测试夹具：导入样例 → 用**确定性** FakeProvider 生成真实标注。
+"""测试夹具：导入样例 → 用**确定性** FakeProvider 生成真实标注。
 
-与 T11 的投影测试同源：FakeProvider 只在测试/演示中显式启用，且这里的
+与投影测试同源：FakeProvider 只在测试/演示中显式启用，且这里的
 `labeling_mode="deterministic"` 是测试专用脚本（真实提供方不会走到该分支）。
 """
 
@@ -46,7 +46,7 @@ def import_sample(client: TestClient, sample: str = SAMPLE) -> dict:
 
 
 def create_fake_profile(
-    client: TestClient, *, name: str = "T12 测试提供方", model: str = "fake-model"
+    client: TestClient, *, name: str = "测试提供方", model: str = "fake-model"
 ) -> str:
     response = client.post(
         "/api/model-profiles",

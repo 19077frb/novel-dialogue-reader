@@ -1,4 +1,4 @@
-"""接受策略与可见时点（DEVELOPMENT.md 4.5 第 4～5 步）。
+"""接受策略与可见时点。
 
 接受策略按证据种类区分：
 
@@ -106,7 +106,7 @@ def decide_acceptance(label: QuoteLabel, *, cold_start: bool = True) -> Acceptan
 def compute_visible_from_cp(*, evidence_positions: list[int], fallback_cp: int) -> int:
     """可见时点 = 证据中最靠后的位置（没有证据时退回到本窗口起点）。
 
-    后文才出现的身份证据因此不会提前生效——初读 projection（T15）据此避免提前同色。
+    后文才出现的身份证据因此不会提前生效——初读 projection据此避免提前同色。
     """
 
     if not evidence_positions:
@@ -115,6 +115,6 @@ def compute_visible_from_cp(*, evidence_positions: list[int], fallback_cp: int) 
 
 
 def is_direct_identity_evidence(*, basis: SpeakerBasis | None) -> bool:
-    """身份合并/拆分是否具备“直接证据”（决定能否自动应用，见 T09 的修订策略）。"""
+    """身份合并/拆分是否具备“直接证据”。"""
 
     return basis in {SpeakerBasis.DIRECT, SpeakerBasis.COREFERENCE}

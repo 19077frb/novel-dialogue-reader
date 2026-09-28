@@ -1,4 +1,4 @@
-"""T07 集成测试：真实 HTTP 适配器（MockTransport）与连接测试端点（F13/F20）。
+"""集成测试：真实 HTTP 适配器（MockTransport）与连接测试端点。
 
 - 用 ``httpx.MockTransport`` 模拟 401/429/超时/500/坏 JSON/错 schema，验证错误映射与“绝不假成功”。
 - 连接测试端点用显式启用的 FakeProvider（不发网络请求），并检查推理尝试记录与未知用量不被写成 0。

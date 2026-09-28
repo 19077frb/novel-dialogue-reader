@@ -1,6 +1,6 @@
 """领域枚举与 API schema 包。
 
-后端是枚举与 schema 的权威定义（DEVELOPMENT.md 3.1）；前端类型由 OpenAPI 生成，
+后端是枚举与 schema 的权威定义；前端类型由 OpenAPI 生成，
 不维护第二份会漂移的枚举。
 """
 

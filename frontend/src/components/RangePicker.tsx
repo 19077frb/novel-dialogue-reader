@@ -1,7 +1,7 @@
 import type { ChapterOut } from '../api/types'
 
 /**
- * 范围选择（T11）：按章选择或手填码点范围。
+ * 范围选择：按章选择或手填码点范围。
  * 纯前端状态：改范围只影响估算/预览请求，不会自动触发任何模型调用。
  */
 export interface RangeValue {

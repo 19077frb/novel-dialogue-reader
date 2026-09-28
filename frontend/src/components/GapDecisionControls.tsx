@@ -1,7 +1,7 @@
 /**
- * Gap 更正（T13）：确认两个引语之间的叙述间隔意味着什么。
+ * Gap 更正：确认两个引语之间的叙述间隔意味着什么。
  *
- * 场景边界问题必须走 Gap 接口，不能误用说话人确认接口（DEVELOPMENT.md 6.3）。
+ * 场景边界问题必须走 Gap 接口，不能误用说话人确认接口。
  */
 import type { GapDecision, GapOut } from '../api/types'
 

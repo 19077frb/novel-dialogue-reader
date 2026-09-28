@@ -1,6 +1,6 @@
 {
   "report_version": "evaluation-1",
-  "generated_at": "2026-09-27T21:23:41.401189+00:00",
+  "generated_at": "2026-09-28T19:25:29.534386+00:00",
   "manifest": "evaluation/manifests/dev.json",
   "manifest_version": "1.0",
   "config": {
@@ -9,7 +9,7 @@
     "label": "B1 固定窗口 + 完整上下文（LLM 批量标签）",
     "strategy": "llm",
     "scene_state": false,
-    "prompt_version": "labeling-1",
+    "prompt_version": "labeling-2",
     "context_policy": "context-1",
     "reading_mode": "reread",
     "budget": {
@@ -20,14 +20,18 @@
     "model": null,
     "notes": "PLAN B1：固定窗口、完整上下文、一次批量标签。需要真实模型配置（--profile-id + --allow-live）才能运行。"
   },
-  "config_fingerprint": "f91cb797e3982929cd029fbe039a812a11afd3f6cadb7b5b0f28fa2a19f25394",
+  "config_fingerprint": "7b74661fead79deb54045a6ac0a942836fb2b4468ff4085a072be6a2c6636010",
   "versions": {
     "evaluation": "evaluation-1",
     "app": "0.1.0",
     "engine": "attribution-engine-1",
-    "prompt": "labeling-1",
+    "prompt": "labeling-10",
     "scanner": "quote-scan-1",
     "context_policy": "context-1",
+    "context_policy_versions": [
+      "context-1",
+      "context-2"
+    ],
     "gold_schema": "1.0",
     "rule_baseline": "b0-rule-1"
   },

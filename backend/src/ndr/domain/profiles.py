@@ -1,4 +1,4 @@
-"""模型配置的 API schema（T06）。
+"""模型配置的 API schema。
 
 响应中**没有**任何存放密钥的字段：只有 `has_key`、`credential_mode` 与可选警告。
 """

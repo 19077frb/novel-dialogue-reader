@@ -1,7 +1,7 @@
-"""稳定 ID 派生（DEVELOPMENT.md 3.1：Quote ID 由原文版本、位置、扫描器版本稳定派生）。
+"""稳定 ID 派生。
 
 同一份 canonical 文本、同一套扫描器版本重复扫描时，ID 必须完全一致，
-这样 T12 的人工更正引用不会因为重新扫描而失效。
+这样人工更正的引用不会因为重新扫描而失效。
 """
 
 from __future__ import annotations

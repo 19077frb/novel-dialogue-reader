@@ -3,11 +3,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * T11：真实效果预览与按章处理。
+ * 真实效果预览与按章处理。
  *
  * 使用真实后端 + 真实浏览器 + 隔离数据目录；模型侧用**显式启用**的 FakeProvider
  * （playwright.config.ts 里 NDR_ALLOW_FAKE_PROVIDER=1 且 NDR_FAKE_PROVIDER_LABELS=deterministic），
- * 不访问任何网络。真实提供方联调与效果评测仍属未完成（T16）。
+ * 不访问任何网络。真实提供方联调与效果评测仍属未完成。
  */
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures')
 const fixture = (name: string) => path.join(fixturesDir, name)

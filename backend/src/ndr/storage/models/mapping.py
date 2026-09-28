@@ -1,4 +1,4 @@
-"""canonical 全文与源文本的映射段（DEVELOPMENT.md 4.1）。
+"""canonical 全文与源文本的映射段。
 
 每个 canonical 行一条记录，覆盖整个 canonical 文本：
 ``canonical_start_cp/canonical_end_cp`` 是规范化全文中的码点范围，

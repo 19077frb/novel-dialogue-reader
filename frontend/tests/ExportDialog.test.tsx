@@ -185,7 +185,7 @@ describe('ExportDialog', () => {
     expect(screen.queryByTestId('export-download-link')).toBeNull()
   })
 })
-describe('ExportDialog 可访问性（T18）', () => {
+describe('ExportDialog 可访问性', () => {
   beforeEach(() => {
     vi.mocked(exportsApi.previewExport).mockReset()
     vi.mocked(exportsApi.previewExport).mockResolvedValue(preview())

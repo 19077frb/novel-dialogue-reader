@@ -1,4 +1,4 @@
-"""场景内匿名分组注册表（DEVELOPMENT.md 4.4 / PLAN 3）。
+"""场景内匿名分组注册表。
 
 规则：
 
@@ -68,7 +68,7 @@ class SpeakerRegistry:
     def ensure_local_anchor(
         self, *, first_quote_id: str, evidence_refs: tuple[str, ...] = ()
     ) -> SpeakerSlot:
-        """冷启动时为首句可区分发言建立局部锚点分组（T09 允许的“第一个分组”）。"""
+        """冷启动时为首句可区分发言建立局部锚点分组。"""
 
         return self.state.add_speaker(
             first_quote_id=first_quote_id,

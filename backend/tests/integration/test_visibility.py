@@ -1,10 +1,10 @@
-"""T15 集成测试：证据时点、初读投影与最终定位回归（F04 / F11 / F17）。
+"""集成测试：证据时点、初读投影与最终定位回归。
 
 覆盖：
 
-- F04：EPUB 的 ruby 注音不进正文、插图成为节点、跨块引语范围正确、脚本/样式不渲染；
-- F11：重复出现的同一句对白有不同 ID；emoji/扩展汉字按**码点**计数与切片；
-- F17：后文才揭示的身份合并，在初读 horizon 之下不会提前同色（颜色/图例都不泄露）。
+- EPUB 的 ruby 注音不进正文、插图成为节点、跨块引语范围正确、脚本/样式不渲染；
+- 重复出现的同一句对白有不同 ID；emoji/扩展汉字按**码点**计数与切片；
+- 后文才揭示的身份合并，在初读 horizon 之下不会提前同色（颜色/图例都不泄露）。
 
 门槛：投影查询是**只读**的（不写库、不调用模型），本文件的用例对行数做了断言。
 """
@@ -94,7 +94,7 @@ def _rows(settings: Settings) -> dict[str, int]:
         engine.dispose()
 
 def test_f11_repeated_quotes_and_codepoint_mapping(migrated_client: TestClient) -> None:
-    """F11：重复对白 ID 不同；emoji/扩展汉字按码点（不是 UTF-16 单元）定位。"""
+    """重复对白 ID 不同；emoji/扩展汉字按码点（不是 UTF-16 单元）定位。"""
 
     data = _import_txt(migrated_client, ASTRAAL_SAMPLE)
     book_id = data["book_id"]
@@ -130,7 +130,7 @@ def test_f11_repeated_quotes_and_codepoint_mapping(migrated_client: TestClient) 
 
 
 def test_f04_epub_ruby_image_and_cross_node_quote(migrated_client: TestClient) -> None:
-    """F04：ruby 注音不进正文、插图登记为节点、跨块引语范围正确。"""
+    """ruby 注音不进正文、插图登记为节点、跨块引语范围正确。"""
 
     data = _import_epub(migrated_client, ruby_and_image_spec())
     book_id = data["book_id"]
@@ -201,13 +201,13 @@ MERGE_SAMPLE = (
 def test_f17_horizon_does_not_reveal_later_identity_merge(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F17：文末才揭示的合并，在初读 horizon 之前不能同色，也不能进图例。"""
+    """文末才揭示的合并，在初读 horizon 之前不能同色，也不能进图例。"""
 
     from fixtures.corrections import create_fake_profile, run_deterministic_job
 
     data = _import_txt(fake_provider_client, MERGE_SAMPLE, name="merge.txt")
     book_id = data["book_id"]
-    profile_id = create_fake_profile(fake_provider_client, name="T15 身份提供方")
+    profile_id = create_fake_profile(fake_provider_client, name="身份合并提供方")
     run_deterministic_job(
         migrated_settings,
         fake_provider_client,
@@ -338,14 +338,14 @@ TWO_CHAPTER_SAMPLE = (
 def test_f17_engine_merge_visible_only_after_evidence(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F17（端到端离线）：模型先判成两个声音、后用末尾证据合并，初读不提前同色。"""
+    """（端到端离线）：模型先判成两个声音、后用末尾证据合并，初读不提前同色。"""
 
     from fixtures.corrections import create_fake_profile
     from ndr.llm.adapters.fake import FakeProviderAdapter
 
     data = _import_txt(fake_provider_client, TWO_CHAPTER_SAMPLE, name="two-chapter.txt")
     book_id = data["book_id"]
-    profile_id = create_fake_profile(fake_provider_client, name="T15 合并提供方")
+    profile_id = create_fake_profile(fake_provider_client, name="合并提供方")
     job = fake_provider_client.post(
         "/api/jobs",
         json={

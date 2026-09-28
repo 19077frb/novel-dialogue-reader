@@ -235,7 +235,7 @@ describe('QuoteDetailDrawer', () => {
     await waitFor(() => expect(reviewApi.deferReviewItem).toHaveBeenCalledWith('r1', '稍后处理'))
   })
 })
-describe('QuoteDetailDrawer 可访问性（T18）', () => {
+describe('QuoteDetailDrawer 可访问性', () => {
   beforeEach(() => {
     vi.mocked(booksApi.fetchQuoteDetail).mockReset()
     vi.mocked(booksApi.fetchQuoteDetail).mockResolvedValue(DETAIL)

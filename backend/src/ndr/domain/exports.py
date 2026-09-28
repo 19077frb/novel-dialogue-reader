@@ -1,4 +1,4 @@
-"""导出相关的 API schema（T15A）。"""
+"""导出相关的 API schema。"""
 
 from __future__ import annotations
 

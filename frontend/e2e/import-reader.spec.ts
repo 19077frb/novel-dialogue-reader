@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * T04/T05：不填写任何 API 配置，也能导入 TXT/EPUB、阅读原文并看到候选引语覆盖。
+ * 不填写任何 API 配置，也能导入 TXT/EPUB、阅读原文并看到候选引语覆盖。
  * 使用真实后端（隔离数据目录 + 自动迁移）与真实浏览器；不涉及任何模型调用。
  */
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures')

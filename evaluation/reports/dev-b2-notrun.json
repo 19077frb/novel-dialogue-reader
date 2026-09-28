@@ -1,6 +1,6 @@
 {
   "report_version": "evaluation-1",
-  "generated_at": "2026-09-27T21:23:40.005989+00:00",
+  "generated_at": "2026-09-28T19:25:31.086106+00:00",
   "manifest": "evaluation/manifests/dev.json",
   "manifest_version": "1.0",
   "config": {
@@ -9,7 +9,7 @@
     "label": "B2 B1 + 持续场景状态与边界判断",
     "strategy": "llm",
     "scene_state": true,
-    "prompt_version": "labeling-1",
+    "prompt_version": "labeling-2",
     "context_policy": "context-1",
     "reading_mode": "reread",
     "budget": {
@@ -20,14 +20,18 @@
     "model": null,
     "notes": "PLAN B2：在 B1 之上加持续场景状态与边界判断（等于当前引擎默认行为）。需要真实模型配置才能运行。"
   },
-  "config_fingerprint": "0bd00a950906f86a5c5d3e1fd525ece74e870a34a3ce7e0f5be23f216074a788",
+  "config_fingerprint": "accd69bc2e84fcb5c2fb32ebf30ac60bb09a6d8dde072a4550cf9ed55d08eb3b",
   "versions": {
     "evaluation": "evaluation-1",
     "app": "0.1.0",
     "engine": "attribution-engine-1",
-    "prompt": "labeling-1",
+    "prompt": "labeling-10",
     "scanner": "quote-scan-1",
     "context_policy": "context-1",
+    "context_policy_versions": [
+      "context-1",
+      "context-2"
+    ],
     "gold_schema": "1.0",
     "rule_baseline": "b0-rule-1"
   },

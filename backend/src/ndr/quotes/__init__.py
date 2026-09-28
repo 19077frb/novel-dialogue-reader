@@ -1,4 +1,4 @@
-"""候选引语/Gap 的扫描与查询（T05）。"""
+"""候选引语/Gap 的扫描与查询。"""
 
 from __future__ import annotations
 

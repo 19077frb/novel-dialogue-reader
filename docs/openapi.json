@@ -2069,7 +2069,7 @@
           "corrections"
         ],
         "summary": "局部复核（有上限；创建真实任务并可能产生费用）",
-        "description": "局部复核：范围取当前场景（其次章节），必须显式给出模型配置与预算。\n\n这是**可能付费**的操作（DEVELOPMENT.md 6.4），与「展开原文」完全不同：\n后者只读本地原文，本接口会创建 RECHECK 任务并调用提供方。",
+        "description": "局部复核：范围取当前场景（其次章节），必须显式给出模型配置与预算。\n\n这是**可能付费**的操作，与「展开原文」完全不同：\n后者只读本地原文，本接口会创建 RECHECK 任务并调用提供方。",
         "operationId": "recheck_quote_route_api_quotes__quote_id__recheck_post",
         "parameters": [
           {
@@ -3419,7 +3419,7 @@
           "other"
         ],
         "title": "ContentNodeType",
-        "description": "统一文档树的受限节点类型（DEVELOPMENT.md 4.1）。\n\nruby/rb/rt/rp 单独保留，注音不重复进入模型正文。"
+        "description": "统一文档树的受限节点类型。\n\nruby/rb/rt/rp 单独保留，注音不重复进入模型正文。"
       },
       "ContentResponse": {
         "properties": {
@@ -3500,7 +3500,7 @@
           "undo"
         ],
         "title": "CorrectionAction",
-        "description": "人工更正动作（DEVELOPMENT.md 5.3）。"
+        "description": "人工更正动作。"
       },
       "CorrectionOut": {
         "properties": {
@@ -3619,7 +3619,7 @@
           "target_id"
         ],
         "title": "CorrectionOut",
-        "description": "人工更正的结果；前端不得自己推算权威计数（DEVELOPMENT.md 5.3）。"
+        "description": "人工更正的结果；前端不得自己推算权威计数。"
       },
       "CorrectionTargetType": {
         "type": "string",
@@ -6154,7 +6154,7 @@
           "quote"
         ],
         "title": "QuoteDetailOut",
-        "description": "普通对白详情；**不要求**该对白已经在待确认队列里（T12）。"
+        "description": "普通对白详情；**不要求**该对白已经在待确认队列里。"
       },
       "QuoteKind": {
         "type": "string",
@@ -7099,7 +7099,7 @@
           "INSUFFICIENT"
         ],
         "title": "SpeakerBasis",
-        "description": "证据类型，不是校准后的置信概率（DEVELOPMENT.md 4.4）。"
+        "description": "证据类型，不是校准后的置信概率。"
       },
       "SpeakerLegendItemOut": {
         "properties": {

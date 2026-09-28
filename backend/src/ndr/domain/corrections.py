@@ -1,6 +1,6 @@
-"""人工更正、待确认队列与身份修订的 API schema（T12）。
+"""人工更正、待确认队列与身份修订的 API schema。
 
-设计要点（DEVELOPMENT.md 5.2 / 5.3 / 6.3 / 3.4）：
+设计要点：
 
 - **人工操作不调用模型**：这些请求只写 `corrections` / `annotations` / `annotation_history` /
   `review_items` / `identity_revisions`，永远不创建 `inference_runs`。
@@ -106,7 +106,7 @@ class QuoteCorrectionIn(ApiModel):
 
 
 class CorrectionOut(ApiModel):
-    """人工更正的结果；前端不得自己推算权威计数（DEVELOPMENT.md 5.3）。"""
+    """人工更正的结果；前端不得自己推算权威计数。"""
 
     correction_id: str = Field(description="主目标的更正记录 ID")
     correction_ids: list[str] = Field(default_factory=list, description="本次写入的全部更正记录")

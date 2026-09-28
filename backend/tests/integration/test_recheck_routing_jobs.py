@@ -1,4 +1,4 @@
-"""T17 集成测试：context-2 压缩策略 + 有限局部复核 + 强模型路由真正落到调度器。
+"""集成测试：context-2 压缩策略 + 有限局部复核 + 强模型路由真正落到调度器。
 
 用显式开启的 FakeProvider（不发任何网络请求）验证：
 
@@ -50,13 +50,13 @@ DROPPED_MARKER = "她把收好的雨伞靠在门边"
 def _import(client: TestClient, sample: str = SAMPLE) -> dict:
     response = client.post(
         "/api/books/import",
-        files={"file": ("t17.txt", sample.encode("utf-8"), "text/plain")},
+        files={"file": ("live-probe.txt", sample.encode("utf-8"), "text/plain")},
     )
     assert response.status_code == 202, response.text
     return response.json()["data"]
 
 
-def _profile(client: TestClient, name: str = "T17 提供方", model: str = "fake-model") -> str:
+def _profile(client: TestClient, name: str = "复核路由提供方", model: str = "fake-model") -> str:
     response = client.post(
         "/api/model-profiles",
         json={
@@ -180,7 +180,7 @@ def test_context_2_rechecks_unresolved_targets_and_restores_evidence(
         fake_provider_client,
         book_id=data["book_id"],
         profile_id=profile_id,
-        key="k-t17-recheck",
+        key="k-recheck",
         range_payload={"start_cp": 0, "end_cp": len(SAMPLE), "context_policy": "context-2"},
     )
 
@@ -220,9 +220,9 @@ def test_strong_routing_uses_configured_profile_and_records_it(
         fake_provider_client,
         SAMPLE.replace("雨停了", "雨停了又停了"),
     )
-    base_profile = _profile(fake_provider_client, name="T17 基础模型")
+    base_profile = _profile(fake_provider_client, name="基础模型")
     strong_profile = _profile(
-        fake_provider_client, name="T17 强模型", model="strong-model"
+        fake_provider_client, name="强模型", model="strong-model"
     )
     range_payload = {
         "start_cp": 0,
@@ -242,7 +242,7 @@ def test_strong_routing_uses_configured_profile_and_records_it(
         fake_provider_client,
         book_id=data["book_id"],
         profile_id=base_profile,
-        key="k-t17-strong",
+        key="k-strong-route",
         range_payload=range_payload,
     )
     outcome = _run(migrated_settings, job["id"], factory, policy=policy)
@@ -269,9 +269,9 @@ def test_strong_share_below_one_window_keeps_base_model(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
     data = _import(fake_provider_client, SAMPLE.replace("雨停了", "雨停了又下起来了"))
-    base_profile = _profile(fake_provider_client, name="T17 基础模型（封顶）")
+    base_profile = _profile(fake_provider_client, name="基础模型（封顶）")
     strong_profile = _profile(
-        fake_provider_client, name="T17 强模型（封顶）", model="strong-model"
+        fake_provider_client, name="强模型（封顶）", model="strong-model"
     )
     policy = BudgetPolicy(gap_compression=True, strong_model_share=0.4)  # 1 个窗口 ×0.4 → 上限 0
 
@@ -285,7 +285,7 @@ def test_strong_share_below_one_window_keeps_base_model(
         fake_provider_client,
         book_id=data["book_id"],
         profile_id=base_profile,
-        key="k-t17-strong-cap",
+        key="k-strong-cap",
         range_payload={
             "start_cp": 0,
             "end_cp": len(SAMPLE),

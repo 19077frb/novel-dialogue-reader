@@ -1,4 +1,4 @@
-/** 导出样式选择与样张说明（T15B：颜色/编号/两者）。 */
+/** 导出样式选择与样张说明。 */
 import type { ExportStylePreset } from '../api/types'
 import { SPEAKER_COLORS } from '../styles/palette'
 

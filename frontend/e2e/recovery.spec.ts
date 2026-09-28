@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * T14：暂停恢复、预算到顶与故障闭环（界面侧）。
+ * 暂停恢复、预算到顶与故障闭环（界面侧）。
  *
  * 真实后端 + 真实 Chromium + 隔离数据目录；模型侧只用显式启用的 FakeProvider
  * （`NDR_ALLOW_FAKE_PROVIDER=1`），**不访问任何真实服务**。
@@ -61,7 +61,7 @@ test.describe('预算与故障恢复', () => {
   test('预算到顶：不发调用、提示「用新预算重新处理」，提高预算后显式重算可完成', async ({
     page,
   }) => {
-    const profileName = 'T14 预算提供方'
+    const profileName = '预算到顶提供方'
     await createProfile(page, { name: profileName })
     await importFile(page, 'sample-utf8.txt')
     await openPreview(page)
@@ -88,7 +88,7 @@ test.describe('预算与故障恢复', () => {
   })
 
   test('缺 Key：任务明确失败并指向模型配置，原文仍然可读', async ({ page }) => {
-    const profileName = 'T14 缺 Key 提供方'
+    const profileName = '缺密钥提供方'
     await createProfile(page, {
       name: profileName,
       protocol: 'chat-completions-compatible',
@@ -113,7 +113,7 @@ test.describe('预算与故障恢复', () => {
   })
 
   test('提供方超时：结果未知不自动重发，可保留未知或确认重发', async ({ page }) => {
-    const profileName = 'T14 超时提供方'
+    const profileName = '超时提供方'
     await createProfile(page, {
       name: profileName,
       model: 'fake-model-timeout',

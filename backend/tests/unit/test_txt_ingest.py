@@ -1,4 +1,4 @@
-"""T02 单元测试：TXT 编码、规范化与 source_map（F01 / F02 / F11）。"""
+"""单元测试：TXT 编码、规范化与 source_map。"""
 
 from __future__ import annotations
 

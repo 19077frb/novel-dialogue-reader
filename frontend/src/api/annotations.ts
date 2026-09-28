@@ -1,4 +1,4 @@
-/** 标注投影查询（T11）。只读：拉取范围、版本、阅读模式与 horizon 下的有效颜色/编号。 */
+/** 标注投影查询。只读：拉取范围、版本、阅读模式与 horizon 下的有效颜色/编号。 */
 import { apiData } from './client'
 import type { AnnotationsResponse, ReadingMode } from './types'
 

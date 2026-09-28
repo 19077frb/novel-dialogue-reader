@@ -1,4 +1,4 @@
-"""T08 单元测试：上下文窗口与证据范围（F05/F06/F12/F17 + 超长单条引语）。
+"""单元测试：上下文窗口与证据范围。
 
 门槛：
 - 预算边界**不是**场景边界；
@@ -110,7 +110,7 @@ def test_single_window_keeps_quotes_and_gaps_in_order() -> None:
 
 
 def test_long_narration_between_quotes_does_not_split_window_or_scene() -> None:
-    """F05：长心理/环境描写插在问答之间时，上下文照常包含该 Gap，也不产生新场景。"""
+    """长心理/环境描写插在问答之间时，上下文照常包含该 Gap，也不产生新场景。"""
 
     plan = plan_windows(_inputs(), target_quote_ids=["q1", "q2"])
 
@@ -126,7 +126,7 @@ def test_long_narration_between_quotes_does_not_split_window_or_scene() -> None:
 
 
 def test_short_gap_with_time_jump_is_still_included() -> None:
-    """F06：允许短 Gap 结束场景，但**决定权在 T09**；上下文构建不做判断。"""
+    """允许短 Gap 结束场景，但**决定权在场景引擎**；上下文构建不做判断。"""
 
     plan = plan_windows(_inputs(), target_quote_ids=["q2", "q3"])
     window = plan.windows[0]
@@ -137,7 +137,7 @@ def test_short_gap_with_time_jump_is_still_included() -> None:
 
 
 def test_long_scene_splits_into_windows_with_overlap_and_carry() -> None:
-    """F12：预算不足时拆窗口，携带重叠与接力点，目标一条都不少。"""
+    """预算不足时拆窗口，携带重叠与接力点，目标一条都不少。"""
 
     # 60 token 的正文预算：刚好拆成两个窗口，且第二窗口仍放得下少量重叠
     policy = BudgetPolicy(context_tokens=60, overlap_tokens=10)
@@ -169,7 +169,7 @@ def test_budget_boundary_is_not_a_scene_boundary() -> None:
 
 
 def test_horizon_limits_evidence_in_initial_mode_only() -> None:
-    """F17：初读只用 horizon 以内的原文；重读可用全文，且哈希不同。"""
+    """初读只用 horizon 以内的原文；重读可用全文，且哈希不同。"""
 
     horizon = 60  # 只能看到第三条对白之前
     initial = plan_windows(

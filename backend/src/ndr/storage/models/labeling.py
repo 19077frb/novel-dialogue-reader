@@ -1,4 +1,4 @@
-"""标注、标注历史与身份修订（DEVELOPMENT.md 3.2 / 3.4 / 4.6）。"""
+"""标注、标注历史与身份修订。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class Annotation(IdMixin, TimestampMixin, VersionMixin, Base):
     """当前标注投影；每个 quote 只有一个当前版本，旧结果进入 annotation_history。
 
     ``stale`` 与 ``user_locked`` 是独立字段：UNKNOWN、用户锁定与过期状态能分别表达，
-    不能被合并成一个“状态”（DEVELOPMENT.md 3.3）。
+    不能被合并成一个“状态”。
     """
 
     __tablename__ = "annotations"

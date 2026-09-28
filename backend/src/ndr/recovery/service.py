@@ -1,4 +1,4 @@
-"""任务恢复（T14）：把「非完成状态」翻译成用户能执行的动作，并在进程重启时修复可见状态。
+"""任务恢复：把「非完成状态」翻译成用户能执行的动作，并在进程重启时修复可见状态。
 
 三条硬规则：
 
@@ -233,7 +233,7 @@ def recover_on_startup(
     lease_seconds: int = 900,
     now: datetime | None = None,
 ) -> StartupRecovery:
-    """进程重启后的恢复扫描（F15）。
+    """进程重启后的恢复扫描。
 
     - 超过租约仍是 DISPATCHED 的尝试 → `UNKNOWN_OUTCOME` + 任务/窗口
       `NEEDS_RECONCILIATION`（不自动重发）。

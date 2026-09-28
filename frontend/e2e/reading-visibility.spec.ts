@@ -3,10 +3,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * T15：证据时点、初读/重读投影与最终定位（F04 / F11 / F17）。
+ * 证据时点、初读/重读投影与最终定位。
  *
  * 真实后端 + 真实 Chromium + 隔离数据目录；模型侧只用显式启用的 FakeProvider（不访问网络）。
- * F17 用测试专用的 `params.script=split_then_merge`：先判成两个声音、再用末尾证据合并，
+ * 用测试专用的 `params.script=split_then_merge`：先判成两个声音、再用末尾证据合并，
  * 因此初读第一章时不会提前同色；重读（或读到证据之后）才显示为同一个人。
  */
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -52,8 +52,8 @@ async function runWholeBook(page: Page, profileName: string, model = 'fake-model
 }
 
 test.describe('证据时点与定位回归', () => {
-  test('F17：后文才揭示的合并不会在初读时提前同色，重读才合并', async ({ page }) => {
-    const profileName = 'T15 合并提供方'
+  test('：后文才揭示的合并不会在初读时提前同色，重读才合并', async ({ page }) => {
+    const profileName = '合并可见性提供方'
     await createProfile(page, {
       name: profileName,
       model: 'fake-model-merge',
@@ -85,8 +85,8 @@ test.describe('证据时点与定位回归', () => {
       .toEqual(['〔S1〕', '〔S1〕'])
   })
 
-  test('F11：emoji 与扩展汉字按码点着色，不切坏代理对', async ({ page }) => {
-    const profileName = 'T15 表情提供方'
+  test('：emoji 与扩展汉字按码点着色，不切坏代理对', async ({ page }) => {
+    const profileName = '码点定位提供方'
     await createProfile(page, { name: profileName, model: 'fake-model-astral' })
     await importFile(page, 'sample-astral.txt')
     await openReader(page, 'sample-astral')
@@ -106,8 +106,8 @@ test.describe('证据时点与定位回归', () => {
     await expect(page.getByTestId('document-renderer')).toContainText('「😀𠮷！」她笑了。')
   })
 
-  test('F04：EPUB 的 ruby 注音不进正文，引语着色位置正确', async ({ page }) => {
-    const profileName = 'T15 注音提供方'
+  test('：EPUB 的 ruby 注音不进正文，引语着色位置正确', async ({ page }) => {
+    const profileName = '注音提供方'
     await createProfile(page, { name: profileName, model: 'fake-model-ruby' })
     await importFile(page, 'original-sample.epub')
     await openReader(page, '原创 ruby/插图样例')

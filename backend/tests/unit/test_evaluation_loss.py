@@ -1,4 +1,4 @@
-"""T17 单元测试：离线证据账（压缩删了什么、是否删到金标准 must_keep）。
+"""单元测试：离线证据账（压缩删了什么、是否删到金标准 must_keep）。
 
 用仓库内的原创合成样例（tmp_path）验证：压缩确实丢行文时会逐段留痕，
 金标准 must_keep 与丢失区间重叠时会被计成 must_keep_violations；
@@ -67,7 +67,7 @@ def _write_fixture(tmp_path: Path) -> Path:
         "works": [
             {
                 "work_id": "w-loss",
-                "title": "T17 合成样例",
+                "title": "合成样例",
                 "split": "dev",
                 "books": [
                     {

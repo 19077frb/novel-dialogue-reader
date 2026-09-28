@@ -1,6 +1,6 @@
-"""标注投影（T11）：把当前标注/分组整理成前端可直接渲染的有效投影。
+"""标注投影：把当前标注/分组整理成前端可直接渲染的有效投影。
 
-规则（DEVELOPMENT.md 6.3 / 6.5）：
+规则：
 
 - 已确认真实姓名的分组按人物身份跨场景共享颜色；未确认姓名的场景分组保持隔离。
 - 初读（`initial`）模式下，`visible_from_cp` 晚于 `visible_horizon_cp` 的标注
@@ -40,7 +40,7 @@ def horizon_identity_reverts(
     book_version_id: str,
     horizon: int | None,
 ) -> tuple[dict[str, str], dict[str, str], int]:
-    """初读 horizon 之前的身份修订要还原（F17）。
+    """初读 horizon 之前的身份修订要还原。
 
     返回 ``(quote_id→旧分组, 新分组→旧分组, 还原条数)``。只读：不写数据库、不调用模型。
     合并/拆分的快照里记录了 `revert`（哪一句原本属于哪个分组），按**最新优先**应用，

@@ -1,4 +1,4 @@
-"""书籍、文档与内容节点 API schema（DEVELOPMENT.md 4.1 / 5.2）。
+"""书籍、文档与内容节点 API schema。
 
 字段一律 snake_case；时间为 UTC ISO 8601；码点指某个书籍版本的 canonical 全文。
 """

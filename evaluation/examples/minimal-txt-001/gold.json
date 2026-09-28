@@ -3,17 +3,17 @@
   "book": {
     "book_id": "ex-minimal-txt-001",
     "work_id": "ex-original-minimal",
-    "title": "原创最小样例：雨停（T00）",
+    "title": "原创最小样例：雨停",
     "format": "TXT",
     "language": "zh",
     "canonical_sha256": "05837374a2446c85fdef4638ab14ab5ad4d617bc500186918c322d59af2ec879",
     "canonical_length_cp": 97,
-    "parser_version": "t00-example",
-    "normalization_version": "t00-example-raw-utf8-lf",
+    "parser_version": "example-raw",
+    "normalization_version": "example-raw-utf8-lf",
     "notes": "canonical text 就是同目录 text.txt 的 UTF-8 解码结果（已使用 LF 换行，未做其他规范化），因此所有码点偏移可直接复算。"
   },
   "annotator": {
-    "annotator_id": "t00-author",
+    "annotator_id": "example-author",
     "annotated_at": "2026-09-28T00:00:00+00:00",
     "guideline_version": "1.0"
   },
@@ -157,5 +157,5 @@
       }
     ]
   },
-  "notes": "原创最小样例，只用于校验金标准格式与坐标约定（决策 0002）；不能作为真实作品效果证据。"
+  "notes": "原创最小样例，只用于校验金标准格式与坐标约定；不能作为真实作品效果证据。"
 }

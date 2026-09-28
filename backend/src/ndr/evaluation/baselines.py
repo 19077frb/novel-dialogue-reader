@@ -34,7 +34,7 @@ ATTRIBUTION_VERBS = (
     "喊",
     "叫",
 )
-NAME_BOUNDARY = "。！？；，、,.!?;「」『』（）()《》〈〉“”\"'：: \n\t…—"
+NAME_BOUNDARY = "。！？；，、,.!?;「」『』()《》〈〉“”\"'：: \n\t…—"
 
 
 @dataclass(frozen=True)

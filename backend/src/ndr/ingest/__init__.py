@@ -1,4 +1,4 @@
-"""导入层：TXT/EPUB 到统一文档树（DEVELOPMENT.md 4.1）。"""
+"""导入层：TXT/EPUB 到统一文档树。"""
 
 from __future__ import annotations
 

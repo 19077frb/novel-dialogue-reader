@@ -25,7 +25,7 @@ export interface JobPanelProps {
 }
 
 /**
- * 任务面板（T14 起带恢复动作）。
+ * 任务面板。
  *
  * - 展示的都是后端真实结算值：`calls` 是真实调用次数，`cached_windows` 是缓存命中窗口数。
  * - 恢复动作完全来自 `GET /api/jobs/{id}/recovery`：前端不自己推断，也不隐藏「可能计费」提示。

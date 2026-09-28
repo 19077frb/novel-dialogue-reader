@@ -1,4 +1,4 @@
-"""任务、估算与用量的 API schema（T10）。"""
+"""任务、估算与用量的 API schema。"""
 
 from __future__ import annotations
 

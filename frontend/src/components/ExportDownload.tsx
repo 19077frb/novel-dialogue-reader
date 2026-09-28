@@ -1,4 +1,4 @@
-/** 导出下载（T15B）：受控端点 + 文件名/哈希；重复下载不会重新生成。 */
+/** 导出下载：受控端点 + 文件名/哈希；重复下载不会重新生成。 */
 import { exportDownloadUrl } from '../api/exports'
 import type { ExportArtifactOut } from '../api/types'
 

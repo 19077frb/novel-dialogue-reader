@@ -1,4 +1,4 @@
-"""T12 集成测试：人工更正、待确认队列与撤销（F14 / F18）。
+"""集成测试：人工更正、待确认队列与撤销。
 
 覆盖：普通对白（含未处理）详情与主动标记、四种说话人更正、跨场景误关联拒绝、
 并发旧版本冲突、撤销越过新修订、下游 stale、模型不覆盖人工锁定、Gap BREAK 与撤销。
@@ -251,7 +251,7 @@ def test_old_expected_version_is_rejected_and_changes_nothing(
 def test_undo_restores_previous_state_and_rejects_newer_revision(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F18：撤销恢复旧状态；若已有更新的修订则返回冲突且不丢数据。"""
+    """撤销恢复旧状态；若已有更新的修订则返回冲突且不丢数据。"""
 
     data = _prepare(fake_provider_client, migrated_settings)
     book_id = data["book_id"]
@@ -343,7 +343,7 @@ def test_cross_scene_speaker_reference_is_rejected(
     )
     book_id = data["book_id"]
     profile_id = create_fake_profile(
-        fake_provider_client, name="T12 第二章提供方", model="fake-model-ch2"
+        fake_provider_client, name="第二章提供方", model="fake-model-ch2"
     )
     run_deterministic_job(
         migrated_settings,
@@ -385,7 +385,7 @@ def test_cross_scene_speaker_reference_is_rejected(
 def test_model_result_does_not_overwrite_user_locked_quote(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F14：模型响应晚于用户确认时，人工锁定不被覆盖。"""
+    """模型响应晚于用户确认时，人工锁定不被覆盖。"""
 
     data = _prepare(fake_provider_client, migrated_settings)
     book_id = data["book_id"]
@@ -401,7 +401,7 @@ def test_model_result_does_not_overwrite_user_locked_quote(
 
     # 换一个模型名 → 缓存键不同 → 真的会调用适配器（FakeProvider，离线）
     profile2 = create_fake_profile(
-        fake_provider_client, name="T12 第二个提供方", model="fake-model-2"
+        fake_provider_client, name="第二个提供方", model="fake-model-2"
     )
     run_deterministic_job(
         migrated_settings,
@@ -522,7 +522,7 @@ def test_recheck_creates_bounded_job_and_does_not_call_model_at_creation(
     book_id = data["book_id"]
     target = quote_ids(fake_provider_client, book_id)[0]
     profile_id = create_fake_profile(
-        fake_provider_client, name="T12 复核提供方", model="fake-model-recheck"
+        fake_provider_client, name="复核提供方", model="fake-model-recheck"
     )
     scene = _scene_state(
         migrated_settings, _annotation_state(migrated_settings, target)["scene_id"]

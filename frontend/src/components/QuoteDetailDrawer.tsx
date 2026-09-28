@@ -1,5 +1,5 @@
 /**
- * 确认抽屉（T13）：普通对白与待确认项共用同一个抽屉。
+ * 确认抽屉：普通对白与待确认项共用同一个抽屉。
  *
  * - 上下文/候选证据只读；「展开更多原文」不调用模型，「局部复核」是显式的付费操作。
  * - 更正/撤销/延后都不调用模型；提交旧版本会得到 409，这里提示冲突并刷新为最新状态。
@@ -55,7 +55,7 @@ export function QuoteDetailDrawer({
     setContextWindowCp(CONTEXT_STEPS[0])
   }, [quoteId])
 
-  // T18 可访问性：抽屉是一个有标题的对话框区域；打开时移入焦点，Escape 关闭并归还焦点。
+  // 可访问性：抽屉是一个有标题的对话框区域；打开时移入焦点，Escape 关闭并归还焦点。
   const titleId = useId()
   const drawerRef = useRef<HTMLElement | null>(null)
   const closeRef = useRef(onClose)

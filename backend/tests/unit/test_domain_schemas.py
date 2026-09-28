@@ -1,4 +1,4 @@
-"""T01：领域 schema、错误体与分页契约的单元测试。"""
+"""领域 schema、错误体与分页契约的单元测试。"""
 
 from __future__ import annotations
 

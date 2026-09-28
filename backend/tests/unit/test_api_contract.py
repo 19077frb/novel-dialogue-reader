@@ -1,4 +1,4 @@
-"""T01：HTTP 错误契约与请求 ID 的集成测试。"""
+"""HTTP 错误契约与请求 ID 的集成测试。"""
 
 from __future__ import annotations
 

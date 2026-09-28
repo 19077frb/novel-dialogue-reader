@@ -26,7 +26,7 @@ export interface DocumentRendererProps {
   annotations?: AnnotationItemOut[]
   /** 点击节点时的回调：用于定位（保存阅读位置）。 */
   onNodeClick?: (node: ContentNodeOut) => void
-  /** 点击某段引语：T13 的普通对白详情入口（打开确认抽屉）。 */
+  /** 点击某段引语：普通对白详情入口（打开确认抽屉）。 */
   onQuoteClick?: (quoteId: string) => void
 }
 

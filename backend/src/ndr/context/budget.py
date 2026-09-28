@@ -1,4 +1,4 @@
-"""token 估算与预算账本（DEVELOPMENT.md 4.3 与 PLAN 7.3）。
+"""token 估算与预算账本。
 
 要点：
 
@@ -77,7 +77,7 @@ REQUIRED_KINDS: frozenset[BudgetItemKind] = frozenset(
 
 @dataclass(frozen=True)
 class BudgetPolicy:
-    """上下文策略（T08 起，T17 加入可回滚的压缩/复核/路由开关）。
+    """上下文策略。
 
     **默认仍然是保守的 `context-1`**：`gap_compression=False`、不做复核、不做模型路由。
     只有拿到真实对比证据（B3/B4 消融）才应该把默认切到 `context-2`；切换前必须能一键回滚。
@@ -88,14 +88,14 @@ class BudgetPolicy:
     state_tokens: int = 300
     prompt_reserve_tokens: int = 900
     output_reserve_tokens: int = 800
-    # T17：长 Gap 保守筛选（默认关闭）
+    # 长 Gap 保守筛选（默认关闭）
     gap_compression: bool = False
     gap_compression_threshold_cp: int = 80  # 短于这个长度的 Gap 原样保留
     gap_compression_margin_sentences: int = 1  # 命中句前后各补回一句
     gap_compression_max_ratio: float = 0.6  # 压缩后仍超过该比例就放弃压缩（省不下来就别动）
-    # T17：有限局部复核（默认 0 = 不复核）
+    # 有限局部复核（默认 0 = 不复核）
     recheck_max_targets: int = 0
-    # T17：可选强模型路由（默认关闭；>0 时才允许把困难窗口交给强模型）
+    # 可选强模型路由（默认关闭；>0 时才允许把困难窗口交给强模型）
     strong_model_share: float = 0.0
 
     def as_key(self) -> dict[str, Any]:
@@ -117,7 +117,7 @@ class BudgetPolicy:
 
 
 DEFAULT_POLICY = BudgetPolicy()
-# T17 的候选策略：保守筛选 + 有限复核；**不是默认值**，需要真实对比证据才切换
+# 的候选策略：保守筛选 + 有限复核；**不是默认值**，需要真实对比证据才切换
 COMPRESSED_POLICY = BudgetPolicy(
     gap_compression=True,
     recheck_max_targets=3,

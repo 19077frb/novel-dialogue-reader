@@ -1,4 +1,4 @@
-# 消融与默认策略选择（T17）
+# 消融与默认策略选择
 
 本文件说明 B2 / B3 / B4 的对比口径、判定门槛与**当前状态**。所有数字必须来自真实运行：
 现在没有真实凭据与人工确认样本，因此这里只给出可复现步骤，并如实标注「优化未验证」。
@@ -40,7 +40,7 @@ python -m ndr.evaluation run --manifest evaluation/manifests/dev.json `
   --output evaluation/reports/dev-b4-live.json
 ```
 
-## 判定门槛（DEVELOPMENT T17）
+## 判定门槛
 
 1. **删对**：`loss` 证据账里 `must_keep_violations` 必须为 0——金标准声明必须保留的证据不能被压缩丢掉。
    非 0 时不谈收益，先修筛选规则。
@@ -57,5 +57,5 @@ python -m ndr.evaluation run --manifest evaluation/manifests/dev.json `
   ——仓库自带的原创最小样例 Gap 都短于 80 码点，**压缩没有触发**，因此它只证明工具可用，不能作为压缩效果证据。
 - `evaluation/reports/dev-b3-notrun.json` / `dev-b4-notrun.json`：`NOT_RUN`（缺少 `--allow-live`、凭据与预算）。
 - 结论：**B3/B4 的真实准确率—覆盖率—总费用对比没有数据**；默认策略保持 `context-1`
-  （`gap_compression=False`、`recheck_max_targets=0`、`strong_model_share=0.0`），实现账本里 T17 的
+  （`gap_compression=False`、`recheck_max_targets=0`、`strong_model_share=0.0`），实现账本里压缩策略的
   Optimization 一栏写 `BLOCKED`。

@@ -1,7 +1,7 @@
-"""模型配置（DEVELOPMENT.md 3.2 / 5.4）。
+"""模型配置。
 
 本表**没有任何存放密钥的列**：只保存 ``credential_mode`` 与 ``credential_ref``，
-明文 Key 由凭据服务（T06）交给系统凭据库或仅存活于会话内存。
+明文 Key 由凭据服务交给系统凭据库或仅存活于会话内存。
 """
 
 from __future__ import annotations

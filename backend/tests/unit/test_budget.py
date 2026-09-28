@@ -1,4 +1,4 @@
-"""T08 单元测试：token 估算与预算账本。
+"""单元测试：token 估算与预算账本。
 
 门槛相关：**补入任何片段都计入预算**；预算先扣提示与输出预留；
 可选片段先丢、目标发言绝不截断。
@@ -116,7 +116,7 @@ def test_policy_defaults_follow_plan_7_3() -> None:
     assert 100 <= DEFAULT_POLICY.overlap_tokens <= 300
     assert DEFAULT_POLICY.gap_compression is False  # 激进压缩默认关闭
     assert RECHECK_POLICY.context_tokens > DEFAULT_POLICY.context_tokens
-    # T17：两个优化开关默认关闭（没有真实对比证据就不改默认策略）
+    # 两个优化开关默认关闭（没有真实对比证据就不改默认策略）
     assert DEFAULT_POLICY.recheck_max_targets == 0
     assert DEFAULT_POLICY.strong_model_share == 0.0
     assert policy_version_for(DEFAULT_POLICY) == "context-1"

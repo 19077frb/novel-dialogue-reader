@@ -1,12 +1,12 @@
-"""T15A 集成测试：冻结快照、EPUB/HTML 导出、校验与受控下载（F21/F22/F26/F27/F30 后端部分）。
+"""集成测试：冻结快照、EPUB/HTML 导出、校验与受控下载。
 
 覆盖：
 
-- F21：TXT（含已确认与自动标注）→ EPUB/HTML，正文完整、编号样式正确、**零模型调用**；
-- F22：EPUB（ruby + 图片）→ 导出 EPUB/HTML，资源闭合、注音不重复；
-- F26：只导出部分章节时，只带必要的资源；
-- F27：损坏的成品被校验报告为失败，不生成假成功；
-- F30：重复导出幂等（同一 fingerprint 复用产物）、重复下载 MIME 正确、中文文件名可用；
+- TXT（含已确认与自动标注）→ EPUB/HTML，正文完整、编号样式正确、**零模型调用**；
+- EPUB（ruby + 图片）→ 导出 EPUB/HTML，资源闭合、注音不重复；
+- 只导出部分章节时，只带必要的资源；
+- 损坏的成品被校验报告为失败，不生成假成功；
+- 重复导出幂等（同一 fingerprint 复用产物）、重复下载 MIME 正确、中文文件名可用；
 - 快照隔离：导出使用冻结投影，之后的人工更正不会改变已生成的产物。
 """
 
@@ -42,7 +42,7 @@ SAMPLE = (
 
 def _prepared_book(client: TestClient, settings: Settings, *, key: str = "k-export") -> dict:
     data = import_sample(client, SAMPLE)
-    profile_id = create_fake_profile(client, name=f"T15A 导出提供方 {key}")
+    profile_id = create_fake_profile(client, name=f"导出提供方 {key}")
     run_deterministic_job(
         settings, client, book_id=data["book_id"], profile_id=profile_id, key=key
     )
@@ -208,7 +208,7 @@ def test_f30_repeat_export_is_idempotent_and_download_is_stable(
 def test_snapshot_isolation_from_later_corrections(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """快照冻结之后的人工更正不能改变已经生成的导出（F24 的后端部分）。"""
+    """快照冻结之后的人工更正不能改变已经生成的导出。"""
 
     data = _prepared_book(fake_provider_client, migrated_settings, key="k-freeze")
     book_id = data["book_id"]

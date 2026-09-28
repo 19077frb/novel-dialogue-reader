@@ -4,16 +4,16 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * T18：完整联调（TXT/EPUB 导入 → 处理 → EPUB/HTML 导出 → 下载件离线可读）。
+ * 完整联调（TXT/EPUB 导入 → 处理 → EPUB/HTML 导出 → 下载件离线可读）。
  *
  * 真实后端 + 真实 Chromium + 隔离数据目录；模型侧只用显式启用的确定性 FakeProvider（不访问网络）。
- * 这里不重复 T15B 对样张/校验细节的断言，而是把**整条链路**在同一个会话里跑通：
+ * 这里不重复导出测试对样张/校验细节的断言，而是把**整条链路**在同一个会话里跑通：
  * 导入 → 本地估算 → 试运行处理 → 导出两种格式 → 下载件真的能离线读。
  */
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures')
 const fixture = (name: string) => path.join(fixturesDir, name)
 
-const FULL_FLOW_TEXT = 'sample-t18-full.txt'
+const FULL_FLOW_TEXT = 'sample-full-flow.txt'
 
 async function createProfile(page: Page, name: string, model = 'fake-model') {
   await page.goto('/settings/models')
@@ -66,11 +66,11 @@ async function downloadArtifact(page: Page): Promise<Download> {
 
 test.describe('完整联调：导入 → 处理 → 导出', () => {
   test('TXT：估算/处理 → HTML 与 EPUB 都能生成、下载并离线可读', async ({ page }) => {
-    const profileName = 'T18 全流程 TXT 提供方'
-    await createProfile(page, profileName, 'fake-model-t18-txt')
+    const profileName = '全流程 TXT 提供方'
+    await createProfile(page, profileName, 'fake-model-full-txt')
     await importFile(page, FULL_FLOW_TEXT)
-    await openReader(page, 'sample-t18-full')
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model-t18-txt`)
+    await openReader(page, 'sample-full-flow')
+    await processFirstChapter(page, `${profileName} · fake-provider · fake-model-full-txt`)
 
     // 处理结果回到阅读页
     await page.getByRole('link', { name: '去阅读' }).click()
@@ -109,11 +109,11 @@ test.describe('完整联调：导入 → 处理 → 导出', () => {
   })
 
   test('EPUB：导入 → 处理 → EPUB 与 HTML 都能生成并下载', async ({ page }) => {
-    const profileName = 'T18 全流程 EPUB 提供方'
-    await createProfile(page, profileName, 'fake-model-t18-epub')
+    const profileName = '全流程 EPUB 提供方'
+    await createProfile(page, profileName, 'fake-model-full-epub')
     await importFile(page, 'original-sample.epub')
     await openReader(page, '原创 ruby/插图样例')
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model-t18-epub`)
+    await processFirstChapter(page, `${profileName} · fake-provider · fake-model-full-epub`)
 
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()

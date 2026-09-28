@@ -1,5 +1,5 @@
 {
-  "generated_by": "T15A build（离线确定性 FakeProvider，未访问任何真实模型）",
+  "generated_by": "离线构建（确定性测试用适配器，未访问任何真实模型）",
   "source": "../minimal-txt-001/text.txt",
   "style": "color_and_label",
   "visibility_policy": "reread",

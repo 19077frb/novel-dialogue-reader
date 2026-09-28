@@ -225,7 +225,7 @@ describe('ModelSettingsPage', () => {
   })
 })
 
-describe('ModelSettingsPage / 连接测试（T07）', () => {
+describe('ModelSettingsPage / 连接测试', () => {
   beforeEach(() => {
     vi.mocked(profilesApi.fetchProfiles).mockReset()
     vi.mocked(profilesApi.fetchProtocols).mockReset()

@@ -1,4 +1,4 @@
-"""模型输出的解析与程序校验（DEVELOPMENT.md 4.5 第 1～2 步）。
+"""模型输出的解析与程序校验。
 
 原则：
 
@@ -63,7 +63,7 @@ class ValidationReport:
 
 @dataclass(frozen=True)
 class RetryPolicy:
-    """格式/结构错误最多重试一次；鉴权与限流不在这里重试（T10/T14 处理退避）。"""
+    """格式/结构错误最多重试一次；鉴权与限流不在这里重试。"""
 
     max_format_retries: int = 1
 
@@ -93,7 +93,7 @@ def _strip_code_fence(text: str) -> str:
 def load_json_object(payload: str) -> dict[str, Any]:
     """把模型返回的**整段**文本解析成 JSON 对象。
 
-    只接受两种形态（DEVELOPMENT 4.5）：整段 JSON 对象，或整段被 ``` 包裹的 JSON 代码块；
+    只接受两种形态：整段 JSON 对象，或整段被 ``` 包裹的 JSON 代码块；
     绝不在长文本里“找看起来像 JSON 的片段”——那会把解释性文字当成数据。
     """
 

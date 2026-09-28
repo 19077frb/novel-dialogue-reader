@@ -1,4 +1,4 @@
-"""T03 集成测试：EPUB 导入、按 spine 阅读、资源端点与安全边界（F03 / F04 / F19）。"""
+"""集成测试：EPUB 导入、按 spine 阅读、资源端点与安全边界。"""
 
 from __future__ import annotations
 

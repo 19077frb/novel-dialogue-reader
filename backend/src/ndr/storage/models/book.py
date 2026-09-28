@@ -1,4 +1,4 @@
-"""书籍、版本、章节、内容节点与资源（DEVELOPMENT.md 3.2）。"""
+"""书籍、版本、章节、内容节点与资源。"""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ class Book(IdMixin, TimestampMixin, VersionMixin, Base):
 
 
 class BookVersion(IdMixin, TimestampMixin, Base):
-    """原文版本：不可变。更换编码或解析器产生新版本（DEVELOPMENT.md 3.2）。"""
+    """原文版本：不可变。更换编码或解析器产生新版本。"""
 
     __tablename__ = "book_versions"
     __table_args__ = (

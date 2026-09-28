@@ -1,4 +1,4 @@
-"""T17：有限局部复核与成本路由的纯决策层。
+"""有限局部复核与成本路由的纯决策层。
 
 只做**决策**，不调用模型、不写数据库：调度器照此派发，因此这套规则可以完全离线单测。
 
@@ -56,7 +56,7 @@ class RecheckDecision:
 
 
 def dropped_compressed_evidence(window) -> bool:  # noqa: ANN001
-    """该窗口是否因为 T17 压缩丢过句子（丢过就必须能在复核里补回）。"""
+    """该窗口是否因为压缩丢过句子（丢过就必须能在复核里补回）。"""
 
     return any(record.reason == COMPRESSION_OMIT_REASON for record in window.omitted)
 

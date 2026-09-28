@@ -1,6 +1,6 @@
-"""处理窗口构建（DEVELOPMENT.md 4.3 / PLAN 6.3）。
+"""处理窗口构建。
 
-- 预算边界**不是**场景边界：窗口只是调用边界，场景状态由 T09 管理。
+- 预算边界**不是**场景边界：窗口只是调用边界，场景状态由场景引擎管理。
 - 目标对白绝不截断；放不下就拆成多个窗口。
   单个目标本身就超预算时给它独立窗口并把该目标标为 ``oversized_quote``（保留待定，绝不截断后猜测）。
 - 窗口之间携带少量重叠与「上一窗口最后一个目标」的接力点，长场景因此可以跨窗口延续。
@@ -38,7 +38,7 @@ from .source_selection import (
 )
 
 # 默认（保守）上下文策略的版本号。窗口/计划真正使用的版本由 `policy_version_for(policy)` 计算：
-# 开启 T17 压缩策略（context-2）会得到不同的窗口 ID、依赖哈希与缓存键，避免错误复用缓存。
+# 开启压缩策略（context-2）会得到不同的窗口 ID、依赖哈希与缓存键，避免错误复用缓存。
 CONTEXT_POLICY_VERSION = CONTEXT_POLICY_CONSERVATIVE
 OVERSIZED_WARNING = "oversized_quote"
 

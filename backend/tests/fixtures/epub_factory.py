@@ -1,4 +1,4 @@
-"""原始 EPUB 夹具构造器（T03）。
+"""原始 EPUB 夹具构造器。
 
 所有内容都是原创最小片段，测试用例按需拼装：spine 顺序与文件名顺序可以不同，
 可以加入 ruby、图片、脚本、越界条目与符号链接条目来验证安全边界。
@@ -217,7 +217,7 @@ def minimal_spec() -> EpubSpec:
 
 
 def ruby_and_image_spec(image_bytes: bytes = b"\x89PNG\r\n\x1a\noriginal") -> EpubSpec:
-    """F04 样例：ruby 注音 + 插图 + 跨块对白 + 脚本与样式。"""
+    """样例：ruby 注音 + 插图 + 跨块对白 + 脚本与样式。"""
 
     return EpubSpec(
         title="原创 ruby/插图样例",

@@ -1,4 +1,4 @@
-# 评测配置（T16）
+# 评测配置
 
 | 配置 | 含义（PLAN） | 是否调用模型 |
 | --- | --- | --- |
@@ -17,14 +17,14 @@
   "strategy": "llm",              // rule_baseline | llm
   "scene_state": true,            // 是否使用持续场景状态
   "prompt_version": "labeling-2",
-  "context_policy": "context-1",     // T17：context-1 保守 / context-2 长 Gap 保守筛选
+  "context_policy": "context-1",     // context-1 保守 / context-2 长 Gap 保守筛选
   "reading_mode": "reread",
-  "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 0},   // T17：max_rechecks → recheck_max_targets
+  "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 0},   // max_rechecks → recheck_max_targets
   "model": null,                  // null 表示用 --profile-id 指定的配置
   "notes": "……"
 }
 ```
 
 每个配置都会算出一个**配置指纹**（`fingerprint`），报告里记录它，便于证明“这份数字是这组参数跑出来的”。
-T17 的消融（B2/B3/B4）口径与判定门槛见 `evaluation/ablations.md`；压缩丢掉的行文可以用
+压缩与复核的消融（B2/B3/B4）口径与判定门槛见 `evaluation/ablations.md`；压缩丢掉的行文可以用
 `python -m ndr.evaluation loss --manifest … --context-policy context-2` 离线复核。

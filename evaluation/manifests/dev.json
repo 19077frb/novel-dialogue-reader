@@ -1,6 +1,6 @@
 {
   "manifest_version": "1.0",
-  "description": "T16 评测清单：目前只有仓库自带的原创最小样例，用于验证工具链与坐标约定",
+  "description": "评测清单：目前只有仓库自带的原创最小样例，用于验证工具链与坐标约定",
   "works": [
     {
       "work_id": "ex-original-minimal",

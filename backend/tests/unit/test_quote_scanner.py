@@ -1,4 +1,4 @@
-"""T05 单元测试：引号扫描与 Gap（F05～F12 的解析部分）。
+"""单元测试：引号扫描与 Gap。
 
 门槛：扫描器**只提出候选**——不分配说话人、不按轮流推断、不做人名匹配；
 异常引号既不会吞章，也不会被静默忽略（都有警告）。
@@ -210,7 +210,7 @@ def test_gap_is_skipped_when_quotes_touch() -> None:
 
 
 def test_gap_can_cross_chapter_boundary() -> None:
-    """F12 的解析部分：Gap 允许跨章节，不能只按章节关闭。"""
+    """解析部分：Gap 允许跨章节，不能只按章节关闭。"""
 
     text = "第一章 一\n「甲」\n\n第二章 二\n少年沉默了很久。\n「乙」"
     result = _scan(text)

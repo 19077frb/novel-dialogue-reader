@@ -134,7 +134,7 @@ export function CharacterRosterPanel({
         character_id: item.character_id ?? null,
         canonical_name: item.canonical_name || null,
         aliases: item.aliasesText
-          .split(/[、,，]/)
+          .split(/[、，]/)
           .map((value) => value.trim())
           .filter(Boolean),
         description: item.description,

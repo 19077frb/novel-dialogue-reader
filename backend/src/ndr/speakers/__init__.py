@@ -1,4 +1,4 @@
-"""场景内匿名分组与身份修订（T09）。"""
+"""场景内匿名分组与身份修订。"""
 
 from __future__ import annotations
 

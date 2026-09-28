@@ -1,4 +1,4 @@
-"""T11 集成测试：标注投影（颜色/编号/图例/统计、初读 horizon、只读）。"""
+"""集成测试：标注投影（颜色/编号/图例/统计、初读 horizon、只读）。"""
 
 from __future__ import annotations
 
@@ -127,7 +127,7 @@ def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
     factory = create_session_factory(engine)
     try:
         with transaction(factory) as session:
-            # 直接写入两条有明确归属的标注（模拟 T09 的接受结果），其中第二条的可见时点在文末
+            # 直接写入两条有明确归属的标注，其中第二条的可见时点在文末
             from ndr.storage.models import BookVersion, Quote, Scene, SpeakerGroup
 
             version = session.get(BookVersion, data["book_version_id"])

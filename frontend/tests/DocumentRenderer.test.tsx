@@ -165,7 +165,7 @@ describe('DocumentRenderer', () => {
   })
 })
 
-describe('DocumentRenderer 标注投影（T11）', () => {
+describe('DocumentRenderer 标注投影', () => {
   const node = {
     node_id: 'n0',
     node_type: 'paragraph' as const,
@@ -321,7 +321,7 @@ describe('DocumentRenderer 标注投影（T11）', () => {
 })
 
 
-describe('DocumentRenderer 码点定位（T15 / F11）', () => {
+describe('DocumentRenderer 码点定位', () => {
   const astralText = '𠮷野家的猫🐈跳上窗台。' // 11 码点 / 13 UTF-16 单元
   const base = 500
 

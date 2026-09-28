@@ -1,6 +1,6 @@
-"""场景状态与转移（DEVELOPMENT.md 4.6 / PLAN 6.3）。
+"""场景状态与转移。
 
-状态要在窗口之间可序列化传递（T10 存进 `jobs.checkpoint_json`），且：
+状态要在窗口之间可序列化传递，且：
 
 - **UPDATE 不切场景**；只有 BREAK 关闭当前场景并开新场景。
 - **UNCERTAIN 不强制切开**：标为 `PENDING_BOUNDARY`，把未解决问题留给下一窗口。

@@ -1,4 +1,4 @@
-"""候选引语、Gap 与原文定位的 API schema（T05）。"""
+"""候选引语、Gap 与原文定位的 API schema。"""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ class GapOut(ApiModel):
 
 
 class QuoteDetailOut(ApiModel):
-    """普通对白详情；**不要求**该对白已经在待确认队列里（T12）。"""
+    """普通对白详情；**不要求**该对白已经在待确认队列里。"""
 
     quote: QuoteOut
     previous_quote_id: str | None = None

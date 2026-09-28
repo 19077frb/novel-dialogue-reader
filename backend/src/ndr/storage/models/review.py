@@ -1,4 +1,4 @@
-"""待确认队列与人工更正（DEVELOPMENT.md 3.2 / 3.4）。
+"""待确认队列与人工更正。
 
 - ``review_items`` 的目标恰好一种：quote_id 或 gap_id，由 CHECK 约束保证。
 - ``corrections`` 保存前值/后值、期望版本与实际应用版本；撤销通过 ``undone_by`` 留痕，

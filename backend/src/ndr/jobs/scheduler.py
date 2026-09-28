@@ -1,12 +1,12 @@
-"""单进程调度器（DEVELOPMENT.md 5.5，T10）。
+"""单进程调度器。
 
 - **每个窗口一次有效提交**：按文档顺序执行，完成即写检查点；再次运行跳过已完成窗口。
 - **网络调用与数据库事务分离**：调用前用短事务写 PREPARED → DISPATCHED 并提交；
   适配器调用期间不持有事务；返回后用另一个事务应用结果并结算用量。
 - **未知结果不自动重发**：DISPATCHED 却没有落库结果的尝试（进程中断、超时）标为
-  `UNKNOWN_OUTCOME`，窗口与任务进入 `NEEDS_RECONCILIATION`，等用户显式决定（F15）。
-- **缓存命中不调用模型**：同语义输入（含 horizon/阅读模式/提示版本/策略版本）直接复用（F16）。
-- **预算**：调用前按估算预留、调用后按 usage 结算；未知用量按预留口径计入并单独标记（F20）。
+  `UNKNOWN_OUTCOME`，窗口与任务进入 `NEEDS_RECONCILIATION`，等用户显式决定。
+- **缓存命中不调用模型**：同语义输入（含 horizon/阅读模式/提示版本/策略版本）直接复用。
+- **预算**：调用前按估算预留、调用后按 usage 结算；未知用量按预留口径计入并单独标记。
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ class JobRunOutcome:
     cached_windows: int = 0
     calls: int = 0
     unknown_runs: int = 0
-    # T17：成本路由与局部复核的计数（默认都是 0；不是估计值）
+    # 成本路由与局部复核的计数（默认都是 0；不是估计值）
     strong_windows: int = 0
     recheck_windows: int = 0
     recheck_targets: int = 0
@@ -365,7 +365,7 @@ def _apply_payload(
     if not report.ok or report.output is None:
         return False, report.error_codes, report.messages, list(report.warnings)
     quote_positions, gap_positions, evidence_positions = _positions(inputs, window)
-    # F14：人工确认过的对白（user_locked）不能被模型结果覆盖，也不能被自动 merge/split。
+    # 人工确认过的对白（user_locked）不能被模型结果覆盖，也不能被自动 merge/split。
     locked_quote_ids = {
         row.quote_id
         for row in session.execute(
@@ -427,7 +427,7 @@ def _run_recheck(
     reading_mode: ReadingMode,
     horizon_cp: int | None,
 ) -> dict[str, int]:
-    """T17 有限局部复核：只复核未解决的目标，并用保守策略把压缩丢掉的行文补回。
+    """有限局部复核：只复核未解决的目标，并用保守策略把压缩丢掉的行文补回。
 
     复核是**额外**一次尝试：单独写 `inference_runs` 并计入用量（不是只统计最后一次调用）。
     复核失败不改变首次结果；只有超时（结果未知、可能已计费）才升级为人工对账。
@@ -625,7 +625,7 @@ def _dispatch_with_bounded_retry(
     保持 DISPATCHED，由调用方按原有逻辑置为 SUCCEEDED/FAILED/UNKNOWN_OUTCOME；
     中间被退避重试的失败尝试在这里就写成 FAILED，保证每次尝试都可追溯。
 
-    超时**不**自动重试：结果未知必须交人工对账（F15）。
+    超时**不**自动重试：结果未知必须交人工对账。
     """
 
     allowed = max(1, int(settings.rate_limit_max_retries) + 1)
@@ -707,7 +707,7 @@ def run_job(
 ) -> JobRunOutcome:
     """把任务跑到终态（或暂停 / 预算耗尽 / 需要人工对账）。
 
-    T17：上下文策略默认取任务范围里的 ``context_policy``（缺省是保守的 ``context-1``）；
+    上下文策略默认取任务范围里的 ``context_policy``（缺省是保守的 ``context-1``）；
     显式传入 ``policy`` 可以覆盖它（测试与 B3/B4 消融对比用）。
     """
 
@@ -842,7 +842,7 @@ def run_job(
             outcome.errors.append(exc.code.value)
             return outcome
 
-    # T17 成本路由：只有策略开启、且任务里指定了强模型配置时才可能升级
+    # 成本路由：只有策略开启、且任务里指定了强模型配置时才可能升级
     strong_adapter: ProviderAdapter | None = None
     if policy.strong_model_share > 0 and strong_snapshot is not None:
         if adapter_factory is not None:
@@ -962,7 +962,7 @@ def run_job(
             outcome.budget_exhausted = True
             break
 
-        # T17 成本路由：默认关闭；开启时也只升级困难窗口，且不超过 share 上限
+        # 成本路由：默认关闭；开启时也只升级困难窗口，且不超过 share 上限
         route = route_window(
             policy=policy,
             window=window,
@@ -1030,7 +1030,7 @@ def run_job(
                     job.last_error = f"缓存结果未通过校验：{codes}；问题：{problems}"
                 session.commit()
             if ok:
-                # T17：首次结果落地后按策略做有限局部复核（默认关闭）
+                # 首次结果落地后按策略做有限局部复核（默认关闭）
                 if not _maybe_recheck(window, window_adapter, window_snapshot):
                     return outcome
                 continue
@@ -1053,7 +1053,7 @@ def run_job(
             outcome.strong_windows += 1
 
         # 每个窗口最多两次调用：首次 + 一次「纠错重发」
-        # （DEVELOPMENT 4.5：格式/契约错误最多重试一次）。
+        #。
         # 每次调用都单独写 inference_runs 并各自结算用量，不是只记最后一次。
         correction: str | None = None
         retry_correction: str | None = None
@@ -1089,7 +1089,7 @@ def run_job(
                 if error is not None:
                     run.usage_json = _usage_json_from_error(error)
                     if error.kind is ProviderErrorKind.TIMEOUT:
-                        # 超时可能已经计费且结果未知：不自动重发，交人工对账（F15/F20）
+                        # 超时可能已经计费且结果未知：不自动重发，交人工对账
                         outcome.errors.append(f"{window.window_id}:{error.code.value}")
                         run.state = InferenceRunState.UNKNOWN_OUTCOME
                         run.error_code = error.code.value
@@ -1215,7 +1215,7 @@ def run_job(
         if window_failed:
             break
 
-        # T17：有限局部复核（默认关闭；只有策略显式开启才会多花一次调用）
+        # 有限局部复核（默认关闭；只有策略显式开启才会多花一次调用）
         if not _maybe_recheck(window, window_adapter, window_snapshot):
             return outcome
 
@@ -1261,7 +1261,7 @@ def _dispatch(
     correction: str | None = None,
     max_tokens_override: int | None = None,
 ) -> Any:
-    # ``correction`` 用于「格式/契约错误后的有限纠错重发」（DEVELOPMENT 4.5：最多重试一次）
+    # ``correction`` 用于「格式/契约错误后的有限纠错重发」
     payload = {
         "messages": _messages_for(
             window=window, state=state, locked_summary=None, correction=correction
@@ -1281,7 +1281,7 @@ def reconcile_stale_runs(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     now: datetime | None = None,
 ) -> list[str]:
-    """把超过租约仍处于 DISPATCHED 的尝试标为未知结果（进程重启后的扫描，F15）。"""
+    """把超过租约仍处于 DISPATCHED 的尝试标为未知结果。"""
 
     moment = now or datetime.now(tz=UTC)
     cutoff = moment - timedelta(seconds=lease_seconds)

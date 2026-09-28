@@ -1,4 +1,4 @@
-"""存储层：ORM 模型、引擎、事务与缓存（DEVELOPMENT.md 3）。"""
+"""存储层：ORM 模型、引擎、事务与缓存。"""
 
 from __future__ import annotations
 

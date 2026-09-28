@@ -1,4 +1,4 @@
-"""人工更正与撤销（T12，DEVELOPMENT.md 5.2 / 5.3 / 3.4）。
+"""人工更正与撤销。
 
 一次请求 = 一个事务 = 一个一致结果：
 
@@ -606,7 +606,7 @@ def annotation_map(session: Session, quote_ids: list[str]) -> dict[str, Annotati
 
 
 def undo_correction(session: Session, *, correction: Correction) -> UndoOutcome:
-    """撤销一次人工更正；目标必须仍停在这次更正产生的版本上（F18）。
+    """撤销一次人工更正；目标必须仍停在这次更正产生的版本上。
 
     - 版本不一致（其它页面又改过、或已有更新的修订）→ 409，且不改动任何数据。
     - 撤销不是硬删除：写一条 `action=undo` 的更正记录 + 一条标注历史，再恢复旧快照。

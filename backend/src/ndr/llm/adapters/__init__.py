@@ -1,4 +1,4 @@
-"""适配器实现与注册（T07）。"""
+"""适配器实现与注册。"""
 
 from __future__ import annotations
 

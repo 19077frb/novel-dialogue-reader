@@ -1,6 +1,6 @@
-"""人工更正、待确认队列与撤销路由（T12）。
+"""人工更正、待确认队列与撤销路由。
 
-契约见 docs/CONTRACTS.md 第 21 节；语义见决策 0014。
+契约见 docs/CONTRACTS.md 第 21 节。
 
 - 读：`GET /api/books/{id}/review-items`、`GET /api/review-items/{id}`。
 - 队列：`POST /api/quotes/{id}/review-items`（主动标记，幂等）、
@@ -295,7 +295,7 @@ def recheck_quote_route(
 ) -> DataEnvelope[JobDetailOut]:
     """局部复核：范围取当前场景（其次章节），必须显式给出模型配置与预算。
 
-    这是**可能付费**的操作（DEVELOPMENT.md 6.4），与「展开原文」完全不同：
+    这是**可能付费**的操作，与「展开原文」完全不同：
     后者只读本地原文，本接口会创建 RECHECK 任务并调用提供方。
     """
 

@@ -1,4 +1,4 @@
-"""T05 单元测试：金标准校验、模板生成与候选覆盖率。
+"""单元测试：金标准校验、模板生成与候选覆盖率。
 
 这些检查只读文件，不触碰数据库、不调用模型。
 """
@@ -55,7 +55,7 @@ def test_example_gold_standard_is_valid() -> None:
     issues, coverage = check_against_scanner(gold, text)
     assert _errors(issues) == []
     assert coverage["gold_quotes"] == 5
-    assert coverage["matched"] == 5  # 扫描器与 T00 样例的坐标完全一致
+    assert coverage["matched"] == 5  # 扫描器与示例样例的坐标完全一致
     assert coverage["missing"] == 0
 
 
@@ -169,7 +169,7 @@ def test_read_canonical_text_detects_gb18030(tmp_path: Path) -> None:
 def test_cli_validate_and_scan(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     cli = _load_cli()
 
-    # 通过：T00 样例
+    # 通过：示例样例
     exit_code = cli.main(
         [
             "validate",

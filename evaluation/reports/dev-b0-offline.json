@@ -1,6 +1,6 @@
 {
   "report_version": "evaluation-1",
-  "generated_at": "2026-09-27T21:23:38.609642+00:00",
+  "generated_at": "2026-09-28T19:25:27.607424+00:00",
   "manifest": "evaluation/manifests/dev.json",
   "manifest_version": "1.0",
   "config": {
@@ -25,9 +25,13 @@
     "evaluation": "evaluation-1",
     "app": "0.1.0",
     "engine": "attribution-engine-1",
-    "prompt": "labeling-1",
+    "prompt": "labeling-10",
     "scanner": "quote-scan-1",
     "context_policy": "context-1",
+    "context_policy_versions": [
+      "context-1",
+      "context-2"
+    ],
     "gold_schema": "1.0",
     "rule_baseline": "b0-rule-1"
   },

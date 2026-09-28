@@ -1,9 +1,9 @@
-"""OpenAI 兼容的 chat-completions 适配器（T07）。
+"""OpenAI 兼容的 chat-completions 适配器。
 
 - Base URL 是 API 根路径，适配器自行追加 ``/chat/completions``。
 - 只用服务端 httpx 客户端；支持本地地址、无 Key 服务与显式超时。
 - 上游错误映射为稳定业务错误码，并做**脱敏**（不记录 Authorization、不整段透传响应）。
-- 不在这里做重试/预算/落库：那是 T10 的任务层；本类只负责一次调用。
+- 不在这里做重试/预算/落库：那是任务层的职责；本类只负责一次调用。
 """
 
 from __future__ import annotations
@@ -301,7 +301,7 @@ class ChatCompletionsAdapter:
             )
 
         try:
-            # 与标注链路共用同一种解析：整段 JSON 或整段 ```json 代码块都接受（DEVELOPMENT 4.5）
+            # 与标注链路共用同一种解析：整段 JSON 或整段 ```json 代码块都接受
             parse_output(text)
         except InvalidModelOutput as exc:
             issues = (exc.details or {}).get("issues") or []
@@ -359,7 +359,7 @@ class ChatCompletionsAdapter:
             exc.details.setdefault("usage", usage)
             raise
         try:
-            # 与连接测试同一套解析：整段 JSON 或整段代码块都接受（DEVELOPMENT 4.5）
+            # 与连接测试同一套解析：整段 JSON 或整段代码块都接受
             parsed = load_json_object(text)
         except InvalidModelOutput as exc:
             finish_reason = self._finish_reason_of(data)

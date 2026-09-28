@@ -1,7 +1,7 @@
 """应用配置。
 
 数据目录不能通过当前 shell 工作目录猜测：默认值由本文件的绝对路径推导，
-也可用 ``NDR_DATA_DIR`` 显式覆盖（见 DEVELOPMENT.md 2.2）。
+也可用 ``NDR_DATA_DIR`` 显式覆盖。
 """
 
 from __future__ import annotations
@@ -68,12 +68,12 @@ class Settings(BaseSettings):
     # 取值：""/"rate_limited_once"/"unavailable_once"/"timeout_once"/"auth_failed_once"。
     fake_provider_script: str = ""
 
-    # 限流/暂时不可用的**有上限**自动重试（T14）。超过上限就停下，等用户显式继续。
+    # 限流/暂时不可用的**有上限**自动重试。超过上限就停下，等用户显式继续。
     rate_limit_max_retries: int = 2
     rate_limit_backoff_base_seconds: int = 1
     rate_limit_backoff_max_seconds: int = 30
 
-    # 进程重启时把超过该租约仍未落库的尝试视为「结果未知」（F15）。
+    # 进程重启时把超过该租约仍未落库的尝试视为「结果未知」。
     stale_run_lease_seconds: int = 900
 
     # 启动时自动扫描孤儿任务（恢复可见状态）；测试可关闭。
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     # 测试/E2E 显式设为 session，避免触碰真实的系统凭据库。
     credential_backend: str = "system"
 
-    # EPUB 解压与结构限制（DEVELOPMENT.md 4.1：限制值可配置并返回具体错误）。
+    # EPUB 解压与结构限制。
     max_epub_entries: int = 2000
     max_epub_total_uncompressed_bytes: int = 200 * 1024 * 1024
     max_epub_entry_bytes: int = 32 * 1024 * 1024

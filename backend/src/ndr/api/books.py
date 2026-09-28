@@ -1,7 +1,7 @@
-"""书籍导入与阅读路由（DEVELOPMENT.md 5.2；T02 实现 TXT，T03 增加 EPUB 与资源）。
+"""书籍导入与阅读路由。
 
 - ``POST /api/books/import``：multipart + 可选 encoding；202 返回 book_id 与 IMPORT job_id。
-  解析在请求内同步完成并立即写入终态；T10 引入调度器后改为后台执行，契约不变。
+  解析在请求内同步完成并立即写入终态；引入调度器后改为后台执行，契约不变。
 - ``GET /api/books``、``/books/{id}``、``/books/{id}/chapters``、``/books/{id}/content``：
   不调用模型，无 LLM 也能完整读取原文。
 - ``GET /api/books/{id}/resources/{resource_id}``：只服务已登记且位于书籍包内的资源。

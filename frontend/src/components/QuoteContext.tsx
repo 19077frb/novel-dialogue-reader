@@ -1,8 +1,8 @@
 /**
- * 对白上下文（T13）：只展示后端返回的原文片段。
+ * 对白上下文：只展示后端返回的原文片段。
  *
  * 「展开更多原文」= 重新请求更大 `context_window_cp` 的本地原文，**不调用模型**；
- * 与「模型复核」是完全不同的操作（DEVELOPMENT.md 6.4）。
+ * 与「模型复核」是完全不同的操作。
  */
 export interface QuoteContextProps {
   before: string

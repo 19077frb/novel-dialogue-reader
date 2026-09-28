@@ -1,4 +1,4 @@
-"""`python -m ndr.evaluation`：评测命令（T16）。
+"""`python -m ndr.evaluation`：评测命令。
 
 ```powershell
 uv run --project backend python -m ndr.evaluation validate --manifest evaluation/manifests/dev.json
@@ -9,7 +9,7 @@ uv run --project backend python -m ndr.evaluation run --manifest evaluation/mani
 - `validate`：只校验清单与金标准（不加载模型，不调用网络）。
 - `run`：产出预测并计算指标；`--config` 为 B0 规则基线时完全离线，
   为 LLM 配置时必须显式 `--allow-live` 并提供 `--profile-id`，否则报告记为 `NOT_RUN`。
-- `loss`：离线证据账（T17）。重放长 Gap 压缩，列出丢掉的行文与是否删到金标准 ``must_keep``。
+- `loss`：离线证据账。重放长 Gap 压缩，列出丢掉的行文与是否删到金标准 ``must_keep``。
 
 退出码：0 = 通过；1 = 校验/运行有错误；2 = 用法错误（argparse）。
 """
@@ -107,7 +107,7 @@ def _cmd_loss(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m ndr.evaluation", description="T16 评测命令")
+    parser = argparse.ArgumentParser(prog="python -m ndr.evaluation", description="离线评测命令")
     sub = parser.add_subparsers(dest="command", required=True)
 
     validate = sub.add_parser("validate", help="校验清单与金标准（离线）")
@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--min-sample", type=int, default=30, help="宣布达标所需的最少可确定样本数")
     run.set_defaults(func=_cmd_run)
 
-    loss = sub.add_parser("loss", help="离线证据账：压缩丢掉了哪些原文（T17）")
+    loss = sub.add_parser("loss", help="离线证据账：压缩丢掉了哪些原文")
     loss.add_argument("--manifest", required=True)
     loss.add_argument("--context-policy", default="context-2", help="context-1 / context-2")
     loss.add_argument("--splits", nargs="*", help="只跑指定划分（默认全部）")

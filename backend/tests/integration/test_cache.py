@@ -1,4 +1,4 @@
-"""T10 单元/集成：语义缓存键与 result_cache 存储（F16）。"""
+"""单元/集成：语义缓存键与 result_cache 存储。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""领域枚举（DEVELOPMENT.md 3.3）。
+"""领域枚举。
 
 取值字符串就是 API 契约的一部分：所有枚举继承 ``StrEnum``，序列化即为字符串值。
 大写取值用于状态机（SceneStatus、JobState…），小写取值用于协议字段
@@ -18,7 +18,7 @@ class DatabaseState(StrEnum):
 
 
 class ContentNodeType(StrEnum):
-    """统一文档树的受限节点类型（DEVELOPMENT.md 4.1）。
+    """统一文档树的受限节点类型。
 
     ruby/rb/rt/rp 单独保留，注音不重复进入模型正文。
     """
@@ -80,7 +80,7 @@ class Assignment(StrEnum):
 
 
 class SpeakerBasis(StrEnum):
-    """证据类型，不是校准后的置信概率（DEVELOPMENT.md 4.4）。"""
+    """证据类型，不是校准后的置信概率。"""
 
     DIRECT = "DIRECT"
     COREFERENCE = "COREFERENCE"
@@ -146,7 +146,7 @@ class CorrectionTargetType(StrEnum):
 
 
 class CorrectionAction(StrEnum):
-    """人工更正动作（DEVELOPMENT.md 5.3）。"""
+    """人工更正动作。"""
 
     ASSIGN_EXISTING = "assign_existing"
     CREATE_SPEAKER = "create_speaker"

@@ -1,4 +1,4 @@
-"""待确认队列与对白详情（T12）。
+"""待确认队列与对白详情。
 
 - `review_items` 的目标恰好一种（quote 或 gap），同一个目标 + 原因只有一条当前项。
 - 用户主动标记（`POST /api/quotes/{id}/review-items`）是幂等的：已解决的项目会被重新打开。
@@ -245,9 +245,9 @@ def build_quote_detail(
     *,
     context_window_cp: int = 120,
 ) -> QuoteDetailOut:
-    """普通对白详情：任何候选都能取，不要求它已经在待确认队列里（DEVELOPMENT.md 5.2）。
+    """普通对白详情：任何候选都能取，不要求它已经在待确认队列里。
 
-    在 T05 的上下文/前置 Gap 之上补充：当前标注投影、所属场景、已有待确认项、可用的分组编号。
+    在候选对白与前置 Gap 的上下文之上补充：当前标注投影、所属场景、已有待确认项、可用的分组编号。
     """
 
     from ..quotes.service import get_quote_detail

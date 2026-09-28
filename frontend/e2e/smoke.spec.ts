@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * T00 连通性冒烟：真实的 Vite 前端 + 真实后端，页面必须显示后端返回的状态，
+ * 连通性冒烟：真实的 Vite 前端 + 真实后端，页面必须显示后端返回的状态，
  * 而不是前端硬编码文本。
  */
 test('首页显示后端 /api/health 返回的真实状态', async ({ page }) => {

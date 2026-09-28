@@ -1,4 +1,4 @@
-"""T10 集成测试：任务、缓存复用、预算与未知结果（F15/F16/F20）。"""
+"""集成测试：任务、缓存复用、预算与未知结果。"""
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ def _run_with_fake(settings: Settings, job_id: str, adapter: FakeProviderAdapter
 def test_preview_then_process_reuses_cache_and_idempotency(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F16：预览后处理同一范围命中缓存；重复点击开始返回同一任务。"""
+    """预览后处理同一范围命中缓存；重复点击开始返回同一任务。"""
 
     data = _import(fake_provider_client)
     profile_id = _fake_profile(fake_provider_client)
@@ -120,7 +120,7 @@ def test_preview_then_process_reuses_cache_and_idempotency(
 def test_failed_model_output_error_keeps_raw_snippet(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """真实提供方返回空内容/坏结构时，任务错误信息必须带脱敏片段（决策 0024）。"""
+    """真实提供方返回空内容/坏结构时，任务错误信息必须带脱敏片段。"""
 
     data = _import(fake_provider_client)
     profile_id = _fake_profile(fake_provider_client)
@@ -177,7 +177,7 @@ def test_truncated_output_retry_raises_max_tokens(
 def test_invalid_output_triggers_one_repair_retry(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """契约错误（DEVELOPMENT 4.5）最多纠错重发一次：一次坏输出后第二次成功，窗口仍完成。"""
+    """契约错误最多纠错重发一次：一次坏输出后第二次成功，窗口仍完成。"""
 
     data = _import(fake_provider_client)
     profile_id = _fake_profile(fake_provider_client)
@@ -294,7 +294,7 @@ def test_completed_windows_are_not_called_again(
 def test_usage_is_recorded_and_unknown_is_not_zeroed(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F20：usage 缺失不写 0；提供方给了 usage 时按口径结算。"""
+    """usage 缺失不写 0；提供方给了 usage 时按口径结算。"""
 
     data = _import(fake_provider_client)
     profile_id = _fake_profile(fake_provider_client)
@@ -342,7 +342,7 @@ def test_usage_is_recorded_and_unknown_is_not_zeroed(
 def test_budget_exhaustion_stops_before_next_call(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F20：预算到顶就停，不再追加调用，原文与已完成结果保持可读。"""
+    """预算到顶就停，不再追加调用，原文与已完成结果保持可读。"""
 
     data = _import(fake_provider_client)
     profile_id = _fake_profile(fake_provider_client)
@@ -367,7 +367,7 @@ def test_budget_exhaustion_stops_before_next_call(
 def test_unknown_outcome_is_not_resent_automatically(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F15：进程中断在请求发出后 → 标未知结果，不自动重发，等人工对账。"""
+    """进程中断在请求发出后 → 标未知结果，不自动重发，等人工对账。"""
 
     data = _import(fake_provider_client)
     profile_id = _fake_profile(fake_provider_client)

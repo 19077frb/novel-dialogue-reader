@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 /**
  * E2E 使用独立端口与**每次运行独立的数据目录**，绝不接触用户书库，
- * 也不会与开发中的 8765/5173 冲突（DEVELOPMENT.md 2.3）。
+ * 也不会与开发中的 8765/5173 冲突。
  */
 const E2E_API_PORT = Number(process.env.NDR_E2E_API_PORT ?? 8795)
 const E2E_UI_PORT = Number(process.env.NDR_E2E_UI_PORT ?? 5273)

@@ -1,4 +1,4 @@
-"""公共 API schema：响应包、错误体、分页（DEVELOPMENT.md 5.1）。
+"""公共 API schema：响应包、错误体、分页。
 
 - 普通成功：``{"data": ..., "request_id": "..."}``
 - 错误：``{"error": {"code", "message", "details"}, "request_id": "..."}``

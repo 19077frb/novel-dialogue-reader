@@ -1,4 +1,4 @@
-"""T03 单元测试：EPUB 结构、节点树与安全边界（F03 / F04 / F19）。"""
+"""单元测试：EPUB 结构、节点树与安全边界。"""
 
 from __future__ import annotations
 

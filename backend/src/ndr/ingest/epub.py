@@ -1,10 +1,10 @@
-"""EPUB → 统一文档树（DEVELOPMENT.md 4.1 / T03）。
+"""EPUB → 统一文档树。
 
 流程：安全的 ZIP 读取 → ``META-INF/container.xml`` → OPF（metadata/manifest/spine）→
 按 **spine 顺序**读取正文文档 → 目录（nav.xhtml 或 NCX）与 spine 关联 → XHTML 转受限节点树 →
 登记资源 → 提取正文与 source_map。
 
-安全边界（F19）：
+安全边界：
 
 - 归一化路径不得越出包内；拒绝绝对路径、``..``、反斜杠逃逸、重复条目与符号链接条目。
 - 条目数量、单条目解压大小与总解压大小都有上限，超限返回可解释错误而不是吞掉整本书。

@@ -1,4 +1,4 @@
-"""候选引语、Gap 与原文定位路由（T05）。
+"""候选引语、Gap 与原文定位路由。
 
 - `GET /api/books/{id}/quotes`：候选列表（可按章节过滤、cursor 分页）。
 - `GET /api/books/{id}/gaps`：候选之间的叙述间隔。

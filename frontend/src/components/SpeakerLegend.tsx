@@ -2,7 +2,7 @@ import type { SpeakerLegendItemOut } from '../api/types'
 import { colorForIndex, labelText } from '../styles/palette'
 
 /**
- * 说话人图例（T11）：完全由后端 `legend` 驱动。
+ * 说话人图例：完全由后端 `legend` 驱动。
  *
  * - 每个分组给一个场景内稳定的色号；颜色和编号只来自真实投影，不在这里凭空生成。
  * - 点击某一项是纯前端定位（滚动到该分组首次发言处），不会发起任何模型调用。

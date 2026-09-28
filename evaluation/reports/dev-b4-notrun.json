@@ -1,6 +1,6 @@
 {
   "report_version": "evaluation-1",
-  "generated_at": "2026-09-27T21:43:57.251757+00:00",
+  "generated_at": "2026-09-28T19:25:34.242714+00:00",
   "manifest": "evaluation/manifests/dev.json",
   "manifest_version": "1.0",
   "config": {
@@ -9,7 +9,7 @@
     "label": "B4 B3 + 有限局部复核（recheck_max_targets=3）",
     "strategy": "llm",
     "scene_state": true,
-    "prompt_version": "labeling-1",
+    "prompt_version": "labeling-2",
     "context_policy": "context-2",
     "reading_mode": "reread",
     "budget": {
@@ -18,14 +18,14 @@
       "max_rechecks": 3
     },
     "model": null,
-    "notes": "T17 B4：只复核首次仍未解决的目标（每个窗口最多 3 条），复核回到保守策略把压缩丢掉的文句补回。复核是额外一次调用，报告里的 usage 必须包含它，不能只统计最后一次调用。强模型路由默认关闭，本配置不启用。"
+    "notes": "B4：只复核首次仍未解决的目标（每个窗口最多 3 条），复核回到保守策略把压缩丢掉的文句补回。复核是额外一次调用，报告里的 usage 必须包含它，不能只统计最后一次调用。强模型路由默认关闭，本配置不启用。"
   },
-  "config_fingerprint": "43e0467097c69b02e624a80df7845f68c9481b02a029c723011a92a3ef5fd9d1",
+  "config_fingerprint": "f7f4db3b77de32a0722cae612e5f7bd414517544d939d055822f953e61b4f0ac",
   "versions": {
     "evaluation": "evaluation-1",
     "app": "0.1.0",
     "engine": "attribution-engine-1",
-    "prompt": "labeling-1",
+    "prompt": "labeling-10",
     "scanner": "quote-scan-1",
     "context_policy": "context-1",
     "context_policy_versions": [

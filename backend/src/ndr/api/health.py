@@ -1,6 +1,6 @@
 """健康检查路由。
 
-`GET /api/health` 报告进程、数据库与版本状态，且不调用模型（DEVELOPMENT.md 5.2）。
+`GET /api/health` 报告进程、数据库与版本状态，且不调用模型。
 数据库状态来自真实迁移状态：未迁移 → NOT_INITIALIZED，版本落后 → OUTDATED，
 迁移到 head → READY，读取失败 → ERROR 且整体状态变为 degraded。
 """

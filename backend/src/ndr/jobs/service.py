@@ -1,8 +1,8 @@
-"""任务创建、估算与用量汇总（DEVELOPMENT.md 5.2 / 5.5，T10）。
+"""任务创建、估算与用量汇总。
 
 - **幂等创建**：同一 `idempotency_key` + 相同请求摘要 → 返回既有任务；
   同一 key 但摘要不同 → 409 `IDEMPOTENCY_CONFLICT`。
-- **估算只做本地计算**：用 T08 的窗口规划给出 token 估算，不调用模型；
+- **估算只做本地计算**：用窗口规划给出 token 估算，不调用模型；
   缺价格资料时只给 token，不伪造金额。
 - **用量按每次尝试汇总**：`usage_json` 为 NULL 表示提供方没给 usage，单独计数，绝不按 0 计。
 """
@@ -292,7 +292,7 @@ def usage_summary(session: Session, book_id: str) -> dict[str, Any]:
     by_model: dict[str, int] = {}
     for run, job in rows:
         by_state[run.state.value] = by_state.get(run.state.value, 0) + 1
-        # T17：按**每次尝试自己的**配置快照归属模型（成本路由会为个别窗口换模型，
+        # 按**每次尝试自己的**配置快照归属模型（成本路由会为个别窗口换模型，
         # 只看任务级快照会把强模型用量算到基础模型头上）。
         snapshot_raw = run.profile_snapshot_json or (
             job.profile_snapshot_json if job is not None else None

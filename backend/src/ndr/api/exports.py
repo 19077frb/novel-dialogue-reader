@@ -1,4 +1,4 @@
-"""导出路由（T15A）：冻结样张、生成、状态与受控下载。
+"""导出路由：冻结样张、生成、状态与受控下载。
 
 - `POST /api/books/{id}/exports/preview`：冻结快照 + 后端样张（**不调用模型**）。
 - `POST /api/books/{id}/exports`：按快照生成 EPUB/HTML（幂等；本地执行，不走网络）。
@@ -214,7 +214,7 @@ def download_export_route(
     try:
         path = resolve_within(settings, artifact.relative_path)
     except UnsafePathError:
-        # 记录被篡改/越界时绝不下发文件，也不把数据目录路径回给调用方（T18 资源边界）
+        # 记录被篡改/越界时绝不下发文件，也不把数据目录路径回给调用方
         raise ApiError.not_found("导出文件路径无效", export_id=export_id) from None
     if not path.exists():
         raise ApiError.not_found("导出文件已被移除", export_id=export_id)

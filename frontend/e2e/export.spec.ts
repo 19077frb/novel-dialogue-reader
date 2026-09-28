@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * T15B：导出对话框、后端样张与下载闭环。
+ * 导出对话框、后端样张与下载闭环。
  *
  * 真实后端 + 真实 Chromium + 隔离数据目录；模型侧只用显式启用的确定性 FakeProvider（不访问网络）。
  * 导出本身不调用模型；这里验证「用户不写脚本就能选择、预览、生成、下载」以及成品的离线可读性。
@@ -69,7 +69,7 @@ async function downloadArtifact(page: Page): Promise<Download> {
 
 test.describe('导出对话框与下载闭环', () => {
   test('TXT → HTML：样张、校验报告、中文文件名与断网可读', async ({ page }) => {
-    const profileName = 'T15B HTML 提供方'
+    const profileName = '导出样张 HTML 提供方'
     await createProfile(page, profileName, 'fake-model-html')
     await importFile(page, 'sample-utf8.txt')
     await openReader(page, 'sample-utf8')
@@ -106,7 +106,7 @@ test.describe('导出对话框与下载闭环', () => {
   })
 
   test('EPUB → EPUB：结构可读、资源随包、重复下载一致', async ({ page }) => {
-    const profileName = 'T15B EPUB 提供方'
+    const profileName = '导出样张 EPUB 提供方'
     await createProfile(page, profileName, 'fake-model-epub')
     await importFile(page, 'original-sample.epub')
     await openReader(page, '原创 ruby/插图样例')
@@ -154,7 +154,7 @@ test.describe('导出对话框与下载闭环', () => {
 
   test('未处理章节：覆盖统计与警告如实展示，导出保持原样', async ({ page }) => {
     // 专用夹具 + 只处理第一章，保证第二章确实没有标注
-    const profileName = 'T15B 未处理提供方'
+    const profileName = '导出未处理提供方'
     await createProfile(page, profileName, 'fake-model-unprocessed')
     await importFile(page, 'sample-export.txt')
     await openReader(page, 'sample-export')
@@ -179,7 +179,7 @@ test.describe('导出对话框与下载闭环', () => {
 
   test('并发纠正：重新打开导出会提示快照已过期', async ({ page }) => {
     // 用专用夹具，避免影响其它用例依赖的书籍（导出只读快照，但更正会改标注）
-    const profileName = 'T15B 并发提供方'
+    const profileName = '导出并发提供方'
     await createProfile(page, profileName, 'fake-model-concurrent')
     await importFile(page, 'sample-export.txt')
     await openReader(page, 'sample-export')

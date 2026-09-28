@@ -8,5 +8,5 @@
   "reading_mode": "reread",
   "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 0},
   "model": null,
-  "notes": "T17 B3：相对 B2 只改上下文策略（长 Gap 只留线索句 + 前后各一句，省不下来就整体保留）。必须与 B2 使用同一清单、同一模型配置、同一提示版本，否则数字不可比；没有对比证据前默认策略仍是 context-1。"
+  "notes": "B3：相对 B2 只改上下文策略（长 Gap 只留线索句 + 前后各一句，省不下来就整体保留）。必须与 B2 使用同一清单、同一模型配置、同一提示版本，否则数字不可比；没有对比证据前默认策略仍是 context-1。"
 }

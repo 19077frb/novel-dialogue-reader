@@ -630,7 +630,7 @@ export interface paths {
          * 局部复核（有上限；创建真实任务并可能产生费用）
          * @description 局部复核：范围取当前场景（其次章节），必须显式给出模型配置与预算。
          *
-         *     这是**可能付费**的操作（DEVELOPMENT.md 6.4），与「展开原文」完全不同：
+         *     这是**可能付费**的操作，与「展开原文」完全不同：
          *     后者只读本地原文，本接口会创建 RECHECK 任务并调用提供方。
          */
         post: operations["recheck_quote_route_api_quotes__quote_id__recheck_post"];
@@ -1116,7 +1116,7 @@ export interface components {
         };
         /**
          * ContentNodeType
-         * @description 统一文档树的受限节点类型（DEVELOPMENT.md 4.1）。
+         * @description 统一文档树的受限节点类型。
          *
          *     ruby/rb/rt/rp 单独保留，注音不重复进入模型正文。
          * @enum {string}
@@ -1143,13 +1143,13 @@ export interface components {
         };
         /**
          * CorrectionAction
-         * @description 人工更正动作（DEVELOPMENT.md 5.3）。
+         * @description 人工更正动作。
          * @enum {string}
          */
         CorrectionAction: "assign_existing" | "create_speaker" | "set_kind" | "mark_unknown" | "set_gap_decision" | "merge_speakers" | "split_speakers" | "undo";
         /**
          * CorrectionOut
-         * @description 人工更正的结果；前端不得自己推算权威计数（DEVELOPMENT.md 5.3）。
+         * @description 人工更正的结果；前端不得自己推算权威计数。
          */
         CorrectionOut: {
             /**
@@ -2212,7 +2212,7 @@ export interface components {
         };
         /**
          * QuoteDetailOut
-         * @description 普通对白详情；**不要求**该对白已经在待确认队列里（T12）。
+         * @description 普通对白详情；**不要求**该对白已经在待确认队列里。
          */
         QuoteDetailOut: {
             quote: components["schemas"]["QuoteOut"];
@@ -2612,7 +2612,7 @@ export interface components {
         };
         /**
          * SpeakerBasis
-         * @description 证据类型，不是校准后的置信概率（DEVELOPMENT.md 4.4）。
+         * @description 证据类型，不是校准后的置信概率。
          * @enum {string}
          */
         SpeakerBasis: "DIRECT" | "COREFERENCE" | "RESPONSE_LINK" | "STYLE_ONLY" | "INSUFFICIENT";

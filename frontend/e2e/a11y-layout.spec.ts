@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * T18：可访问性与 360 / 1280px 布局检查。
+ * 可访问性与 360 / 1280px 布局检查。
  *
  * - 可访问性：语言、标题层级、可访问名称、图片 alt、跳转链接、对话框语义 + Escape + 焦点归还。
  * - 布局：窄屏（360×740）与宽屏（1280×900）都不出现横向溢出，关键控件仍在可点区域。
@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures')
 const fixture = (name: string) => path.join(fixturesDir, name)
 
-async function createProfile(page: Page, name: string, model = 'fake-model-t18-a11y') {
+async function createProfile(page: Page, name: string, model = 'fake-model-a11y') {
   await page.goto('/settings/models')
   await page.getByTestId('profile-name').fill(name)
   await page.selectOption('[data-testid=profile-protocol]', 'fake-provider')
@@ -85,7 +85,7 @@ async function namelessControls(page: Page): Promise<string[]> {
   })
 }
 
-test.describe('可访问性与布局检查（T18）', () => {
+test.describe('可访问性与布局检查', () => {
   test('基础可访问性：语言、标题、可访问名称、图片 alt、跳转链接、导航当前页', async ({ page }) => {
     await page.goto('/library')
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
@@ -137,17 +137,17 @@ test.describe('可访问性与布局检查（T18）', () => {
   })
 
   test('对话框与抽屉：role/aria-modal/标题关联、Escape 关闭、焦点归还', async ({ page }) => {
-    const profileName = 'T18 可访问性提供方'
+    const profileName = '可访问性提供方'
     await createProfile(page, profileName)
-    await importFile(page, 'sample-t18-full.txt')
+    await importFile(page, 'sample-full-flow.txt')
 
     await page
-      .locator('[data-testid=book-card]', { hasText: 'sample-t18-full' })
+      .locator('[data-testid=book-card]', { hasText: 'sample-full-flow' })
       .getByRole('link', { name: '开始阅读' })
       .click()
     await page.getByRole('link', { name: '预览与处理' }).click()
     await page.getByTestId('preview-profile').selectOption({
-      label: `${profileName} · fake-provider · fake-model-t18-a11y`,
+      label: `${profileName} · fake-provider · fake-model-a11y`,
     })
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
@@ -180,8 +180,8 @@ test.describe('可访问性与布局检查（T18）', () => {
   })
 
   test('360px 与 1280px：五个页面都无横向溢出，关键控件可见可点', async ({ page }) => {
-    await importFile(page, 'sample-t18-full.txt')
-    const bookId = await bookIdOf(page, 'sample-t18-full')
+    await importFile(page, 'sample-full-flow.txt')
+    const bookId = await bookIdOf(page, 'sample-full-flow')
 
     const routes: Array<[string, string]> = [
       ['书架', '/library'],

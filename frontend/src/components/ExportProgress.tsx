@@ -1,4 +1,4 @@
-/** 导出进度与校验报告（T15B）：状态、内部检查逐项、标准检查状态。 */
+/** 导出进度与校验报告：状态、内部检查逐项、标准检查状态。 */
 import type { ExportArtifactOut } from '../api/types'
 
 const STATE_LABEL: Record<string, string> = {

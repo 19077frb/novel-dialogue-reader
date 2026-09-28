@@ -123,7 +123,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw '数据库迁移失败' }
     }
     else {
-        Write-Host '尚未建立 migrations（T01 引入），跳过 alembic。'
+        Write-Host '尚未建立 migrations，跳过 alembic。'
     }
 
     if (-not $SkipFrontend) {

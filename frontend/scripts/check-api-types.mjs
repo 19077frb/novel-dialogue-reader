@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * T18：接口类型一致性检查。
+ * 接口类型一致性检查。
  *
  * 用 `docs/openapi.json`（由后端导出、pytest 会校验它与应用一致）重新生成 API 类型，
  * 与提交在仓库里的 `src/api/schema.d.ts` 逐字节比对：

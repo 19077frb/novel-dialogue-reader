@@ -112,8 +112,8 @@ export default function ReaderPage() {
   const activeChapter = chapters.data?.find((chapter) => chapter.id === chapterId) ?? null
   const readingMode: ReadingMode = readingModeOverride ?? book.data?.reading_mode ?? 'initial'
 
-  // 初读 horizon：本章末端（DEVELOPMENT 6.5 的「可见阅读块」）。
-  // 后文才出现的证据不会提前着色，也不会提前把两个声音合成同一个颜色（F17）。
+  // 初读 horizon：本章末端。
+  // 后文才出现的证据不会提前着色，也不会提前把两个声音合成同一个颜色。
   const visibleHorizonCp = readingMode === 'initial' ? activeChapter?.end_cp ?? null : null
 
   // 标注投影：只读查询（不写库、不调用模型）。

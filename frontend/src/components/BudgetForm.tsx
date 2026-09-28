@@ -1,7 +1,7 @@
 import type { BudgetInput } from '../api/jobs'
 
 /**
- * 预算表单（T11）：把上限直接交给后端；留空表示不设该上限。
+ * 预算表单：把上限直接交给后端；留空表示不设该上限。
  * 这里不做任何估算/调用，改动只在提交估算或创建任务时生效。
  */
 export interface BudgetFormProps {

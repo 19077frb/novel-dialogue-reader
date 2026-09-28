@@ -1,4 +1,4 @@
-"""标注投影的 API schema（T11；T15 会加入历史与身份修订投影）。"""
+"""标注投影的 API schema。"""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * T06/T07：用户不改源码即可配置模型；密钥只在提交时出现，界面与接口都不回显；
+ * 用户不改源码即可配置模型；密钥只在提交时出现，界面与接口都不回显；
  * 连接测试用微型结构化请求，并明确标注测试用适配器。
  * 后端使用 session 凭据后端与显式启用的 FakeProvider（见 playwright.config.ts），不会触碰真实凭据库。
  *

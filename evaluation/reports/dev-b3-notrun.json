@@ -1,6 +1,6 @@
 {
   "report_version": "evaluation-1",
-  "generated_at": "2026-09-27T21:43:55.757679+00:00",
+  "generated_at": "2026-09-28T19:25:32.653175+00:00",
   "manifest": "evaluation/manifests/dev.json",
   "manifest_version": "1.0",
   "config": {
@@ -9,7 +9,7 @@
     "label": "B3 长 Gap 保守筛选（context-2，无复核）",
     "strategy": "llm",
     "scene_state": true,
-    "prompt_version": "labeling-1",
+    "prompt_version": "labeling-2",
     "context_policy": "context-2",
     "reading_mode": "reread",
     "budget": {
@@ -18,14 +18,14 @@
       "max_rechecks": 0
     },
     "model": null,
-    "notes": "T17 B3：相对 B2 只改上下文策略（长 Gap 只留线索句 + 前后各一句，省不下来就整体保留）。必须与 B2 使用同一清单、同一模型配置、同一提示版本，否则数字不可比；没有对比证据前默认策略仍是 context-1。"
+    "notes": "B3：相对 B2 只改上下文策略（长 Gap 只留线索句 + 前后各一句，省不下来就整体保留）。必须与 B2 使用同一清单、同一模型配置、同一提示版本，否则数字不可比；没有对比证据前默认策略仍是 context-1。"
   },
-  "config_fingerprint": "e1179612d208c92e408c536d8ee4ac5da1ad2898567ae728cdf9bbf621567ed2",
+  "config_fingerprint": "95b05d3d0ce31a91bd5087a8442653f177a180b713008725088a4a9ec548c0d8",
   "versions": {
     "evaluation": "evaluation-1",
     "app": "0.1.0",
     "engine": "attribution-engine-1",
-    "prompt": "labeling-1",
+    "prompt": "labeling-10",
     "scanner": "quote-scan-1",
     "context_policy": "context-1",
     "context_policy_versions": [

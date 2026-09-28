@@ -1,4 +1,4 @@
-"""T06 集成测试：模型配置 CRUD、密钥三态与凭据降级。
+"""集成测试：模型配置 CRUD、密钥三态与凭据降级。
 
 注意：`migrated_client` 使用 `credential_backend="session"`，绝不触碰真实系统凭据库；
 真实的 keyring 后端行为由 `test_credentials.py` 的替身覆盖。
@@ -253,7 +253,7 @@ def test_delete_is_refused_when_referenced_by_job(
 def test_creating_profiles_does_not_start_any_job(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """T06 只写配置：默认不发起任何真实调用，也不产生任务。"""
+    """本页只写配置：默认不发起任何真实调用，也不产生任务。"""
 
     _create(migrated_client, api_key=SECRET)
 
@@ -272,7 +272,7 @@ def test_protocols_endpoint_declares_capabilities(migrated_client: TestClient) -
     items = {item["protocol"]: item for item in response.json()["data"]}
 
     chat = items["chat-completions-compatible"]
-    # 兼容服务不声称支持严格 json_schema（T07 按实际提供方核对后再打开）
+    # 兼容服务不声称支持严格 json_schema
     assert chat["supports_json_schema"] is False
     assert chat["supports_json_object"] is True
     assert "根路径" in chat["notes"]

@@ -1,6 +1,6 @@
-"""T09 集成测试：单窗口推理引擎（F05～F10、F12、F14、F17）。
+"""集成测试：单窗口推理引擎。
 
-用 FakeProvider 驱动状态机（不发任何网络请求）：真实模型效果属于 T16。
+用 FakeProvider 驱动状态机（不发任何网络请求）：真实模型效果属于评测范畴。
 每个用例都用**小的显式窗口**（目标对白必须全部被标注，否则校验会报 missing_targets）。
 """
 
@@ -174,7 +174,7 @@ def _apply(session, *, output, window, state: SceneState, inputs, **kwargs):  # 
 def test_insufficient_evidence_never_creates_people(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F09：证据不足时全部 UNKNOWN，不新建任何人物，并进入待确认队列。"""
+    """证据不足时全部 UNKNOWN，不新建任何人物，并进入待确认队列。"""
 
     _import(migrated_client)
 
@@ -200,7 +200,7 @@ def test_insufficient_evidence_never_creates_people(
 def test_three_speakers_and_consecutive_same_speaker(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F07：不强制轮流；同一人连续发言属于同一分组。"""
+    """不强制轮流；同一人连续发言属于同一分组。"""
 
     _import(migrated_client)
 
@@ -325,7 +325,7 @@ def test_confirmed_identity_wins_when_model_name_conflicts(
 def test_update_keeps_scene_and_break_opens_new_scene(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F05/F06：UPDATE 不切场景；BREAK 关闭当前场景并开新场景。"""
+    """/：UPDATE 不切场景；BREAK 关闭当前场景并开新场景。"""
 
     _import(migrated_client)
 
@@ -385,7 +385,7 @@ def test_update_keeps_scene_and_break_opens_new_scene(
 def test_locked_annotation_is_never_overwritten(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F14：用户确认（user_locked）优先，晚到的模型结果不得覆盖。"""
+    """用户确认（user_locked）优先，晚到的模型结果不得覆盖。"""
 
     _import(migrated_client)
 
@@ -432,7 +432,7 @@ def test_locked_annotation_is_never_overwritten(
 def test_identity_preserved_across_windows(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F12/F08：跨窗口沿用同一场景与分组（临时引用映射到稳定 ID）。"""
+    """/：跨窗口沿用同一场景与分组（临时引用映射到稳定 ID）。"""
 
     _import(migrated_client)
 
@@ -483,7 +483,7 @@ def test_identity_preserved_across_windows(
 def test_late_evidence_merge_records_visible_from(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F08/F17：后文揭示的身份合并记录可见时点（初读时不提前同色）。"""
+    """/：后文揭示的身份合并记录可见时点（初读时不提前同色）。"""
 
     _import(migrated_client)
 
@@ -595,7 +595,7 @@ def test_late_evidence_merge_records_visible_from(
 def test_invalid_output_retries_once_then_rejects_without_writing(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """F13：坏 JSON 只重试一次；两次都坏 → 拒绝提交，且不留下任何自动结果。"""
+    """坏 JSON 只重试一次；两次都坏 → 拒绝提交，且不留下任何自动结果。"""
 
     _import(migrated_client)
 
@@ -643,7 +643,7 @@ def test_bad_then_good_output_is_accepted(
     assert result.attempts == 2
     assert result.ok is True, result.application.validation_codes
     assert len(annotations) == 1
-    # 非 speech 的类型判断可以接受，但不带说话人（F10：不污染普通人物）
+    # 非 speech 的类型判断可以接受，但不带说话人
     assert annotations[0].kind is QuoteKind.THOUGHT
     assert annotations[0].speaker_id is None
     assert annotations[0].status is AnnotationStatus.ACCEPTED
@@ -652,7 +652,7 @@ def test_bad_then_good_output_is_accepted(
 def test_plan_range_still_covers_whole_book(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
-    """回归：T08 的整书窗口规划仍然可用（不因 T09 改动而退化）。"""
+    """回归：整书窗口规划仍然可用。"""
 
     _import(migrated_client)
 

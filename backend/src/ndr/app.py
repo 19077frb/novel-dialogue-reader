@@ -64,7 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # 显式 opt-in（NDR_AUTO_MIGRATE=1）才会在启动时迁移；默认由用户/脚本显式执行。
             run_migrations(resolved)
         if resolved.recover_on_startup:
-            # T14：进程重启后修复任务可见状态（超租约的尝试 → 未知结果；不留 RUNNING 孤儿）。
+            # 进程重启后修复任务可见状态（超租约的尝试 → 未知结果；不留 RUNNING 孤儿）。
             try:
                 app.state.recovery = recover_on_startup(
                     session_factory, lease_seconds=resolved.stale_run_lease_seconds

@@ -1,4 +1,4 @@
-"""模型接入层的稳定错误类型（DEVELOPMENT.md 5.1）。
+"""模型接入层的稳定错误类型。
 
 上游错误必须映射成这些业务错误码；消息经过脱敏，绝不透传密钥或完整上游响应。
 """
@@ -33,7 +33,7 @@ KIND_TO_CODE: dict[ProviderErrorKind, ErrorCode] = {
     ProviderErrorKind.UNKNOWN_OUTCOME: ErrorCode.PROVIDER_TIMEOUT,
 }
 
-# 哪些错误值得让调用方重试（T10/T14 会结合退避上限与预算再决定）
+# 哪些错误值得让调用方重试
 RETRYABLE_KINDS: frozenset[ProviderErrorKind] = frozenset(
     {ProviderErrorKind.RATE_LIMITED, ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNAVAILABLE}
 )

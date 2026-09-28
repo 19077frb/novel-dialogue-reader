@@ -1,4 +1,4 @@
-/** 导出范围选择（T15B）：整本或指定章节。 */
+/** 导出范围选择：整本或指定章节。 */
 import type { ChapterOut } from '../api/types'
 
 export interface ExportScopePickerProps {

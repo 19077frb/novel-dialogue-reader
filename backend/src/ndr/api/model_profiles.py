@@ -1,4 +1,4 @@
-"""模型配置路由（T06）。
+"""模型配置路由。
 
 - `GET /api/model-profiles`：非敏感配置 + `has_key`，**从不回传密钥**。
 - `GET /api/model-profiles/protocols`：协议能力声明（页面据此说明实际能力）。
@@ -6,7 +6,7 @@
 - `PATCH /api/model-profiles/{id}`：字段变更 + keep/replace/remove 密钥三态 + expected_version。
 - `DELETE /api/model-profiles/{id}`：删除配置与其凭据引用；被任务引用时 409。
 
-连接测试（`POST /api/model-profiles/test`）属于 T07，本任务不发起任何真实调用。
+连接测试（`POST /api/model-profiles/test`）本任务不发起任何真实调用。
 """
 
 from __future__ import annotations
