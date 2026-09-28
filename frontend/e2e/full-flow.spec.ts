@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { confirmChapterRoster } from './roster'
+
 /**
  * 完整联调（TXT/EPUB 导入 → 处理 → EPUB/HTML 导出 → 下载件离线可读）。
  *
@@ -44,6 +46,8 @@ async function openReader(page: Page, title: string) {
 async function processFirstChapter(page: Page, profileLabel: string) {
   await page.getByRole('link', { name: '预览与处理' }).click()
   await page.getByTestId('preview-profile').selectOption({ label: profileLabel })
+  // 逐句归属前必须先确认本章人物与第一视角主人公。
+  await confirmChapterRoster(page)
   await page.getByTestId('preview-estimate').click()
   await expect(page.getByTestId('estimate-summary')).toBeVisible()
   await page.getByTestId('preview-run').click()

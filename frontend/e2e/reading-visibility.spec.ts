@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { confirmChapterRoster } from './roster'
+
 /**
  * 证据时点、初读/重读投影与最终定位。
  *
@@ -94,6 +96,7 @@ test.describe('证据时点与定位回归', () => {
     await page.getByTestId('preview-profile').selectOption({
       label: `${profileName} · fake-provider · fake-model-astral`,
     })
+    await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
 
@@ -115,6 +118,7 @@ test.describe('证据时点与定位回归', () => {
     await page.getByTestId('preview-profile').selectOption({
       label: `${profileName} · fake-provider · fake-model-ruby`,
     })
+    await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
 

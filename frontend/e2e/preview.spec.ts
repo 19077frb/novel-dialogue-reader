@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { confirmChapterRoster } from './roster'
+
 /**
  * 真实效果预览与按章处理。
  *
@@ -51,6 +53,7 @@ test.describe('预览与按章处理', () => {
     await page
       .getByTestId('preview-profile')
       .selectOption({ label: `${profileName} · fake-provider · fake-model` })
+    await confirmChapterRoster(page)
 
     // 本地估算：不调用模型
     await page.getByTestId('preview-estimate').click()
@@ -100,6 +103,7 @@ test.describe('预览与按章处理', () => {
     await page
       .getByTestId('preview-profile')
       .selectOption({ label: `${profileName} · fake-provider · fake-model` })
+    await confirmChapterRoster(page)
 
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
@@ -129,6 +133,8 @@ test.describe('预览与按章处理', () => {
     await page.getByTestId('range-chapter').selectOption({ index: 2 })
     await expect(page.getByTestId('range-summary')).toContainText(`${startCp} – ${endCp}`)
 
+    // 换章节后人物名单要重新确认，确认的是这一章的人物与主人公
+    await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()

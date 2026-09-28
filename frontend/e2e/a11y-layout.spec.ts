@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { confirmChapterRoster } from './roster'
+
 /**
  * 可访问性与 360 / 1280px 布局检查。
  *
@@ -124,6 +126,8 @@ test.describe('可访问性与布局检查', () => {
       .getByRole('link', { name: '开始阅读' })
       .click()
     await page.locator('.ndr-chapter').first().click()
+    // 正文是异步加载的：先等这一章渲染完，再统计插图，避免在空文档上误判。
+    await expect(page.getByTestId('document-renderer')).toContainText('插图之后的对白。')
     const images = page.locator('.ndr-document img')
     expect(await images.count()).toBeGreaterThan(0)
     expect(
@@ -149,6 +153,7 @@ test.describe('可访问性与布局检查', () => {
     await page.getByTestId('preview-profile').selectOption({
       label: `${profileName} · fake-provider · fake-model-a11y`,
     })
+    await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
     await page.getByRole('link', { name: '去阅读' }).click()

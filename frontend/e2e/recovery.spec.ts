@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { confirmChapterRoster } from './roster'
+
 /**
  * 暂停恢复、预算到顶与故障闭环（界面侧）。
  *
@@ -68,6 +70,7 @@ test.describe('预算与故障恢复', () => {
     await page
       .getByTestId('preview-profile')
       .selectOption({ label: `${profileName} · fake-provider · fake-model` })
+    await confirmChapterRoster(page)
 
     await page.getByTestId('budget-max-input').fill('1')
     await page.getByTestId('preview-run').click()
@@ -89,6 +92,9 @@ test.describe('预算与故障恢复', () => {
 
   test('缺 Key：任务明确失败并指向模型配置，原文仍然可读', async ({ page }) => {
     const profileName = '缺密钥提供方'
+    const rosterProfileName = '缺密钥人物提供方'
+    // 人物名单先用离线提供方确认：要验证的是标注任务在缺 Key 时如实失败。
+    await createProfile(page, { name: rosterProfileName, model: 'fake-model' })
     await createProfile(page, {
       name: profileName,
       protocol: 'chat-completions-compatible',
@@ -97,6 +103,10 @@ test.describe('预算与故障恢复', () => {
     })
     await importFile(page, 'sample-gb18030.txt')
     await openPreview(page, 'sample-gb18030')
+    await page
+      .getByTestId('preview-profile')
+      .selectOption({ label: `${rosterProfileName} · fake-provider · fake-model` })
+    await confirmChapterRoster(page)
     await page
       .getByTestId('preview-profile')
       .selectOption({ label: `${profileName} · chat-completions-compatible · fake-model-no-key` })
@@ -124,6 +134,7 @@ test.describe('预算与故障恢复', () => {
     await page
       .getByTestId('preview-profile')
       .selectOption({ label: `${profileName} · fake-provider · fake-model-timeout` })
+    await confirmChapterRoster(page)
 
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('NEEDS_RECONCILIATION', {

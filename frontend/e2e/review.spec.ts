@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { confirmChapterRoster } from './roster'
+
 /**
  * 待确认队列与阅读页确认抽屉。
  *
@@ -56,6 +58,8 @@ async function processFirstChapter(page: Page, profileLabel: string) {
   await page.getByRole('link', { name: '预览与处理' }).click()
   await expect(page).toHaveURL(/\/books\/[^/]+\/preview/)
   await page.getByTestId('preview-profile').selectOption({ label: profileLabel })
+  // 逐句归属前必须先确认本章人物与第一视角主人公。
+  await confirmChapterRoster(page)
   await page.getByTestId('preview-run').click()
   await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
 }
