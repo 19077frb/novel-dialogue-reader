@@ -335,6 +335,7 @@ describe('PreviewPage', () => {
     const legend = await screen.findByTestId('speaker-legend')
     expect(within(legend).getByText('〔S1〕')).toBeInTheDocument()
     expect(screen.getByTestId('range-summary')).toHaveTextContent('0 – 20')
+    expect(screen.queryByTestId('preview-reading-mode')).not.toBeInTheDocument()
     expect(screen.getByTestId('usage-total')).toHaveTextContent('0')
     expect(screen.getByTestId('usage-unknown-warning')).toHaveTextContent('没有')
     expect(screen.queryByText('金额')).not.toBeInTheDocument()
@@ -354,7 +355,7 @@ describe('PreviewPage', () => {
     expect(vi.mocked(jobsApi.createJob).mock.calls[0][0]).toMatchObject({
       bookId: 'b1',
       mode: 'preview',
-      readingMode: 'initial',
+      readingMode: 'reread',
     })
     expect(await screen.findByTestId('job-panel')).toBeInTheDocument()
     expect(screen.getByTestId('job-state')).toHaveTextContent('COMPLETED')

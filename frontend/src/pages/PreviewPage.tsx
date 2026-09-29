@@ -13,7 +13,7 @@ import {
   type BudgetInput,
 } from '../api/jobs'
 import { fetchProfiles, profileKeys } from '../api/profiles'
-import type { AnnotationItemOut, EstimateOut, JobDetailOut, ReadingMode } from '../api/types'
+import type { AnnotationItemOut, EstimateOut, JobDetailOut } from '../api/types'
 import { BudgetForm } from '../components/BudgetForm'
 import { CharacterRosterPanel } from '../components/CharacterRosterPanel'
 import type { CandidateRange } from '../components/DocumentRenderer'
@@ -31,6 +31,9 @@ const DEFAULT_BUDGET: BudgetInput = {
   maxRechecks: 0,
 }
 
+// 处理只生成一套完整标注；初读/重读仅由阅读页在展示投影时切换。
+const PROCESSING_READING_MODE = 'reread' as const
+
 /**
  * 预览页：范围选择 → 本地估算 → 小范围试运行 → 任务面板 → 原文/标注对比。
  *
@@ -47,7 +50,6 @@ export default function PreviewPage() {
 
   const [range, setRange] = useState<RangeValue>({ chapterId: null, startCp: 0, endCp: null })
   const [budget, setBudget] = useState<BudgetInput>(DEFAULT_BUDGET)
-  const [readingMode, setReadingMode] = useState<ReadingMode>('initial')
   const [profileId, setProfileId] = useState('')
   const [viewMode, setViewMode] = useState<'annotated' | 'original'>('annotated')
   const [estimate, setEstimate] = useState<EstimateOut | null>(null)
@@ -111,7 +113,7 @@ export default function PreviewPage() {
       bookId ?? '',
       range.startCp,
       resolvedEnd,
-      readingMode,
+      PROCESSING_READING_MODE,
       null,
     ),
     queryFn: ({ signal }) =>
@@ -120,7 +122,7 @@ export default function PreviewPage() {
         {
           startCp: range.startCp,
           endCp: resolvedEnd,
-          readingMode,
+          readingMode: PROCESSING_READING_MODE,
           visibleHorizonCp: null,
         },
         signal,
@@ -155,7 +157,7 @@ export default function PreviewPage() {
       estimateRange(bookId as string, {
         bookVersionId: book.data?.active_version_id ?? null,
         range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
-        readingMode,
+        readingMode: PROCESSING_READING_MODE,
         visibleHorizonCp: null,
         budget,
       }),
@@ -174,7 +176,7 @@ export default function PreviewPage() {
         bookVersionId: book.data?.active_version_id ?? null,
         range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
         profileId: profileId || null,
-        readingMode,
+        readingMode: PROCESSING_READING_MODE,
         visibleHorizonCp: null,
         budget,
         // 同输入 → 同幂等键（用短摘要，避免超过后端 128 字符上限）：重复点击复用同一任务。
@@ -186,7 +188,6 @@ export default function PreviewPage() {
             chapterId: range.chapterId,
             start: range.startCp,
             end: resolvedEnd,
-            readingMode,
             profileId,
             budget,
           }),
@@ -218,7 +219,7 @@ export default function PreviewPage() {
       void queryClient.invalidateQueries({ queryKey: ['annotations'] })
       void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId ?? '') })
     },
-    [bookId, queryClient, range.startCp, readingMode, resolvedEnd],
+    [bookId, queryClient],
   )
 
   const focusQuote = useCallback((quoteId: string | null | undefined) => {
@@ -270,7 +271,7 @@ export default function PreviewPage() {
           <span className="ndr-step-badge" aria-hidden="true">1</span>
           <div>
             <h3>选择处理范围与模型</h3>
-            <p className="hint">决定要处理的范围、使用哪个模型配置，以及初读/重读模式。</p>
+            <p className="hint">决定要处理的范围和使用哪个模型配置。</p>
           </div>
         </div>
         <RangePicker
@@ -284,7 +285,7 @@ export default function PreviewPage() {
           }}
         />
         <fieldset className="ndr-preview-model">
-          <legend>模型与阅读模式</legend>
+          <legend>模型配置</legend>
           <label>
             模型配置
             <select
@@ -298,17 +299,6 @@ export default function PreviewPage() {
                   {profile.name} · {profile.protocol} · {profile.model}
                 </option>
               ))}
-            </select>
-          </label>
-          <label>
-            阅读模式
-            <select
-              value={readingMode}
-              onChange={(event) => setReadingMode(event.target.value as ReadingMode)}
-              data-testid="preview-reading-mode"
-            >
-              <option value="initial">初读（不提前显示后文证据）</option>
-              <option value="reread">重读（显示全部有效投影）</option>
             </select>
           </label>
           {profiles.data && profiles.data.length === 0 && (
