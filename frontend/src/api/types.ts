@@ -13,6 +13,7 @@ export type RosterConfirmCandidateIn = components['schemas']['RosterConfirmCandi
 export type RosterConfirmIn = components['schemas']['RosterConfirmIn']
 export type BookVersionOut = components['schemas']['BookVersionOut']
 export type ChapterOut = components['schemas']['ChapterOut']
+export type ChapterProcessingCompleteOut = components['schemas']['ChapterProcessingCompleteOut']
 export type ContentNodeOut = components['schemas']['ContentNodeOut']
 export type ContentResponse = components['schemas']['ContentResponse']
 export type ImportResult = components['schemas']['ImportResult']

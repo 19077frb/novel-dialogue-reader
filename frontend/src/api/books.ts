@@ -3,6 +3,7 @@ import { apiData, apiUpload } from './client'
 import type {
   BookOut,
   ChapterOut,
+  ChapterProcessingCompleteOut,
   ContentResponse,
   CursorPageBook,
   CursorPageGap,
@@ -35,6 +36,22 @@ export function fetchBook(bookId: string, signal?: AbortSignal): Promise<BookOut
 
 export function fetchChapters(bookId: string, signal?: AbortSignal): Promise<ChapterOut[]> {
   return apiData<ChapterOut[]>(`/api/books/${bookId}/chapters`, { signal })
+}
+
+export function completeChapterProcessing(
+  bookId: string,
+  chapterId: string,
+  bookVersionId: string,
+  signal?: AbortSignal,
+): Promise<ChapterProcessingCompleteOut> {
+  return apiData<ChapterProcessingCompleteOut>(
+    `/api/books/${bookId}/chapters/${chapterId}/processing-complete`,
+    {
+      method: 'POST',
+      signal,
+      body: { book_version_id: bookVersionId },
+    },
+  )
 }
 
 export interface ContentQuery {

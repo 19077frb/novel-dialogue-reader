@@ -1,13 +1,14 @@
-import { useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
-import { fetchJob } from '../api/books'
+import { completeChapterProcessing, fetchJob } from '../api/books'
 import {
   analyzeCharacterRoster,
   confirmCharacterRoster,
   fetchCharacterRoster,
 } from '../api/characters'
 import { createJob, estimateRange, freshIdempotencyKey } from '../api/jobs'
-import type { ChapterOut, JobDetailOut } from '../api/types'
+import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
+import { createTaskLimiter } from '../processing/concurrency'
 
 const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'])
 
@@ -20,12 +21,7 @@ export interface BatchProgressSnapshot {
   revision: number
 }
 
-const EMPTY_BATCH: BatchProgressSnapshot = {
-  running: false,
-  message: '',
-  chapterStates: {},
-  revision: 0,
-}
+const EMPTY_BATCH: BatchProgressSnapshot = { running: false, message: '', chapterStates: {}, revision: 0 }
 const batchSnapshots = new Map<string, BatchProgressSnapshot>()
 const batchListeners = new Set<() => void>()
 
@@ -51,6 +47,11 @@ function positiveIntegerOrNull(value: string): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
 }
 
+function nonNegativeInteger(value: string): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0
+}
+
 function jobTokens(job: JobDetailOut): number {
   const value = job.usage?.total_tokens
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
@@ -66,30 +67,37 @@ async function waitForJob(job: JobDetailOut, stopped: () => boolean): Promise<Jo
   return current
 }
 
+interface ChapterPlan {
+  chapter: ChapterOut
+  estimate: EstimateOut
+}
+
 interface BatchProcessorProps {
   bookId: string
   bookVersionId: string | null | undefined
   chapters: ChapterOut[]
-  profileId: string
+  profiles: ModelProfileOut[]
   onFinished: () => void
 }
 
-export function BatchProcessor({
-  bookId,
-  bookVersionId,
-  chapters,
-  profileId,
-  onFinished,
-}: BatchProcessorProps) {
+export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished }: BatchProcessorProps) {
   const [startId, setStartId] = useState('')
   const [endId, setEndId] = useState('')
+  const [profileId, setProfileId] = useState('')
+  const [maxRechecks, setMaxRechecks] = useState(0)
   const [tokenLimitText, setTokenLimitText] = useState('')
+  const [concurrency, setConcurrency] = useState(2)
   const [running, setRunning] = useState(false)
   const [estimating, setEstimating] = useState(false)
   const [estimatedTokens, setEstimatedTokens] = useState<number | null>(null)
+  const [plans, setPlans] = useState<ChapterPlan[]>([])
   const [progress, setProgress] = useState('')
   const [error, setError] = useState<string | null>(null)
   const stopRef = useRef(false)
+
+  useEffect(() => {
+    if (!profileId && profiles.length > 0) setProfileId(profiles[0].id)
+  }, [profileId, profiles])
 
   const firstId = startId || chapters[0]?.id || ''
   const lastId = endId || chapters.at(-1)?.id || ''
@@ -97,7 +105,10 @@ export function BatchProcessor({
   const endIndex = chapters.findIndex((chapter) => chapter.id === lastId)
   const validRange = startIndex >= 0 && endIndex >= startIndex
 
-  const resetEstimate = () => setEstimatedTokens(null)
+  const resetEstimate = () => {
+    setEstimatedTokens(null)
+    setPlans([])
+  }
 
   const calculateEstimate = async () => {
     if (!validRange) return
@@ -107,29 +118,22 @@ export function BatchProcessor({
     try {
       const requested = chapters.slice(startIndex, endIndex + 1)
       const selected = requested.filter((chapter) => !chapter.dialogue_processed)
-      const dialogueEstimates = await Promise.all(
-        selected.map((chapter) =>
-          estimateRange(bookId, {
-            bookVersionId,
-            range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
-            readingMode: 'reread',
-            visibleHorizonCp: null,
-            budget: { maxInputTokens: null, maxOutputTokens: null, maxRechecks: 0 },
-          }),
-        ),
+      const estimates = await Promise.all(
+        selected.map((chapter) => estimateRange(bookId, {
+          bookVersionId,
+          range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
+          readingMode: 'reread',
+          visibleHorizonCp: null,
+          budget: { maxInputTokens: null, maxOutputTokens: null, maxRechecks },
+        })),
       )
-      // 人物识别另有一次章节级调用：按章节文本长度估输入，并预留最多 2,000 输出 token。
+      setPlans(selected.map((chapter, index) => ({ chapter, estimate: estimates[index] })))
       const rosterReserve = selected.reduce(
         (total, chapter) => total + Math.max(0, chapter.end_cp - chapter.start_cp) + 2_000,
         0,
       )
-      setEstimatedTokens(
-        dialogueEstimates.reduce((total, estimate) => total + estimate.total_tokens, 0) +
-          rosterReserve,
-      )
-      if (selected.length < requested.length) {
-        setProgress(`已跳过 ${requested.length - selected.length} 个已处理章节。`)
-      }
+      setEstimatedTokens(estimates.reduce((total, estimate) => total + estimate.total_tokens, 0) + rosterReserve)
+      if (selected.length < requested.length) setProgress(`已跳过 ${requested.length - selected.length} 个已处理章节。`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '批量 Token 估算失败')
     } finally {
@@ -138,104 +142,105 @@ export function BatchProcessor({
   }
 
   const run = async () => {
-    if (!validRange || !profileId) return
+    if (!validRange || !profileId || !bookVersionId) return
     const requested = chapters.slice(startIndex, endIndex + 1)
-    const selected = requested.filter((chapter) => !chapter.dialogue_processed)
+    const selectedPlans = plans.filter(({ chapter }) => !chapter.dialogue_processed)
     let tokenLimit = positiveIntegerOrNull(tokenLimitText)
     let spent = 0
+    let reserved = 0
     let warnedAtEightyPercent = false
+    let warningOpen = false
+    const limiter = createTaskLimiter(concurrency)
+    const pendingDialogue: Promise<void>[] = []
     stopRef.current = false
     setRunning(true)
     setError(null)
     publishBatch(bookId, {
       running: true,
       message: '准备批量处理…',
-      chapterStates: Object.fromEntries(
-        requested.map((chapter) => [
-          chapter.id,
-          chapter.dialogue_processed ? 'processed' : 'unprocessed',
-        ]),
-      ),
+      chapterStates: Object.fromEntries(requested.map((chapter) => [
+        chapter.id,
+        chapter.dialogue_processed ? 'processed' : 'unprocessed',
+      ])),
     })
 
-    try {
-      if (selected.length === 0) {
-        const message = `所选 ${requested.length} 章均已处理，无需重复调用模型。`
-        setProgress(message)
-        publishBatch(bookId, { running: false, message })
-        onFinished()
+    const checkBudgetReminder = () => {
+      if (tokenLimit === null || warnedAtEightyPercent || warningOpen || spent < Math.ceil(tokenLimit * 0.8)) return
+      warnedAtEightyPercent = true
+      warningOpen = true
+      const answer = window.prompt(
+        `本次已使用约 ${spent.toLocaleString()} tokens，达到上限 ${tokenLimit.toLocaleString()} 的 80%。\n\n` +
+          '请输入新的 Token 上限并直接继续；如果额度已经刷新，请输入 0，系统会按原上限从 0 重新计算。取消则安全停止。',
+        String(tokenLimit),
+      )
+      warningOpen = false
+      if (answer === null) throw new Error('已在额度接近上限时停止')
+      const nextLimit = Number(answer.trim())
+      if (nextLimit === 0) {
+        spent = 0
+        warnedAtEightyPercent = false
+        publishBatch(bookId, { message: '额度已刷新，继续后台处理…' })
         return
       }
-      const checkBudgetReminder = () => {
-        if (
-          tokenLimit === null ||
-          warnedAtEightyPercent ||
-          spent < Math.ceil(tokenLimit * 0.8)
-        ) return
-        warnedAtEightyPercent = true
-        const answer = window.prompt(
-          `本次已使用约 ${spent.toLocaleString()} tokens，达到上限 ${tokenLimit.toLocaleString()} 的 80%。\n\n` +
-          '请输入新的 Token 上限并直接继续；如果额度已经刷新，请输入 0，系统会按原上限从 0 重新计算。取消则安全停止。',
-          String(tokenLimit),
-        )
-        if (answer === null) {
-          throw new Error('已在额度接近上限时停止')
-        }
-        const nextLimit = Number(answer.trim())
-        if (nextLimit === 0) {
-          spent = 0
-          warnedAtEightyPercent = false
-          publishBatch(bookId, { message: '额度已刷新，继续后台处理…' })
-          return
-        }
-        if (!Number.isFinite(nextLimit) || nextLimit <= spent) {
-          throw new Error(`新额度必须大于当前已使用的 ${spent.toLocaleString()} tokens`)
-        }
-        tokenLimit = Math.floor(nextLimit)
-        setTokenLimitText(String(tokenLimit))
-        warnedAtEightyPercent = spent >= Math.ceil(tokenLimit * 0.8)
-        publishBatch(bookId, {
-          message: `Token 上限已调整为 ${tokenLimit.toLocaleString()}，继续后台处理…`,
-        })
+      if (!Number.isFinite(nextLimit) || nextLimit <= spent) {
+        throw new Error(`新额度必须大于当前已使用的 ${spent.toLocaleString()} tokens`)
       }
+      tokenLimit = Math.floor(nextLimit)
+      setTokenLimitText(String(tokenLimit))
+      warnedAtEightyPercent = spent >= Math.ceil(tokenLimit * 0.8)
+      publishBatch(bookId, { message: `Token 上限已调整为 ${tokenLimit.toLocaleString()}，继续后台处理…` })
+    }
 
-      for (let index = 0; index < selected.length; index += 1) {
+    const runMetered = <T,>(reserveEstimate: number, task: (available: number | null) => Promise<T>) =>
+      limiter.run(async () => {
         if (stopRef.current) throw new Error('批量处理已停止')
-        const chapter = selected[index]
-        const prefix = `${index + 1}/${selected.length} ${chapter.title || `第 ${chapter.ordinal + 1} 章`}`
-        const currentStates = batchSnapshots.get(bookId)?.chapterStates ?? {}
-        publishBatch(bookId, {
-          message: `${prefix}：正在识别人物…`,
-          chapterStates: { ...currentStates, [chapter.id]: 'processing' },
-        })
-        let remaining = tokenLimit === null ? null : tokenLimit - spent
-        if (remaining !== null && remaining <= 0) throw new Error('已达到本次 Token 使用上限')
+        const available = tokenLimit === null ? null : tokenLimit - spent - reserved
+        if (available !== null && available <= 0) throw new Error('已达到本次 Token 使用上限')
+        // 用启动前的本地估算预留额度；所有在途任务的预留之和不会超过
+        // 当前批次剩余额度，完成后再按提供方返回的实测用量结算。
+        const reservation = available === null
+          ? 0
+          : Math.min(Math.max(1, reserveEstimate), available)
+        reserved += reservation
+        try {
+          return await task(available === null ? null : reservation)
+        } finally {
+          reserved = Math.max(0, reserved - reservation)
+        }
+      })
 
-        setProgress(`${prefix}：正在识别人物…`)
+    const recordUsage = (job: JobDetailOut, stage: string) => {
+      if (tokenLimit !== null && job.unknown_usage_runs > 0) {
+        throw new Error(`模型没有返回${stage}用量，无法可靠执行 Token 上限，批量处理已停止`)
+      }
+      spent += jobTokens(job)
+      checkBudgetReminder()
+    }
+
+    const scheduleRoster = (plan: ChapterPlan, index: number) => {
+      const { chapter } = plan
+      const prefix = `${index + 1}/${selectedPlans.length} ${chapter.title || `第 ${chapter.ordinal + 1} 章`}`
+      publishBatch(bookId, {
+        message: `${prefix}：正在识别人物…`,
+        chapterStates: { ...(batchSnapshots.get(bookId)?.chapterStates ?? {}), [chapter.id]: 'processing' },
+      })
+      setProgress(`${prefix}：正在识别人物…`)
+      return runMetered(Math.max(1, chapter.end_cp - chapter.start_cp) + 2_000, async (available) => {
         const rosterJob = await waitForJob(
           await analyzeCharacterRoster(bookId, chapter.id, {
             bookVersionId,
             profileId,
-            maxInputTokens: remaining,
+            maxInputTokens: available,
             idempotencyKey: freshIdempotencyKey('batch-roster', `${bookId}:${chapter.id}:${profileId}`),
           }),
           () => stopRef.current,
         )
-        if (rosterJob.state !== 'COMPLETED') {
-          throw new Error(rosterJob.last_error || `${prefix}的人物识别未完成`)
-        }
-        spent += jobTokens(rosterJob)
-        if (tokenLimit !== null && rosterJob.unknown_usage_runs > 0) {
-          throw new Error('模型没有返回人物识别用量，无法可靠执行 Token 上限，批量处理已停止')
-        }
-        checkBudgetReminder()
-
+        if (rosterJob.state !== 'COMPLETED') throw new Error(rosterJob.last_error || `${prefix}的人物识别未完成`)
+        recordUsage(rosterJob, '人物识别')
         const roster = await fetchCharacterRoster(bookId, chapter.id, bookVersionId)
         const accepted = (roster.candidates ?? []).filter((candidate) => Boolean(candidate.canonical_name))
         if (accepted.length === 0) throw new Error(`${prefix}没有识别到可确认的人物`)
         const pov = accepted.find((candidate) => candidate.pov_candidate) ?? accepted[0]
-        setProgress(`${prefix}：正在确认人物并判断对白…`)
-        publishBatch(bookId, { message: `${prefix}：正在确认人物并判断对白…` })
         await confirmCharacterRoster(bookId, chapter.id, {
           bookVersionId,
           candidates: accepted.map((candidate) => ({
@@ -249,49 +254,77 @@ export function BatchProcessor({
           povTempRef: pov.temp_ref,
           expectedVersion: roster.version,
         })
-
-        remaining = tokenLimit === null ? null : tokenLimit - spent
-        if (remaining !== null && remaining <= 0) throw new Error('已达到本次 Token 使用上限')
-        const dialogueJob = await waitForJob(
-          await createJob({
-            bookId,
-            mode: 'process',
-            bookVersionId,
-            range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
-            profileId,
-            readingMode: 'reread',
-            visibleHorizonCp: null,
-            budget: { maxInputTokens: remaining, maxOutputTokens: remaining, maxRechecks: 0 },
-            idempotencyKey: freshIdempotencyKey('batch-dialogue', `${bookId}:${chapter.id}:${profileId}`),
-          }),
-          () => stopRef.current,
-        )
-        spent += jobTokens(dialogueJob)
-        if (dialogueJob.state !== 'COMPLETED') {
-          throw new Error(dialogueJob.last_error || `${prefix}的对白归属未完成`)
-        }
-        if (tokenLimit !== null && dialogueJob.unknown_usage_runs > 0) {
-          throw new Error('模型没有返回对白处理用量，无法可靠执行 Token 上限，批量处理已停止')
-        }
-        checkBudgetReminder()
-        setProgress(`${prefix}：已完成；本次累计 ${spent.toLocaleString()} tokens`)
-        publishBatch(bookId, {
-          message: `${prefix}：已完成；本次累计 ${spent.toLocaleString()} tokens`,
-          chapterStates: {
-            ...(batchSnapshots.get(bookId)?.chapterStates ?? {}),
-            [chapter.id]: 'processed',
-          },
-        })
-      }
-      const skipped = requested.length - selected.length
-      const summary = `批量处理完成：新处理 ${selected.length} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
-      setProgress(summary)
-      publishBatch(bookId, {
-        running: false,
-        message: summary,
+        publishBatch(bookId, { message: `${prefix}：人物已确认，正在并发处理对白窗口…` })
       })
+    }
+
+    const scheduleDialogue = (plan: ChapterPlan, index: number) => {
+      const { chapter, estimate } = plan
+      const prefix = `${index + 1}/${selectedPlans.length} ${chapter.title || `第 ${chapter.ordinal + 1} 章`}`
+      const jobs = (estimate.windows ?? []).map((window) => {
+        const windowId = String(window.window_id)
+        return runMetered(Number(window.estimated_tokens) || 1, async (available) => {
+          const dialogueJob = await waitForJob(
+            await createJob({
+              bookId,
+              mode: 'process',
+              bookVersionId,
+              range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
+              selectedWindowIds: [windowId],
+              profileId,
+              readingMode: 'reread',
+              visibleHorizonCp: null,
+              budget: { maxInputTokens: available, maxOutputTokens: available, maxRechecks },
+              idempotencyKey: freshIdempotencyKey(
+                'batch-dialogue-window',
+                `${bookId}:${chapter.id}:${windowId}:${profileId}:${maxRechecks}`,
+              ),
+            }),
+            () => stopRef.current,
+          )
+          if (dialogueJob.state !== 'COMPLETED') throw new Error(dialogueJob.last_error || `${prefix}的窗口 ${windowId} 未完成`)
+          recordUsage(dialogueJob, '对白处理')
+        })
+      })
+      return Promise.all(jobs).then(async () => {
+        await completeChapterProcessing(bookId, chapter.id, bookVersionId)
+        const message = `${prefix}：已完成；本次累计 ${spent.toLocaleString()} tokens`
+        setProgress(message)
+        publishBatch(bookId, {
+          message,
+          chapterStates: { ...(batchSnapshots.get(bookId)?.chapterStates ?? {}), [chapter.id]: 'processed' },
+        })
+      })
+    }
+
+    try {
+      if (selectedPlans.length === 0) {
+        const message = `所选 ${requested.length} 章均已处理，无需重复调用模型。`
+        setProgress(message)
+        publishBatch(bookId, { running: false, message })
+        onFinished()
+        return
+      }
+
+      let rosterPromise: Promise<void> | null = scheduleRoster(selectedPlans[0], 0)
+      for (let index = 0; index < selectedPlans.length; index += 1) {
+        await rosterPromise
+        if (stopRef.current) throw new Error('批量处理已停止')
+        // 下一章人物任务先进入共享队列，使它能与本章的多个对白窗口并行。
+        rosterPromise = index + 1 < selectedPlans.length
+          ? scheduleRoster(selectedPlans[index + 1], index + 1)
+          : null
+        pendingDialogue.push(scheduleDialogue(selectedPlans[index], index))
+      }
+      await Promise.all(pendingDialogue)
+      const skipped = requested.length - selectedPlans.length
+      const summary = `批量处理完成：新处理 ${selectedPlans.length} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
+      setProgress(summary)
+      publishBatch(bookId, { running: false, message: summary })
       onFinished()
     } catch (reason) {
+      stopRef.current = true
+      await Promise.allSettled(pendingDialogue)
       const message = reason instanceof Error ? reason.message : '批量处理失败'
       setError(message)
       publishBatch(bookId, { running: false, message })
@@ -304,8 +337,8 @@ export function BatchProcessor({
     <section className="card ndr-step-card" data-testid="batch-processor">
       <div className="ndr-step-heading">
         <div>
-          <h3>批量处理章节</h3>
-          <p className="hint">按顺序逐章识别并自动确认人物，再判断对白；后续章节会沿用前文人物。</p>
+          <h3>批量处理配置</h3>
+          <p className="hint">人物按章节顺序确认；上一章人物完成后，本章对白窗口会与下一章人物识别共享并发任务池。</p>
         </div>
       </div>
       <div className="ndr-range-grid">
@@ -322,18 +355,28 @@ export function BatchProcessor({
           </select>
         </label>
         <label>
+          模型配置
+          <select value={profileId} onChange={(event) => { setProfileId(event.target.value); resetEstimate() }} disabled={running} data-testid="batch-profile">
+            <option value="">（请选择模型配置）</option>
+            {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.model}</option>)}
+          </select>
+        </label>
+        <label>
+          每个窗口最多复核数
+          <input type="number" min={0} value={maxRechecks} onChange={(event) => { setMaxRechecks(nonNegativeInteger(event.target.value)); resetEstimate() }} disabled={running} data-testid="batch-max-rechecks" />
+        </label>
+        <label>
           本次 Token 使用上限（留空＝不限制）
           <input type="number" min={1} value={tokenLimitText} onChange={(event) => { setTokenLimitText(event.target.value); resetEstimate() }} disabled={running} data-testid="batch-token-limit" />
         </label>
+        <label>
+          最大并发任务数
+          <input type="number" min={1} max={16} value={concurrency} onChange={(event) => setConcurrency(Math.min(16, Math.max(1, Number(event.target.value) || 1)))} disabled={running} data-testid="batch-concurrency" />
+        </label>
       </div>
+      <p className="hint">并发数同时约束人物识别和对白窗口；设为 1 即按顺序处理，建议从 2 开始。</p>
       <div className="ndr-form-actions">
-        <button
-          type="button"
-          className="ndr-primary"
-          disabled={running || estimating || !validRange || !profileId}
-          onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())}
-          data-testid="batch-run"
-        >
+        <button type="button" className="ndr-primary" disabled={running || estimating || !validRange || !profileId || !bookVersionId} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
           {running ? '批量处理中…' : estimating ? '正在估算…' : estimatedTokens === null ? '预估 Token' : '确认并开始批量处理'}
         </button>
         {running && <button type="button" onClick={() => { stopRef.current = true; setProgress('正在安全停止…') }}>停止</button>}
@@ -341,15 +384,11 @@ export function BatchProcessor({
       {estimatedTokens !== null && (
         <p className="hint" data-testid="batch-estimate">
           整批预计约 {estimatedTokens.toLocaleString()} tokens（包含逐章人物识别预留与对白归属估算）。
-          {chapters.slice(startIndex, endIndex + 1).some((chapter) => chapter.dialogue_processed)
-            ? ' 已处理章节不会重复计费或处理。'
-            : ''}
-          {positiveIntegerOrNull(tokenLimitText) !== null && estimatedTokens > (positiveIntegerOrNull(tokenLimitText) ?? 0)
-            ? ' 预计会超过当前上限，任务将在额度不足时停止。'
-            : ''}
+          {chapters.slice(startIndex, endIndex + 1).some((chapter) => chapter.dialogue_processed) ? ' 已处理章节不会重复计费或处理。' : ''}
+          {positiveIntegerOrNull(tokenLimitText) !== null && estimatedTokens > (positiveIntegerOrNull(tokenLimitText) ?? 0) ? ' 预计会超过当前上限，系统只会在剩余额度允许时派发新任务。' : ''}
         </p>
       )}
-      {!profileId && <p className="hint">请先选择模型配置。</p>}
+      {!profileId && <p className="hint">请选择批量处理使用的模型配置。</p>}
       {!validRange && <p className="status-error">结束章节不能早于开始章节。</p>}
       {progress && <p className="hint" data-testid="batch-progress">{progress}</p>}
       {error && <p className="status-error" data-testid="batch-error">{error}</p>}

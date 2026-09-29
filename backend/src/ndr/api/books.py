@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import Settings
@@ -20,6 +21,8 @@ from ..domain.common import CursorPage, DataEnvelope
 from ..domain.documents import (
     BookOut,
     ChapterOut,
+    ChapterProcessingCompleteIn,
+    ChapterProcessingCompleteOut,
     ContentResponse,
     ImportResult,
     ReadingProgressIn,
@@ -38,7 +41,7 @@ from ..ingest.query import (
 )
 from ..ingest.resources import get_resource_or_404, read_resource_bytes
 from ..ingest.service import import_epub, import_txt, record_failed_import
-from ..storage.models import BookVersion
+from ..storage.models import Annotation, BookVersion, Chapter, Quote
 from ..storage.transactions import apply_versioned_update, transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
@@ -223,6 +226,79 @@ def list_chapters_route(
         data=list_chapters(session, version.id),
         request_id=current_request_id(request),
     )
+
+
+@router.post(
+    "/{book_id}/chapters/{chapter_id}/processing-complete",
+    response_model=DataEnvelope[ChapterProcessingCompleteOut],
+    summary="确认并发窗口已覆盖整章并标记为已处理",
+)
+def complete_chapter_processing_route(
+    request: Request,
+    book_id: str,
+    chapter_id: str,
+    payload: ChapterProcessingCompleteIn,
+) -> DataEnvelope[ChapterProcessingCompleteOut]:
+    """只在本章每条外层候选对白都有当前标注时写入完成状态。"""
+
+    factory = request.app.state.session_factory
+    with transaction(factory) as session:
+        book = get_book_or_404(session, book_id)
+        version = session.get(BookVersion, payload.book_version_id)
+        if version is None or version.book_id != book.id:
+            raise ApiError.validation(
+                "book_version_id 不属于该书籍",
+                book_id=book_id,
+                book_version_id=payload.book_version_id,
+            )
+        chapter = session.get(Chapter, chapter_id)
+        if chapter is None or chapter.book_version_id != version.id:
+            raise ApiError.not_found(
+                "章节不存在或不属于指定书籍版本",
+                book_id=book_id,
+                chapter_id=chapter_id,
+            )
+
+        quote_count = int(
+            session.scalar(
+                select(func.count(Quote.id)).where(
+                    Quote.chapter_id == chapter.id,
+                    Quote.nesting_depth == 0,
+                )
+            )
+            or 0
+        )
+        annotated_quote_count = int(
+            session.scalar(
+                select(func.count(Quote.id))
+                .select_from(Quote)
+                .join(Annotation, Annotation.quote_id == Quote.id)
+                .where(
+                    Quote.chapter_id == chapter.id,
+                    Quote.nesting_depth == 0,
+                )
+            )
+            or 0
+        )
+        if annotated_quote_count != quote_count:
+            raise ApiError(
+                ErrorCode.RESOURCE_CONFLICT,
+                "章节仍有未处理对白，不能标记为已处理",
+                details={
+                    "chapter_id": chapter.id,
+                    "quote_count": quote_count,
+                    "annotated_quote_count": annotated_quote_count,
+                },
+                status_code=409,
+            )
+        chapter.dialogue_processed = True
+        result = ChapterProcessingCompleteOut(
+            chapter_id=chapter.id,
+            dialogue_processed=True,
+            quote_count=quote_count,
+            annotated_quote_count=annotated_quote_count,
+        )
+    return DataEnvelope(data=result, request_id=current_request_id(request))
 
 
 @router.get(

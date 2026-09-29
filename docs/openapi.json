@@ -222,6 +222,68 @@
         }
       }
     },
+    "/api/books/{book_id}/chapters/{chapter_id}/processing-complete": {
+      "post": {
+        "tags": [
+          "books"
+        ],
+        "summary": "确认并发窗口已覆盖整章并标记为已处理",
+        "description": "只在本章每条外层候选对白都有当前标注时写入完成状态。",
+        "operationId": "complete_chapter_processing_route_api_books__book_id__chapters__chapter_id__processing_complete_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chapter Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChapterProcessingCompleteIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ChapterProcessingCompleteOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/books/{book_id}/content": {
       "get": {
         "tags": [
@@ -3180,6 +3242,52 @@
         ],
         "title": "ChapterOut"
       },
+      "ChapterProcessingCompleteIn": {
+        "properties": {
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_version_id"
+        ],
+        "title": "ChapterProcessingCompleteIn",
+        "description": "并发窗口全部完成后，由编排器请求确认章节覆盖状态。"
+      },
+      "ChapterProcessingCompleteOut": {
+        "properties": {
+          "chapter_id": {
+            "type": "string",
+            "title": "Chapter Id"
+          },
+          "dialogue_processed": {
+            "type": "boolean",
+            "title": "Dialogue Processed"
+          },
+          "quote_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Quote Count"
+          },
+          "annotated_quote_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Annotated Quote Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chapter_id",
+          "dialogue_processed",
+          "quote_count",
+          "annotated_quote_count"
+        ],
+        "title": "ChapterProcessingCompleteOut"
+      },
       "ChapterRosterOut": {
         "properties": {
           "chapter_id": {
@@ -3772,6 +3880,25 @@
           "request_id"
         ],
         "title": "DataEnvelope[BookOut]"
+      },
+      "DataEnvelope_ChapterProcessingCompleteOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChapterProcessingCompleteOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ChapterProcessingCompleteOut]"
       },
       "DataEnvelope_ChapterRosterOut_": {
         "properties": {

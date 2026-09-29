@@ -92,6 +92,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/chapters/{chapter_id}/processing-complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 确认并发窗口已覆盖整章并标记为已处理
+         * @description 只在本章每条外层候选对白都有当前标注时写入完成状态。
+         */
+        post: operations["complete_chapter_processing_route_api_books__book_id__chapters__chapter_id__processing_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/content": {
         parameters: {
             query?: never;
@@ -1042,6 +1062,25 @@ export interface components {
              */
             dialogue_processed: boolean;
         };
+        /**
+         * ChapterProcessingCompleteIn
+         * @description 并发窗口全部完成后，由编排器请求确认章节覆盖状态。
+         */
+        ChapterProcessingCompleteIn: {
+            /** Book Version Id */
+            book_version_id: string;
+        };
+        /** ChapterProcessingCompleteOut */
+        ChapterProcessingCompleteOut: {
+            /** Chapter Id */
+            chapter_id: string;
+            /** Dialogue Processed */
+            dialogue_processed: boolean;
+            /** Quote Count */
+            quote_count: number;
+            /** Annotated Quote Count */
+            annotated_quote_count: number;
+        };
         /** ChapterRosterOut */
         ChapterRosterOut: {
             /** Chapter Id */
@@ -1245,6 +1284,15 @@ export interface components {
         /** DataEnvelope[BookOut] */
         DataEnvelope_BookOut_: {
             data: components["schemas"]["BookOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[ChapterProcessingCompleteOut] */
+        DataEnvelope_ChapterProcessingCompleteOut_: {
+            data: components["schemas"]["ChapterProcessingCompleteOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -2995,6 +3043,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_list_ChapterOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_chapter_processing_route_api_books__book_id__chapters__chapter_id__processing_complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                chapter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChapterProcessingCompleteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ChapterProcessingCompleteOut_"];
                 };
             };
             /** @description Validation Error */

@@ -3,7 +3,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { annotationKeys, fetchAnnotations } from '../api/annotations'
-import { fetchBook, fetchChapters, fetchContent, fetchQuotes, queryKeys } from '../api/books'
+import {
+  completeChapterProcessing,
+  fetchBook,
+  fetchChapters,
+  fetchContent,
+  fetchQuotes,
+  queryKeys,
+} from '../api/books'
 import {
   createJob,
   estimateRange,
@@ -25,6 +32,7 @@ import { JobPanel } from '../components/JobPanel'
 import { RangePicker, type RangeValue } from '../components/RangePicker'
 import { SpeakerLegend } from '../components/SpeakerLegend'
 import { UsageSummary } from '../components/UsageSummary'
+import { mapWithConcurrency } from '../processing/concurrency'
 
 const DEFAULT_BUDGET: BudgetInput = {
   maxInputTokens: 200_000,
@@ -50,7 +58,9 @@ export default function PreviewPage() {
   const initializedRef = useRef(false)
 
   const [range, setRange] = useState<RangeValue>({ chapterId: null, startCp: 0, endCp: null })
+  const [processingMode, setProcessingMode] = useState<'single' | 'batch'>('single')
   const [budget, setBudget] = useState<BudgetInput>(DEFAULT_BUDGET)
+  const [concurrency, setConcurrency] = useState(2)
   const [profileId, setProfileId] = useState('')
   const [viewMode, setViewMode] = useState<'annotated' | 'original'>('annotated')
   const [estimate, setEstimate] = useState<EstimateOut | null>(null)
@@ -174,34 +184,71 @@ export default function PreviewPage() {
   })
 
   const jobMutation = useMutation({
-    mutationFn: (mode: 'preview' | 'process') =>
-      createJob({
-        bookId: bookId as string,
-        mode,
-        bookVersionId: book.data?.active_version_id ?? null,
-        range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
-        selectedWindowIds:
-          range.chapterId && estimate?.windows?.length ? selectedWindowIds : null,
-        profileId: profileId || null,
-        readingMode: PROCESSING_READING_MODE,
-        visibleHorizonCp: null,
-        budget,
-        // 同输入 → 同幂等键（用短摘要，避免超过后端 128 字符上限）：重复点击复用同一任务。
-        // preview 与 process 的键不同，但缓存键相同：预览过的范围正式处理时不会重复调用模型。
-        idempotencyKey: freshIdempotencyKey(
-          `${mode}:${bookId}`,
-          JSON.stringify({
-            bookVersionId: book.data?.active_version_id ?? null,
-            chapterId: range.chapterId,
-            start: range.startCp,
-            end: resolvedEnd,
-            profileId,
-            budget,
-            selectedWindowIds,
-          }),
-        ),
-        runNow: true,
-      }),
+    mutationFn: async (mode: 'preview' | 'process') => {
+      const versionId = book.data?.active_version_id ?? null
+      const plannedWindows = range.chapterId && estimate?.windows?.length
+        ? (estimate.windows ?? []).filter((window) => selectedWindowIds.includes(String(window.window_id)))
+        : []
+      if (plannedWindows.length === 0) {
+        return createJob({
+          bookId: bookId as string,
+          mode,
+          bookVersionId: versionId,
+          range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
+          selectedWindowIds: null,
+          profileId: profileId || null,
+          readingMode: PROCESSING_READING_MODE,
+          visibleHorizonCp: null,
+          budget,
+          idempotencyKey: freshIdempotencyKey(`${mode}:${bookId}`, JSON.stringify({ versionId, range, profileId, budget })),
+          runNow: true,
+        })
+      }
+
+      const totalEstimated = plannedWindows.reduce(
+        (total, window) => total + Math.max(1, Number(window.estimated_tokens) || 1),
+        0,
+      )
+      const allocate = (limit: number | null, estimated: number) =>
+        limit === null ? null : Math.max(1, Math.floor((limit * estimated) / totalEstimated))
+      const jobs = await mapWithConcurrency(plannedWindows, concurrency, async (window) => {
+        const windowId = String(window.window_id)
+        const estimated = Math.max(1, Number(window.estimated_tokens) || 1)
+        return createJob({
+          bookId: bookId as string,
+          mode,
+          bookVersionId: versionId,
+          range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
+          selectedWindowIds: [windowId],
+          profileId: profileId || null,
+          readingMode: PROCESSING_READING_MODE,
+          visibleHorizonCp: null,
+          budget: {
+            maxInputTokens: allocate(budget.maxInputTokens, estimated),
+            maxOutputTokens: allocate(budget.maxOutputTokens, estimated),
+            maxRechecks: budget.maxRechecks,
+          },
+          idempotencyKey: freshIdempotencyKey(
+            `${mode}:${bookId}:window`,
+            JSON.stringify({ versionId, range, profileId, budget, windowId }),
+          ),
+          runNow: true,
+        })
+      })
+      const failedJob = jobs.find((job) => job.state !== 'COMPLETED')
+      if (failedJob) {
+        throw new Error(failedJob.last_error || `窗口任务结束于 ${failedJob.state}`)
+      }
+      if (
+        mode === 'process' &&
+        range.chapterId &&
+        versionId &&
+        plannedWindows.length === (estimate?.windows?.length ?? 0)
+      ) {
+        await completeChapterProcessing(bookId as string, range.chapterId, versionId)
+      }
+      return jobs.at(-1) as JobDetailOut
+    },
     onSuccess: (job) => {
       setJobId(job.id)
       setCurrentJob(job)
@@ -261,7 +308,7 @@ export default function PreviewPage() {
         <div>
           <h2>预览与按章处理：{book.data?.title ?? '载入中…'}</h2>
           <p className="hint">
-            按顺序完成三个步骤：选择范围与模型 → 确认本章人物 → 对白归属；预览结果直接复用到正式阅读。
+            先选择单章或批量处理，再展开对应配置；处理结果直接用于正式阅读。
           </p>
         </div>
         <nav className="ndr-preview-nav" aria-label="本书导航">
@@ -276,6 +323,40 @@ export default function PreviewPage() {
 
       {book.isError && <p className="status-error">书籍读取失败。</p>}
       {chapters.isError && <p className="status-error">目录读取失败。</p>}
+
+      <section className="card ndr-step-card" data-testid="processing-mode-picker">
+        <div className="ndr-step-heading">
+          <div>
+            <h3>选择处理方式</h3>
+            <p className="hint">单章可挑选窗口试运行；批量会自动识别人物并按章节流水线处理。</p>
+          </div>
+        </div>
+        <div className="ndr-radio-row">
+          <label>
+            <input
+              type="radio"
+              name="processing-mode"
+              checked={processingMode === 'single'}
+              onChange={() => setProcessingMode('single')}
+              data-testid="processing-mode-single"
+            />
+            单章处理
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="processing-mode"
+              checked={processingMode === 'batch'}
+              onChange={() => setProcessingMode('batch')}
+              data-testid="processing-mode-batch"
+            />
+            批量处理
+          </label>
+        </div>
+      </section>
+
+      {processingMode === 'single' && (
+        <>
 
       <section className="card ndr-preview-controls ndr-step-card">
         <div className="ndr-step-heading">
@@ -321,18 +402,6 @@ export default function PreviewPage() {
         </fieldset>
       </section>
 
-      <BatchProcessor
-        bookId={bookId}
-        bookVersionId={book.data?.active_version_id}
-        chapters={chapters.data ?? []}
-        profileId={profileId}
-        onFinished={() => {
-          void queryClient.invalidateQueries({ queryKey: ['annotations'] })
-          void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })
-          void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId) })
-        }}
-      />
-
       <CharacterRosterPanel
         step={2}
         bookId={bookId}
@@ -353,6 +422,21 @@ export default function PreviewPage() {
           </div>
         </div>
         <BudgetForm value={budget} onChange={setBudget} />
+        <fieldset className="ndr-budget-form">
+          <legend>并发限制</legend>
+          <label>
+            最大并发窗口数
+            <input
+              type="number"
+              min={1}
+              max={16}
+              value={concurrency}
+              onChange={(event) => setConcurrency(Math.min(16, Math.max(1, Number(event.target.value) || 1)))}
+              data-testid="preview-concurrency"
+            />
+          </label>
+          <p className="hint">只影响所选对白窗口；人物识别仍会先读取本章全文。</p>
+        </fieldset>
         <div className="ndr-form-actions">
           <button
             type="button"
@@ -448,6 +532,22 @@ export default function PreviewPage() {
             </button>
           </div>
         </section>
+      )}
+        </>
+      )}
+
+      {processingMode === 'batch' && (
+        <BatchProcessor
+          bookId={bookId}
+          bookVersionId={book.data?.active_version_id}
+          chapters={chapters.data ?? []}
+          profiles={profiles.data ?? []}
+          onFinished={() => {
+            void queryClient.invalidateQueries({ queryKey: ['annotations'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })
+            void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId) })
+          }}
+        />
       )}
 
       <section className="card">

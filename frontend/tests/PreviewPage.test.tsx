@@ -38,6 +38,7 @@ vi.mock('../src/api/books', () => ({
   fetchContent: vi.fn(),
   fetchQuotes: vi.fn(),
   fetchJob: vi.fn(),
+  completeChapterProcessing: vi.fn(),
 }))
 
 vi.mock('../src/api/characters', () => ({
@@ -280,6 +281,7 @@ describe('PreviewPage', () => {
     vi.mocked(booksApi.fetchContent).mockReset()
     vi.mocked(booksApi.fetchQuotes).mockReset()
     vi.mocked(booksApi.fetchJob).mockReset()
+    vi.mocked(booksApi.completeChapterProcessing).mockReset()
     vi.mocked(annotationsApi.fetchAnnotations).mockReset()
     vi.mocked(charactersApi.fetchBookCharacters).mockReset()
     vi.mocked(charactersApi.fetchCharacterRoster).mockReset()
@@ -325,6 +327,12 @@ describe('PreviewPage', () => {
       next_cursor: null,
     })
     vi.mocked(booksApi.fetchJob).mockResolvedValue(JOB)
+    vi.mocked(booksApi.completeChapterProcessing).mockResolvedValue({
+      chapter_id: 'c1',
+      dialogue_processed: true,
+      quote_count: 1,
+      annotated_quote_count: 1,
+    })
     vi.mocked(annotationsApi.fetchAnnotations).mockResolvedValue(ANNOTATIONS)
     vi.mocked(charactersApi.fetchBookCharacters).mockResolvedValue(ROSTER.confirmed_characters ?? [])
     vi.mocked(charactersApi.fetchCharacterRoster).mockResolvedValue(ROSTER)
@@ -391,6 +399,24 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('preview-notice')).toHaveTextContent('标注投影')
   })
 
+  it('单章正式处理按并发配置拆分所选窗口并在全覆盖后标记完成', async () => {
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('annotation-span')
+    await userEvent.click(screen.getByTestId('preview-estimate'))
+    await screen.findByTestId('window-picker')
+
+    await userEvent.clear(screen.getByTestId('preview-concurrency'))
+    await userEvent.type(screen.getByTestId('preview-concurrency'), '2')
+    await userEvent.click(screen.getByTestId('preview-process'))
+
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(jobsApi.createJob).mock.calls.map(([input]) => input.selectedWindowIds)).toEqual([
+      ['w1'],
+      ['w2'],
+    ])
+    expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1')
+  })
+
   it('原文/标注切换只改显示，不触发任何模型调用', async () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('annotation-span')
@@ -430,29 +456,73 @@ describe('PreviewPage', () => {
     vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(meteredJob)
     vi.mocked(jobsApi.createJob).mockResolvedValue(meteredJob)
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
+    expect(screen.queryByTestId('preview-profile')).not.toBeInTheDocument()
+    expect(screen.getByTestId('batch-profile')).toHaveValue('p1')
+
+    await userEvent.clear(screen.getByTestId('batch-max-rechecks'))
+    await userEvent.type(screen.getByTestId('batch-max-rechecks'), '2')
+    await userEvent.clear(screen.getByTestId('batch-concurrency'))
+    await userEvent.type(screen.getByTestId('batch-concurrency'), '1')
 
     await userEvent.type(screen.getByTestId('batch-token-limit'), '50000')
     await userEvent.click(screen.getByTestId('batch-run'))
     expect(await screen.findByTestId('batch-estimate')).toHaveTextContent('3,280')
+    expect(jobsApi.estimateRange).toHaveBeenCalledWith(
+      'b1',
+      expect.objectContaining({ budget: expect.objectContaining({ maxRechecks: 2 }) }),
+    )
     await userEvent.click(screen.getByTestId('batch-run'))
 
     await waitFor(() => expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
     expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledWith(
       'b1',
       'c1',
-      expect.objectContaining({ profileId: 'p1', maxInputTokens: 50000 }),
+      expect.objectContaining({ profileId: 'p1', maxInputTokens: 2020 }),
     )
     expect(jobsApi.createJob).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: 'process',
         range: { chapterId: 'c1', startCp: 0, endCp: 20 },
+        selectedWindowIds: ['w1'],
+        budget: expect.objectContaining({ maxRechecks: 2 }),
       }),
     )
+    expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1')
     await waitFor(() =>
       expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'),
     )
+  })
+
+  it('批量流水线会让下一章人物先与当前章窗口进入共享队列', async () => {
+    const twoChapters = [
+      { ...CHAPTERS[0], dialogue_processed: false },
+      { ...CHAPTERS[0], id: 'c2', ordinal: 1, title: '第二章', start_cp: 20, end_cp: 40, dialogue_processed: false },
+    ] as ChapterOut[]
+    const meteredJob = {
+      ...JOB,
+      unknown_usage_runs: 0,
+      usage: { input_tokens: 30, output_tokens: 10, total_tokens: 40, unknown_runs: 0 },
+    } as JobDetailOut
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue(twoChapters)
+    vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(meteredJob)
+    vi.mocked(jobsApi.createJob).mockResolvedValue(meteredJob)
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await screen.findByTestId('batch-processor')
+
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await screen.findByTestId('batch-estimate')
+    await userEvent.click(screen.getByTestId('batch-run'))
+
+    await waitFor(() => expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(4))
+    const secondRosterOrder = vi.mocked(charactersApi.analyzeCharacterRoster).mock.invocationCallOrder[1]
+    const firstWindowOrder = vi.mocked(jobsApi.createJob).mock.invocationCallOrder[0]
+    expect(secondRosterOrder).toBeLessThan(firstWindowOrder)
+    await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'))
   })
 
   it('批量处理会跳过回导后标记为已处理的章节', async () => {
@@ -460,6 +530,7 @@ describe('PreviewPage', () => {
       CHAPTERS.map((chapter) => ({ ...chapter, dialogue_processed: true })),
     )
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
 
     await userEvent.click(screen.getByTestId('batch-run'))
@@ -478,21 +549,26 @@ describe('PreviewPage', () => {
     const meteredJob = {
       ...JOB,
       unknown_usage_runs: 0,
-      usage: { input_tokens: 30, output_tokens: 10, total_tokens: 40, unknown_runs: 0 },
+      usage: { input_tokens: 1600, output_tokens: 400, total_tokens: 2000, unknown_runs: 0 },
+    } as JobDetailOut
+    const dialogueJob = {
+      ...meteredJob,
+      usage: { input_tokens: 80, output_tokens: 20, total_tokens: 100, unknown_runs: 0 },
     } as JobDetailOut
     vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(meteredJob)
-    vi.mocked(jobsApi.createJob).mockResolvedValue(meteredJob)
-    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('200')
+    vi.mocked(jobsApi.createJob).mockResolvedValue(dialogueJob)
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('5000')
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
 
-    await userEvent.type(screen.getByTestId('batch-token-limit'), '50')
+    await userEvent.type(screen.getByTestId('batch-token-limit'), '2500')
     await userEvent.click(screen.getByTestId('batch-run'))
     await screen.findByTestId('batch-estimate')
     await userEvent.click(screen.getByTestId('batch-run'))
 
     await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
     await waitFor(() =>
       expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'),
     )

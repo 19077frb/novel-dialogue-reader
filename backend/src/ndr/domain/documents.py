@@ -57,6 +57,19 @@ class ChapterOut(ApiModel):
     dialogue_processed: bool = False
 
 
+class ChapterProcessingCompleteIn(ApiModel):
+    """并发窗口全部完成后，由编排器请求确认章节覆盖状态。"""
+
+    book_version_id: str
+
+
+class ChapterProcessingCompleteOut(ApiModel):
+    chapter_id: str
+    dialogue_processed: bool
+    quote_count: int = Field(ge=0)
+    annotated_quote_count: int = Field(ge=0)
+
+
 class ContentNodeOut(ApiModel):
     node_id: str
     node_type: ContentNodeType
