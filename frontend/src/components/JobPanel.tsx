@@ -20,8 +20,8 @@ export function isTerminalJob(state: JobDetailOut['state']): boolean {
 
 export interface JobPanelProps {
   jobId: string
-  /** 任务进入终态时回调一次（例如刷新标注投影与用量）。 */
-  onTerminal?: (job: JobDetailOut) => void
+  /** 任务快照更新时回调（例如显示本次用量；终态时刷新累计用量）。 */
+  onUpdate?: (job: JobDetailOut) => void
 }
 
 /**
@@ -31,7 +31,7 @@ export interface JobPanelProps {
  * - 恢复动作完全来自 `GET /api/jobs/{id}/recovery`：前端不自己推断，也不隐藏「可能计费」提示。
  * - 未知结果不会自动重发：只有用户点「确认重发」才会回到队列。
  */
-export function JobPanel({ jobId, onTerminal }: JobPanelProps) {
+export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
   const queryClient = useQueryClient()
   const job = useQuery({
     queryKey: queryKeys.job(jobId),
@@ -54,8 +54,8 @@ export function JobPanel({ jobId, onTerminal }: JobPanelProps) {
 
   const state = job.data?.state
   useEffect(() => {
-    if (job.data && onTerminal) onTerminal(job.data)
-  }, [job.data, onTerminal])
+    if (job.data && onUpdate) onUpdate(job.data)
+  }, [job.data, onUpdate])
 
   const action = useMutation({
     mutationFn: async (value: string) => {

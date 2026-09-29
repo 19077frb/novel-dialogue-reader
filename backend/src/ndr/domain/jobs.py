@@ -91,8 +91,6 @@ class UsageOut(ApiModel):
     total_tokens: int = Field(ge=0)
     by_state: dict[str, int] = Field(default_factory=dict)
     by_model: dict[str, int] = Field(default_factory=dict)
-    currency: str | None = None
-    cost: str | None = None
 
 
 class ReconcileIn(ApiModel):

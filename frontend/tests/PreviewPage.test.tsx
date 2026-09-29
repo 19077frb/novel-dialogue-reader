@@ -237,7 +237,7 @@ const JOB = {
   calls: 2,
   cached_windows: 0,
   unknown_usage_runs: 1,
-  usage: {},
+  usage: { input_tokens: 30, output_tokens: 10, unknown_runs: 1 },
   created_at: '2026-09-28T00:00:00+00:00',
   updated_at: '2026-09-28T00:00:00+00:00',
 } as JobDetailOut
@@ -251,8 +251,6 @@ const USAGE = {
   total_tokens: 0,
   by_state: { SUCCEEDED: 2 },
   by_model: {},
-  currency: null,
-  cost: null,
 } as UsageOut
 
 describe('PreviewPage', () => {
@@ -339,6 +337,7 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('range-summary')).toHaveTextContent('0 – 20')
     expect(screen.getByTestId('usage-total')).toHaveTextContent('0')
     expect(screen.getByTestId('usage-unknown-warning')).toHaveTextContent('没有')
+    expect(screen.queryByText('金额')).not.toBeInTheDocument()
   })
 
   it('估算只走本地接口，试运行用 preview 模式创建任务并轮询', async () => {
@@ -360,6 +359,9 @@ describe('PreviewPage', () => {
     expect(await screen.findByTestId('job-panel')).toBeInTheDocument()
     expect(screen.getByTestId('job-state')).toHaveTextContent('COMPLETED')
     expect(screen.getByTestId('job-calls')).toHaveTextContent('2')
+    expect(screen.getByTestId('usage-current-total')).toHaveTextContent('40')
+    expect(screen.getByRole('heading', { name: '本次任务消耗' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '本书累计消耗' })).toBeInTheDocument()
     expect(screen.getByTestId('preview-notice')).toHaveTextContent('标注投影')
   })
 

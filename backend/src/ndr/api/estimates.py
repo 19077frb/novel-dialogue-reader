@@ -1,7 +1,7 @@
 """估算与用量路由。
 
 - `POST /api/books/{id}/estimates`：纯本地估算（不调用模型、不写数据库）。
-- `GET /api/books/{id}/usage`：按任务汇总真实用量；未知用量单独计数，缺价格资料时不给金额。
+- `GET /api/books/{id}/usage`：按任务汇总真实用量；未知用量单独计数。
 """
 
 from __future__ import annotations

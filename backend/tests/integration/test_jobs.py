@@ -315,7 +315,7 @@ def test_usage_is_recorded_and_unknown_is_not_zeroed(
     assert usage["runs"] >= 1
     assert usage["unknown_usage_runs"] >= 1
     assert usage["total_tokens"] == 0  # 不把未知当成真实用量
-    assert usage["cost"] is None  # 缺价格资料不给金额
+    assert "cost" not in usage and "currency" not in usage
 
     # 提供方上报 usage 时按真实数字结算
     known_job = _create_job(

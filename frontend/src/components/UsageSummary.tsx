@@ -1,13 +1,39 @@
-import type { UsageOut } from '../api/types'
+import type { JobDetailOut, UsageOut } from '../api/types'
 
 /**
- * 用量汇总：直接显示后端结算结果。
- * 未知用量的尝试单独计数，绝不按 0 计入 token；缺价格资料时不显示金额。
+ * 本次任务与本书累计用量。未知用量的尝试单独计数，绝不按 0 计入 token。
  */
-export function UsageSummary({ usage }: { usage: UsageOut }) {
+export function UsageSummary({
+  usage,
+  currentJob,
+}: {
+  usage: UsageOut
+  currentJob?: JobDetailOut | null
+}) {
+  const currentInput = Number(currentJob?.usage?.input_tokens ?? 0)
+  const currentOutput = Number(currentJob?.usage?.output_tokens ?? 0)
+
   return (
     <div className="ndr-usage" data-testid="usage-summary">
-      <dl>
+      {currentJob && (
+        <>
+          <h3>本次任务消耗</h3>
+          <dl data-testid="usage-current">
+            <dt>尝试次数</dt>
+            <dd>{currentJob.calls}</dd>
+            <dt>未知用量</dt>
+            <dd>{currentJob.unknown_usage_runs}</dd>
+            <dt>输入 token</dt>
+            <dd>{currentInput}</dd>
+            <dt>输出 token</dt>
+            <dd>{currentOutput}</dd>
+            <dt>合计 token</dt>
+            <dd data-testid="usage-current-total">{currentInput + currentOutput}</dd>
+          </dl>
+        </>
+      )}
+      <h3>本书累计消耗</h3>
+      <dl data-testid="usage-cumulative">
         <dt>尝试次数</dt>
         <dd data-testid="usage-runs">{usage.runs}</dd>
         <dt>未知用量</dt>
@@ -18,10 +44,6 @@ export function UsageSummary({ usage }: { usage: UsageOut }) {
         <dd>{usage.output_tokens}</dd>
         <dt>合计 token</dt>
         <dd data-testid="usage-total">{usage.total_tokens}</dd>
-        <dt>金额</dt>
-        <dd data-testid="usage-cost">
-          {usage.cost && usage.currency ? `${usage.cost} ${usage.currency}` : '缺价格资料，不显示金额'}
-        </dd>
       </dl>
       {usage.unknown_usage_runs > 0 && (
         <p className="hint" data-testid="usage-unknown-warning">

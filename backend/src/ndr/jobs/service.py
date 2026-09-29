@@ -2,8 +2,7 @@
 
 - **幂等创建**：同一 `idempotency_key` + 相同请求摘要 → 返回既有任务；
   同一 key 但摘要不同 → 409 `IDEMPOTENCY_CONFLICT`。
-- **估算只做本地计算**：用窗口规划给出 token 估算，不调用模型；
-  缺价格资料时只给 token，不伪造金额。
+- **估算只做本地计算**：用窗口规划给出 token 估算，不调用模型。
 - **用量按每次尝试汇总**：`usage_json` 为 NULL 表示提供方没给 usage，单独计数，绝不按 0 计。
 """
 
@@ -331,8 +330,6 @@ def usage_summary(session: Session, book_id: str) -> dict[str, Any]:
         "total_tokens": total_tokens,
         "by_state": by_state,
         "by_model": by_model,
-        "currency": None,  # 缺价格资料时不给金额
-        "cost": None,
     }
 
 

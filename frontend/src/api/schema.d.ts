@@ -2747,10 +2747,6 @@ export interface components {
             by_model?: {
                 [key: string]: number;
             };
-            /** Currency */
-            currency?: string | null;
-            /** Cost */
-            cost?: string | null;
         };
         /** ValidationError */
         ValidationError: {

@@ -52,6 +52,7 @@ export default function PreviewPage() {
   const [viewMode, setViewMode] = useState<'annotated' | 'original'>('annotated')
   const [estimate, setEstimate] = useState<EstimateOut | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
+  const [currentJob, setCurrentJob] = useState<JobDetailOut | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
@@ -194,14 +195,19 @@ export default function PreviewPage() {
       }),
     onSuccess: (job) => {
       setJobId(job.id)
+      setCurrentJob(job)
       setError(null)
       setNotice(null)
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : '创建任务失败'),
   })
 
-  const handleTerminal = useCallback(
+  const handleJobUpdate = useCallback(
     (job: JobDetailOut) => {
+      setCurrentJob(job)
+      if (!['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'].includes(job.state)) {
+        return
+      }
       setNotice(
         job.state === 'COMPLETED'
           ? '任务完成：结果已写入与正式阅读相同的标注投影（没有另一套临时存储）。'
@@ -355,7 +361,7 @@ export default function PreviewPage() {
       {jobId && (
         <section className="card">
           <h2>任务</h2>
-          <JobPanel jobId={jobId} onTerminal={handleTerminal} />
+          <JobPanel jobId={jobId} onUpdate={handleJobUpdate} />
           <div className="ndr-recompute-entry" data-testid="recompute-entry">
             <p className="hint">
               任务**不会**自动重算：暂停/限流/预算到顶或失败后，都需要你显式重新发起。
@@ -377,7 +383,7 @@ export default function PreviewPage() {
         <h2>用量</h2>
         {usage.isPending && <p className="hint">正在读取用量…</p>}
         {usage.isError && <p className="status-error">用量读取失败。</p>}
-        {usage.data && <UsageSummary usage={usage.data} />}
+        {usage.data && <UsageSummary usage={usage.data} currentJob={currentJob} />}
       </section>
 
       <section className="card">
