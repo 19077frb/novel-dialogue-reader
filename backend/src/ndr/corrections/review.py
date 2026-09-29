@@ -112,10 +112,21 @@ def review_counts(session: Session, book_version_id: str) -> ReviewItemCountsOut
     )
     by_status: dict[str, int] = {}
     by_reason: dict[str, int] = {}
+    targets: set[str] = set()
+    targets_by_status: dict[str, set[str]] = {}
     for row in rows:
+        target = f"quote:{row.quote_id}" if row.quote_id else f"gap:{row.gap_id}"
+        targets.add(target)
         by_status[row.queue_status.value] = by_status.get(row.queue_status.value, 0) + 1
         by_reason[row.reason.value] = by_reason.get(row.reason.value, 0) + 1
-    return ReviewItemCountsOut(total=len(rows), by_status=by_status, by_reason=by_reason)
+        targets_by_status.setdefault(row.queue_status.value, set()).add(target)
+    return ReviewItemCountsOut(
+        total=len(rows),
+        by_status=by_status,
+        by_reason=by_reason,
+        targets_total=len(targets),
+        targets_by_status={key: len(value) for key, value in targets_by_status.items()},
+    )
 
 
 def get_review_item_or_404(session: Session, item_id: str) -> ReviewItem:

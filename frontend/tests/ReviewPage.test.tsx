@@ -130,6 +130,8 @@ const QUEUE = {
     total: 3,
     by_status: { PENDING: 3 },
     by_reason: { LOW_CONFIDENCE: 1, AMBIGUOUS_SPEAKER: 1, SCENE_BOUNDARY: 1 },
+    targets_total: 2,
+    targets_by_status: { PENDING: 2 },
   },
 } as never
 
@@ -201,15 +203,21 @@ describe('ReviewPage', () => {
     expect(screen.getAllByText('「雨停了。」')).toHaveLength(1)
     expect(rows[1]).toHaveTextContent('少女合上伞。')
     expect(rows[1]).toHaveTextContent('原因：场景边界待确认')
-    expect(screen.getByTestId('review-counts')).toHaveTextContent('共 3 个原因记录')
-    expect(screen.getByTestId('review-counts')).toHaveTextContent('待确认 3')
+    expect(screen.getByTestId('review-counts')).toHaveTextContent('共 2 个对话')
+    expect(screen.getByTestId('review-counts')).toHaveTextContent('待确认 2')
   })
 
   it('空队列明确说明「不等于全部识别正确」', async () => {
     vi.mocked(reviewApi.fetchReviewQueue).mockResolvedValue({
       items: [],
       next_cursor: null,
-      counts: { total: 0, by_status: {}, by_reason: {} },
+      counts: {
+        total: 0,
+        by_status: {},
+        by_reason: {},
+        targets_total: 0,
+        targets_by_status: {},
+      },
     } as never)
 
     renderRoute('/books/:bookId/review', <ReviewPage />, '/books/b1/review')

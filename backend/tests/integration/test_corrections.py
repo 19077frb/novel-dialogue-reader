@@ -157,6 +157,17 @@ def test_quote_detail_and_review_flag_work_for_unprocessed_quote(
     assert deferred.status_code == 200, deferred.text
     assert deferred.json()["data"]["queue_status"] == "DEFERRED"
 
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        session.add(
+            ReviewItem(
+                target_type="quote",
+                quote_id=unprocessed,
+                reason="OTHER",
+                queue_status="DEFERRED",
+                candidates_json="{}",
+            )
+        )
+
     queue = fake_provider_client.get(f"/api/books/{book_id}/review-items").json()["data"]
     assert queue["counts"]["total"] >= 1
     assert queue["counts"]["by_status"]["DEFERRED"] >= 1
@@ -164,6 +175,11 @@ def test_quote_detail_and_review_flag_work_for_unprocessed_quote(
     queued_item = next(row for row in queue["items"] if row["id"] == item["id"])
     assert queued_item["target_text"].startswith(("「", "『", '"'))
     assert queued_item["target_text"] != "（对白）"
+    assert queue["counts"]["targets_total"] < queue["counts"]["total"]
+    assert (
+        queue["counts"]["targets_by_status"]["DEFERRED"]
+        < queue["counts"]["by_status"]["DEFERRED"]
+    )
 
     detail_item = fake_provider_client.get(f"/api/review-items/{item['id']}").json()["data"]
     assert detail_item["item"]["id"] == item["id"]

@@ -2416,6 +2416,15 @@ export interface components {
             by_reason?: {
                 [key: string]: number;
             };
+            /**
+             * Targets Total
+             * @default 0
+             */
+            targets_total: number;
+            /** Targets By Status */
+            targets_by_status?: {
+                [key: string]: number;
+            };
         };
         /** ReviewItemDetailOut */
         ReviewItemDetailOut: {

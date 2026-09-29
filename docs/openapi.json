@@ -6523,6 +6523,19 @@
             },
             "type": "object",
             "title": "By Reason"
+          },
+          "targets_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Targets Total",
+            "default": 0
+          },
+          "targets_by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Targets By Status"
           }
         },
         "additionalProperties": false,

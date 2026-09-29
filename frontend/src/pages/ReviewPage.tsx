@@ -211,8 +211,8 @@ export default function ReviewPage() {
         </label>
         {counts && (
           <p className="hint" data-testid="review-counts">
-            共 {counts.total} 个原因记录：
-            {Object.entries(counts.by_status ?? {})
+            共 {counts.targets_total} 个对话：
+            {Object.entries(counts.targets_by_status ?? {})
               .map(([key, value]) => `${STATUS_LABELS[key as ReviewQueueStatus] ?? key} ${value}`)
               .join(' · ')}
           </p>

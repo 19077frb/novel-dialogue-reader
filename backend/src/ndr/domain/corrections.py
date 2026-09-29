@@ -232,6 +232,8 @@ class ReviewItemCountsOut(ApiModel):
     total: int = Field(ge=0)
     by_status: dict[str, int] = Field(default_factory=dict)
     by_reason: dict[str, int] = Field(default_factory=dict)
+    targets_total: int = Field(default=0, ge=0)
+    targets_by_status: dict[str, int] = Field(default_factory=dict)
 
 
 class ReviewItemDetailOut(ApiModel):

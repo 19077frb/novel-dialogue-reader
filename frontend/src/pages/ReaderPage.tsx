@@ -241,7 +241,7 @@ export default function ReaderPage() {
         </div>
         <nav className="ndr-preview-nav">
           <Link to={`/books/${bookId}/review`} data-testid="reader-review-link">
-            待确认 {pending.data?.counts.by_status?.PENDING ?? 0} 项
+            待确认 {pending.data?.counts.targets_by_status?.PENDING ?? 0} 项
           </Link>
           <Link to={`/books/${bookId}/preview`}>预览与处理</Link>
           <button type="button" onClick={() => setExportOpen(true)} data-testid="open-export">
