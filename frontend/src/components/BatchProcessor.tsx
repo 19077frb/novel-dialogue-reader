@@ -135,7 +135,7 @@ export function BatchProcessor({
   const run = async () => {
     if (!validRange || !profileId) return
     const selected = chapters.slice(startIndex, endIndex + 1)
-    const tokenLimit = positiveIntegerOrNull(tokenLimitText)
+    let tokenLimit = positiveIntegerOrNull(tokenLimitText)
     let spent = 0
     let warnedAtEightyPercent = false
     stopRef.current = false
@@ -155,17 +155,30 @@ export function BatchProcessor({
           spent < Math.ceil(tokenLimit * 0.8)
         ) return
         warnedAtEightyPercent = true
-        const refreshed = window.confirm(
+        const answer = window.prompt(
           `本次已使用约 ${spent.toLocaleString()} tokens，达到上限 ${tokenLimit.toLocaleString()} 的 80%。\n\n` +
-          '如果额度已经刷新，请点“确定”继续并从 0 重新计算本轮额度；如果需要修改上限，请点“取消”，修改后重新开始。已完成章节会复用缓存。',
+          '请输入新的 Token 上限并直接继续；如果额度已经刷新，请输入 0，系统会按原上限从 0 重新计算。取消则安全停止。',
+          String(tokenLimit),
         )
-        if (refreshed) {
+        if (answer === null) {
+          throw new Error('已在额度接近上限时停止')
+        }
+        const nextLimit = Number(answer.trim())
+        if (nextLimit === 0) {
           spent = 0
           warnedAtEightyPercent = false
           publishBatch(bookId, { message: '额度已刷新，继续后台处理…' })
           return
         }
-        throw new Error('已在额度接近上限时暂停；请修改 Token 上限后重新开始，已完成章节会复用缓存')
+        if (!Number.isFinite(nextLimit) || nextLimit <= spent) {
+          throw new Error(`新额度必须大于当前已使用的 ${spent.toLocaleString()} tokens`)
+        }
+        tokenLimit = Math.floor(nextLimit)
+        setTokenLimitText(String(tokenLimit))
+        warnedAtEightyPercent = spent >= Math.ceil(tokenLimit * 0.8)
+        publishBatch(bookId, {
+          message: `Token 上限已调整为 ${tokenLimit.toLocaleString()}，继续后台处理…`,
+        })
       }
 
       for (let index = 0; index < selected.length; index += 1) {

@@ -427,17 +427,20 @@ describe('PreviewPage', () => {
         range: { chapterId: 'c1', startCp: 0, endCp: 20 },
       }),
     )
-    expect(await screen.findByTestId('batch-progress')).toHaveTextContent('批量处理完成')
+    await waitFor(() =>
+      expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'),
+    )
   })
 
-  it('达到 Token 上限的 80% 时提醒用户刷新或修改额度', async () => {
+  it('达到 Token 上限的 80% 时可原地修改额度并继续', async () => {
     const meteredJob = {
       ...JOB,
       unknown_usage_runs: 0,
       usage: { input_tokens: 30, output_tokens: 10, total_tokens: 40, unknown_runs: 0 },
     } as JobDetailOut
     vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(meteredJob)
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    vi.mocked(jobsApi.createJob).mockResolvedValue(meteredJob)
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('200')
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('batch-processor')
 
@@ -446,9 +449,12 @@ describe('PreviewPage', () => {
     await screen.findByTestId('batch-estimate')
     await userEvent.click(screen.getByTestId('batch-run'))
 
-    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
-    expect(await screen.findByTestId('batch-error')).toHaveTextContent('修改 Token 上限')
-    expect(jobsApi.createJob).not.toHaveBeenCalled()
-    confirm.mockRestore()
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'),
+    )
+    expect(screen.queryByTestId('batch-error')).not.toBeInTheDocument()
+    prompt.mockRestore()
   })
 })
