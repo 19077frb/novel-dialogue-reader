@@ -23,7 +23,7 @@ EPUBCHECK_TIMEOUT_SECONDS = 180
 EPUBCHECK_VERSION_COMMAND = ("--version",)
 
 _TAG_RE = re.compile(r"<[^>]+>")
-_LABEL_RE = re.compile(r'<span class="label">.*?</span>', re.DOTALL)
+_LABEL_RE = re.compile(r'<span class="label"(?:\s[^>]*)?>.*?</span>', re.DOTALL)
 _SCRIPT_RE = re.compile(r"<script\b", re.IGNORECASE)
 _FETCH_RE = re.compile(r'(?:src|href)\s*=\s*"(?!#)([^"]+)"', re.IGNORECASE)
 _URL_CSS_RE = re.compile(r"url\(([^)]+)\)", re.IGNORECASE)

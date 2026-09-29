@@ -27,6 +27,7 @@ from ..domain.annotations import (
 from ..domain.enums import AnnotationStatus, ReadingMode
 from ..storage.models import (
     Annotation,
+    BookCharacter,
     IdentityRevision,
     Quote,
     Scene,
@@ -162,6 +163,18 @@ def build_projection(
             group.id,
         )
     )
+    character_ids = {group.character_id for group in groups if group.character_id}
+    characters = {
+        row.id: row
+        for row in session.execute(
+            select(BookCharacter).where(BookCharacter.id.in_(character_ids or [""]))
+        ).scalars()
+    }
+    reserved_colors = {
+        row.preferred_color_index
+        for row in characters.values()
+        if row.preferred_color_index is not None and row.preferred_color_index >= 0
+    }
     identity_by_group: dict[str, str] = {}
     color_by_group: dict[str, int] = {}
     label_by_group: dict[str, str] = {}
@@ -169,6 +182,7 @@ def build_projection(
     color_by_identity: dict[str, int] = {}
     representative_by_identity: dict[str, SpeakerGroup] = {}
     ordered_identities: list[str] = []
+    used_colors: set[int] = set()
     for group in groups:
         name = (group.canonical_name or "").strip()
         if group.character_id:
@@ -178,7 +192,16 @@ def build_projection(
         else:
             identity = f"group:{group.id}"
         if identity not in color_by_identity:
-            color_by_identity[identity] = len(color_by_identity)
+            character = characters.get(group.character_id or "")
+            preferred = character.preferred_color_index if character is not None else None
+            if preferred is not None and preferred >= 0 and preferred not in used_colors:
+                color = preferred
+            else:
+                color = 0
+                while color in used_colors or color in reserved_colors:
+                    color += 1
+            color_by_identity[identity] = color
+            used_colors.add(color)
             representative_by_identity[identity] = group
             ordered_identities.append(identity)
         identity_by_group[group.id] = identity

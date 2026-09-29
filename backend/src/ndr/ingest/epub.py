@@ -343,9 +343,16 @@ def _iter_text(element: ET.Element) -> str:
     return "".join(parts)
 
 
-def _walk(element: ET.Element, builder: _BlockBuilder) -> None:
+def _walk(
+    element: ET.Element,
+    builder: _BlockBuilder,
+    *,
+    strip_ndr_auxiliary: bool = False,
+) -> None:
     tag = _local(element.tag)
     if tag in SKIP_TAGS:
+        return
+    if strip_ndr_auxiliary and element.get("data-ndr-auxiliary") == "true":
         return
 
     block_type = BLOCK_TAGS.get(tag)
@@ -370,7 +377,7 @@ def _walk(element: ET.Element, builder: _BlockBuilder) -> None:
     if element.text:
         builder.add_text(element.text)
     for child in list(element):
-        _walk(child, builder)
+        _walk(child, builder, strip_ndr_auxiliary=strip_ndr_auxiliary)
         if child.tail:
             builder.add_text(child.tail)
 
@@ -397,7 +404,13 @@ def _walk_ruby(element: ET.Element, builder: _BlockBuilder) -> None:
         builder.add_ruby(start, start + length, base_text, rt)
 
 
-def _parse_xhtml(data: bytes, path: str, resolve_image) -> _Document:  # noqa: ANN001
+def _parse_xhtml(  # noqa: ANN001
+    data: bytes,
+    path: str,
+    resolve_image,
+    *,
+    strip_ndr_auxiliary: bool = False,
+) -> _Document:
     document = _Document(path=path)
     try:
         root = ET.fromstring(data)
@@ -409,7 +422,7 @@ def _parse_xhtml(data: bytes, path: str, resolve_image) -> _Document:  # noqa: A
         ) from exc
 
     builder = _BlockBuilder(resolve_image)
-    _walk(root, builder)
+    _walk(root, builder, strip_ndr_auxiliary=strip_ndr_auxiliary)
     document.blocks = builder.finish()
     for block in document.blocks:
         if block.node_type is ContentNodeType.HEADING and block.text:
@@ -535,6 +548,7 @@ def parse_epub(
     limits = limits or EpubLimits()
     archive = _Archive(raw, limits)
     warnings: list[str] = []
+    strip_ndr_auxiliary = archive.exists("OEBPS/annotations.json")
 
     if not archive.exists(CONTAINER_PATH):
         raise EpubError(
@@ -716,7 +730,10 @@ def parse_epub(
             warnings.append(f"spine 文档缺失：{item.href}")
             continue
         document = _parse_xhtml(
-            archive.read(item.path), item.path, make_image_resolver(item.path)
+            archive.read(item.path),
+            item.path,
+            make_image_resolver(item.path),
+            strip_ndr_auxiliary=strip_ndr_auxiliary,
         )
         if not document.blocks:
             warnings.append(f"正文文档没有可渲染内容：{item.path}")

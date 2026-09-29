@@ -35,6 +35,7 @@ class BookCharacter(IdMixin, TimestampMixin, VersionMixin, Base):
     )
     user_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     first_seen_cp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    preferred_color_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class ChapterCharacterRoster(IdMixin, TimestampMixin, VersionMixin, Base):

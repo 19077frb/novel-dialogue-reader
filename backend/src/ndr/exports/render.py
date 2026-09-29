@@ -19,7 +19,7 @@ from ..domain.enums import ContentNodeType, ExportStylePreset
 from ..ingest.query import load_canonical_text
 from ..storage.models import Book, BookVersion, Chapter, ContentNode
 
-EXPORTER_VERSION = "exporter-1"
+EXPORTER_VERSION = "exporter-2"
 
 # 与阅读器一致的 8 色板；超出时靠编号辨认（不假装颜色足够）
 EXPORT_PALETTE: tuple[str, ...] = (

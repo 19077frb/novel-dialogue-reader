@@ -36,7 +36,12 @@ def render_block(block: RenderedBlock, *, images: Mapping[str, bytes]) -> str:
         text = escape(run.text)
         if run.quote_id and (run.color_class or run.label):
             classes = " ".join(name for name in (run.color_class,) if name)
-            label = f'<span class="label">{escape(run.label)}</span>' if run.label else ""
+            label = (
+                '<span class="label" data-ndr-auxiliary="true">'
+                f"{escape(run.label)}</span>"
+                if run.label
+                else ""
+            )
             span_class = f' class="{classes}"' if classes else ""
             parts.append(f"<span{span_class}>{label}{text}</span>")
         else:

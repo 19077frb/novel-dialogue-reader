@@ -115,8 +115,15 @@ def quote_ids(client: TestClient, book_id: str) -> list[str]:
     return [item["quote_id"] for item in payload["items"]]
 
 
-def annotations_of(client: TestClient, book_id: str, *, start_cp: int = 0, end_cp: int | None = None):
-    params = {"start_cp": start_cp}
+def annotations_of(
+    client: TestClient,
+    book_id: str,
+    *,
+    start_cp: int = 0,
+    end_cp: int | None = None,
+    reading_mode: str = "initial",
+):
+    params = {"start_cp": start_cp, "reading_mode": reading_mode}
     if end_cp is not None:
         params["end_cp"] = end_cp
     response = client.get(f"/api/books/{book_id}/annotations", params=params)

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..api.errors import ApiError
 from ..domain.enums import ExportFormat, ExportStylePreset, JobKind, JobState
+from ..ingest.query import load_canonical_text
 from ..ingest.resources import read_resource_bytes
 from ..storage.cache import fingerprint
 from ..storage.models import (
@@ -29,6 +30,7 @@ from ..storage.models import (
     Resource,
 )
 from ..storage.paths import resolve_within, to_relative
+from .annotations import build_annotations_manifest
 from .epub import build_epub
 from .html import render_html
 from .render import EXPORTER_VERSION, RenderedBook, export_filename, render_book
@@ -189,6 +191,14 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
         book_title = book.title
         selected = bool(chapter_ids)
         fmt = artifact.format
+        annotations_manifest = None
+        if fmt is ExportFormat.EPUB:
+            annotations_manifest = build_annotations_manifest(
+                projection_payload=payload,
+                rendered=rendered,
+                canonical_text=load_canonical_text(settings, version),
+                style=style,
+            )
 
     out_dir = export_dir(settings, artifact_id)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -203,6 +213,7 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
                 images=images,
                 identifier=f"urn:ndr:{artifact_id}",
                 generated_at=generated_at,
+                annotations=annotations_manifest,
             )
         else:
             document = render_html(rendered, images=images, generated_at=generated_at)

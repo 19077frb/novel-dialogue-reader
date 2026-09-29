@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings
 from ..domain.enums import BookFormat, ImportStatus, JobKind, JobState
+from ..exports.annotations import parse_annotations_manifest
 from ..quotes.scanner import SCANNER_VERSION, ScanLimits
 from ..quotes.service import scan_and_store
 from ..storage.models import (
@@ -39,6 +40,7 @@ from ..storage.models import (
     TextMapping,
 )
 from ..storage.paths import book_source_path, to_relative, version_canonical_path
+from .annotations_restore import restore_annotations_from_manifest
 from .document import ParsedBook
 from .encoding import DecodeFailure
 from .epub import EpubError, EpubLimits, parse_epub
@@ -156,6 +158,7 @@ def persist_parsed(
     reused_version = version is not None
 
     written: list[Path] = []
+    restored_stats: dict = {}
     try:
         source_path = book_source_path(settings, book.id, _suffix_for(filename, parsed.format))
         if not source_path.exists():
@@ -194,6 +197,15 @@ def persist_parsed(
                 limits=ScanLimits(),
                 scanner_version=SCANNER_VERSION,
             )
+            if parsed.format == "EPUB":
+                manifest = parse_annotations_manifest(raw)
+                if manifest is not None:
+                    restored_stats = restore_annotations_from_manifest(
+                        session,
+                        version,
+                        manifest,
+                        canonical_text=parsed.canonical_text,
+                    )
 
         book.active_version_id = version.id
         book.import_status = ImportStatus.COMPLETED
@@ -214,6 +226,11 @@ def persist_parsed(
                     "nodes": len(parsed.nodes),
                     "resources": len(parsed.resources),
                     "canonical_length_cp": parsed.canonical_length_cp,
+                    **(
+                        {"restored_annotations": restored_stats}
+                        if restored_stats
+                        else {}
+                    ),
                 },
                 ensure_ascii=False,
             ),

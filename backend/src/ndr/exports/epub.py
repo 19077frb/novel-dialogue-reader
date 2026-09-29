@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import base64  # noqa: F401 - 保留下游便于调试内联资源
 import io
+import json
 import zipfile
 from collections.abc import Mapping
 
 from ..domain.enums import ContentNodeType
+from .annotations import ANNOTATIONS_ENTRY
 from .html import render_block
 from .render import EXPORT_CSS, RenderedBook, escape
 
@@ -52,7 +54,7 @@ def chapter_xhtml(title: str, body_html: str, *, language: str = "zh") -> str:
         '<link rel="stylesheet" type="text/css" href="../style.css"/>\n'
         "</head>\n"
         "<body>\n"
-        f'<h2 class="chapter-title">{escape(title)}</h2>\n'
+        f'<h2 class="chapter-title" data-ndr-auxiliary="true">{escape(title)}</h2>\n'
         f"{body_html}\n"
         "</body>\n"
         "</html>\n"
@@ -75,8 +77,13 @@ def build_epub(
     images: Mapping[str, bytes],
     identifier: str,
     generated_at: str,
+    annotations: dict | None = None,
 ) -> bytes:
-    """把渲染结果打包成 EPUB 3（离线可读，不依赖外部资源）。"""
+    """把渲染结果打包成 EPUB 3（离线可读，不依赖外部资源）。
+
+    ``annotations`` 是标注清单（见 ``exports.annotations``）；提供时写入
+    ``OEBPS/annotations.json``，供本工具重新导入时恢复标注。
+    """
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -84,11 +91,18 @@ def build_epub(
         _write(archive, "mimetype", b"application/epub+zip", compress=False)
         _write(archive, "META-INF/container.xml", _CONTAINER_XML)
         _write(archive, "OEBPS/style.css", EXPORT_CSS)
+        if annotations is not None:
+            _write(archive, ANNOTATIONS_ENTRY, json.dumps(annotations, ensure_ascii=False))
 
         manifest: list[str] = [
             '<item id="style" href="style.css" media-type="text/css"/>',
             '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
         ]
+        if annotations is not None:
+            manifest.append(
+                '<item id="ndr-annotations" href="annotations.json"'
+                ' media-type="application/json" properties="ndr:annotations"/>'
+            )
         spine: list[str] = []
         nav_items: list[str] = []
         used_images: dict[str, str] = {}
@@ -151,6 +165,7 @@ def build_epub(
             "OEBPS/content.opf",
             _content_opf(
                 rendered,
+                annotations=annotations is not None,
                 identifier=identifier,
                 generated_at=generated_at,
                 manifest="\n    ".join(manifest),
@@ -162,14 +177,21 @@ def build_epub(
 def _content_opf(
     rendered: RenderedBook,
     *,
+    annotations: bool,
     identifier: str,
     generated_at: str,
     manifest: str,
     spine: str,
 ) -> str:
+    prefix = (
+        ' prefix="ndr: https://github.com/novel-dialogue-reader/ndr#annotations"'
+        if annotations
+        else ""
+    )
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
-        '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">\n'
+        '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid"'
+        f"{prefix}>\n"
         '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
         f'    <dc:identifier id="bookid">{escape(identifier)}</dc:identifier>\n'
         f"    <dc:title>{escape(rendered.title)}</dc:title>\n"
