@@ -40,6 +40,7 @@ class RosterAnalyzeIn(ApiModel):
     book_version_id: str | None = None
     profile_id: str
     idempotency_key: str = Field(min_length=1, max_length=128)
+    max_input_tokens: int | None = Field(default=None, ge=1)
     run_now: bool = True
 
 

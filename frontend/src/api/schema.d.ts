@@ -2513,6 +2513,8 @@ export interface components {
             profile_id: string;
             /** Idempotency Key */
             idempotency_key: string;
+            /** Max Input Tokens */
+            max_input_tokens?: number | null;
             /**
              * Run Now
              * @default true

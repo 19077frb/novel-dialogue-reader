@@ -110,6 +110,7 @@ def analyze_character_roster_route(
             chapter=chapter,
             profile=profile,
             idempotency_key=payload.idempotency_key,
+            max_input_tokens=payload.max_input_tokens,
         )
         detail = job_detail(session, job)
 

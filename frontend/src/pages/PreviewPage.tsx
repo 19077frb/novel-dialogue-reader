@@ -15,6 +15,7 @@ import {
 import { fetchProfiles, profileKeys } from '../api/profiles'
 import type { AnnotationItemOut, EstimateOut, JobDetailOut } from '../api/types'
 import { BudgetForm } from '../components/BudgetForm'
+import { BatchProcessor } from '../components/BatchProcessor'
 import { CharacterRosterPanel } from '../components/CharacterRosterPanel'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
@@ -308,6 +309,17 @@ export default function PreviewPage() {
           )}
         </fieldset>
       </section>
+
+      <BatchProcessor
+        bookId={bookId}
+        bookVersionId={book.data?.active_version_id}
+        chapters={chapters.data ?? []}
+        profileId={profileId}
+        onFinished={() => {
+          void queryClient.invalidateQueries({ queryKey: ['annotations'] })
+          void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId) })
+        }}
+      />
 
       <CharacterRosterPanel
         step={2}

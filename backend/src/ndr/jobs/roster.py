@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..characters.service import roster_messages, store_roster_candidates
 from ..config import Settings
+from ..context.budget import estimate_tokens
 from ..domain.enums import CredentialMode, InferenceRunState, JobKind, JobState
 from ..llm.adapters import AdapterSpec, build_adapter
 from ..llm.errors import ProviderError
@@ -119,6 +120,18 @@ def run_character_roster_job(
         session.commit()
 
         messages = roster_messages(session, settings, job, version, chapter)
+        budget = json.loads(job.budget_json or "{}")
+        max_input_tokens = budget.get("max_input_tokens")
+        estimated_tokens = sum(estimate_tokens(message["content"]) for message in messages)
+        if max_input_tokens is not None and estimated_tokens + ROSTER_MAX_TOKENS > int(
+            max_input_tokens
+        ):
+            job.state = JobState.BUDGET_EXHAUSTED
+            job.last_error = "剩余 Token 额度不足以分析本章人物"
+            job.progress_json = json.dumps({"stage": "budget_exhausted"}, ensure_ascii=False)
+            session.commit()
+            outcome.state = JobState.BUDGET_EXHAUSTED
+            return outcome
         fingerprint = hashlib.sha256(
             json.dumps(messages, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()

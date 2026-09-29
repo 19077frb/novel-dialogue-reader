@@ -6783,6 +6783,18 @@
             "minLength": 1,
             "title": "Idempotency Key"
           },
+          "max_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Input Tokens"
+          },
           "run_now": {
             "type": "boolean",
             "title": "Run Now",

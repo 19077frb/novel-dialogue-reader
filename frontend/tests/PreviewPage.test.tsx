@@ -308,6 +308,8 @@ describe('PreviewPage', () => {
     vi.mocked(annotationsApi.fetchAnnotations).mockResolvedValue(ANNOTATIONS)
     vi.mocked(charactersApi.fetchBookCharacters).mockResolvedValue(ROSTER.confirmed_characters ?? [])
     vi.mocked(charactersApi.fetchCharacterRoster).mockResolvedValue(ROSTER)
+    vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(JOB)
+    vi.mocked(charactersApi.confirmCharacterRoster).mockResolvedValue(ROSTER)
     vi.mocked(jobsApi.estimateRange).mockResolvedValue(ESTIMATE)
     vi.mocked(jobsApi.createJob).mockResolvedValue(JOB)
     vi.mocked(jobsApi.fetchUsage).mockResolvedValue(USAGE)
@@ -394,5 +396,35 @@ describe('PreviewPage', () => {
     expect(await screen.findByTestId('preview-no-profile')).toBeInTheDocument()
     expect(screen.getByTestId('preview-run')).toBeDisabled()
     expect(screen.getByTestId('preview-process')).toBeDisabled()
+  })
+
+  it('批量处理会先识别并确认人物，再处理所选章节对白', async () => {
+    const meteredJob = {
+      ...JOB,
+      unknown_usage_runs: 0,
+      usage: { input_tokens: 30, output_tokens: 10, total_tokens: 40, unknown_runs: 0 },
+    } as JobDetailOut
+    vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(meteredJob)
+    vi.mocked(jobsApi.createJob).mockResolvedValue(meteredJob)
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('batch-processor')
+
+    await userEvent.type(screen.getByTestId('batch-token-limit'), '50000')
+    await userEvent.click(screen.getByTestId('batch-run'))
+
+    await waitFor(() => expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(1))
+    expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledWith(
+      'b1',
+      'c1',
+      expect.objectContaining({ profileId: 'p1', maxInputTokens: 50000 }),
+    )
+    expect(jobsApi.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'process',
+        range: { chapterId: 'c1', startCp: 0, endCp: 20 },
+      }),
+    )
+    expect(await screen.findByTestId('batch-progress')).toHaveTextContent('批量处理完成')
   })
 })

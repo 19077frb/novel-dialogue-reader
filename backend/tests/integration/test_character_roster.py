@@ -189,3 +189,51 @@ def test_roster_analysis_runs_offline_with_fake_provider(
     assert body["status"] == "CONFIRMED"
     assert body["pov_character_id"] == roster["candidates"][0]["character_id"]
     assert [item["name"] for item in body["confirmed_characters"]] == ["样例说话人甲"]
+
+
+def test_roster_analysis_respects_batch_token_limit(
+    migrated_client: TestClient,
+    migrated_settings: Settings,
+) -> None:
+    imported = migrated_client.post(
+        "/api/books/import",
+        files={"file": ("limited.txt", "第一章\n「你好。」".encode(), "text/plain")},
+    ).json()["data"]
+    profile = migrated_client.post(
+        "/api/model-profiles",
+        json={
+            "name": "批量预算测试",
+            "protocol": "fake-provider",
+            "base_url": "http://127.0.0.1:1",
+            "model": "fake-model",
+            "credential_mode": "none",
+        },
+    ).json()["data"]
+    chapter = migrated_client.get(
+        f"/api/books/{imported['book_id']}/chapters"
+    ).json()["data"][0]
+    created = migrated_client.post(
+        f"/api/books/{imported['book_id']}/chapters/{chapter['id']}/character-roster/analyze",
+        json={
+            "book_version_id": imported["book_version_id"],
+            "profile_id": profile["id"],
+            "idempotency_key": "roster-budget-1",
+            "max_input_tokens": 1,
+            "run_now": False,
+        },
+    ).json()["data"]
+
+    run_settings = Settings(
+        data_dir=migrated_settings.data_dir,
+        credential_backend="session",
+        allow_fake_provider=True,
+        fake_provider_labels="deterministic",
+    )
+    engine = create_db_engine(run_settings)
+    factory = create_session_factory(engine)
+    try:
+        outcome = run_job(factory, run_settings, job_id=created["id"])
+    finally:
+        engine.dispose()
+    assert outcome.state is JobState.BUDGET_EXHAUSTED
+    assert outcome.calls == 0

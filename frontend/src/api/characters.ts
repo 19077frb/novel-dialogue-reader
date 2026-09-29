@@ -34,6 +34,7 @@ export interface AnalyzeRosterInput {
   bookVersionId: string | null | undefined
   profileId: string
   idempotencyKey: string
+  maxInputTokens?: number | null
   runNow?: boolean
 }
 
@@ -52,6 +53,7 @@ export function analyzeCharacterRoster(
         book_version_id: input.bookVersionId ?? null,
         profile_id: input.profileId,
         idempotency_key: input.idempotencyKey,
+        max_input_tokens: input.maxInputTokens ?? null,
         run_now: input.runNow ?? true,
       },
     },
