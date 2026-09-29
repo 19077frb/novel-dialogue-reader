@@ -27,7 +27,12 @@ def database_url() -> str:
     override = config.attributes.get("sqlalchemy_url") or config.get_main_option("sqlalchemy.url")
     if override:
         return str(override)
-    return Settings().database_url
+    # `alembic -c backend/alembic.ini upgrade head` is also the first-run path
+    # used by the Windows launch scripts. SQLite creates the database file, but
+    # it does not create a missing parent directory for it.
+    settings = Settings()
+    settings.ensure_data_dir()
+    return settings.database_url
 
 
 def run_migrations_offline() -> None:

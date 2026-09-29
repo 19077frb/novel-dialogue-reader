@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
@@ -56,6 +58,18 @@ def test_empty_database_migrates_to_head(tmp_settings: Settings) -> None:
         assert "review_items" in set(inspect(engine).get_table_names())
     finally:
         engine.dispose()
+
+
+def test_cli_migration_creates_missing_data_directory(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "first-run" / "data"
+    monkeypatch.setenv("NDR_DATA_DIR", str(data_dir))
+
+    settings = Settings()
+    assert not data_dir.exists()
+
+    command.upgrade(Config(str(settings.alembic_ini_path)), "head")
+
+    assert settings.database_path.is_file()
 
 
 def test_migrations_are_repeatable(tmp_settings: Settings) -> None:
