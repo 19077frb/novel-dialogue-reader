@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from collections import OrderedDict
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -108,6 +110,12 @@ def list_chapters(session: Session, version_id: str) -> list[ChapterOut]:
     ]
 
 
+# canonical 文本按文件身份（路径 + mtime + 大小）做进程内缓存：导出/估算会反复读取。
+_TEXT_CACHE_LIMIT = 4
+_text_lock = threading.Lock()
+_cached_texts: OrderedDict[tuple[str, int, int], str] = OrderedDict()
+
+
 def load_canonical_text(settings: Settings, version: BookVersion) -> str:
     if not version.canonical_path:
         raise ApiError(
@@ -124,7 +132,19 @@ def load_canonical_text(settings: Settings, version: BookVersion) -> str:
             details={"book_version_id": version.id},
             status_code=409,
         )
-    return path.read_text(encoding="utf-8")
+    stat = path.stat()
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    with _text_lock:
+        cached = _cached_texts.get(key)
+        if cached is not None:
+            _cached_texts.move_to_end(key)
+            return cached
+    text = path.read_text(encoding="utf-8")
+    with _text_lock:
+        _cached_texts[key] = text
+        while len(_cached_texts) > _TEXT_CACHE_LIMIT:
+            _cached_texts.popitem(last=False)
+    return text
 
 
 def job_out(job: Job) -> JobOut:

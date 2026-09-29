@@ -14,29 +14,21 @@ from ..domain.enums import ContentNodeType, ReadingMode
 from ..quotes.service import canonical_text_of
 from ..storage.models import Chapter, ContentNode, Gap, Quote
 from .budget import DEFAULT_POLICY, BudgetPolicy
+from .cache import WindowMaterial, get_cached_material, store_material
 from .source_selection import GapView, ParagraphView, QuoteView
 from .window_builder import WindowInputs, WindowPlan, plan_windows
 
 PARAGRAPH_NODE_TYPES = (ContentNodeType.PARAGRAPH, ContentNodeType.HEADING)
 
 
-def load_window_inputs(
-    session: Session,
-    settings: Settings,
-    version,  # noqa: ANN001 - BookVersion
-    *,
-    reading_mode: ReadingMode = ReadingMode.INITIAL,
-    visible_horizon_cp: int | None = None,
-    scene_ref: str = "scene_current",
-    scene_state: str | None = None,
-    locked_summary: str | None = None,
-    speaker_refs: tuple[str, ...] = (),
-    policy: BudgetPolicy | None = None,
-) -> WindowInputs:
-    """把某个书籍版本的引语/Gap/段落装配成 :class:`WindowInputs`（纯只读）。"""
+def _window_material(session: Session, settings: Settings, version) -> WindowMaterial:  # noqa: ANN001 - BookVersion
+    """装配重成本材料并做进程内缓存；结果不可变，可安全跨线程共享。"""
 
+    cached = get_cached_material(version)
+    if cached is not None:
+        return cached
     text = canonical_text_of(settings, version)
-    quotes = [
+    quotes = tuple(
         QuoteView(
             quote_id=row.id,
             start_cp=row.start_cp,
@@ -46,8 +38,8 @@ def load_window_inputs(
         for row in session.execute(
             select(Quote).where(Quote.book_version_id == version.id).order_by(Quote.start_cp)
         ).scalars()
-    ]
-    gaps = [
+    )
+    gaps = tuple(
         GapView(
             gap_id=row.id,
             start_cp=row.start_cp,
@@ -58,7 +50,7 @@ def load_window_inputs(
         for row in session.execute(
             select(Gap).where(Gap.book_version_id == version.id).order_by(Gap.start_cp)
         ).scalars()
-    ]
+    )
     paragraphs: list[ParagraphView] = []
     node_rows = session.execute(
         select(ContentNode)
@@ -76,13 +68,42 @@ def load_window_inputs(
         paragraphs.append(
             ParagraphView(node_id=node.node_id, start_cp=node.start_cp, end_cp=node.end_cp)
         )
-
-    return WindowInputs(
-        book_version_id=version.id,
+    material = WindowMaterial(
         canonical_text=text,
         quotes=quotes,
         gaps=gaps,
-        paragraphs=paragraphs,
+        paragraphs=tuple(paragraphs),
+    )
+    store_material(version, material)
+    return material
+
+
+def load_window_inputs(
+    session: Session,
+    settings: Settings,
+    version,  # noqa: ANN001 - BookVersion
+    *,
+    reading_mode: ReadingMode = ReadingMode.INITIAL,
+    visible_horizon_cp: int | None = None,
+    scene_ref: str = "scene_current",
+    scene_state: str | None = None,
+    locked_summary: str | None = None,
+    speaker_refs: tuple[str, ...] = (),
+    policy: BudgetPolicy | None = None,
+) -> WindowInputs:
+    """把某个书籍版本的引语/Gap/段落装配成 :class:`WindowInputs`（纯只读）。
+
+    重成本部分（canonical 全文 + 全量引语 / Gap / 段落）来自版本级进程内缓存；
+    与调用参数相关的字段每次重新组装。
+    """
+
+    material = _window_material(session, settings, version)
+    return WindowInputs(
+        book_version_id=version.id,
+        canonical_text=material.canonical_text,
+        quotes=material.quotes,
+        gaps=material.gaps,
+        paragraphs=material.paragraphs,
         reading_mode=reading_mode,
         visible_horizon_cp=visible_horizon_cp,
         scene_ref=scene_ref,

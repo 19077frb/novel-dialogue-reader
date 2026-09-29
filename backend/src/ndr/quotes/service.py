@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from ..api.errors import ApiError
 from ..api.pagination import decode_cursor, encode_cursor
 from ..config import Settings
+from ..context.cache import invalidate_version
 from ..domain.quotes import (
     GapOut,
     LocateOut,
@@ -141,6 +142,8 @@ def scan_and_store(
             )
         )
     session.flush()
+    # 候选/Gap 变更后立刻失效窗口材料缓存，保证后续读取不使用旧数据。
+    invalidate_version(version.id)
 
     warnings = tuple(
         ScanWarningOut(

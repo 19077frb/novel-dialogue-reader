@@ -55,3 +55,4 @@ Desktop.ini
 .uv-cache/
 .tools/
 .npm-cache/
+backend/pytest-sandbox/
