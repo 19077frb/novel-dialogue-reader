@@ -523,6 +523,43 @@ describe('PreviewPage', () => {
     await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'))
   })
 
+  it('当前章对白完成前不会提前识别下下章人物', async () => {
+    const threeChapters = [
+      { ...CHAPTERS[0], dialogue_processed: false },
+      { ...CHAPTERS[0], id: 'c2', ordinal: 1, title: '第二章', start_cp: 20, end_cp: 40, dialogue_processed: false },
+      { ...CHAPTERS[0], id: 'c3', ordinal: 2, title: '第三章', start_cp: 40, end_cp: 60, dialogue_processed: false },
+    ] as ChapterOut[]
+    const meteredJob = {
+      ...JOB,
+      unknown_usage_runs: 0,
+      usage: { input_tokens: 30, output_tokens: 10, total_tokens: 40, unknown_runs: 0 },
+    } as JobDetailOut
+    const firstChapterResolvers: Array<(job: JobDetailOut) => void> = []
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue(threeChapters)
+    vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(meteredJob)
+    vi.mocked(jobsApi.createJob).mockImplementation((input) => {
+      if (input.range.chapterId !== 'c1') return Promise.resolve(meteredJob)
+      return new Promise<JobDetailOut>((resolve) => firstChapterResolvers.push(resolve))
+    })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await screen.findByTestId('batch-processor')
+    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '3' } })
+
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await screen.findByTestId('batch-estimate')
+    await userEvent.click(screen.getByTestId('batch-run'))
+
+    await waitFor(() => expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(charactersApi.analyzeCharacterRoster).mock.calls.map((call) => call[1])).toEqual(['c1', 'c2'])
+    await waitFor(() => expect(firstChapterResolvers).toHaveLength(2))
+    firstChapterResolvers.forEach((resolve) => resolve(meteredJob))
+
+    await waitFor(() => expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(3))
+    expect(vi.mocked(charactersApi.analyzeCharacterRoster).mock.calls[2]?.[1]).toBe('c3')
+    await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'))
+  })
+
   it('批量运行时切换为逐任务进度面板，停止后不再派发排队窗口', async () => {
     const meteredJob = {
       ...JOB,

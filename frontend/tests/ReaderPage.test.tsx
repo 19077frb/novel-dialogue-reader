@@ -204,6 +204,19 @@ describe('ReaderPage', () => {
     expect(active).toHaveTextContent('第二章')
   })
 
+  it('书籍读取失败时显示具体错误并允许重新读取', async () => {
+    vi.mocked(booksApi.fetchBook).mockRejectedValueOnce(new Error('数据库暂时繁忙'))
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
+
+    expect(await screen.findByTestId('book-read-error')).toHaveTextContent(
+      '书籍读取失败：数据库暂时繁忙',
+    )
+    vi.mocked(booksApi.fetchBook).mockResolvedValueOnce(BOOK)
+    await userEvent.click(screen.getByRole('button', { name: '重新读取' }))
+
+    expect(await screen.findByText(/第二章的正文/)).toBeInTheDocument()
+  })
+
   it('切换章节时保存阅读位置', async () => {
     renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
     await screen.findByText(/第二章的正文/)

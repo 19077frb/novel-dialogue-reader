@@ -30,6 +30,7 @@ import { EstimateSummary } from '../components/EstimateSummary'
 import { ExportDialog } from '../components/ExportDialog'
 import { JobPanel } from '../components/JobPanel'
 import { RangePicker, type RangeValue } from '../components/RangePicker'
+import { ReadErrorNotice } from '../components/ReadErrorNotice'
 import { SpeakerLegend } from '../components/SpeakerLegend'
 import { UsageSummary } from '../components/UsageSummary'
 import { mapWithConcurrency } from '../processing/concurrency'
@@ -322,8 +323,22 @@ export default function PreviewPage() {
         </nav>
       </header>
 
-      {book.isError && <p className="status-error">书籍读取失败。</p>}
-      {chapters.isError && <p className="status-error">目录读取失败。</p>}
+      {book.isError && (
+        <ReadErrorNotice
+          label="书籍读取失败"
+          error={book.error}
+          retrying={book.isFetching}
+          onRetry={() => void book.refetch()}
+        />
+      )}
+      {chapters.isError && (
+        <ReadErrorNotice
+          label="目录读取失败"
+          error={chapters.error}
+          retrying={chapters.isFetching}
+          onRetry={() => void chapters.refetch()}
+        />
+      )}
 
       <section className="card ndr-step-card" data-testid="processing-mode-picker">
         <div className="ndr-step-heading">

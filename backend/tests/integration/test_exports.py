@@ -89,7 +89,7 @@ def test_f21_txt_export_epub_and_html_without_model_calls(
     preview = _preview(fake_provider_client, book_id)
     assert preview["counts"]["accepted"] >= 3
     assert preview["sample_html"].startswith("<!DOCTYPE html>")
-    assert "〔S1〕" in preview["sample_html"]  # 编号是真实文本
+    assert "〔确定性测试说话人〕" in preview["sample_html"]  # 人物称呼是真实文本
     assert any("「雨停了。」" in fragment for fragment in preview["sample_fragments"])
 
     epub = _export(fake_provider_client, book_id, preview["snapshot_id"], "epub", key="k-epub")
@@ -117,7 +117,7 @@ def test_f21_txt_export_epub_and_html_without_model_calls(
     assert html_download.headers["content-type"].startswith("text/html")
     body = html_download.content.decode("utf-8")
     assert "「雨停了。」" in body
-    assert "〔S1〕" in body
+    assert "〔确定性测试说话人〕" in body
     assert "http://" not in body and "https://" not in body  # 无外部依赖
 
 

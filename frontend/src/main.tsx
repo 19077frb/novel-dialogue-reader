@@ -4,13 +4,15 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 
 import App from './App'
+import { readRetryDelay, shouldRetryReadRequest } from './api/client'
 import './styles/global.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // 本地应用：重试由页面显式按钮触发，避免自动重复请求。
-      retry: false,
+      // 阅读期间数据库可能正被后台批处理写入；只读请求短暂失败时有限重试。
+      retry: shouldRetryReadRequest,
+      retryDelay: readRetryDelay,
       staleTime: 5_000,
     },
   },

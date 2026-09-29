@@ -21,6 +21,8 @@ from ndr.domain.enums import (
     BookFormat,
     DatabaseState,
     ImportStatus,
+    JobKind,
+    JobPurpose,
     JobState,
     QuoteKind,
     ReviewQueueStatus,
@@ -40,6 +42,8 @@ from ndr.storage.models import (
     Annotation,
     Book,
     BookVersion,
+    Chapter,
+    Job,
     Quote,
     ReviewItem,
     Scene,
@@ -138,6 +142,59 @@ def test_existing_database_upgrades_without_data_loss(tmp_settings: Settings) ->
             assert stored is not None
             assert stored.title == "迁移前的书"
         assert "review_items" in set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
+def test_processing_state_is_backfilled_once_when_upgrading_from_0009(
+    tmp_settings: Settings,
+) -> None:
+    run_migrations(tmp_settings, revision="0009")
+    engine = create_db_engine(tmp_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            book = Book(
+                title="旧任务",
+                format=BookFormat.TXT,
+                source_sha256="d" * 64,
+                import_status=ImportStatus.COMPLETED,
+            )
+            session.add(book)
+            session.flush()
+            version = BookVersion(
+                book_id=book.id,
+                encoding="utf-8",
+                parser_version="txt-1",
+                normalization_version="canonical-lf-1",
+                canonical_sha256="e" * 64,
+                canonical_length_cp=10,
+            )
+            session.add(version)
+            session.flush()
+            chapter = Chapter(
+                book_version_id=version.id,
+                ordinal=0,
+                title="第一章",
+                start_cp=0,
+                end_cp=10,
+            )
+            session.add(chapter)
+            session.flush()
+            session.add(Job(
+                kind=JobKind.INFERENCE,
+                purpose=JobPurpose.PROCESS,
+                book_id=book.id,
+                book_version_id=version.id,
+                range_json=f'{{"chapter_id":"{chapter.id}","selected_window_ids":null}}',
+                state=JobState.COMPLETED,
+                budget_json="{}",
+            ))
+            chapter_id = chapter.id
+
+        run_migrations(tmp_settings)
+        with transaction(factory) as session:
+            assert session.get(Chapter, chapter_id).dialogue_processed is True
     finally:
         engine.dispose()
 

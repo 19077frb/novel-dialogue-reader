@@ -15,12 +15,23 @@ import {
 import { ApiError } from '../api/client'
 import type { ChapterOut, ContentNodeOut, ReadingMode } from '../api/types'
 import { ChapterNavigation } from '../components/ChapterNavigation'
-import { useBatchProgress } from '../components/BatchProcessor'
+import {
+  useBatchAnnotationRevisions,
+  useBatchCatalogRevision,
+  useBatchChapterProgress,
+  useBatchMessage,
+} from '../components/BatchProcessor'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
 import { ExportDialog } from '../components/ExportDialog'
 import { QuoteDetailDrawer } from '../components/QuoteDetailDrawer'
+import { ReadErrorNotice } from '../components/ReadErrorNotice'
 import { SpeakerLegend } from '../components/SpeakerLegend'
+
+function ReaderBatchMessage({ bookId }: { bookId: string }) {
+  const message = useBatchMessage(bookId)
+  return message ? <p className="hint" data-testid="reader-batch-progress">{message}</p> : null
+}
 
 /** 找到视口内第一个节点对应的起点；用于保存阅读位置（纯函数，便于测试）。 */
 export function findCurrentStartCp(nodes: HTMLElement[]): number | null {
@@ -41,7 +52,9 @@ export function findCurrentStartCp(nodes: HTMLElement[]): number | null {
 export default function ReaderPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const queryClient = useQueryClient()
-  const batchProgress = useBatchProgress(bookId)
+  const batchChapterProgress = useBatchChapterProgress(bookId)
+  const annotationRevisions = useBatchAnnotationRevisions(bookId)
+  const catalogRevision = useBatchCatalogRevision(bookId)
   const documentRef = useRef<HTMLDivElement>(null)
   const lastSavedRef = useRef<number | null>(null)
   const [chapterId, setChapterId] = useState<string | null>(null)
@@ -67,10 +80,12 @@ export default function ReaderPage() {
   })
 
   useEffect(() => {
-    if (!bookId || batchProgress.revision === 0) return
-    void queryClient.invalidateQueries({ queryKey: ['annotations', bookId] })
-    void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })
-  }, [batchProgress.revision, bookId, queryClient])
+    if (!bookId || catalogRevision === 0) return
+    const timer = window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId), exact: true })
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [catalogRevision, bookId, queryClient])
 
   const content = useQuery({
     queryKey: queryKeys.content(bookId ?? '', chapterId, cursor),
@@ -150,6 +165,32 @@ export default function ReaderPage() {
       activeChapter !== null &&
       activeChapter.end_cp > activeChapter.start_cp,
   })
+  const activeAnnotationRevision = activeChapter
+    ? annotationRevisions[activeChapter.id] ?? 0
+    : 0
+  useEffect(() => {
+    if (!bookId || !activeChapter || activeAnnotationRevision === 0) return
+    const timer = window.setTimeout(() => {
+      void queryClient.invalidateQueries({
+        queryKey: annotationKeys.range(
+          bookId,
+          activeChapter.start_cp,
+          activeChapter.end_cp,
+          readingMode,
+          visibleHorizonCp,
+        ),
+        exact: true,
+      })
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [
+    activeAnnotationRevision,
+    activeChapter,
+    bookId,
+    queryClient,
+    readingMode,
+    visibleHorizonCp,
+  ])
   const annotationItems = showAnnotations ? annotations.data?.items ?? [] : []
 
   // 待确认数量（只读）：阅读页顶部提示，点击进入队列页。
@@ -265,7 +306,15 @@ export default function ReaderPage() {
           {notice}
         </p>
       )}
-      {book.isError && <p className="status-error">书籍读取失败。</p>}
+      {book.isError && (
+        <ReadErrorNotice
+          label="书籍读取失败"
+          error={book.error}
+          retrying={book.isFetching}
+          onRetry={() => void book.refetch()}
+          testId="book-read-error"
+        />
+      )}
 
       <div className="ndr-reader-body">
         <aside className="card ndr-reader-sidebar">
@@ -274,19 +323,32 @@ export default function ReaderPage() {
               chapters={chapters.data}
               activeChapterId={chapterId}
               onSelect={handleChapterSelect}
-              processingStates={batchProgress.chapterStates}
+              processingStates={batchChapterProgress}
             />
           )}
-          {batchProgress.message && (
-            <p className="hint" data-testid="reader-batch-progress">{batchProgress.message}</p>
+          {chapters.isError && (
+            <ReadErrorNotice
+              label="目录读取失败"
+              error={chapters.error}
+              retrying={chapters.isFetching}
+              onRetry={() => void chapters.refetch()}
+            />
           )}
+          <ReaderBatchMessage bookId={bookId} />
           {chapters.isPending && <p className="hint">正在读取目录…</p>}
         </aside>
 
         <section className="card ndr-reader-content" ref={documentRef} onScroll={handleScroll}>
           {chapterId === null && <p className="hint">这本书没有可显示的章节。</p>}
           {content.isPending && chapterId !== null && <p className="hint">正在读取正文…</p>}
-          {content.isError && <p className="status-error">正文读取失败。</p>}
+          {content.isError && (
+            <ReadErrorNotice
+              label="正文读取失败"
+              error={content.error}
+              retrying={content.isFetching}
+              onRetry={() => void content.refetch()}
+            />
+          )}
           {nodes.length > 0 && (
             <>
               <h1 className="ndr-chapter-heading">{activeChapter?.title ?? '正文'}</h1>

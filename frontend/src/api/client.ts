@@ -27,6 +27,17 @@ export class ApiError extends Error {
   }
 }
 
+/** GET 查询只对网络错误、限流和服务端临时错误做至多两次重试。 */
+export function shouldRetryReadRequest(failureCount: number, error: unknown): boolean {
+  if (failureCount >= 2) return false
+  if (!(error instanceof ApiError)) return true
+  return error.status === 408 || error.status === 429 || error.status >= 500
+}
+
+export function readRetryDelay(attemptIndex: number): number {
+  return Math.min(1_000, 200 * (2 ** attemptIndex))
+}
+
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown

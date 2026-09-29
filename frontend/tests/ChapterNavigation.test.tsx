@@ -17,14 +17,18 @@ describe('ChapterNavigation', () => {
         chapters={CHAPTERS}
         activeChapterId="c2"
         onSelect={vi.fn()}
-        processingStates={{ c1: 'processed', c2: 'processing', c3: 'unprocessed' }}
+        processingStates={{
+          c1: { state: 'processed', completedWindows: 2, totalWindows: 2, error: null },
+          c2: { state: 'dialogue', completedWindows: 1, totalWindows: 3, error: null },
+          c3: { state: 'queued', completedWindows: 0, totalWindows: 2, error: null },
+        }}
       />,
     )
 
-    expect(screen.getByTestId('chapter-status-legend')).toHaveTextContent('未处理处理中已处理')
+    expect(screen.getByTestId('chapter-status-legend')).toHaveTextContent('未处理排队中识别人物处理对白已完成失败/已停止')
     expect(screen.getByRole('button', { name: /第一章/ })).toHaveAttribute('data-processing-state', 'processed')
-    expect(screen.getByRole('button', { name: /第二章/ })).toHaveAttribute('data-processing-state', 'processing')
-    expect(screen.getByRole('button', { name: /第三章/ })).toHaveAttribute('data-processing-state', 'unprocessed')
+    expect(screen.getByRole('button', { name: /第二章.*1\/3/ })).toHaveAttribute('data-processing-state', 'dialogue')
+    expect(screen.getByRole('button', { name: /第三章/ })).toHaveAttribute('data-processing-state', 'queued')
   })
 
   it('没有实时批次状态时使用后端保存的章节状态', () => {

@@ -391,7 +391,7 @@ def test_f17_engine_merge_visible_only_after_evidence(
     ).json()["data"]
     assert early["identity_reverts"] == 1
     labels = [row["label"] for row in early["items"]]
-    assert sorted(labels) == ["S1", "S2"]
+    assert sorted(labels) == ["第一个声音", "第二个声音"]
     assert len({row["color_index"] for row in early["items"]}) == 2
     assert len(early["legend"]) == 2
 
@@ -400,5 +400,5 @@ def test_f17_engine_merge_visible_only_after_evidence(
         params={"start_cp": 0, "end_cp": 30, "reading_mode": "reread"},
     ).json()["data"]
     assert reread["identity_reverts"] == 0
-    assert {row["label"] for row in reread["items"]} == {"S1"}
+    assert {row["label"] for row in reread["items"]} == {"第一个声音"}
     assert len(reread["legend"]) == 1
