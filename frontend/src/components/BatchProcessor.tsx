@@ -8,7 +8,7 @@ import {
 } from '../api/characters'
 import { createJob, estimateRange, freshIdempotencyKey } from '../api/jobs'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
-import { createTaskLimiter } from '../processing/concurrency'
+import { createTaskLimiter, mapWithConcurrency } from '../processing/concurrency'
 
 const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'])
 const TASK_STATE_LABELS: Record<BatchTaskState, string> = {
@@ -526,22 +526,15 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         return
       }
 
-      let rosterPromise: Promise<void> | null = scheduleRoster(selectedPlans[0], 0)
-      pendingWork.push(rosterPromise)
-      for (let index = 0; index < selectedPlans.length; index += 1) {
+      await mapWithConcurrency(selectedPlans, concurrency, async (plan, index) => {
+        const rosterPromise = scheduleRoster(plan, index)
+        pendingWork.push(rosterPromise)
         await rosterPromise
         if (batchShouldStop(bookId, stopRef.current)) throw new Error('批量处理已停止')
-        // 下一章人物可与本章对白并发；本章完成前不再推进到下下章。
-        const nextRoster = index + 1 < selectedPlans.length
-          ? scheduleRoster(selectedPlans[index + 1], index + 1)
-          : null
-        if (nextRoster) pendingWork.push(nextRoster)
-        const dialoguePromise = scheduleDialogue(selectedPlans[index], index)
+        const dialoguePromise = scheduleDialogue(plan, index)
         pendingWork.push(dialoguePromise)
         await dialoguePromise
-        rosterPromise = nextRoster
-      }
-      await Promise.all(pendingWork)
+      })
       const skipped = requested.length - selectedPlans.length
       const summary = `批量处理完成：新处理 ${selectedPlans.length} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
       setProgress(summary)
