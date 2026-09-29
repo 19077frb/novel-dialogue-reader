@@ -411,6 +411,8 @@ describe('PreviewPage', () => {
 
     await userEvent.type(screen.getByTestId('batch-token-limit'), '50000')
     await userEvent.click(screen.getByTestId('batch-run'))
+    expect(await screen.findByTestId('batch-estimate')).toHaveTextContent('3,280')
+    await userEvent.click(screen.getByTestId('batch-run'))
 
     await waitFor(() => expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(1))
@@ -426,5 +428,27 @@ describe('PreviewPage', () => {
       }),
     )
     expect(await screen.findByTestId('batch-progress')).toHaveTextContent('批量处理完成')
+  })
+
+  it('达到 Token 上限的 80% 时提醒用户刷新或修改额度', async () => {
+    const meteredJob = {
+      ...JOB,
+      unknown_usage_runs: 0,
+      usage: { input_tokens: 30, output_tokens: 10, total_tokens: 40, unknown_runs: 0 },
+    } as JobDetailOut
+    vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(meteredJob)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('batch-processor')
+
+    await userEvent.type(screen.getByTestId('batch-token-limit'), '50')
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await screen.findByTestId('batch-estimate')
+    await userEvent.click(screen.getByTestId('batch-run'))
+
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
+    expect(await screen.findByTestId('batch-error')).toHaveTextContent('修改 Token 上限')
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    confirm.mockRestore()
   })
 })
