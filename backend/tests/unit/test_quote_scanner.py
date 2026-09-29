@@ -13,7 +13,14 @@ import pytest
 from ndr.domain.enums import GapDecision, QuoteKind
 from ndr.quotes.gaps import build_gaps
 from ndr.quotes.ids import gap_id_for, quote_id_for
-from ndr.quotes.scanner import SCANNER_VERSION, ScanLimits, scan_quotes
+from ndr.quotes.normalization import detect_auto_close_suggestions
+from ndr.quotes.scanner import (
+    AUTO_CLOSE_REPLACEMENT,
+    SCANNER_VERSION,
+    AutoClosePoint,
+    ScanLimits,
+    scan_quotes,
+)
 
 VERSION = "book-version-1"
 
@@ -92,6 +99,37 @@ def test_unclosed_quote_is_warned_and_not_emitted() -> None:
     assert "unclosed_quote" in _codes(result)
     warning = next(item for item in result.warnings if item.code == "unclosed_quote")
     assert text[warning.position_cp] == "「"
+
+
+def test_auto_close_point_repairs_paragraph_before_next_open_quote() -> None:
+    text = "“确实可以买到。\n但是，我苦笑着继续说道。\n“我的话保留意见。”\n"
+    newline_cp = text.index("\n")
+    result = _scan(
+        text,
+        auto_close_points=[AutoClosePoint(opening_cp=0, close_cp=newline_cp)],
+    )
+
+    first, second = result.quotes
+    assert text[first.start_cp : first.end_cp] == "“确实可以买到。"
+    assert first.closing == AUTO_CLOSE_REPLACEMENT
+    assert first.normalized is True
+    assert first.nesting_depth == 0
+    assert second.nesting_depth == 0
+    assert second.normalized is False
+    assert result.stats["normalized_closes"] == 1
+    assert "unclosed_quote" not in _codes(result)
+
+
+def test_auto_close_detector_suggests_paragraph_end_before_next_open() -> None:
+    text = "“第一段没有闭合。\n“第二段。”\n叙述。\n"
+    suggestions = detect_auto_close_suggestions(text)
+
+    assert len(suggestions) == 1
+    suggestion = suggestions[0]
+    assert suggestion.opening_cp == 0
+    assert suggestion.close_cp == text.index("\n")
+    assert suggestion.normalized_text == "“第一段没有闭合。”"
+    assert suggestion.normalized_text.endswith(AUTO_CLOSE_REPLACEMENT)
 
 
 def test_stray_closing_quote_is_warned() -> None:

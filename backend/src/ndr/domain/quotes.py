@@ -6,7 +6,13 @@ from pydantic import Field
 
 from .common import ApiModel
 from .corrections import AnnotationStateOut, ReviewItemOut, SceneGroupRefOut, SceneRefOut
-from .enums import ContentNodeType, GapDecision, QuoteKind
+from .enums import (
+    ContentNodeType,
+    GapDecision,
+    QuoteKind,
+    QuoteNormalizationSource,
+    QuoteNormalizationStatus,
+)
 
 
 class ScanWarningOut(ApiModel):
@@ -32,6 +38,10 @@ class QuoteOut(ApiModel):
     parent_quote_id: str | None = None
     kind_hint: QuoteKind | None = None
     scanner_version: str
+    normalized: bool = Field(
+        default=False,
+        description="右引号来自引号修复；canonical 原文未被修改。",
+    )
 
 
 class GapOut(ApiModel):
@@ -100,3 +110,32 @@ class ScanResultOut(ApiModel):
     gap_count: int
     warnings: list[ScanWarningOut] = Field(default_factory=list)
     stats: dict[str, int] = Field(default_factory=dict)
+
+
+class QuoteNormalizationOut(ApiModel):
+    id: str
+    book_version_id: str
+    opening_cp: int = Field(ge=0)
+    close_cp: int = Field(ge=0)
+    replacement: str
+    source: QuoteNormalizationSource
+    status: QuoteNormalizationStatus
+    original_text: str
+    normalized_text: str
+    reason: str
+    version: int = Field(ge=1)
+
+
+class QuoteNormalizationUpdateIn(ApiModel):
+    close_cp: int | None = Field(default=None, ge=1)
+    replacement: str | None = Field(default=None, min_length=1, max_length=4)
+    status: QuoteNormalizationStatus | None = None
+    expected_version: int = Field(ge=1)
+
+
+class QuoteNormalizationRefreshOut(ApiModel):
+    book_id: str
+    book_version_id: str
+    created: int
+    active: int
+    scan: ScanResultOut

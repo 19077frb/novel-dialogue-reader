@@ -31,6 +31,7 @@ import { ExportDialog } from '../components/ExportDialog'
 import { JobPanel } from '../components/JobPanel'
 import { RangePicker, type RangeValue } from '../components/RangePicker'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
+import { QuoteNormalizationPanel } from '../components/QuoteNormalizationPanel'
 import { SpeakerLegend } from '../components/SpeakerLegend'
 import { UsageSummary } from '../components/UsageSummary'
 import { mapWithConcurrency } from '../processing/concurrency'
@@ -339,6 +340,8 @@ export default function PreviewPage() {
           onRetry={() => void chapters.refetch()}
         />
       )}
+
+      <QuoteNormalizationPanel bookId={bookId} />
 
       <section className="card ndr-step-card" data-testid="processing-mode-picker">
         <div className="ndr-step-heading">

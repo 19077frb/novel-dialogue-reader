@@ -14,13 +14,30 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..corrections.review import build_quote_detail as _build_quote_detail
 from ..domain.common import CursorPage, DataEnvelope
-from ..domain.enums import ErrorCode, JobKind, JobState
-from ..domain.quotes import GapOut, LocateOut, QuoteDetailOut, QuoteOut, ScanResultOut
-from ..ingest.query import active_version, get_book_or_404
+from ..domain.enums import (
+    ErrorCode,
+    JobKind,
+    JobState,
+    QuoteNormalizationSource,
+    QuoteNormalizationStatus,
+)
+from ..domain.quotes import (
+    GapOut,
+    LocateOut,
+    QuoteDetailOut,
+    QuoteNormalizationOut,
+    QuoteNormalizationRefreshOut,
+    QuoteNormalizationUpdateIn,
+    QuoteOut,
+    ScanResultOut,
+)
+from ..ingest.query import active_version, get_book_or_404, load_canonical_text
+from ..quotes.normalization import detect_auto_close_suggestions, upsert_suggestions
 from ..quotes.service import (
     ScanConflict,
     list_gaps,
@@ -28,8 +45,8 @@ from ..quotes.service import (
     locate,
     scan_and_store,
 )
-from ..storage.models import BookVersion, Job, Quote
-from ..storage.transactions import transaction
+from ..storage.models import BookVersion, Job, Quote, QuoteNormalization
+from ..storage.transactions import check_version, transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
 from .pagination import parse_limit
@@ -175,6 +192,201 @@ def scan_quotes_route(
             status_code=409,
         ) from exc
     return DataEnvelope(data=payload, request_id=current_request_id(request))
+
+
+def _normalization_out(row: QuoteNormalization) -> QuoteNormalizationOut:
+    return QuoteNormalizationOut(
+        id=row.id,
+        book_version_id=row.book_version_id,
+        opening_cp=row.opening_cp,
+        close_cp=row.close_cp,
+        replacement=row.replacement,
+        source=row.source,
+        status=row.status,
+        original_text=row.original_text,
+        normalized_text=row.normalized_text,
+        reason=row.reason,
+        version=row.version,
+    )
+
+
+def _scan_payload(book, version, job_id: str, outcome) -> ScanResultOut:  # noqa: ANN001 - internal models
+    return ScanResultOut(
+        book_id=book.id,
+        book_version_id=version.id,
+        job_id=job_id,
+        scanner_version=outcome.scanner_version,
+        quote_count=outcome.quotes,
+        top_level_quote_count=outcome.top_level_quotes,
+        gap_count=outcome.gaps,
+        warnings=list(outcome.warnings),
+        stats=outcome.stats,
+    )
+
+
+def _record_scan_job(session, book, version, outcome) -> Job:  # noqa: ANN001 - internal models
+    job = Job(
+        kind=JobKind.RECOMPUTE,
+        purpose=None,
+        book_id=book.id,
+        book_version_id=version.id,
+        state=JobState.COMPLETED,
+        range_json="{}",
+        progress_json=json.dumps(
+            {
+                "stage": "completed",
+                "reason": "quote_normalization",
+                "scanner_version": outcome.scanner_version,
+                "quotes": outcome.quotes,
+                "gaps": outcome.gaps,
+            },
+            ensure_ascii=False,
+        ),
+    )
+    session.add(job)
+    session.flush()
+    return job
+
+
+def _active_normalization_count(session: Session, version_id: str) -> int:
+    return int(
+        session.execute(
+            select(func.count(QuoteNormalization.id)).where(
+                QuoteNormalization.book_version_id == version_id,
+                QuoteNormalization.status == QuoteNormalizationStatus.ACTIVE,
+            )
+        ).scalar_one()
+    )
+
+
+@router.get(
+    "/{book_id}/quote-normalizations",
+    response_model=DataEnvelope[list[QuoteNormalizationOut]],
+    summary="查看引号修复建议与用户调整",
+)
+def list_quote_normalizations_route(
+    request: Request,
+    book_id: str,
+    session: Session = Depends(get_session),
+) -> DataEnvelope[list[QuoteNormalizationOut]]:
+    _, version = _active_version_or_409(session, book_id)
+    rows = session.execute(
+        select(QuoteNormalization)
+        .where(QuoteNormalization.book_version_id == version.id)
+        .order_by(QuoteNormalization.opening_cp)
+    ).scalars()
+    return DataEnvelope(
+        data=[_normalization_out(row) for row in rows],
+        request_id=current_request_id(request),
+    )
+
+
+@router.post(
+    "/{book_id}/quote-normalizations/refresh",
+    status_code=202,
+    response_model=DataEnvelope[QuoteNormalizationRefreshOut],
+    summary="重新检测引号修复点并重建候选",
+)
+def refresh_quote_normalizations_route(
+    request: Request,
+    book_id: str,
+) -> DataEnvelope[QuoteNormalizationRefreshOut]:
+    settings = request.app.state.settings
+    factory = request.app.state.session_factory
+    try:
+        with transaction(factory) as session:
+            book, version = _active_version_or_409(session, book_id)
+            text = load_canonical_text(settings, version)
+            created = upsert_suggestions(
+                session,
+                version.id,
+                detect_auto_close_suggestions(text),
+            )
+            outcome = scan_and_store(session, settings, version)
+            job = _record_scan_job(session, book, version, outcome)
+            payload = QuoteNormalizationRefreshOut(
+                book_id=book.id,
+                book_version_id=version.id,
+                created=created,
+                active=_active_normalization_count(session, version.id),
+                scan=_scan_payload(book, version, job.id, outcome),
+            )
+    except ScanConflict as exc:
+        raise ApiError(
+            ErrorCode.VERSION_CONFLICT,
+            str(exc),
+            details={"book_id": book_id, "reason": "USER_LABELING_PRESENT"},
+            status_code=409,
+        ) from exc
+    return DataEnvelope(data=payload, request_id=current_request_id(request))
+
+
+@router.put(
+    "/{book_id}/quote-normalizations/{normalization_id}",
+    status_code=202,
+    response_model=DataEnvelope[QuoteNormalizationRefreshOut],
+    summary="调整引号修复点并重建候选",
+)
+def update_quote_normalization_route(
+    request: Request,
+    book_id: str,
+    normalization_id: str,
+    payload: QuoteNormalizationUpdateIn,
+) -> DataEnvelope[QuoteNormalizationRefreshOut]:
+    settings = request.app.state.settings
+    factory = request.app.state.session_factory
+    try:
+        with transaction(factory) as session:
+            book, version = _active_version_or_409(session, book_id)
+            row = session.get(QuoteNormalization, normalization_id)
+            if row is None or row.book_version_id != version.id:
+                raise ApiError.not_found(
+                    "引号修复点不存在",
+                    normalization_id=normalization_id,
+                )
+            check_version(row, payload.expected_version)
+            text = load_canonical_text(settings, version)
+            close_cp = payload.close_cp if payload.close_cp is not None else row.close_cp
+            replacement = (
+                payload.replacement
+                if payload.replacement is not None
+                else row.replacement
+            )
+            if (
+                close_cp <= row.opening_cp
+                or close_cp > len(text)
+                or text.find("\n", row.opening_cp, close_cp) != -1
+            ):
+                raise ApiError.validation(
+                    "闭合点必须在开引号所在段落内",
+                    details={"opening_cp": row.opening_cp, "close_cp": close_cp},
+                )
+            row.close_cp = close_cp
+            row.replacement = replacement
+            row.status = payload.status or row.status
+            row.source = QuoteNormalizationSource.USER
+            row.original_text = text[row.opening_cp : close_cp]
+            row.normalized_text = row.original_text + replacement
+            row.version += 1
+            session.flush()
+
+            outcome = scan_and_store(session, settings, version)
+            job = _record_scan_job(session, book, version, outcome)
+            payload_out = QuoteNormalizationRefreshOut(
+                book_id=book.id,
+                book_version_id=version.id,
+                created=0,
+                active=_active_normalization_count(session, version.id),
+                scan=_scan_payload(book, version, job.id, outcome),
+            )
+    except ScanConflict as exc:
+        raise ApiError(
+            ErrorCode.VERSION_CONFLICT,
+            str(exc),
+            details={"book_id": book_id, "reason": "USER_LABELING_PRESENT"},
+            status_code=409,
+        ) from exc
+    return DataEnvelope(data=payload_out, request_id=current_request_id(request))
 
 
 @quote_router.get(

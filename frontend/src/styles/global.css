@@ -1287,3 +1287,60 @@ textarea:focus-visible {
   border-radius: 8px;
   padding: 8px 12px;
 }
+
+.ndr-normalization-list {
+  display: grid;
+  gap: 12px;
+}
+
+.ndr-normalization-card {
+  border: 1px solid var(--ndr-border);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  background: color-mix(in srgb, var(--ndr-panel) 88%, transparent);
+}
+
+.ndr-normalization-summary code {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ndr-accent) 8%, transparent);
+}
+
+.ndr-normalization-summary small {
+  display: block;
+  margin-top: 6px;
+  color: var(--ndr-muted);
+}
+
+.ndr-normalization-edit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.ndr-normalization-edit label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: var(--ndr-muted);
+}
+
+.ndr-normalization-edit input,
+.ndr-normalization-edit select {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ndr-border);
+  background: transparent;
+  color: inherit;
+}
+
+.status-warning {
+  color: #9a5a00;
+}

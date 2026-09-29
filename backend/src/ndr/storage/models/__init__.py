@@ -14,6 +14,7 @@ from .jobs import InferenceRun, Job, JobWindow, ResultCache
 from .labeling import Annotation, AnnotationHistory, IdentityRevision
 from .mapping import TextMapping
 from .modeling import ModelProfile
+from .quote_normalization import QuoteNormalization
 from .review import Correction, ReviewItem
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "ModelProfile",
     "Participant",
     "Quote",
+    "QuoteNormalization",
     "Resource",
     "ResultCache",
     "ReviewItem",

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import delete, func, select
@@ -17,6 +18,7 @@ from ..api.errors import ApiError
 from ..api.pagination import decode_cursor, encode_cursor
 from ..config import Settings
 from ..context.cache import invalidate_version
+from ..domain.enums import QuoteNormalizationStatus
 from ..domain.quotes import (
     GapOut,
     LocateOut,
@@ -25,10 +27,19 @@ from ..domain.quotes import (
     QuoteOut,
     ScanWarningOut,
 )
-from ..storage.models import Annotation, Chapter, ContentNode, Gap, Quote, TextMapping
+from ..storage.models import (
+    Annotation,
+    Chapter,
+    ContentNode,
+    Gap,
+    Quote,
+    QuoteNormalization,
+    TextMapping,
+)
 from .delimiters import DELIMITER_PAIRS
 from .gaps import build_gaps
-from .scanner import SCANNER_VERSION, ScanLimits, scan_quotes
+from .normalization import active_close_points
+from .scanner import SCANNER_VERSION, AutoClosePoint, ScanLimits, scan_quotes
 
 CONTEXT_WINDOW_CP = 120
 
@@ -73,15 +84,25 @@ def scan_and_store(
     scanner_version: str = SCANNER_VERSION,
     limits: ScanLimits | None = None,
     replace: bool = True,
+    auto_close_points: Sequence[AutoClosePoint] | None = None,
 ) -> ScanOutcome:
     """扫描候选引语与 Gap 并落库；返回候选数量与警告。"""
 
     text = canonical_text if canonical_text is not None else canonical_text_of(settings, version)
+    if auto_close_points is None:
+        rows = session.execute(
+            select(QuoteNormalization).where(
+                QuoteNormalization.book_version_id == version.id,
+                QuoteNormalization.status == QuoteNormalizationStatus.ACTIVE,
+            )
+        ).scalars()
+        auto_close_points = active_close_points(rows)
     result = scan_quotes(
         text,
         book_version_id=version.id,
         scanner_version=scanner_version,
         limits=limits,
+        auto_close_points=auto_close_points,
     )
     gaps = build_gaps(
         text,
@@ -125,6 +146,7 @@ def scan_and_store(
                 utterance_id=None,
                 scanner_version=scanner_version,
                 kind_hint=quote.kind_hint,
+                normalized=quote.normalized,
             )
         )
     session.flush()
@@ -182,8 +204,14 @@ def _quote_out(quote: Quote, text: str, chapter: Chapter | None) -> QuoteOut:
         chapter_ordinal=chapter.ordinal if chapter is not None else None,
         start_cp=quote.start_cp,
         end_cp=quote.end_cp,
-        text=text[quote.start_cp + len(opening) : quote.end_cp - len(closing)],
-        delimited_text=text[quote.start_cp : quote.end_cp],
+        text=text[
+            quote.start_cp + len(opening) : quote.end_cp - len(closing)
+        ],
+        delimited_text=(
+            text[quote.start_cp : quote.end_cp] + closing
+            if quote.normalized
+            else text[quote.start_cp : quote.end_cp]
+        ),
         delimiter=quote.delimiter,
         opening=opening,
         closing=closing,
@@ -191,6 +219,7 @@ def _quote_out(quote: Quote, text: str, chapter: Chapter | None) -> QuoteOut:
         parent_quote_id=quote.parent_quote_id,
         kind_hint=quote.kind_hint,
         scanner_version=quote.scanner_version,
+        normalized=quote.normalized,
     )
 
 

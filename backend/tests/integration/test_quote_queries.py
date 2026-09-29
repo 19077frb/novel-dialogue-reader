@@ -26,6 +26,14 @@ SAMPLE = (
 
 EXPECTED_QUOTES = ["「雨停了。」", "「……谢谢。」", "「明天也来这里吧。」", "「他当时说的是『明天见』。」", "『明天见』"]
 
+AUTO_CLOSE_SAMPLE = (
+    "第一章 电子书\n"
+    "“确实可以买到。\n"
+    "“我的话保留意见。”\n"
+    "第二章 特典\n"
+    "「继续。」\n"
+)
+
 
 def _import(client: TestClient) -> dict:
     response = client.post(
@@ -177,6 +185,96 @@ def test_rescan_is_refused_when_user_labeling_exists(
     assert response.json()["error"]["details"]["reason"] == "USER_LABELING_PRESENT"
     # 候选没有被覆盖：人工结果仍在，候选数量不变
     assert len(_quotes(migrated_client, book_id)) == len(EXPECTED_QUOTES)
+
+
+def test_import_applies_and_exposes_quote_normalization(migrated_client: TestClient) -> None:
+    response = migrated_client.post(
+        "/api/books/import",
+        files={"file": ("auto-close.txt", AUTO_CLOSE_SAMPLE.encode("utf-8"), "text/plain")},
+    )
+    assert response.status_code == 202, response.text
+    book_id = response.json()["data"]["book_id"]
+
+    normalizations = migrated_client.get(
+        f"/api/books/{book_id}/quote-normalizations"
+    ).json()["data"]
+    assert len(normalizations) == 1
+    row = normalizations[0]
+    assert row["source"] == "AUTO"
+    assert row["status"] == "ACTIVE"
+    assert row["original_text"].startswith("“确实可以买到。")
+    assert row["normalized_text"].endswith("”")
+
+    quotes = _quotes(migrated_client, book_id)
+    repaired, normal, cross_chapter = quotes
+    assert repaired["normalized"] is True
+    assert repaired["closing"] == "”"
+    assert repaired["delimited_text"].endswith("”")
+    assert repaired["nesting_depth"] == 0
+    assert normal["nesting_depth"] == 0
+    assert cross_chapter["nesting_depth"] == 0
+
+    refreshed = migrated_client.post(
+        f"/api/books/{book_id}/quote-normalizations/refresh"
+    )
+    assert refreshed.status_code == 202, refreshed.text
+    assert refreshed.json()["data"]["created"] == 0
+    assert refreshed.json()["data"]["active"] == 1
+
+
+def test_user_can_move_quote_normalization_and_rescan(
+    migrated_client: TestClient,
+) -> None:
+    response = migrated_client.post(
+        "/api/books/import",
+        files={"file": ("auto-close-edit.txt", AUTO_CLOSE_SAMPLE.encode("utf-8"), "text/plain")},
+    )
+    book_id = response.json()["data"]["book_id"]
+    row = migrated_client.get(
+        f"/api/books/{book_id}/quote-normalizations"
+    ).json()["data"][0]
+
+    text = AUTO_CLOSE_SAMPLE
+    updated = migrated_client.put(
+        f"/api/books/{book_id}/quote-normalizations/{row['id']}",
+        json={"close_cp": 13, "expected_version": row["version"]},
+    )
+    assert updated.status_code == 202, updated.text
+    assert updated.json()["data"]["active"] == 1
+
+    quotes = _quotes(migrated_client, book_id)
+    repaired = quotes[0]
+    assert repaired["start_cp"] == row["opening_cp"]
+    assert repaired["end_cp"] == 13
+    assert text[repaired["start_cp"] : repaired["end_cp"]] == text[8:13]
+    assert repaired["normalized"] is True
+
+    rows = migrated_client.get(
+        f"/api/books/{book_id}/quote-normalizations"
+    ).json()["data"]
+    assert rows[0]["source"] == "USER"
+    assert rows[0]["version"] == row["version"] + 1
+
+
+def test_user_cannot_move_quote_normalization_across_paragraph(
+    migrated_client: TestClient,
+) -> None:
+    response = migrated_client.post(
+        "/api/books/import",
+        files={"file": ("auto-close-edit.txt", AUTO_CLOSE_SAMPLE.encode("utf-8"), "text/plain")},
+    )
+    book_id = response.json()["data"]["book_id"]
+    row = migrated_client.get(
+        f"/api/books/{book_id}/quote-normalizations"
+    ).json()["data"][0]
+
+    updated = migrated_client.put(
+        f"/api/books/{book_id}/quote-normalizations/{row['id']}",
+        json={"close_cp": 40, "expected_version": row["version"]},
+    )
+
+    assert updated.status_code == 422, updated.text
+    assert updated.json()["error"]["message"] == "闭合点必须在开引号所在段落内"
 
 
 def test_scanning_creates_no_annotations_or_scenes(

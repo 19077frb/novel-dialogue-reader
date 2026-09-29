@@ -57,6 +57,7 @@ const DETAIL = {
     parent_quote_id: null,
     kind_hint: null,
     scanner_version: 'quote-scan-1',
+    normalized: false,
   },
   previous_quote_id: null,
   next_quote_id: null,

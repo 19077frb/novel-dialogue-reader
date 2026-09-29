@@ -71,6 +71,16 @@ class QuoteKind(StrEnum):
     UNKNOWN = "unknown"
 
 
+class QuoteNormalizationSource(StrEnum):
+    AUTO = "AUTO"
+    USER = "USER"
+
+
+class QuoteNormalizationStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    DISABLED = "DISABLED"
+
+
 class Assignment(StrEnum):
     """普通 speech 的归属结论；其他类型 conclusion 为 None，不强行指定说话人。"""
 

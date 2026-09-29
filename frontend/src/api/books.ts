@@ -10,6 +10,9 @@ import type {
   CursorPageQuote,
   ImportResult,
   JobDetailOut,
+  QuoteNormalizationRefreshOut,
+  QuoteNormalizationOut,
+  QuoteNormalizationUpdateIn,
   QuoteDetailOut,
   ReadingMode,
   ReadingProgressOut,
@@ -23,6 +26,7 @@ export const queryKeys = {
   content: (bookId: string, chapterId: string | null, cursor: string | null) =>
     ['content', bookId, chapterId, cursor] as const,
   quotes: (bookId: string, chapterId: string | null) => ['quotes', bookId, chapterId] as const,
+  quoteNormalizations: (bookId: string) => ['quote-normalizations', bookId] as const,
   job: (jobId: string) => ['job', jobId] as const,
 }
 
@@ -127,6 +131,36 @@ export function fetchQuoteDetail(
   return apiData<QuoteDetailOut>(`/api/quotes/${quoteId}${query ? `?${query}` : ''}`, {
     signal: options.signal,
   })
+}
+
+export function fetchQuoteNormalizations(
+  bookId: string,
+  signal?: AbortSignal,
+): Promise<QuoteNormalizationOut[]> {
+  return apiData<QuoteNormalizationOut[]>(
+    `/api/books/${bookId}/quote-normalizations`,
+    { signal },
+  )
+}
+
+export function refreshQuoteNormalizations(
+  bookId: string,
+): Promise<QuoteNormalizationRefreshOut> {
+  return apiData<QuoteNormalizationRefreshOut>(
+    `/api/books/${bookId}/quote-normalizations/refresh`,
+    { method: 'POST' },
+  )
+}
+
+export function updateQuoteNormalization(
+  bookId: string,
+  normalizationId: string,
+  input: QuoteNormalizationUpdateIn,
+): Promise<QuoteNormalizationRefreshOut> {
+  return apiData<QuoteNormalizationRefreshOut>(
+    `/api/books/${bookId}/quote-normalizations/${normalizationId}`,
+    { method: 'PUT', body: input },
+  )
 }
 
 export interface ImportInput {

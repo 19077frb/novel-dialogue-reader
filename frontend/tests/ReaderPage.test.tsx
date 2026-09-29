@@ -107,6 +107,7 @@ function quotesFor(chapterId: string) {
         parent_quote_id: null,
         kind_hint: null,
         scanner_version: 'quote-scan-1',
+        normalized: false,
       },
     ],
     next_cursor: null,

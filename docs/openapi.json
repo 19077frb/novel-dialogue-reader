@@ -1328,6 +1328,151 @@
         }
       }
     },
+    "/api/books/{book_id}/quote-normalizations": {
+      "get": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "查看引号修复建议与用户调整",
+        "operationId": "list_quote_normalizations_route_api_books__book_id__quote_normalizations_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_list_QuoteNormalizationOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/quote-normalizations/refresh": {
+      "post": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "重新检测引号修复点并重建候选",
+        "operationId": "refresh_quote_normalizations_route_api_books__book_id__quote_normalizations_refresh_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_QuoteNormalizationRefreshOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/quote-normalizations/{normalization_id}": {
+      "put": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "调整引号修复点并重建候选",
+        "operationId": "update_quote_normalization_route_api_books__book_id__quote_normalizations__normalization_id__put",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "normalization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Normalization Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteNormalizationUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_QuoteNormalizationRefreshOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/quotes/{quote_id}": {
       "get": {
         "tags": [
@@ -4242,6 +4387,25 @@
         ],
         "title": "DataEnvelope[QuoteDetailOut]"
       },
+      "DataEnvelope_QuoteNormalizationRefreshOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QuoteNormalizationRefreshOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[QuoteNormalizationRefreshOut]"
+      },
       "DataEnvelope_ReadingProgressOut_": {
         "properties": {
           "data": {
@@ -4506,6 +4670,29 @@
           "request_id"
         ],
         "title": "DataEnvelope[list[ProtocolCapabilitiesOut]]"
+      },
+      "DataEnvelope_list_QuoteNormalizationOut__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/QuoteNormalizationOut"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[list[QuoteNormalizationOut]]"
       },
       "EstimateIn": {
         "properties": {
@@ -6330,6 +6517,170 @@
         ],
         "title": "QuoteKind"
       },
+      "QuoteNormalizationOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "opening_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Opening Cp"
+          },
+          "close_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Close Cp"
+          },
+          "replacement": {
+            "type": "string",
+            "title": "Replacement"
+          },
+          "source": {
+            "$ref": "#/components/schemas/QuoteNormalizationSource"
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuoteNormalizationStatus"
+          },
+          "original_text": {
+            "type": "string",
+            "title": "Original Text"
+          },
+          "normalized_text": {
+            "type": "string",
+            "title": "Normalized Text"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "book_version_id",
+          "opening_cp",
+          "close_cp",
+          "replacement",
+          "source",
+          "status",
+          "original_text",
+          "normalized_text",
+          "reason",
+          "version"
+        ],
+        "title": "QuoteNormalizationOut"
+      },
+      "QuoteNormalizationRefreshOut": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "active": {
+            "type": "integer",
+            "title": "Active"
+          },
+          "scan": {
+            "$ref": "#/components/schemas/ScanResultOut"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "book_version_id",
+          "created",
+          "active",
+          "scan"
+        ],
+        "title": "QuoteNormalizationRefreshOut"
+      },
+      "QuoteNormalizationSource": {
+        "type": "string",
+        "enum": [
+          "AUTO",
+          "USER"
+        ],
+        "title": "QuoteNormalizationSource"
+      },
+      "QuoteNormalizationStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "DISABLED"
+        ],
+        "title": "QuoteNormalizationStatus"
+      },
+      "QuoteNormalizationUpdateIn": {
+        "properties": {
+          "close_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Cp"
+          },
+          "replacement": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacement"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteNormalizationStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "QuoteNormalizationUpdateIn"
+      },
       "QuoteOut": {
         "properties": {
           "quote_id": {
@@ -6423,6 +6774,12 @@
           "scanner_version": {
             "type": "string",
             "title": "Scanner Version"
+          },
+          "normalized": {
+            "type": "boolean",
+            "title": "Normalized",
+            "description": "右引号来自引号修复；canonical 原文未被修改。",
+            "default": false
           }
         },
         "additionalProperties": false,

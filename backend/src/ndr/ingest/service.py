@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from ..config import Settings
 from ..domain.enums import BookFormat, ImportStatus, JobKind, JobState
 from ..exports.annotations import parse_annotations_manifest
+from ..quotes.normalization import detect_auto_close_suggestions, upsert_suggestions
 from ..quotes.scanner import SCANNER_VERSION, ScanLimits
 from ..quotes.service import scan_and_store
 from ..storage.models import (
@@ -159,6 +160,7 @@ def persist_parsed(
 
     written: list[Path] = []
     restored_stats: dict = {}
+    auto_close_count = 0
     try:
         source_path = book_source_path(settings, book.id, _suffix_for(filename, parsed.format))
         if not source_path.exists():
@@ -188,6 +190,11 @@ def persist_parsed(
             _insert_nodes(session, parsed, chapter_ids)
             _insert_mappings(session, version, parsed, chapter_ids)
             _insert_resources(session, version, parsed)
+            auto_close_count = upsert_suggestions(
+                session,
+                version.id,
+                detect_auto_close_suggestions(parsed.canonical_text),
+            )
             # 候选引语/Gap 是派生数据：导入后立即扫描，便于界面显示候选覆盖（不涉及任何模型调用）。
             scan_and_store(
                 session,
@@ -226,6 +233,7 @@ def persist_parsed(
                     "nodes": len(parsed.nodes),
                     "resources": len(parsed.resources),
                     "canonical_length_cp": parsed.canonical_length_cp,
+                    "quote_normalizations": auto_close_count,
                     **(
                         {"restored_annotations": restored_stats}
                         if restored_stats

@@ -16,6 +16,8 @@ import type {
   EstimateOut,
   JobDetailOut,
   UsageOut,
+  QuoteNormalizationOut,
+  QuoteNormalizationRefreshOut,
 } from '../src/api/types'
 import PreviewPage from '../src/pages/PreviewPage'
 import { renderRoute } from './helpers'
@@ -31,6 +33,7 @@ vi.mock('../src/api/books', () => ({
       cursor,
     ],
     quotes: (id: string, chapter: string | null) => ['quotes', id, chapter],
+    quoteNormalizations: (id: string) => ['quote-normalizations', id],
     job: (id: string) => ['job', id],
   },
   fetchBook: vi.fn(),
@@ -39,6 +42,9 @@ vi.mock('../src/api/books', () => ({
   fetchQuotes: vi.fn(),
   fetchJob: vi.fn(),
   completeChapterProcessing: vi.fn(),
+  fetchQuoteNormalizations: vi.fn(),
+  refreshQuoteNormalizations: vi.fn(),
+  updateQuoteNormalization: vi.fn(),
 }))
 
 vi.mock('../src/api/characters', () => ({
@@ -282,6 +288,10 @@ describe('PreviewPage', () => {
     vi.mocked(booksApi.fetchQuotes).mockReset()
     vi.mocked(booksApi.fetchJob).mockReset()
     vi.mocked(booksApi.completeChapterProcessing).mockReset()
+    vi.mocked(booksApi.fetchQuoteNormalizations).mockReset()
+    vi.mocked(booksApi.refreshQuoteNormalizations).mockReset()
+    vi.mocked(booksApi.updateQuoteNormalization).mockReset()
+    vi.mocked(booksApi.fetchQuoteNormalizations).mockResolvedValue([])
     vi.mocked(annotationsApi.fetchAnnotations).mockReset()
     vi.mocked(charactersApi.fetchBookCharacters).mockReset()
     vi.mocked(charactersApi.fetchCharacterRoster).mockReset()
@@ -322,6 +332,7 @@ describe('PreviewPage', () => {
           parent_quote_id: null,
           kind_hint: null,
           scanner_version: 'quote-scan-1',
+        normalized: false,
         },
       ],
       next_cursor: null,
@@ -689,4 +700,65 @@ describe('PreviewPage', () => {
     expect(screen.queryByTestId('batch-error')).not.toBeInTheDocument()
     prompt.mockRestore()
   })
+  it('展示可编辑的引号修复建议并支持重扫和重新检测', async () => {
+    const normalization = {
+      id: 'n1',
+      book_version_id: 'v1',
+      opening_cp: 3,
+      close_cp: 10,
+      replacement: '”',
+      source: 'AUTO',
+      status: 'ACTIVE',
+      original_text: '“他说雨停了。',
+      normalized_text: '“他说雨停了。”',
+      reason: '开引号未在本段或后续段落闭合，且下一处引号是开引号。',
+      version: 1,
+    } as QuoteNormalizationOut
+    const refreshed = {
+      book_id: 'b1',
+      book_version_id: 'v1',
+      created: 0,
+      active: 1,
+      scan: {
+        book_id: 'b1',
+        book_version_id: 'v1',
+        job_id: 'scan1',
+        scanner_version: 'quote-scan-1',
+        quote_count: 1,
+        top_level_quote_count: 1,
+        gap_count: 0,
+        warnings: [],
+        stats: {},
+      },
+    } as QuoteNormalizationRefreshOut
+    vi.mocked(booksApi.fetchQuoteNormalizations).mockResolvedValue([normalization])
+    vi.mocked(booksApi.refreshQuoteNormalizations).mockResolvedValue(refreshed)
+    vi.mocked(booksApi.updateQuoteNormalization).mockResolvedValue(refreshed)
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+
+    expect(await screen.findByTestId('quote-normalization-warning'))
+      .toHaveTextContent('已启用 1 条虚拟闭合')
+    expect(screen.getByText('“他说雨停了。”')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId('quote-normalization-close-n1'), {
+      target: { value: '9' },
+    })
+    await userEvent.click(screen.getByText('保存并重扫'))
+
+    await waitFor(() => expect(booksApi.updateQuoteNormalization).toHaveBeenCalledWith(
+      'b1',
+      'n1',
+      {
+        close_cp: 9,
+        replacement: '”',
+        status: 'ACTIVE',
+        expected_version: 1,
+      },
+    ))
+
+    await userEvent.click(screen.getByTestId('quote-normalization-refresh'))
+    await waitFor(() => expect(booksApi.refreshQuoteNormalizations).toHaveBeenCalledWith('b1'))
+  })
+
+
 })

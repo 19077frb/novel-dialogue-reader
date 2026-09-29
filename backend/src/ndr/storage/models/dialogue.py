@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.enums import GapDecision, QuoteKind, SceneStatus
@@ -45,6 +45,7 @@ class Quote(IdMixin, TimestampMixin, Base):
     kind_hint: Mapped[QuoteKind | None] = mapped_column(
         enum_type(QuoteKind, name="quote_kind"), nullable=True
     )
+    normalized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class Gap(IdMixin, TimestampMixin, Base):

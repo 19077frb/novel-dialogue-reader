@@ -408,6 +408,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/quote-normalizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查看引号修复建议与用户调整 */
+        get: operations["list_quote_normalizations_route_api_books__book_id__quote_normalizations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/quote-normalizations/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重新检测引号修复点并重建候选 */
+        post: operations["refresh_quote_normalizations_route_api_books__book_id__quote_normalizations_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/quote-normalizations/{normalization_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 调整引号修复点并重建候选 */
+        put: operations["update_quote_normalization_route_api_books__book_id__quote_normalizations__normalization_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/quotes/{quote_id}": {
         parameters: {
             query?: never;
@@ -1461,6 +1512,15 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[QuoteNormalizationRefreshOut] */
+        DataEnvelope_QuoteNormalizationRefreshOut_: {
+            data: components["schemas"]["QuoteNormalizationRefreshOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[ReadingProgressOut] */
         DataEnvelope_ReadingProgressOut_: {
             data: components["schemas"]["ReadingProgressOut"];
@@ -1579,6 +1639,16 @@ export interface components {
         DataEnvelope_list_ProtocolCapabilitiesOut__: {
             /** Data */
             data: components["schemas"]["ProtocolCapabilitiesOut"][];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[list[QuoteNormalizationOut]] */
+        DataEnvelope_list_QuoteNormalizationOut__: {
+            /** Data */
+            data: components["schemas"]["QuoteNormalizationOut"][];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -2321,6 +2391,61 @@ export interface components {
          * @enum {string}
          */
         QuoteKind: "speech" | "thought" | "quotation" | "group" | "other" | "unknown";
+        /** QuoteNormalizationOut */
+        QuoteNormalizationOut: {
+            /** Id */
+            id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Opening Cp */
+            opening_cp: number;
+            /** Close Cp */
+            close_cp: number;
+            /** Replacement */
+            replacement: string;
+            source: components["schemas"]["QuoteNormalizationSource"];
+            status: components["schemas"]["QuoteNormalizationStatus"];
+            /** Original Text */
+            original_text: string;
+            /** Normalized Text */
+            normalized_text: string;
+            /** Reason */
+            reason: string;
+            /** Version */
+            version: number;
+        };
+        /** QuoteNormalizationRefreshOut */
+        QuoteNormalizationRefreshOut: {
+            /** Book Id */
+            book_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Created */
+            created: number;
+            /** Active */
+            active: number;
+            scan: components["schemas"]["ScanResultOut"];
+        };
+        /**
+         * QuoteNormalizationSource
+         * @enum {string}
+         */
+        QuoteNormalizationSource: "AUTO" | "USER";
+        /**
+         * QuoteNormalizationStatus
+         * @enum {string}
+         */
+        QuoteNormalizationStatus: "ACTIVE" | "DISABLED";
+        /** QuoteNormalizationUpdateIn */
+        QuoteNormalizationUpdateIn: {
+            /** Close Cp */
+            close_cp?: number | null;
+            /** Replacement */
+            replacement?: string | null;
+            status?: components["schemas"]["QuoteNormalizationStatus"] | null;
+            /** Expected Version */
+            expected_version: number;
+        };
         /** QuoteOut */
         QuoteOut: {
             /** Quote Id */
@@ -2358,6 +2483,12 @@ export interface components {
             kind_hint?: components["schemas"]["QuoteKind"] | null;
             /** Scanner Version */
             scanner_version: string;
+            /**
+             * Normalized
+             * @description 右引号来自引号修复；canonical 原文未被修改。
+             * @default false
+             */
+            normalized: boolean;
         };
         /**
          * ReadingMode
@@ -3677,6 +3808,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_ScanResultOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_quote_normalizations_route_api_books__book_id__quote_normalizations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_list_QuoteNormalizationOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_quote_normalizations_route_api_books__book_id__quote_normalizations_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_QuoteNormalizationRefreshOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_quote_normalization_route_api_books__book_id__quote_normalizations__normalization_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                normalization_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteNormalizationUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_QuoteNormalizationRefreshOut_"];
                 };
             };
             /** @description Validation Error */

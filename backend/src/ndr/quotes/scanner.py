@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from ..domain.enums import QuoteKind
@@ -19,6 +19,8 @@ from .delimiters import CLOSING_TO_PAIR, OPENING_TO_PAIR, DelimiterPair
 from .ids import quote_id_for
 
 SCANNER_VERSION = "quote-scan-1"
+
+AUTO_CLOSE_REPLACEMENT = "”"
 
 DEFAULT_MAX_QUOTE_LENGTH_CP = 1200
 DEFAULT_MAX_SPAN_PARAGRAPHS = 3
@@ -53,6 +55,7 @@ class ScannedQuote:
     nesting_depth: int
     parent_quote_id: str | None
     kind_hint: QuoteKind | None
+    normalized: bool = False
 
     @property
     def inner_start_cp(self) -> int:
@@ -74,6 +77,15 @@ class ScanResult:
     stats: dict[str, int] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class AutoClosePoint:
+    """一个虚拟右引号；码点仍指向原文，不在 canonical 中插入字符。"""
+
+    opening_cp: int
+    close_cp: int
+    replacement: str = AUTO_CLOSE_REPLACEMENT
+
+
 @dataclass
 class _OpenQuote:
     pair: DelimiterPair
@@ -89,6 +101,7 @@ class _RawQuote:
     pair: DelimiterPair
     depth: int
     parent_start_cp: int | None
+    normalized: bool = False
 
 
 def _paragraph_breaks(text: str) -> int:
@@ -101,6 +114,7 @@ def scan_quotes(
     book_version_id: str,
     scanner_version: str = SCANNER_VERSION,
     limits: ScanLimits | None = None,
+    auto_close_points: Sequence[AutoClosePoint] = (),
 ) -> ScanResult:
     """扫描候选引语；返回候选与警告（不涉及任何说话人判断）。"""
 
@@ -113,8 +127,80 @@ def scan_quotes(
     stray_closes = 0
     unclosed = 0
     depth_limit_hits = 0
+    normalized_closes = 0
+
+    virtual_closes: dict[int, list[AutoClosePoint]] = {}
+    for point in auto_close_points:
+        if point.close_cp <= point.opening_cp or point.close_cp > len(canonical_text):
+            warnings.append(
+                ScanWarning(
+                    code="invalid_auto_close",
+                    position_cp=point.opening_cp,
+                    delimiter="curly_double",
+                    detail="虚拟闭合点不在开引号之后，已忽略。",
+                )
+            )
+            continue
+        if point.replacement not in CLOSING_TO_PAIR:
+            warnings.append(
+                ScanWarning(
+                    code="invalid_auto_close",
+                    position_cp=point.opening_cp,
+                    delimiter="curly_double",
+                    detail="虚拟闭合字符不是已支持的右引号，已忽略。",
+                )
+            )
+            continue
+        virtual_closes.setdefault(point.close_cp, []).append(point)
+    for points in virtual_closes.values():
+        points.sort(key=lambda item: item.opening_cp, reverse=True)
 
     for index, char in enumerate(canonical_text):
+        for point in virtual_closes.pop(index, []):
+            closing_pair = CLOSING_TO_PAIR[point.replacement]
+            match_index = next(
+                (
+                    position
+                    for position in range(len(stack) - 1, -1, -1)
+                    if stack[position].pair is closing_pair
+                    and stack[position].start_cp == point.opening_cp
+                ),
+                -1,
+            )
+            if match_index < 0:
+                warnings.append(
+                    ScanWarning(
+                        code="invalid_auto_close",
+                        position_cp=point.opening_cp,
+                        delimiter=closing_pair.name,
+                        detail="虚拟闭合点没有匹配到指定开引号，已忽略。",
+                    )
+                )
+                continue
+            for orphan in stack[match_index + 1 :]:
+                unclosed += 1
+                warnings.append(
+                    ScanWarning(
+                        code="unclosed_quote",
+                        position_cp=orphan.start_cp,
+                        delimiter=orphan.pair.name,
+                        detail="该开引号在虚拟闭合前被更外层引号关闭，已放弃该候选。",
+                    )
+                )
+            del stack[match_index + 1 :]
+            opened = stack.pop()
+            raw_quotes.append(
+                _RawQuote(
+                    start_cp=opened.start_cp,
+                    end_cp=index,
+                    pair=opened.pair,
+                    depth=len(stack),
+                    parent_start_cp=stack[-1].start_cp if stack else None,
+                    normalized=True,
+                )
+            )
+            normalized_closes += 1
+
         # 硬上限保护：开口太久仍未闭合的开引号直接放弃，避免吞掉后文。
         hard_ceiling = limits.max_length_cp * limits.hard_ceiling_factor
         while stack and index - stack[-1].start_cp > hard_ceiling:
@@ -273,6 +359,7 @@ def scan_quotes(
                 id_by_start.get(raw.parent_start_cp) if raw.parent_start_cp is not None else None
             ),
             kind_hint=raw.pair.hint_for_depth(raw.depth),
+            normalized=raw.normalized,
         )
         for raw in sorted(kept, key=lambda item: item.start_cp)
     )
@@ -287,6 +374,7 @@ def scan_quotes(
         "dropped_too_long": too_long,
         "dropped_too_many_paragraphs": too_many_paragraphs,
         "depth_limit_hits": depth_limit_hits,
+        "normalized_closes": normalized_closes,
     }
     return ScanResult(quotes=quotes, warnings=tuple(warnings), stats=stats)
 
