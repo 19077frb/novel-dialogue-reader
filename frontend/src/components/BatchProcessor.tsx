@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 
 import { fetchJob } from '../api/books'
 import {
@@ -10,6 +10,40 @@ import { createJob, freshIdempotencyKey } from '../api/jobs'
 import type { ChapterOut, JobDetailOut } from '../api/types'
 
 const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'])
+
+export type ChapterProcessingState = 'unprocessed' | 'processing' | 'processed'
+
+export interface BatchProgressSnapshot {
+  running: boolean
+  message: string
+  chapterStates: Record<string, ChapterProcessingState>
+  revision: number
+}
+
+const EMPTY_BATCH: BatchProgressSnapshot = {
+  running: false,
+  message: '',
+  chapterStates: {},
+  revision: 0,
+}
+const batchSnapshots = new Map<string, BatchProgressSnapshot>()
+const batchListeners = new Set<() => void>()
+
+function publishBatch(bookId: string, update: Partial<BatchProgressSnapshot>) {
+  const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
+  batchSnapshots.set(bookId, { ...current, ...update, revision: current.revision + 1 })
+  batchListeners.forEach((listener) => listener())
+}
+
+export function useBatchProgress(bookId: string | undefined): BatchProgressSnapshot {
+  return useSyncExternalStore(
+    (listener) => {
+      batchListeners.add(listener)
+      return () => batchListeners.delete(listener)
+    },
+    () => (bookId ? batchSnapshots.get(bookId) ?? EMPTY_BATCH : EMPTY_BATCH),
+  )
+}
 
 function positiveIntegerOrNull(value: string): number | null {
   if (value.trim() === '') return null
@@ -69,12 +103,22 @@ export function BatchProcessor({
     stopRef.current = false
     setRunning(true)
     setError(null)
+    publishBatch(bookId, {
+      running: true,
+      message: '准备批量处理…',
+      chapterStates: Object.fromEntries(selected.map((chapter) => [chapter.id, 'unprocessed'])),
+    })
 
     try {
       for (let index = 0; index < selected.length; index += 1) {
         if (stopRef.current) throw new Error('批量处理已停止')
         const chapter = selected[index]
         const prefix = `${index + 1}/${selected.length} ${chapter.title || `第 ${chapter.ordinal + 1} 章`}`
+        const currentStates = batchSnapshots.get(bookId)?.chapterStates ?? {}
+        publishBatch(bookId, {
+          message: `${prefix}：正在识别人物…`,
+          chapterStates: { ...currentStates, [chapter.id]: 'processing' },
+        })
         let remaining = tokenLimit === null ? null : tokenLimit - spent
         if (remaining !== null && remaining <= 0) throw new Error('已达到本次 Token 使用上限')
 
@@ -101,6 +145,7 @@ export function BatchProcessor({
         if (accepted.length === 0) throw new Error(`${prefix}没有识别到可确认的人物`)
         const pov = accepted.find((candidate) => candidate.pov_candidate) ?? accepted[0]
         setProgress(`${prefix}：正在确认人物并判断对白…`)
+        publishBatch(bookId, { message: `${prefix}：正在确认人物并判断对白…` })
         await confirmCharacterRoster(bookId, chapter.id, {
           bookVersionId,
           candidates: accepted.map((candidate) => ({
@@ -139,11 +184,24 @@ export function BatchProcessor({
           throw new Error('模型没有返回对白处理用量，无法可靠执行 Token 上限，批量处理已停止')
         }
         setProgress(`${prefix}：已完成；本次累计 ${spent.toLocaleString()} tokens`)
+        publishBatch(bookId, {
+          message: `${prefix}：已完成；本次累计 ${spent.toLocaleString()} tokens`,
+          chapterStates: {
+            ...(batchSnapshots.get(bookId)?.chapterStates ?? {}),
+            [chapter.id]: 'processed',
+          },
+        })
       }
       setProgress(`批量处理完成：共 ${selected.length} 章，本次累计 ${spent.toLocaleString()} tokens。`)
+      publishBatch(bookId, {
+        running: false,
+        message: `批量处理完成：共 ${selected.length} 章，本次累计 ${spent.toLocaleString()} tokens。`,
+      })
       onFinished()
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '批量处理失败')
+      const message = reason instanceof Error ? reason.message : '批量处理失败'
+      setError(message)
+      publishBatch(bookId, { running: false, message })
     } finally {
       setRunning(false)
     }

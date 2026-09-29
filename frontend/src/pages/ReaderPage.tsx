@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
@@ -15,6 +15,7 @@ import {
 import { ApiError } from '../api/client'
 import type { ChapterOut, ContentNodeOut, ReadingMode } from '../api/types'
 import { ChapterNavigation } from '../components/ChapterNavigation'
+import { useBatchProgress } from '../components/BatchProcessor'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
 import { ExportDialog } from '../components/ExportDialog'
@@ -39,6 +40,8 @@ export function findCurrentStartCp(nodes: HTMLElement[]): number | null {
  */
 export default function ReaderPage() {
   const { bookId } = useParams<{ bookId: string }>()
+  const queryClient = useQueryClient()
+  const batchProgress = useBatchProgress(bookId)
   const documentRef = useRef<HTMLDivElement>(null)
   const lastSavedRef = useRef<number | null>(null)
   const [chapterId, setChapterId] = useState<string | null>(null)
@@ -62,6 +65,11 @@ export default function ReaderPage() {
     queryFn: ({ signal }) => fetchChapters(bookId as string, signal),
     enabled: Boolean(bookId) && book.isSuccess,
   })
+
+  useEffect(() => {
+    if (!bookId || batchProgress.revision === 0) return
+    void queryClient.invalidateQueries({ queryKey: ['annotations', bookId] })
+  }, [batchProgress.revision, bookId, queryClient])
 
   const content = useQuery({
     queryKey: queryKeys.content(bookId ?? '', chapterId, cursor),
@@ -265,7 +273,11 @@ export default function ReaderPage() {
               chapters={chapters.data}
               activeChapterId={chapterId}
               onSelect={handleChapterSelect}
+              processingStates={batchProgress.chapterStates}
             />
+          )}
+          {batchProgress.message && (
+            <p className="hint" data-testid="reader-batch-progress">{batchProgress.message}</p>
           )}
           {chapters.isPending && <p className="hint">正在读取目录…</p>}
         </aside>
