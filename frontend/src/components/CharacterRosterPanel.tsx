@@ -18,6 +18,8 @@ import type {
 } from '../api/types'
 
 interface CharacterRosterPanelProps {
+  /** 在分步流程中的步骤编号（可选，仅用于展示）。 */
+  step?: number
   bookId: string
   bookVersionId: string | null | undefined
   chapterId: string | null
@@ -59,6 +61,7 @@ function draftFromCandidate(item: RosterCharacterCandidate): DraftCandidate {
 }
 
 export function CharacterRosterPanel({
+  step,
   bookId,
   bookVersionId,
   chapterId,
@@ -194,20 +197,37 @@ export function CharacterRosterPanel({
 
   if (!chapterId) {
     return (
-      <p className="hint" data-testid="roster-no-chapter">
-        当前不是单章范围：整本或自定义码点范围不使用「本章人物」名单。
-        需要确认人物与本章主人公时，请先在处理范围里选择具体章节。
-      </p>
+      <section className="card" data-testid="character-roster-panel">
+        <div className="ndr-step-heading">
+          {typeof step === 'number' && (
+            <span className="ndr-step-badge" aria-hidden="true">
+              {step}
+            </span>
+          )}
+          <div>
+            <h3>本章人物确认</h3>
+            <p className="hint" data-testid="roster-no-chapter">
+              当前不是单章范围：整本或自定义码点范围不使用「本章人物」名单，可直接进行对白归属。
+              需要确认人物与本章主人公时，请先在处理范围里选择具体章节。
+            </p>
+          </div>
+        </div>
+      </section>
     )
   }
 
   return (
     <section className="card" data-testid="character-roster-panel">
-      <div className="ndr-preview-viewbar">
+      <div className="ndr-preview-viewbar ndr-step-heading">
+        {typeof step === 'number' && (
+          <span className="ndr-step-badge" aria-hidden="true">
+            {step}
+          </span>
+        )}
         <div>
-          <h3>本章人物</h3>
+          <h3>本章人物确认</h3>
           <p className="hint">
-            先让模型识别人物，确认名单并选择本章第一视角主人公后，才会开始逐句归属。
+            对白归属的前置步骤：先让模型识别人物，确认名单并选择本章第一视角主人公。
           </p>
         </div>
         <div className="ndr-form-actions">

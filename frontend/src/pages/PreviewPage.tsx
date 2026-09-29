@@ -235,25 +235,26 @@ export default function PreviewPage() {
   // 本章人物是逐句归属的前置：只有选中单一章节时才要求先确认名单与主人公；
   // 整本或自定义码点范围没有“本章”，后端也不会注入章节人物名单。
   const rosterRequired = range.chapterId !== null
-  const runDisabled =
-    !rangeValid ||
-    profileId === '' ||
-    (rosterRequired && !rosterConfirmed) ||
-    jobMutation.isPending
+  const runBlockers: string[] = []
+  if (!rangeValid) runBlockers.push('处理范围无效')
+  if (profileId === '') runBlockers.push('未选择模型配置（见第一步）')
+  if (rosterRequired && !rosterConfirmed) runBlockers.push('尚未确认本章人物（见第二步）')
+  const runDisabled = runBlockers.length > 0 || jobMutation.isPending
 
   if (!bookId) return <p className="status-error">缺少书籍 ID。</p>
 
   return (
     <div className="ndr-page ndr-preview">
-      <header className="ndr-reader-header card">
+      <header className="ndr-reader-header card ndr-page-header">
         <div>
           <h2>预览与按章处理：{book.data?.title ?? '载入中…'}</h2>
           <p className="hint">
-            先用小范围试运行确认效果，再按章处理；预览结果直接复用到正式阅读。
+            按顺序完成三个步骤：选择范围与模型 → 确认本章人物 → 对白归属；预览结果直接复用到正式阅读。
           </p>
         </div>
-        <nav className="ndr-preview-nav">
+        <nav className="ndr-preview-nav" aria-label="本书导航">
           <Link to={`/books/${bookId}/read`}>去阅读</Link>
+          <Link to={`/books/${bookId}/review`}>待确认队列</Link>
           <button type="button" onClick={() => setExportOpen(true)} data-testid="open-export">
             导出
           </button>
@@ -264,7 +265,14 @@ export default function PreviewPage() {
       {book.isError && <p className="status-error">书籍读取失败。</p>}
       {chapters.isError && <p className="status-error">目录读取失败。</p>}
 
-      <section className="card ndr-preview-controls">
+      <section className="card ndr-preview-controls ndr-step-card">
+        <div className="ndr-step-heading">
+          <span className="ndr-step-badge" aria-hidden="true">1</span>
+          <div>
+            <h3>选择处理范围与模型</h3>
+            <p className="hint">决定要处理的范围、使用哪个模型配置，以及初读/重读模式。</p>
+          </div>
+        </div>
         <RangePicker
           chapters={chapters.data ?? []}
           value={range}
@@ -275,7 +283,6 @@ export default function PreviewPage() {
             setNotice(null)
           }}
         />
-        <BudgetForm value={budget} onChange={setBudget} />
         <fieldset className="ndr-preview-model">
           <legend>模型与阅读模式</legend>
           <label>
@@ -310,6 +317,28 @@ export default function PreviewPage() {
             </p>
           )}
         </fieldset>
+      </section>
+
+      <CharacterRosterPanel
+        step={2}
+        bookId={bookId}
+        bookVersionId={book.data?.active_version_id ?? null}
+        chapterId={range.chapterId}
+        profileId={profileId}
+        onConfirmedChange={handleRosterConfirmedChange}
+      />
+
+      <section className="card ndr-preview-controls ndr-step-card">
+        <div className="ndr-step-heading">
+          <span className="ndr-step-badge" aria-hidden="true">3</span>
+          <div>
+            <h3>对白归属（试运行与正式处理）</h3>
+            <p className="hint">
+              人物确认后才能开始逐句归属；建议先小范围试运行确认效果，再按范围正式处理。
+            </p>
+          </div>
+        </div>
+        <BudgetForm value={budget} onChange={setBudget} />
         <div className="ndr-form-actions">
           <button
             type="button"
@@ -337,6 +366,11 @@ export default function PreviewPage() {
             按此范围正式处理
           </button>
         </div>
+        {runBlockers.length > 0 && (
+          <p className="hint" data-testid="preview-run-hint">
+            暂不能开始对白归属：{runBlockers.join('；')}。
+          </p>
+        )}
         {error && (
           <p className="status-error" data-testid="preview-error">
             {error}
@@ -349,14 +383,6 @@ export default function PreviewPage() {
         )}
         {estimate && <EstimateSummary estimate={estimate} />}
       </section>
-
-      <CharacterRosterPanel
-        bookId={bookId}
-        bookVersionId={book.data?.active_version_id ?? null}
-        chapterId={range.chapterId}
-        profileId={profileId}
-        onConfirmedChange={handleRosterConfirmedChange}
-      />
 
       {jobId && (
         <section className="card">

@@ -32,17 +32,13 @@ export function HealthBadge() {
   }
 
   return (
-    <dl className="ndr-health" data-testid="health-ok">
-      <dt>状态</dt>
-      <dd className="status status-ok">{health.data.status}</dd>
-      <dt>版本</dt>
-      <dd>{health.data.version}</dd>
-      <dt>数据库</dt>
-      <dd>
-        {health.data.database.state}
+    <div className="ndr-health-pill" data-testid="health-ok">
+      <span className="ndr-health-dot" aria-hidden="true" />
+      <span>
+        后端 {health.data.status} · v{health.data.version} · 数据库 {health.data.database.state}
         {health.data.database.detail ? ` — ${health.data.database.detail}` : ''}
-      </dd>
-    </dl>
+      </span>
+    </div>
   )
 }
 

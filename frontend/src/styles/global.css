@@ -7,6 +7,10 @@
   --ndr-ok: #1a7f37;
   --ndr-error: #b42318;
   --ndr-accent: #2f6feb;
+  --ndr-accent-strong: #1d55c4;
+  --ndr-panel: #f2f4f7;
+  --ndr-shadow: 0 1px 2px rgba(15, 18, 22, 0.06), 0 6px 20px rgba(15, 18, 22, 0.05);
+  --ndr-shadow-hover: 0 2px 6px rgba(15, 18, 22, 0.1), 0 12px 28px rgba(15, 18, 22, 0.09);
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
 }
 
@@ -20,6 +24,10 @@
     --ndr-ok: #4ac26b;
     --ndr-error: #ff8a80;
     --ndr-accent: #6ea8fe;
+    --ndr-accent-strong: #92bdff;
+    --ndr-panel: #262a30;
+    --ndr-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.35);
+    --ndr-shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.5), 0 14px 32px rgba(0, 0, 0, 0.45);
   }
 }
 
@@ -63,9 +71,10 @@ h3 {
 .card {
   background: var(--ndr-card);
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 18px 20px;
   margin-top: 16px;
+  box-shadow: var(--ndr-shadow);
 }
 
 dl {
@@ -97,12 +106,19 @@ dd {
 
 button {
   font: inherit;
-  padding: 6px 12px;
-  border-radius: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
   border: 1px solid var(--ndr-border);
   background: transparent;
   color: inherit;
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--ndr-accent);
+  color: var(--ndr-accent);
 }
 
 button:disabled {
@@ -143,9 +159,23 @@ a {
 }
 
 .ndr-primary {
+  background: var(--ndr-accent);
   border-color: var(--ndr-accent);
-  color: var(--ndr-accent);
+  color: #ffffff;
   font-weight: 600;
+}
+
+.ndr-primary:hover:not(:disabled) {
+  background: var(--ndr-accent-strong);
+  border-color: var(--ndr-accent-strong);
+  color: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ndr-primary,
+  .ndr-primary:hover:not(:disabled) {
+    color: #10131a;
+  }
 }
 
 /* ---------- 应用外壳 ---------- */
@@ -186,21 +216,69 @@ textarea:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--ndr-border);
-  padding-bottom: 12px;
+  padding-bottom: 16px;
+}
+
+.ndr-brand h1 {
+  font-size: 1.35rem;
+  letter-spacing: 0.01em;
+}
+
+.ndr-app-nav {
+  display: flex;
+  gap: 2px;
+  background: var(--ndr-card);
+  border: 1px solid var(--ndr-border);
+  border-radius: 999px;
+  padding: 3px;
 }
 
 .ndr-app-nav a {
-  margin-right: 12px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  color: var(--ndr-muted);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.92rem;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.ndr-health {
-  grid-template-columns: max-content 1fr;
-  font-size: 0.9rem;
-  margin: 0;
-  min-width: 240px;
+.ndr-app-nav a:hover {
+  color: var(--ndr-accent);
+}
+
+.ndr-app-nav a.active {
+  background: var(--ndr-accent);
+  color: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ndr-app-nav a.active {
+    color: #10131a;
+  }
+}
+
+.ndr-health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--ndr-muted);
+  background: var(--ndr-card);
+  border: 1px solid var(--ndr-border);
+  border-radius: 999px;
+  padding: 6px 14px;
+}
+
+.ndr-health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ndr-ok);
+  flex: none;
 }
 
 .ndr-health-error {
@@ -423,7 +501,7 @@ textarea:focus-visible {
     text-indent: 1.5em;
   }
 
-  .ndr-health {
+  .ndr-health-pill {
     min-width: 0;
   }
 }
@@ -594,8 +672,26 @@ textarea:focus-visible {
 
 /* ---------- 预览与按章处理页 ---------- */
 
+.ndr-preview-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .ndr-preview-nav a {
-  margin-left: 12px;
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid var(--ndr-border);
+  border-radius: 8px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.ndr-preview-nav a:hover {
+  border-color: var(--ndr-accent);
+  color: var(--ndr-accent);
 }
 
 .ndr-preview-controls {
@@ -968,4 +1064,62 @@ textarea:focus-visible {
 .ndr-character-card input[type='checkbox'],
 .ndr-character-card input[type='radio'] {
   width: auto;
+}
+
+/* ---------- 分步流程与页面视觉增强 ---------- */
+
+.ndr-step-heading {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.ndr-step-heading h3 {
+  font-size: 1.05rem;
+  margin: 3px 0 4px;
+}
+
+.ndr-step-heading .hint {
+  margin: 0;
+}
+
+.ndr-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--ndr-accent);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  flex: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ndr-step-badge {
+    color: #10131a;
+  }
+}
+
+.ndr-page-header {
+  border-top: 3px solid var(--ndr-accent);
+}
+
+.ndr-book-card {
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.ndr-book-card:hover {
+  box-shadow: var(--ndr-shadow-hover);
+  transform: translateY(-2px);
+}
+
+.ndr-quote-legend {
+  background: var(--ndr-panel);
+  border: 1px solid var(--ndr-border);
+  border-radius: 8px;
+  padding: 8px 12px;
 }

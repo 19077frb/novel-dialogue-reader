@@ -117,7 +117,7 @@ export default function ReviewPage() {
 
   return (
     <div className="ndr-page ndr-review">
-      <header className="ndr-reader-header card">
+      <header className="ndr-reader-header card ndr-page-header">
         <div>
           <h2>待确认队列：{book.data?.title ?? '载入中…'}</h2>
           <p className="hint">

@@ -230,7 +230,7 @@ export default function ReaderPage() {
 
   return (
     <div className="ndr-page ndr-reader">
-      <header className="ndr-reader-header card">
+      <header className="ndr-reader-header card ndr-page-header">
         <div>
           <h2>{book.data?.title ?? '载入中…'}</h2>
           <p className="hint">
