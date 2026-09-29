@@ -8,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { fetchBook, fetchChapters, fetchGaps, fetchQuotes, queryKeys } from '../api/books'
+import { fetchBook, fetchChapters, fetchGaps, queryKeys } from '../api/books'
 import { fetchReviewQueue, submitGapCorrection, type ReviewFilters } from '../api/review'
 import type {
   GapDecision,
@@ -62,11 +62,6 @@ export default function ReviewPage() {
     queryFn: ({ signal }) => fetchChapters(bookId as string, signal),
     enabled: Boolean(bookId),
   })
-  const quotes = useQuery({
-    queryKey: queryKeys.quotes(bookId ?? '', null),
-    queryFn: ({ signal }) => fetchQuotes(bookId as string, { limit: 500 }, signal),
-    enabled: Boolean(bookId),
-  })
   const gaps = useQuery({
     queryKey: ['gaps', bookId ?? ''],
     queryFn: ({ signal }) => fetchGaps(bookId as string, { limit: 200 }, signal),
@@ -89,11 +84,6 @@ export default function ReviewPage() {
     setPages((previous) => (cursor ? [...previous, queue.data] : [queue.data]))
   }, [queue.data, cursor])
 
-  const quoteText = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const item of quotes.data?.items ?? []) map.set(item.quote_id, item.delimited_text)
-    return map
-  }, [quotes.data])
   const gapById = useMemo(() => {
     const map = new Map<string, GapOut>()
     for (const item of gaps.data?.items ?? []) map.set(item.gap_id, item)
@@ -206,7 +196,7 @@ export default function ReviewPage() {
                   <span className="ndr-badge">{item.reason}</span>
                   <span className="ndr-badge">{item.queue_status}</span>
                   <span className="ndr-review-text">
-                    {quoteId ? quoteText.get(quoteId) ?? '（对白）' : gap?.narration ?? '（Gap）'}
+                    {item.target_text || gap?.narration || '原文暂不可用'}
                   </span>
                 </div>
                 <div className="ndr-review-item-actions">

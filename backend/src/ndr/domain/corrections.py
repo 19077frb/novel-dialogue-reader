@@ -216,6 +216,7 @@ class ReviewItemOut(ApiModel):
     target_type: ReviewTargetType
     quote_id: str | None = None
     gap_id: str | None = None
+    target_text: str = Field(default="", description="待确认目标对应的原文片段。")
     reason: ReviewReason
     queue_status: ReviewQueueStatus
     candidates: dict[str, Any] = Field(default_factory=dict)

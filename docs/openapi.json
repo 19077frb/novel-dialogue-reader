@@ -6613,6 +6613,12 @@
             ],
             "title": "Gap Id"
           },
+          "target_text": {
+            "type": "string",
+            "title": "Target Text",
+            "description": "待确认目标对应的原文片段。",
+            "default": ""
+          },
           "reason": {
             "$ref": "#/components/schemas/ReviewReason"
           },

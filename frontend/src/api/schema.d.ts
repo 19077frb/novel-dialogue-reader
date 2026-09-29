@@ -2444,6 +2444,12 @@ export interface components {
             quote_id?: string | null;
             /** Gap Id */
             gap_id?: string | null;
+            /**
+             * Target Text
+             * @description 待确认目标对应的原文片段。
+             * @default
+             */
+            target_text: string;
             reason: components["schemas"]["ReviewReason"];
             queue_status: components["schemas"]["ReviewQueueStatus"];
             /** Candidates */

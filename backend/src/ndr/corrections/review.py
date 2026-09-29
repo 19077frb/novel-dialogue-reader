@@ -69,12 +69,26 @@ def scene_ref_out(scene: Scene) -> dict[str, Any]:
     }
 
 
-def review_item_out(item: ReviewItem) -> ReviewItemOut:
+def review_target_text(session: Session, item: ReviewItem, canonical_text: str) -> str:
+    """返回队列目标的原文；不依赖前端另行分页加载候选列表。"""
+
+    target = (
+        session.get(Quote, item.quote_id)
+        if item.quote_id
+        else session.get(Gap, item.gap_id) if item.gap_id else None
+    )
+    if target is None:
+        return ""
+    return canonical_text[target.start_cp : target.end_cp]
+
+
+def review_item_out(item: ReviewItem, *, target_text: str = "") -> ReviewItemOut:
     return ReviewItemOut(
         id=item.id,
         target_type=item.target_type,
         quote_id=item.quote_id,
         gap_id=item.gap_id,
+        target_text=target_text,
         reason=item.reason,
         queue_status=item.queue_status,
         candidates=load_json(item.candidates_json, {}),
@@ -120,6 +134,7 @@ def list_review_items(
     queue_status: ReviewQueueStatus | None = None,
     limit: int = 100,
     cursor: str | None = None,
+    canonical_text: str = "",
 ) -> tuple[list[ReviewItemOut], str | None]:
     from ..api.pagination import decode_cursor, encode_cursor
 
@@ -147,7 +162,10 @@ def list_review_items(
     rows = list(session.execute(stmt).scalars())
     has_more = len(rows) > limit
     rows = rows[:limit]
-    items = [review_item_out(row) for row in rows]
+    items = [
+        review_item_out(row, target_text=review_target_text(session, row, canonical_text))
+        for row in rows
+    ]
     next_cursor = encode_cursor([rows[-1].id]) if has_more and rows else None
     return items, next_cursor
 
@@ -175,7 +193,9 @@ def review_item_detail(
             context_after = canonical_text[gap.end_cp : gap.end_cp + 120]
     label_map = label_map_for_scene(session, scene.id) if scene is not None else {}
     return ReviewItemDetailOut(
-        item=review_item_out(item),
+        item=review_item_out(
+            item, target_text=review_target_text(session, item, canonical_text)
+        ),
         annotation=annotation_out(annotation, label_map) if annotation is not None else None,
         scene=scene_ref_out(scene) if scene is not None else None,
         context_before=context_before,

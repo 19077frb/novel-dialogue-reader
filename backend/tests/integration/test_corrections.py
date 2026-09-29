@@ -154,6 +154,9 @@ def test_quote_detail_and_review_flag_work_for_unprocessed_quote(
     assert queue["counts"]["total"] >= 1
     assert queue["counts"]["by_status"]["DEFERRED"] >= 1
     assert item["id"] in {row["id"] for row in queue["items"]}
+    queued_item = next(row for row in queue["items"] if row["id"] == item["id"])
+    assert queued_item["target_text"].startswith(("「", "『", '"'))
+    assert queued_item["target_text"] != "（对白）"
 
     detail_item = fake_provider_client.get(f"/api/review-items/{item['id']}").json()["data"]
     assert detail_item["item"]["id"] == item["id"]

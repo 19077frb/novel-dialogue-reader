@@ -107,7 +107,9 @@ def list_review_items_route(
     cursor: str | None = Query(default=None),
     session: Session = Depends(get_session),
 ) -> DataEnvelope[ReviewQueueResponse]:
+    settings = request.app.state.settings
     _, version = _active_version_or_409(session, book_id)
+    canonical_text = load_canonical_text(settings, version)
     items, next_cursor = list_review_items(
         session,
         book_version_id=version.id,
@@ -117,6 +119,7 @@ def list_review_items_route(
         queue_status=queue_status,
         limit=parse_limit(limit, default=50, maximum=200),
         cursor=cursor,
+        canonical_text=canonical_text,
     )
     payload = ReviewQueueResponse(
         items=items, next_cursor=next_cursor, counts=review_counts(session, version.id)
