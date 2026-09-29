@@ -1139,6 +1139,86 @@ textarea:focus-visible {
   margin: 0;
 }
 
+.ndr-batch-progress .ndr-step-heading {
+  justify-content: space-between;
+}
+
+.ndr-batch-progress .ndr-danger {
+  color: var(--ndr-error);
+  border-color: var(--ndr-error);
+}
+
+.ndr-batch-progress-summary {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ndr-batch-progress-summary progress {
+  width: 100%;
+  height: 12px;
+}
+
+.ndr-table-wrap {
+  overflow-x: auto;
+}
+
+.ndr-batch-task-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.ndr-batch-task-table th,
+.ndr-batch-task-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--ndr-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ndr-batch-task-table tbody tr[data-task-state='running'] {
+  background: color-mix(in srgb, var(--ndr-accent) 10%, transparent);
+}
+
+.ndr-batch-task-table small {
+  display: block;
+  margin-top: 4px;
+}
+
+.ndr-task-state {
+  display: inline-block;
+  min-width: 4.2em;
+  padding: 2px 7px;
+  border: 1px solid var(--ndr-border);
+  border-radius: 999px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ndr-task-running {
+  color: #9a5a00;
+  border-color: #d9972d;
+}
+
+.ndr-task-completed {
+  color: #16803a;
+  border-color: #42a866;
+}
+
+.ndr-task-failed,
+.ndr-task-cancelled {
+  color: var(--ndr-error);
+}
+
+@media (max-width: 640px) {
+  .ndr-batch-progress-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
 .ndr-step-badge {
   display: inline-flex;
   align-items: center;

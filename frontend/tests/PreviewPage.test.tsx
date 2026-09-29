@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -405,8 +405,7 @@ describe('PreviewPage', () => {
     await userEvent.click(screen.getByTestId('preview-estimate'))
     await screen.findByTestId('window-picker')
 
-    await userEvent.clear(screen.getByTestId('preview-concurrency'))
-    await userEvent.type(screen.getByTestId('preview-concurrency'), '2')
+    fireEvent.change(screen.getByTestId('preview-concurrency'), { target: { value: '2' } })
     await userEvent.click(screen.getByTestId('preview-process'))
 
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
@@ -463,8 +462,7 @@ describe('PreviewPage', () => {
 
     await userEvent.clear(screen.getByTestId('batch-max-rechecks'))
     await userEvent.type(screen.getByTestId('batch-max-rechecks'), '2')
-    await userEvent.clear(screen.getByTestId('batch-concurrency'))
-    await userEvent.type(screen.getByTestId('batch-concurrency'), '1')
+    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '1' } })
 
     await userEvent.type(screen.getByTestId('batch-token-limit'), '50000')
     await userEvent.click(screen.getByTestId('batch-run'))
@@ -523,6 +521,46 @@ describe('PreviewPage', () => {
     const firstWindowOrder = vi.mocked(jobsApi.createJob).mock.invocationCallOrder[0]
     expect(secondRosterOrder).toBeLessThan(firstWindowOrder)
     await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'))
+  })
+
+  it('批量运行时切换为逐任务进度面板，停止后不再派发排队窗口', async () => {
+    const meteredJob = {
+      ...JOB,
+      unknown_usage_runs: 0,
+      usage: { input_tokens: 30, output_tokens: 10, total_tokens: 40, unknown_runs: 0 },
+    } as JobDetailOut
+    let resolveWindow!: (job: JobDetailOut) => void
+    vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(meteredJob)
+    vi.mocked(jobsApi.createJob).mockImplementation(
+      () => new Promise<JobDetailOut>((resolve) => { resolveWindow = resolve }),
+    )
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await screen.findByTestId('batch-processor')
+    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '1' } })
+
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await screen.findByTestId('batch-estimate')
+    await userEvent.click(screen.getByTestId('batch-run'))
+
+    const panel = await screen.findByTestId('batch-progress-panel')
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(1))
+    expect(within(panel).getByText('人物识别')).toBeInTheDocument()
+    expect(within(panel).getAllByText('对白归属')).toHaveLength(2)
+    expect(within(panel).getByText('窗口 1 · 1 句对白')).toBeInTheDocument()
+    expect(within(panel).getByText('窗口 2 · 2 句对白')).toBeInTheDocument()
+    expect(screen.getByTestId('processing-mode-single')).toBeDisabled()
+    expect(screen.queryByTestId('batch-run')).not.toBeInTheDocument()
+
+    await userEvent.click(within(panel).getByTestId('batch-stop'))
+    expect(within(panel).getByTestId('batch-progress-message')).toHaveTextContent('正在安全停止')
+    expect(within(panel).getByTestId('batch-stop')).toBeDisabled()
+    expect(within(panel).getByText('已停止')).toBeInTheDocument()
+
+    resolveWindow(meteredJob)
+    await waitFor(() => expect(screen.queryByTestId('batch-progress-panel')).not.toBeInTheDocument())
+    expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('batch-error')).toHaveTextContent('批量处理已停止')
   })
 
   it('批量处理会跳过回导后标记为已处理的章节', async () => {

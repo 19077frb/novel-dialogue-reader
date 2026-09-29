@@ -22,7 +22,7 @@ import {
 import { fetchProfiles, profileKeys } from '../api/profiles'
 import type { AnnotationItemOut, EstimateOut, JobDetailOut } from '../api/types'
 import { BudgetForm } from '../components/BudgetForm'
-import { BatchProcessor } from '../components/BatchProcessor'
+import { BatchProcessor, useBatchProgress } from '../components/BatchProcessor'
 import { CharacterRosterPanel } from '../components/CharacterRosterPanel'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
@@ -71,6 +71,7 @@ export default function PreviewPage() {
   const [error, setError] = useState<string | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
   const [rosterConfirmed, setRosterConfirmed] = useState(false)
+  const batchProgress = useBatchProgress(bookId)
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -337,6 +338,7 @@ export default function PreviewPage() {
               type="radio"
               name="processing-mode"
               checked={processingMode === 'single'}
+              disabled={batchProgress.running || jobMutation.isPending}
               onChange={() => setProcessingMode('single')}
               data-testid="processing-mode-single"
             />
@@ -347,6 +349,7 @@ export default function PreviewPage() {
               type="radio"
               name="processing-mode"
               checked={processingMode === 'batch'}
+              disabled={batchProgress.running || jobMutation.isPending}
               onChange={() => setProcessingMode('batch')}
               data-testid="processing-mode-batch"
             />
@@ -355,7 +358,7 @@ export default function PreviewPage() {
         </div>
       </section>
 
-      {processingMode === 'single' && (
+      {processingMode === 'single' && !batchProgress.running && (
         <>
 
       <section className="card ndr-preview-controls ndr-step-card">
@@ -536,7 +539,7 @@ export default function PreviewPage() {
         </>
       )}
 
-      {processingMode === 'batch' && (
+      {(processingMode === 'batch' || batchProgress.running) && (
         <BatchProcessor
           bookId={bookId}
           bookVersionId={book.data?.active_version_id}
