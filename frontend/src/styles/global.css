@@ -460,6 +460,27 @@ textarea:focus-visible {
   overflow-y: auto;
 }
 
+.ndr-window-picker {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ndr-window-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--ndr-border);
+  border-radius: 8px;
+}
+
+.ndr-window-option small {
+  display: block;
+  margin-top: 4px;
+  color: var(--ndr-muted);
+}
+
 .ndr-chapter-heading {
   font-size: 1.2rem;
   margin: 0 0 12px;

@@ -4468,6 +4468,14 @@
             },
             "type": "array",
             "title": "Notes"
+          },
+          "windows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Windows"
           }
         },
         "additionalProperties": false,
@@ -5109,6 +5117,22 @@
             "type": "object",
             "title": "Range",
             "description": "{start_cp, end_cp, chapter_id?}"
+          },
+          "selected_window_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Window Ids",
+            "description": "只处理预估阶段选中的窗口；null 表示全部窗口"
           },
           "profile_id": {
             "anyOf": [

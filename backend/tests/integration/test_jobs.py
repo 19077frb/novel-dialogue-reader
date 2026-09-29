@@ -445,7 +445,9 @@ def test_pause_marks_paused_between_windows(
     assert adapter.calls == []
 
 
-def test_estimate_endpoint_is_local_only(fake_provider_client: TestClient) -> None:
+def test_estimate_endpoint_is_local_only(
+    fake_provider_client: TestClient, migrated_settings: Settings
+) -> None:
     data = _import(fake_provider_client)
     response = fake_provider_client.post(
         f"/api/books/{data['book_id']}/estimates",
@@ -456,7 +458,21 @@ def test_estimate_endpoint_is_local_only(fake_provider_client: TestClient) -> No
     assert payload["window_count"] >= 1
     assert payload["target_count"] >= 4
     assert payload["total_tokens"] > 0
+    assert len(payload["windows"]) == payload["window_count"]
+    assert payload["windows"][0]["target_count"] > 0
+    assert payload["windows"][0]["estimated_tokens"] > 0
+    assert payload["windows"][0]["preview"]
     assert payload["estimator"]["method"] == "heuristic-cjk"
     assert any("启发式" in note for note in payload["notes"])
-    # 估算不产生任务与推理尝试
+    profile_id = _fake_profile(fake_provider_client, "窗口选择测试")
+    selected = _create_job(
+        fake_provider_client,
+        data["book_id"],
+        profile_id,
+        key="selected-window",
+        selected_window_ids=[payload["windows"][0]["window_id"]],
+    )
+    outcome = _run_with_fake(migrated_settings, selected["id"], FakeProviderAdapter())
+    assert outcome.windows_total == 1
+    # 未知任务仍保持标准 404 契约。
     assert fake_provider_client.get("/api/jobs/does-not-exist").status_code == 404

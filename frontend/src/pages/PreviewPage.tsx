@@ -54,6 +54,7 @@ export default function PreviewPage() {
   const [profileId, setProfileId] = useState('')
   const [viewMode, setViewMode] = useState<'annotated' | 'original'>('annotated')
   const [estimate, setEstimate] = useState<EstimateOut | null>(null)
+  const [selectedWindowIds, setSelectedWindowIds] = useState<string[]>([])
   const [jobId, setJobId] = useState<string | null>(null)
   const [currentJob, setCurrentJob] = useState<JobDetailOut | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -164,6 +165,9 @@ export default function PreviewPage() {
       }),
     onSuccess: (data) => {
       setEstimate(data)
+      setSelectedWindowIds(
+        (data.windows ?? []).map((window) => String(window.window_id)),
+      )
       setError(null)
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : '估算失败'),
@@ -176,6 +180,8 @@ export default function PreviewPage() {
         mode,
         bookVersionId: book.data?.active_version_id ?? null,
         range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
+        selectedWindowIds:
+          range.chapterId && estimate?.windows?.length ? selectedWindowIds : null,
         profileId: profileId || null,
         readingMode: PROCESSING_READING_MODE,
         visibleHorizonCp: null,
@@ -191,6 +197,7 @@ export default function PreviewPage() {
             end: resolvedEnd,
             profileId,
             budget,
+            selectedWindowIds,
           }),
         ),
         runNow: true,
@@ -241,6 +248,9 @@ export default function PreviewPage() {
   if (!rangeValid) runBlockers.push('处理范围无效')
   if (profileId === '') runBlockers.push('未选择模型配置（见第一步）')
   if (rosterRequired && !rosterConfirmed) runBlockers.push('尚未确认本章人物（见第二步）')
+  if (range.chapterId && estimate?.windows?.length && selectedWindowIds.length === 0) {
+    runBlockers.push('尚未选择要处理的窗口')
+  }
   const runDisabled = runBlockers.length > 0 || jobMutation.isPending
 
   if (!bookId) return <p className="status-error">缺少书籍 ID。</p>
@@ -282,6 +292,7 @@ export default function PreviewPage() {
           onChange={(next) => {
             setRange(next)
             setEstimate(null)
+            setSelectedWindowIds([])
             setNotice(null)
           }}
         />
@@ -384,6 +395,37 @@ export default function PreviewPage() {
           </p>
         )}
         {estimate && <EstimateSummary estimate={estimate} />}
+        {range.chapterId && (estimate?.windows?.length ?? 0) > 0 && (
+          <fieldset className="ndr-window-picker" data-testid="window-picker">
+            <legend>选择要处理的窗口（可多选）</legend>
+            <p className="hint">人物识别仍会读取本章全文；这里只限制对白归属窗口。</p>
+            {(estimate?.windows ?? []).map((window) => {
+              const windowId = String(window.window_id)
+              const checked = selectedWindowIds.includes(windowId)
+              return (
+                <label key={windowId} className="ndr-window-option">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) =>
+                      setSelectedWindowIds((current) =>
+                        event.target.checked
+                          ? [...current, windowId]
+                          : current.filter((item) => item !== windowId),
+                      )
+                    }
+                    data-testid={`window-${windowId}`}
+                  />
+                  <span>
+                    窗口 {String(window.ordinal)} · {String(window.target_count)} 句对白 · 约{' '}
+                    {Number(window.estimated_tokens).toLocaleString()} tokens
+                    <small>{String(window.preview || '（无文本预览）')}</small>
+                  </span>
+                </label>
+              )
+            })}
+          </fieldset>
+        )}
       </section>
 
       {jobId && (

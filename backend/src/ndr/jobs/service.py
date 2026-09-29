@@ -28,8 +28,17 @@ from ..domain.enums import (
     ReadingMode,
 )
 from ..domain.jobs import JobDetailOut, JobWindowOut
+from ..ingest.query import load_canonical_text
 from ..storage.cache import fingerprint
-from ..storage.models import Book, BookVersion, InferenceRun, Job, JobWindow, ModelProfile
+from ..storage.models import (
+    Book,
+    BookVersion,
+    InferenceRun,
+    Job,
+    JobWindow,
+    ModelProfile,
+    Quote,
+)
 
 
 @dataclass(frozen=True)
@@ -42,6 +51,7 @@ class JobEstimate:
     estimator: dict[str, Any]
     policy: dict[str, Any]
     notes: list[str]
+    windows: list[dict[str, Any]]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -53,6 +63,7 @@ class JobEstimate:
             "estimator": self.estimator,
             "policy": self.policy,
             "notes": list(self.notes),
+            "windows": self.windows,
         }
 
 
@@ -94,6 +105,33 @@ def estimate_inference(
     ]
     if plan.stats.get("oversized_targets"):
         notes.append(f"其中 {plan.stats['oversized_targets']} 条目标超长，会单独成窗口或保留待定。")
+    target_ids = [quote_id for window in plan.windows for quote_id in window.target_quote_ids]
+    quote_positions = {
+        row.id: (row.start_cp, row.end_cp)
+        for row in session.execute(select(Quote).where(Quote.id.in_(target_ids or [""]))).scalars()
+    }
+    canonical = load_canonical_text(settings, version)
+    windows: list[dict[str, Any]] = []
+    for index, window in enumerate(plan.windows):
+        positions = [
+            quote_positions[item]
+            for item in window.target_quote_ids
+            if item in quote_positions
+        ]
+        window_start = min((item[0] for item in positions), default=start_cp)
+        window_end = max((item[1] for item in positions), default=window_start)
+        windows.append(
+            {
+                "window_id": window.window_id,
+                "ordinal": index + 1,
+                "start_cp": window_start,
+                "end_cp": window_end,
+                "target_count": len(window.target_quote_ids),
+                "estimated_tokens": int(window.budget["total_tokens"])
+                + len(window.target_quote_ids) * output_tokens_per_target,
+                "preview": canonical[window_start : min(window_end, window_start + 160)].strip(),
+            }
+        )
     return JobEstimate(
         window_count=len(plan.windows),
         target_count=targets,
@@ -103,6 +141,7 @@ def estimate_inference(
         estimator=plan.windows[0].budget["estimator"] if plan.windows else {},
         policy=resolved_policy.as_key(),
         notes=notes,
+        windows=windows,
     )
 
 

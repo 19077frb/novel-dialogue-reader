@@ -219,6 +219,26 @@ const ESTIMATE = {
   estimator: {},
   policy: {},
   notes: ['本地启发式'],
+  windows: [
+    {
+      window_id: 'w1',
+      ordinal: 1,
+      start_cp: 0,
+      end_cp: 8,
+      target_count: 1,
+      estimated_tokens: 620,
+      preview: '「雨停了。」',
+    },
+    {
+      window_id: 'w2',
+      ordinal: 2,
+      start_cp: 8,
+      end_cp: 20,
+      target_count: 2,
+      estimated_tokens: 640,
+      preview: '少女说。',
+    },
+  ],
 } as EstimateOut
 
 const JOB = {
@@ -351,6 +371,8 @@ describe('PreviewPage', () => {
     await waitFor(() => expect(jobsApi.estimateRange).toHaveBeenCalledTimes(1))
     expect(await screen.findByTestId('estimate-summary')).toHaveTextContent('1260 token')
     expect(await screen.findByTestId('estimate-windows')).toHaveTextContent('2')
+    expect(screen.getByTestId('window-picker')).toHaveTextContent('窗口 1')
+    await userEvent.click(screen.getByTestId('window-w2'))
 
     await userEvent.click(screen.getByTestId('preview-run'))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(1))
@@ -358,6 +380,7 @@ describe('PreviewPage', () => {
       bookId: 'b1',
       mode: 'preview',
       readingMode: 'reread',
+      selectedWindowIds: ['w1'],
     })
     expect(await screen.findByTestId('job-panel')).toBeInTheDocument()
     expect(screen.getByTestId('job-state')).toHaveTextContent('COMPLETED')

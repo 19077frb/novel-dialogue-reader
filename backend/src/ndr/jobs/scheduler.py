@@ -251,7 +251,7 @@ def _plan(
     policy: BudgetPolicy,
 ):  # noqa: ANN202
     payload = _range_of(job)
-    return plan_range(
+    plan = plan_range(
         session,
         settings,
         version,
@@ -261,6 +261,14 @@ def _plan(
         visible_horizon_cp=payload.get("visible_horizon_cp"),
         policy=policy,
     )
+    selected = payload.get("selected_window_ids")
+    if isinstance(selected, list):
+        selected_ids = {str(item) for item in selected}
+        plan = replace(
+            plan,
+            windows=tuple(window for window in plan.windows if window.window_id in selected_ids),
+        )
+    return plan
 
 
 def ensure_windows(

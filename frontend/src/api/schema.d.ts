@@ -1572,6 +1572,10 @@ export interface components {
             };
             /** Notes */
             notes?: string[];
+            /** Windows */
+            windows?: {
+                [key: string]: unknown;
+            }[];
         };
         /** ExportArtifactOut */
         ExportArtifactOut: {
@@ -1821,6 +1825,11 @@ export interface components {
             range?: {
                 [key: string]: unknown;
             };
+            /**
+             * Selected Window Ids
+             * @description 只处理预估阶段选中的窗口；null 表示全部窗口
+             */
+            selected_window_ids?: string[] | null;
             /** Profile Id */
             profile_id?: string | null;
             /** @default initial */

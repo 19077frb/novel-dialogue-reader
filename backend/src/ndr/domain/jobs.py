@@ -24,6 +24,11 @@ class JobCreate(ApiModel):
     range: dict[str, Any] = Field(
         default_factory=dict, description="{start_cp, end_cp, chapter_id?}"
     )
+    selected_window_ids: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        description="只处理预估阶段选中的窗口；null 表示全部窗口",
+    )
     profile_id: str | None = None
     reading_mode: ReadingMode = ReadingMode.INITIAL
     visible_horizon_cp: int | None = Field(default=None, ge=0)
@@ -80,6 +85,7 @@ class EstimateOut(ApiModel):
     estimator: dict[str, Any] = Field(default_factory=dict)
     policy: dict[str, Any] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
+    windows: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class UsageOut(ApiModel):

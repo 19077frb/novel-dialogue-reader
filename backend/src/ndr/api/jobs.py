@@ -73,7 +73,10 @@ def create_job_route(
             version=version,
             profile=profile,
             purpose=payload.mode,
-            range_payload=dict(payload.range),
+            range_payload={
+                **dict(payload.range),
+                "selected_window_ids": payload.selected_window_ids,
+            },
             budget=payload.budget.model_dump(),
             idempotency_key=payload.idempotency_key,
             reading_mode=payload.reading_mode,
