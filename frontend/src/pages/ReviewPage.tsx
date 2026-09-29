@@ -13,6 +13,7 @@ import { fetchReviewQueue, submitGapCorrection, type ReviewFilters } from '../ap
 import type {
   GapDecision,
   GapOut,
+  ReviewItemOut,
   ReviewQueueStatus,
   ReviewReason,
   ReviewQueueResponse,
@@ -30,6 +31,47 @@ const REASONS: ReviewReason[] = [
   'USER_FLAGGED',
   'OTHER',
 ]
+
+const REASON_LABELS: Record<ReviewReason, string> = {
+  LOW_CONFIDENCE: '置信度低',
+  AMBIGUOUS_SPEAKER: '说话人有歧义',
+  UNKNOWN_SPEAKER: '无法确定说话人',
+  POSSIBLE_NEW_SPEAKER: '可能是新说话人',
+  SCENE_BOUNDARY: '场景边界待确认',
+  STALE_DEPENDENCY: '上游修改后需重新确认',
+  USER_FLAGGED: '用户标记',
+  OTHER: '其他',
+}
+
+const STATUS_LABELS: Record<ReviewQueueStatus, string> = {
+  PENDING: '待确认',
+  DEFERRED: '已延后',
+  RESOLVED: '已解决',
+}
+
+interface GroupedReviewItem {
+  item: ReviewItemOut
+  reasons: ReviewReason[]
+  statuses: ReviewQueueStatus[]
+}
+
+function groupReviewItems(items: ReviewItemOut[]): GroupedReviewItem[] {
+  const grouped = new Map<string, GroupedReviewItem>()
+  for (const item of items) {
+    const key = item.quote_id ? `quote:${item.quote_id}` : item.gap_id ? `gap:${item.gap_id}` : item.id
+    const existing = grouped.get(key)
+    if (!existing) {
+      grouped.set(key, { item, reasons: [item.reason], statuses: [item.queue_status] })
+      continue
+    }
+    if (!existing.reasons.includes(item.reason)) existing.reasons.push(item.reason)
+    if (!existing.statuses.includes(item.queue_status)) existing.statuses.push(item.queue_status)
+    if (item.queue_status === 'PENDING' && existing.item.queue_status !== 'PENDING') {
+      existing.item = item
+    }
+  }
+  return [...grouped.values()]
+}
 
 export default function ReviewPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -91,6 +133,7 @@ export default function ReviewPage() {
   }, [gaps.data])
 
   const items = pages.flatMap((page) => page.items ?? [])
+  const groupedItems = groupReviewItems(items)
   const counts = pages[0]?.counts
 
   const decision = useMutation({
@@ -148,7 +191,7 @@ export default function ReviewPage() {
             <option value="">全部原因</option>
             {REASONS.map((value) => (
               <option key={value} value={value}>
-                {value}
+                {REASON_LABELS[value]}
               </option>
             ))}
           </select>
@@ -168,9 +211,9 @@ export default function ReviewPage() {
         </label>
         {counts && (
           <p className="hint" data-testid="review-counts">
-            共 {counts.total} 项：
+            共 {counts.total} 个原因记录：
             {Object.entries(counts.by_status ?? {})
-              .map(([key, value]) => `${key} ${value}`)
+              .map(([key, value]) => `${STATUS_LABELS[key as ReviewQueueStatus] ?? key} ${value}`)
               .join(' · ')}
           </p>
         )}
@@ -186,15 +229,23 @@ export default function ReviewPage() {
           </p>
         )}
         <ul className="ndr-review-list" data-testid="review-list">
-          {items.map((item) => {
+          {groupedItems.map(({ item, reasons, statuses }) => {
             const quoteId = item.quote_id
             const gap = item.gap_id ? gapById.get(item.gap_id) : undefined
             return (
               <li key={item.id} data-testid="review-item" data-review-id={item.id}>
                 <div className="ndr-review-item-main">
-                  <span className="ndr-badge">{item.target_type}</span>
-                  <span className="ndr-badge">{item.reason}</span>
-                  <span className="ndr-badge">{item.queue_status}</span>
+                  <span className="ndr-badge">{quoteId ? '对白' : '场景边界'}</span>
+                  {reasons.map((value) => (
+                    <span className="ndr-badge" key={value}>
+                      原因：{REASON_LABELS[value]}
+                    </span>
+                  ))}
+                  {statuses.map((value) => (
+                    <span className="ndr-badge" key={value}>
+                      {STATUS_LABELS[value]}
+                    </span>
+                  ))}
                   <span className="ndr-review-text">
                     {item.target_text || gap?.narration || '原文暂不可用'}
                   </span>

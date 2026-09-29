@@ -95,6 +95,21 @@ const QUEUE = {
       updated_at: '2026-09-28T00:00:00+00:00',
     },
     {
+      id: 'r1b',
+      target_type: 'quote',
+      quote_id: 'q1',
+      gap_id: null,
+      target_text: '「雨停了。」',
+      reason: 'AMBIGUOUS_SPEAKER',
+      queue_status: 'PENDING',
+      candidates: {},
+      annotation_version: 2,
+      resolved_by_correction_id: null,
+      version: 1,
+      created_at: '2026-09-28T00:00:00+00:00',
+      updated_at: '2026-09-28T00:00:00+00:00',
+    },
+    {
       id: 'r2',
       target_type: 'gap',
       quote_id: null,
@@ -112,9 +127,9 @@ const QUEUE = {
   ],
   next_cursor: null,
   counts: {
-    total: 2,
-    by_status: { PENDING: 2 },
-    by_reason: { LOW_CONFIDENCE: 1, SCENE_BOUNDARY: 1 },
+    total: 3,
+    by_status: { PENDING: 3 },
+    by_reason: { LOW_CONFIDENCE: 1, AMBIGUOUS_SPEAKER: 1, SCENE_BOUNDARY: 1 },
   },
 } as never
 
@@ -180,11 +195,14 @@ describe('ReviewPage', () => {
 
     const rows = await screen.findAllByTestId('review-item')
     expect(rows).toHaveLength(2)
-    expect(rows[0]).toHaveTextContent('LOW_CONFIDENCE')
     expect(rows[0]).toHaveTextContent('「雨停了。」')
+    expect(rows[0]).toHaveTextContent('原因：置信度低')
+    expect(rows[0]).toHaveTextContent('原因：说话人有歧义')
+    expect(screen.getAllByText('「雨停了。」')).toHaveLength(1)
     expect(rows[1]).toHaveTextContent('少女合上伞。')
-    expect(screen.getByTestId('review-counts')).toHaveTextContent('共 2 项')
-    expect(screen.getByTestId('review-counts')).toHaveTextContent('PENDING 2')
+    expect(rows[1]).toHaveTextContent('原因：场景边界待确认')
+    expect(screen.getByTestId('review-counts')).toHaveTextContent('共 3 个原因记录')
+    expect(screen.getByTestId('review-counts')).toHaveTextContent('待确认 3')
   })
 
   it('空队列明确说明「不等于全部识别正确」', async () => {
