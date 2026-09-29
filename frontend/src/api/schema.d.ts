@@ -1036,6 +1036,11 @@ export interface components {
             end_cp: number;
             /** Source Href */
             source_href?: string | null;
+            /**
+             * Dialogue Processed
+             * @default false
+             */
+            dialogue_processed: boolean;
         };
         /** ChapterRosterOut */
         ChapterRosterOut: {

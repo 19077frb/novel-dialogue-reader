@@ -24,7 +24,7 @@ from ..domain.documents import (
     ContentResponse,
     JobOut,
 )
-from ..domain.enums import ErrorCode
+from ..domain.enums import ErrorCode, JobKind, JobState
 from ..storage.models import Book, BookVersion, Chapter, ContentNode, Job
 from ..storage.paths import resolve_within
 
@@ -94,9 +94,10 @@ def list_books(
 
 
 def list_chapters(session: Session, version_id: str) -> list[ChapterOut]:
-    rows = session.execute(
+    rows = list(session.execute(
         select(Chapter).where(Chapter.book_version_id == version_id).order_by(Chapter.ordinal)
-    ).scalars()
+    ).scalars())
+    processed = processed_chapter_ids(session, version_id)
     return [
         ChapterOut(
             id=row.id,
@@ -105,9 +106,41 @@ def list_chapters(session: Session, version_id: str) -> list[ChapterOut]:
             start_cp=row.start_cp,
             end_cp=row.end_cp,
             source_href=row.source_href,
+            dialogue_processed=row.id in processed,
         )
         for row in rows
     ]
+
+
+def processed_chapter_ids(session: Session, version_id: str) -> set[str]:
+    """返回已完整处理的章节，兼容新状态位和升级前已完成的整章任务。"""
+
+    chapter_ids = {
+        row.id
+        for row in session.execute(
+            select(Chapter).where(
+                Chapter.book_version_id == version_id,
+                Chapter.dialogue_processed.is_(True),
+            )
+        ).scalars()
+    }
+    jobs = session.execute(
+        select(Job).where(
+            Job.book_version_id == version_id,
+            Job.kind == JobKind.INFERENCE,
+            Job.state == JobState.COMPLETED,
+        )
+    ).scalars()
+    for job in jobs:
+        try:
+            job_range = json.loads(job.range_json or "{}")
+        except json.JSONDecodeError:
+            continue
+        chapter_id = job_range.get("chapter_id")
+        selected_windows = job_range.get("selected_window_ids")
+        if chapter_id and not selected_windows:
+            chapter_ids.add(str(chapter_id))
+    return chapter_ids
 
 
 # canonical 文本按文件身份（路径 + mtime + 大小）做进程内缓存：导出/估算会反复读取。

@@ -65,15 +65,27 @@ def restore_annotations_from_manifest(
         if isinstance(row, dict) and row.get("key")
     }
     entries = [row for row in manifest.get("annotations", []) or [] if isinstance(row, dict)]
-    if not entries:
-        return {"restored": 0, "unmatched": len(entries), "speakers": len(speakers)}
-
     chapters = list(
         session.execute(
             select(Chapter).where(Chapter.book_version_id == version.id).order_by(Chapter.ordinal)
         ).scalars()
     )
     binding = _bind_chapters(chapters, manifest.get("chapter_titles", []) or [])
+    processed_count = 0
+    for raw_index in manifest.get("processed_chapter_indices", []) or []:
+        if not isinstance(raw_index, int):
+            continue
+        chapter = binding.get(raw_index)
+        if chapter is not None and not chapter.dialogue_processed:
+            chapter.dialogue_processed = True
+            processed_count += 1
+    if not entries:
+        return {
+            "restored": 0,
+            "unmatched": 0,
+            "speakers": len(speakers),
+            "processed_chapters": processed_count,
+        }
 
     quotes_by_chapter: dict[str, list[tuple[Quote, str]]] = {}
     top_level = list(
@@ -151,7 +163,12 @@ def restore_annotations_from_manifest(
         scene.start_cp = start
         scene.end_cp = end
     session.flush()
-    return {"restored": restored, "unmatched": unmatched, "speakers": len(speakers)}
+    return {
+        "restored": restored,
+        "unmatched": unmatched,
+        "speakers": len(speakers),
+        "processed_chapters": processed_count,
+    }
 
 
 def _bind_chapters(chapters: list, manifest_titles: list) -> dict[int, Any]:  # noqa: ANN001

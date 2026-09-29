@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..api.errors import ApiError
 from ..domain.enums import ExportFormat, ExportStylePreset, JobKind, JobState
-from ..ingest.query import load_canonical_text
+from ..ingest.query import load_canonical_text, processed_chapter_ids
 from ..ingest.resources import read_resource_bytes
 from ..storage.cache import fingerprint
 from ..storage.models import (
@@ -193,11 +193,17 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
         fmt = artifact.format
         annotations_manifest = None
         if fmt is ExportFormat.EPUB:
+            processed_ids = processed_chapter_ids(session, version.id)
             annotations_manifest = build_annotations_manifest(
                 projection_payload=payload,
                 rendered=rendered,
                 canonical_text=load_canonical_text(settings, version),
                 style=style,
+                processed_chapter_indices=[
+                    index
+                    for index, chapter in enumerate(rendered.chapters)
+                    if chapter.chapter_id in processed_ids
+                ],
             )
 
     out_dir = export_dir(settings, artifact_id)

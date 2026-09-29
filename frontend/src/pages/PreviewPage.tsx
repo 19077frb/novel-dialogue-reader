@@ -328,6 +328,7 @@ export default function PreviewPage() {
         profileId={profileId}
         onFinished={() => {
           void queryClient.invalidateQueries({ queryKey: ['annotations'] })
+          void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })
           void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId) })
         }}
       />

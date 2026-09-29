@@ -26,4 +26,21 @@ describe('ChapterNavigation', () => {
     expect(screen.getByRole('button', { name: /第二章/ })).toHaveAttribute('data-processing-state', 'processing')
     expect(screen.getByRole('button', { name: /第三章/ })).toHaveAttribute('data-processing-state', 'unprocessed')
   })
+
+  it('没有实时批次状态时使用后端保存的章节状态', () => {
+    const chapters = CHAPTERS.map((chapter) => ({
+      ...chapter,
+      dialogue_processed: chapter.id === 'c3',
+    }))
+    render(
+      <ChapterNavigation
+        chapters={chapters}
+        activeChapterId={null}
+        onSelect={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /第一章/ })).toHaveAttribute('data-processing-state', 'unprocessed')
+    expect(screen.getByRole('button', { name: /第三章/ })).toHaveAttribute('data-processing-state', 'processed')
+  })
 })

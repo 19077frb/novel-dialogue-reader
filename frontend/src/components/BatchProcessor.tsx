@@ -103,8 +103,10 @@ export function BatchProcessor({
     if (!validRange) return
     setEstimating(true)
     setError(null)
+    setProgress('')
     try {
-      const selected = chapters.slice(startIndex, endIndex + 1)
+      const requested = chapters.slice(startIndex, endIndex + 1)
+      const selected = requested.filter((chapter) => !chapter.dialogue_processed)
       const dialogueEstimates = await Promise.all(
         selected.map((chapter) =>
           estimateRange(bookId, {
@@ -125,6 +127,9 @@ export function BatchProcessor({
         dialogueEstimates.reduce((total, estimate) => total + estimate.total_tokens, 0) +
           rosterReserve,
       )
+      if (selected.length < requested.length) {
+        setProgress(`已跳过 ${requested.length - selected.length} 个已处理章节。`)
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '批量 Token 估算失败')
     } finally {
@@ -134,7 +139,8 @@ export function BatchProcessor({
 
   const run = async () => {
     if (!validRange || !profileId) return
-    const selected = chapters.slice(startIndex, endIndex + 1)
+    const requested = chapters.slice(startIndex, endIndex + 1)
+    const selected = requested.filter((chapter) => !chapter.dialogue_processed)
     let tokenLimit = positiveIntegerOrNull(tokenLimitText)
     let spent = 0
     let warnedAtEightyPercent = false
@@ -144,10 +150,22 @@ export function BatchProcessor({
     publishBatch(bookId, {
       running: true,
       message: '准备批量处理…',
-      chapterStates: Object.fromEntries(selected.map((chapter) => [chapter.id, 'unprocessed'])),
+      chapterStates: Object.fromEntries(
+        requested.map((chapter) => [
+          chapter.id,
+          chapter.dialogue_processed ? 'processed' : 'unprocessed',
+        ]),
+      ),
     })
 
     try {
+      if (selected.length === 0) {
+        const message = `所选 ${requested.length} 章均已处理，无需重复调用模型。`
+        setProgress(message)
+        publishBatch(bookId, { running: false, message })
+        onFinished()
+        return
+      }
       const checkBudgetReminder = () => {
         if (
           tokenLimit === null ||
@@ -265,10 +283,12 @@ export function BatchProcessor({
           },
         })
       }
-      setProgress(`批量处理完成：共 ${selected.length} 章，本次累计 ${spent.toLocaleString()} tokens。`)
+      const skipped = requested.length - selected.length
+      const summary = `批量处理完成：新处理 ${selected.length} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
+      setProgress(summary)
       publishBatch(bookId, {
         running: false,
-        message: `批量处理完成：共 ${selected.length} 章，本次累计 ${spent.toLocaleString()} tokens。`,
+        message: summary,
       })
       onFinished()
     } catch (reason) {
@@ -321,6 +341,9 @@ export function BatchProcessor({
       {estimatedTokens !== null && (
         <p className="hint" data-testid="batch-estimate">
           整批预计约 {estimatedTokens.toLocaleString()} tokens（包含逐章人物识别预留与对白归属估算）。
+          {chapters.slice(startIndex, endIndex + 1).some((chapter) => chapter.dialogue_processed)
+            ? ' 已处理章节不会重复计费或处理。'
+            : ''}
           {positiveIntegerOrNull(tokenLimitText) !== null && estimatedTokens > (positiveIntegerOrNull(tokenLimitText) ?? 0)
             ? ' 预计会超过当前上限，任务将在额度不足时停止。'
             : ''}

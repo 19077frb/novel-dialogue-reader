@@ -15,13 +15,17 @@ import json
 import zipfile
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from fixtures.corrections import (
     annotations_of,
     create_fake_profile,
     import_sample,
     run_deterministic_job,
+    session_scope,
 )
+from ndr.storage.models import Chapter
+from ndr.storage.transactions import transaction
 
 
 def _preview(client: TestClient, book_id: str) -> dict:
@@ -74,6 +78,13 @@ def test_exported_epub_roundtrip_restores_annotations(
     run_deterministic_job(
         migrated_settings, fake_provider_client, book_id=book_id, profile_id=profile_id, key="k-rt"
     )
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        first_chapter = session.execute(
+            select(Chapter).where(Chapter.book_version_id == data["book_version_id"])
+            .order_by(Chapter.ordinal)
+        ).scalars().first()
+        assert first_chapter is not None
+        first_chapter.dialogue_processed = True
 
     preview = _preview(fake_provider_client, book_id)
     original = annotations_of(fake_provider_client, book_id, reading_mode="reread")
@@ -101,6 +112,10 @@ def test_exported_epub_roundtrip_restores_annotations(
     assert reimport.status_code == 202, reimport.text
     new_book_id = reimport.json()["data"]["book_id"]
     assert new_book_id != book_id
+    restored_chapters = fake_provider_client.get(
+        f"/api/books/{new_book_id}/chapters"
+    ).json()["data"]
+    assert restored_chapters[0]["dialogue_processed"] is True
 
     restored = annotations_of(fake_provider_client, new_book_id, reading_mode="reread")
 

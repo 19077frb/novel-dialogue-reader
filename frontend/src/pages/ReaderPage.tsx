@@ -69,6 +69,7 @@ export default function ReaderPage() {
   useEffect(() => {
     if (!bookId || batchProgress.revision === 0) return
     void queryClient.invalidateQueries({ queryKey: ['annotations', bookId] })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })
   }, [batchProgress.revision, bookId, queryClient])
 
   const content = useQuery({

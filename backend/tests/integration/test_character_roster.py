@@ -9,6 +9,7 @@ from ndr.characters.service import store_roster_candidates
 from ndr.config import Settings
 from ndr.domain.enums import CharacterSource, JobState
 from ndr.jobs.scheduler import run_job
+from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.llm.schemas import RosterOutput
 from ndr.storage.engine import create_db_engine, create_session_factory
 from ndr.storage.models import BookCharacter, BookVersion, Chapter
@@ -189,6 +190,34 @@ def test_roster_analysis_runs_offline_with_fake_provider(
     assert body["status"] == "CONFIRMED"
     assert body["pov_character_id"] == roster["candidates"][0]["character_id"]
     assert [item["name"] for item in body["confirmed_characters"]] == ["样例说话人甲"]
+
+    dialogue = migrated_client.post(
+        "/api/jobs",
+        json={
+            "book_id": book_id,
+            "book_version_id": version_id,
+            "profile_id": profile_id,
+            "mode": "process",
+            "range": {"chapter_id": chapter_id},
+            "idempotency_key": "dialogue-full-chapter-1",
+            "run_now": False,
+        },
+    )
+    assert dialogue.status_code == 202, dialogue.text
+    engine = create_db_engine(run_settings)
+    factory = create_session_factory(engine)
+    try:
+        dialogue_outcome = run_job(
+            factory,
+            run_settings,
+            job_id=dialogue.json()["data"]["id"],
+            adapter_factory=lambda *_: FakeProviderAdapter(labeling_mode="deterministic"),
+        )
+    finally:
+        engine.dispose()
+    assert dialogue_outcome.state is JobState.COMPLETED, dialogue_outcome
+    refreshed_chapter = migrated_client.get(f"/api/books/{book_id}/chapters").json()["data"][0]
+    assert refreshed_chapter["dialogue_processed"] is True
 
 
 def test_roster_analysis_respects_batch_token_limit(

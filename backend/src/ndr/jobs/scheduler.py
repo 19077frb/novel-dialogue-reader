@@ -47,7 +47,15 @@ from ..scenes.engine import apply_window
 from ..scenes.runner import _messages_for, _restore_output_references, _targets_for
 from ..scenes.state import ConfirmedCharacter, SceneState
 from ..storage.cache import CacheKeyParts, ResultCacheStore, compute_cache_key, fingerprint
-from ..storage.models import Annotation, BookVersion, InferenceRun, Job, JobWindow, ModelProfile
+from ..storage.models import (
+    Annotation,
+    BookVersion,
+    Chapter,
+    InferenceRun,
+    Job,
+    JobWindow,
+    ModelProfile,
+)
 from .roster import run_character_roster_job
 from .service import (
     credential_mode_of,
@@ -1238,6 +1246,16 @@ def run_job(
         if job.state not in STOP_STATES:
             if outcome.windows_total == 0 or done >= outcome.windows_total:
                 job.state = JobState.COMPLETED
+                job_range = _range_of(job)
+                chapter_id = job_range.get("chapter_id")
+                if (
+                    job.kind is JobKind.INFERENCE
+                    and chapter_id
+                    and not job_range.get("selected_window_ids")
+                ):
+                    chapter = session.get(Chapter, str(chapter_id))
+                    if chapter is not None and chapter.book_version_id == job.book_version_id:
+                        chapter.dialogue_processed = True
                 job.progress_json = json.dumps(
                     {
                         "stage": "completed",

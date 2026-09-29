@@ -455,6 +455,25 @@ describe('PreviewPage', () => {
     )
   })
 
+  it('批量处理会跳过回导后标记为已处理的章节', async () => {
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue(
+      CHAPTERS.map((chapter) => ({ ...chapter, dialogue_processed: true })),
+    )
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('batch-processor')
+
+    await userEvent.click(screen.getByTestId('batch-run'))
+    expect(await screen.findByTestId('batch-estimate')).toHaveTextContent('0 tokens')
+    await userEvent.click(screen.getByTestId('batch-run'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('batch-progress')).toHaveTextContent('均已处理'),
+    )
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    expect(jobsApi.estimateRange).not.toHaveBeenCalled()
+  })
+
   it('达到 Token 上限的 80% 时可原地修改额度并继续', async () => {
     const meteredJob = {
       ...JOB,

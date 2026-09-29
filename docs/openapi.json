@@ -3163,6 +3163,11 @@
               }
             ],
             "title": "Source Href"
+          },
+          "dialogue_processed": {
+            "type": "boolean",
+            "title": "Dialogue Processed",
+            "default": false
           }
         },
         "additionalProperties": false,

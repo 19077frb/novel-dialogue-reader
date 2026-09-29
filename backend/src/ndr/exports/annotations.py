@@ -37,6 +37,7 @@ def build_annotations_manifest(
     rendered: RenderedBook,
     canonical_text: str,
     style: ExportStylePreset,
+    processed_chapter_indices: list[int] | None = None,
 ) -> dict[str, Any]:
     """从冻结投影 + 渲染结果生成标注清单。
 
@@ -97,6 +98,7 @@ def build_annotations_manifest(
         "exporter_style": style.value,
         "book_title": rendered.title,
         "chapter_titles": [chapter.title for chapter in rendered.chapters],
+        "processed_chapter_indices": sorted(set(processed_chapter_indices or [])),
         "speakers": [speakers[key] for key in sorted(speakers)],
         "annotations": [entry for _, entry in entries],
     }
@@ -117,5 +119,7 @@ def parse_annotations_manifest(raw: bytes) -> dict[str, Any] | None:
     if payload.get("manifest_version") != ANNOTATIONS_MANIFEST_VERSION:
         return None
     if not isinstance(payload.get("annotations"), list):
+        return None
+    if not isinstance(payload.get("processed_chapter_indices", []), list):
         return None
     return payload

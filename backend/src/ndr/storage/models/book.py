@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.enums import BookFormat, ContentNodeType, ImportStatus, ReadingMode
@@ -84,6 +84,7 @@ class Chapter(IdMixin, TimestampMixin, Base):
     start_cp: Mapped[int] = mapped_column(Integer, nullable=False)
     end_cp: Mapped[int] = mapped_column(Integer, nullable=False)
     source_href: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    dialogue_processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class ContentNode(IdMixin, TimestampMixin, Base):

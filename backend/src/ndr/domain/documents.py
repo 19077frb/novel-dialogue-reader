@@ -54,6 +54,7 @@ class ChapterOut(ApiModel):
     start_cp: int = Field(ge=0)
     end_cp: int = Field(ge=0)
     source_href: str | None = None
+    dialogue_processed: bool = False
 
 
 class ContentNodeOut(ApiModel):

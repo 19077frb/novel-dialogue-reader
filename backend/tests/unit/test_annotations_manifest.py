@@ -110,10 +110,12 @@ def test_build_manifest_contains_speakers_and_entries() -> None:
         rendered=_book(),
         canonical_text=CANONICAL,
         style=ExportStylePreset.COLOR_AND_LABEL,
+        processed_chapter_indices=[0],
     )
     assert manifest is not None
     assert manifest["manifest_version"] == ANNOTATIONS_MANIFEST_VERSION
     assert manifest["chapter_titles"] == ["第一章 雨夜"]
+    assert manifest["processed_chapter_indices"] == [0]
     assert manifest["speakers"] == [
         {"key": "c0", "color_index": 0, "label": "S1", "description": "少女"},
         {"key": "c1", "color_index": 1, "label": "S2", "description": ""},

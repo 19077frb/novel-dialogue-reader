@@ -30,7 +30,8 @@ export function ChapterNavigation({ chapters, activeChapterId, onSelect, process
           <ol>
           {chapters.map((chapter) => {
             const active = chapter.id === activeChapterId
-            const processingState = processingStates[chapter.id] ?? 'unprocessed'
+            const processingState = processingStates[chapter.id]
+              ?? (chapter.dialogue_processed ? 'processed' : 'unprocessed')
             return (
               <li key={chapter.id}>
                 <button
