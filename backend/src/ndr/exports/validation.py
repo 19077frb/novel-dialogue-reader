@@ -72,10 +72,19 @@ def expected_fragments_from(
     return lines or [expected_text]
 
 
-def text_consistency(document: str, fragments: list[str]) -> tuple[bool, list[str]]:
-    """逐段检查正文是否都出现在导出文本里（顺序无关，重复标题不算缺失）。"""
+def text_consistency(
+    document: str,
+    fragments: list[str],
+    *,
+    document_is_visible_text: bool = False,
+) -> tuple[bool, list[str]]:
+    """逐段检查正文是否都出现在导出文本里（顺序无关，重复标题不算缺失）。
 
-    visible = normalize_text(visible_text(document))
+    EPUB 校验会先逐个 XHTML 文档提取可见文本。此时不能再次按 HTML 解析，
+    否则原文中的 ``<书名>`` 会被当作标签，字面量 ``&#9834;`` 也会被二次解码。
+    """
+
+    visible = normalize_text(document if document_is_visible_text else visible_text(document))
     missing = [
         fragment
         for fragment in fragments
@@ -171,7 +180,11 @@ def check_epub(
         return {"format": "epub", "ok": False, "checks": checks, "detail": "不是有效的 zip"}
     checks["readable_zip"] = True
     fragments = expected_fragments_from(expected_text, expected_fragments)
-    consistent, missing = text_consistency("\n".join(body_text), fragments)
+    consistent, missing = text_consistency(
+        "\n".join(body_text),
+        fragments,
+        document_is_visible_text=True,
+    )
     checks["text_consistency"] = consistent
     return {
         "format": "epub",

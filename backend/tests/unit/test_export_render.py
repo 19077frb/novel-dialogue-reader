@@ -114,7 +114,12 @@ def test_check_html_reports_internal_problems() -> None:
     assert missing["checks"]["text_consistency"] is False
 
 
-def _epub_bytes(*, mimetype_first: bool = True, stored: bool = True) -> bytes:
+def _epub_bytes(
+    *,
+    mimetype_first: bool = True,
+    stored: bool = True,
+    body: str = "正文 C",
+) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         def write(name: str, data: bytes) -> None:
@@ -129,7 +134,7 @@ def _epub_bytes(*, mimetype_first: bool = True, stored: bool = True) -> bytes:
             write("META-INF/container.xml", b"<container/>")
         write(
             "OEBPS/text/chapter-001.xhtml",
-            ('<html><body><p class="node-paragraph">正文 C</p></body></html>').encode(),
+            (f'<html><body><p class="node-paragraph">{body}</p></body></html>').encode(),
         )
         write("OEBPS/style.css", EXPORT_CSS.encode())
         write("OEBPS/content.opf", b"<package/>")
@@ -152,3 +157,13 @@ def test_check_epub_reports_broken_zip() -> None:
     report = check_epub(b"not a zip", expected_text="")
     assert report["ok"] is False
     assert report["detail"] == "不是有效的 zip"
+
+
+def test_check_epub_does_not_parse_visible_source_text_twice() -> None:
+    source = "<义妹生活> 葛格&#9834;"
+    escaped = "&lt;义妹生活&gt; 葛格&amp;#9834;"
+
+    report = check_epub(_epub_bytes(body=escaped), expected_text=source)
+
+    assert report["ok"] is True, report
+    assert report["checks"]["text_consistency"] is True
