@@ -44,7 +44,11 @@ class NewSpeaker(ApiModel):
     temp_ref: str = Field(min_length=1, description="本次输出内的临时人物引用，如 new1")
     scene_ref: str = Field(min_length=1)
     first_quote_id: str = Field(min_length=1)
-    description: str = ""
+    description: str = Field(
+        min_length=1,
+        max_length=512,
+        description="面向读者的简短人物称呼或描述，例如姓名、女同学、门外的声音",
+    )
     evidence_refs: list[str] = Field(default_factory=list)
 
 

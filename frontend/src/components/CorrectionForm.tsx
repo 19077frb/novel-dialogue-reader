@@ -111,8 +111,12 @@ export function CorrectionForm({
             data-testid="correction-speaker"
           >
             {sceneGroups.map((group) => (
-              <option key={group.group_id} value={group.group_id}>
-                {group.canonical_name || group.label}
+              <option
+                key={group.group_id}
+                value={group.group_id}
+                title={group.description || undefined}
+              >
+                {group.canonical_name || group.description || '未确认说话人'}
               </option>
             ))}
           </select>

@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from ..schemas import output_json_schema
 
-LABELING_PROMPT_VERSION = "labeling-10"
+LABELING_PROMPT_VERSION = "labeling-11"
 DATA_DELIMITER = "<<<NDR_DATA>>>"
 ESCAPED_DELIMITER = "<<<NDR_DATA_ESCAPED>>>"
 
@@ -57,6 +57,9 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
     new_speakers 声明，即使此人已在 confirmed_chapter_characters 中或刚在旧场景说过话。
 17. locked_results 中“最近已确认轮次”是上一窗口已落库的可靠接力信息。长段心理描写或观察到
     旁人不会自动更换交谈人；只有原文明示旁人开口，才把发言切给该人物。
+18. 每个 new_speakers[].description 必须填写面向读者、简短且尽量可区分的人物称呼。优先使用
+    原文明示的姓名；没有姓名时使用“女同学”“老师”“门外的男声”等称呼，绝不能填写 S1/S2、
+    new1、“未知人物”或空字符串。称呼只用于展示，不表示已经确认真实身份。
 """.strip()
 
 

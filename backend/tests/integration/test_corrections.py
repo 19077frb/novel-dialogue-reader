@@ -207,6 +207,7 @@ def test_quote_detail_exposes_confirmed_speaker_names(
     )
     assert current["label"].startswith("S")
     assert current["canonical_name"] == "绫濑沙季"
+    assert "description" in current
 
 def test_assign_existing_locks_quote_without_model_call_and_marks_downstream(
     fake_provider_client: TestClient, migrated_settings: Settings
@@ -218,7 +219,7 @@ def test_assign_existing_locks_quote_without_model_call_and_marks_downstream(
     assert len(items) >= 3
     group_id = items[0]["speaker_group_id"]
     label = items[0]["label"]
-    assert group_id and label == "S1"
+    assert group_id and label and not label.startswith("S")
 
     second = items[1]
     before = _annotation_state(migrated_settings, second["quote_id"])
@@ -228,7 +229,7 @@ def test_assign_existing_locks_quote_without_model_call_and_marks_downstream(
         f"/api/quotes/{second['quote_id']}/corrections",
         json={
             "action": "assign_existing",
-            "speaker_ref": label,
+            "speaker_ref": group_id,
             "expected_version": before["version"],
             "note": "人工确认",
         },

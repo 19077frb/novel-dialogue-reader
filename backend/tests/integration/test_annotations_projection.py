@@ -216,6 +216,7 @@ def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
     assert full["counts"]["accepted"] == 3
     assert [item["color_index"] for item in full["items"]] == [0, 0, 0]
     assert [item["label"] for item in full["items"]] == ["绫濑沙季"] * 3
+    assert "义妹" in {item["speaker_description"] for item in full["items"]}
     assert len(full["legend"]) == 1
     assert full["legend"][0]["label"] == "绫濑沙季"
     assert full["legend"][0]["description"] == "义妹"
@@ -320,6 +321,6 @@ def test_deterministic_fake_provider_produces_colored_projection(tmp_path) -> No
     colored = [item for item in payload["items"] if item["color_index"] is not None]
     assert colored, payload["counts"]
     assert {item["color_index"] for item in colored} == {0}
-    assert {item["label"] for item in colored} == {"S1"}
+    assert {item["label"] for item in colored} == {"确定性测试说话人"}
     assert payload["counts"]["accepted"] >= 1
-    assert payload["legend"] and payload["legend"][0]["label"] == "S1"
+    assert payload["legend"] and payload["legend"][0]["label"] == "确定性测试说话人"

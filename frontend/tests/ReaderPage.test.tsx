@@ -158,6 +158,7 @@ describe('ReaderPage', () => {
           source: 'MODEL',
           speaker_group_id: 'g1',
           label: 'S1',
+          speaker_description: '本章主人公',
           color_index: 0,
           stale: false,
           user_locked: false,

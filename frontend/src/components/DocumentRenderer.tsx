@@ -158,7 +158,9 @@ function renderAnnotatedText(
         title={
           annotation.status === 'UNKNOWN'
             ? '证据不足：不指定说话人（无色无编号）'
-            : `说话人分组 ${label ?? ''}（${annotation.status}）`
+            : annotation.speaker_description
+              ? `${label ?? '说话人'}：${annotation.speaker_description}`
+              : label ?? '说话人'
         }
       >
         {showLabel ? (

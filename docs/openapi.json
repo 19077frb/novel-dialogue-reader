@@ -2581,7 +2581,13 @@
               }
             ],
             "title": "Label",
-            "description": "已确认真实姓名优先，否则为场景内编号；仅在可见时有值"
+            "description": "已确认真实姓名优先，否则为人物称呼/说明；仅在可见时有值"
+          },
+          "speaker_description": {
+            "type": "string",
+            "title": "Speaker Description",
+            "description": "说话人的人物描述，用于正文悬停提示",
+            "default": ""
           },
           "color_index": {
             "anyOf": [
@@ -7066,6 +7072,11 @@
               }
             ],
             "title": "Canonical Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
           }
         },
         "additionalProperties": false,

@@ -65,6 +65,7 @@ class SceneGroupRefOut(ApiModel):
     group_id: str
     label: str
     canonical_name: str | None = None
+    description: str = ""
 
 
 class SceneRefOut(ApiModel):

@@ -22,9 +22,9 @@ const ANNOTATION = {
 } as AnnotationStateOut
 
 const GROUPS: SceneGroupRefOut[] = [
-  { group_id: 'g1', label: 'S1', canonical_name: '浅村悠太' },
-  { group_id: 'g2', label: 'S2', canonical_name: '绫濑沙季' },
-  { group_id: 'g3', label: 'S3', canonical_name: null },
+  { group_id: 'g1', label: 'S1', canonical_name: '浅村悠太', description: '本章主人公' },
+  { group_id: 'g2', label: 'S2', canonical_name: '绫濑沙季', description: '主人公的义妹' },
+  { group_id: 'g3', label: 'S3', canonical_name: null, description: '后排的男同学' },
 ]
 
 describe('CorrectionForm', () => {
@@ -43,7 +43,14 @@ describe('CorrectionForm', () => {
     expect(screen.getByRole('option', { name: '浅村悠太' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: '绫濑沙季' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'S1' })).not.toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'S3' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '后排的男同学' })).toHaveAttribute(
+      'title',
+      '后排的男同学',
+    )
+    expect(screen.getByRole('option', { name: '绫濑沙季' })).toHaveAttribute(
+      'title',
+      '主人公的义妹',
+    )
     await userEvent.selectOptions(screen.getByTestId('correction-action'), 'assign_existing')
     await userEvent.selectOptions(screen.getByTestId('correction-speaker'), 'g2')
     await userEvent.click(screen.getByTestId('correction-submit'))

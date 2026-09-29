@@ -310,6 +310,7 @@ def build_quote_detail(
                 group_id=group.id,
                 label=group.display_label,
                 canonical_name=(group.canonical_name or "").strip() or None,
+                description=(group.description or "").strip(),
             )
             for group in session.execute(
                 select(SpeakerGroup)

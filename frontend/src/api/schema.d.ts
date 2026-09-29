@@ -803,9 +803,15 @@ export interface components {
             speaker_group_id?: string | null;
             /**
              * Label
-             * @description 已确认真实姓名优先，否则为场景内编号；仅在可见时有值
+             * @description 已确认真实姓名优先，否则为人物称呼/说明；仅在可见时有值
              */
             label?: string | null;
+            /**
+             * Speaker Description
+             * @description 说话人的人物描述，用于正文悬停提示
+             * @default
+             */
+            speaker_description: string;
             /** Color Index */
             color_index?: number | null;
             /** Visible From Cp */
@@ -2613,6 +2619,11 @@ export interface components {
             label: string;
             /** Canonical Name */
             canonical_name?: string | null;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
         };
         /** SceneRefOut */
         SceneRefOut: {

@@ -165,6 +165,7 @@ def build_projection(
     identity_by_group: dict[str, str] = {}
     color_by_group: dict[str, int] = {}
     label_by_group: dict[str, str] = {}
+    description_by_group: dict[str, str] = {}
     color_by_identity: dict[str, int] = {}
     representative_by_identity: dict[str, SpeakerGroup] = {}
     ordered_identities: list[str] = []
@@ -182,7 +183,9 @@ def build_projection(
             ordered_identities.append(identity)
         identity_by_group[group.id] = identity
         color_by_group[group.id] = color_by_identity[identity]
-        label_by_group[group.id] = name or group.display_label
+        description = (group.description or "").strip()
+        label_by_group[group.id] = name or description or "未确认说话人"
+        description_by_group[group.id] = description
 
     counts = {
         "total": 0,
@@ -246,6 +249,9 @@ def build_projection(
                 source=annotation.source.value,
                 speaker_group_id=group_id,
                 label=label,
+                speaker_description=(
+                    "" if (withheld or group_id is None) else description_by_group.get(group_id, "")
+                ),
                 color_index=color_index,
                 visible_from_cp=annotation.visible_from_cp,
                 stale=annotation.stale,
@@ -263,7 +269,9 @@ def build_projection(
         legend.append(
             SpeakerLegendItemOut(
                 group_id=group.id,
-                label=(group.canonical_name or "").strip() or group.display_label,
+                label=(group.canonical_name or "").strip()
+                or (group.description or "").strip()
+                or "未确认说话人",
                 scene_id=group.scene_id,
                 color_index=color_by_identity[identity],
                 first_quote_id=group.first_quote_id,

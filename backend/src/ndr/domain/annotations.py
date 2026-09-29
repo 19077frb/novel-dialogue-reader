@@ -39,7 +39,10 @@ class AnnotationItemOut(ApiModel):
     speaker_group_id: str | None = None
     label: str | None = Field(
         default=None,
-        description="已确认真实姓名优先，否则为场景内编号；仅在可见时有值",
+        description="已确认真实姓名优先，否则为人物称呼/说明；仅在可见时有值",
+    )
+    speaker_description: str = Field(
+        default="", description="说话人的人物描述，用于正文悬停提示"
     )
     color_index: int | None = Field(default=None, ge=0)
     visible_from_cp: int | None = None

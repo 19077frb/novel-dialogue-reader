@@ -191,6 +191,7 @@ describe('DocumentRenderer 标注投影', () => {
       source: 'MODEL',
       speaker_group_id: 'g1',
       label: 'S1',
+      speaker_description: '戴着红围巾的女同学',
       color_index: 0,
       stale: false,
       user_locked: false,
@@ -211,6 +212,7 @@ describe('DocumentRenderer 标注投影', () => {
     const span = screen.getByTestId('annotation-span')
     expect(span).toHaveAttribute('data-quote-id', 'q1')
     expect(span).toHaveAttribute('data-status', 'ACCEPTED')
+    expect(span).toHaveAttribute('title', 'S1：戴着红围巾的女同学')
     expect(span.style.color).toBeTruthy()
     // 编号是真实文本节点，不是 CSS 伪元素
     expect(within(span).getByTestId('annotation-label')).toHaveTextContent('〔S1〕')
