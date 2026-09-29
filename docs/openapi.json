@@ -7042,6 +7042,17 @@
           "label": {
             "type": "string",
             "title": "Label"
+          },
+          "canonical_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Name"
           }
         },
         "additionalProperties": false,

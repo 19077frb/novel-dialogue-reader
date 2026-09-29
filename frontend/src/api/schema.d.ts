@@ -2602,6 +2602,8 @@ export interface components {
             group_id: string;
             /** Label */
             label: string;
+            /** Canonical Name */
+            canonical_name?: string | null;
         };
         /** SceneRefOut */
         SceneRefOut: {

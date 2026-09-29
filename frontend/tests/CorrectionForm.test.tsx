@@ -22,8 +22,9 @@ const ANNOTATION = {
 } as AnnotationStateOut
 
 const GROUPS: SceneGroupRefOut[] = [
-  { group_id: 'g1', label: 'S1' },
-  { group_id: 'g2', label: 'S2' },
+  { group_id: 'g1', label: 'S1', canonical_name: '浅村悠太' },
+  { group_id: 'g2', label: 'S2', canonical_name: '绫濑沙季' },
+  { group_id: 'g3', label: 'S3', canonical_name: null },
 ]
 
 describe('CorrectionForm', () => {
@@ -39,6 +40,10 @@ describe('CorrectionForm', () => {
     )
 
     expect(screen.getByTestId('correction-version')).toHaveTextContent('版本 4')
+    expect(screen.getByRole('option', { name: '浅村悠太' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '绫濑沙季' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'S1' })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'S3' })).toBeInTheDocument()
     await userEvent.selectOptions(screen.getByTestId('correction-action'), 'assign_existing')
     await userEvent.selectOptions(screen.getByTestId('correction-speaker'), 'g2')
     await userEvent.click(screen.getByTestId('correction-submit'))

@@ -89,7 +89,7 @@ const DETAIL = {
     version: 2,
   },
   scene: { scene_id: 's1', status: 'OPEN', start_cp: 0, end_cp: 30, version: 1 },
-  scene_groups: [{ group_id: 'grp1', label: 'S1' }],
+  scene_groups: [{ group_id: 'grp1', label: 'S1', canonical_name: '绫濑沙季' }],
   review_items: [],
   can_correct: true,
 } as unknown as QuoteDetailOut

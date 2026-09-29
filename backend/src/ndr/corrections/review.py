@@ -25,7 +25,7 @@ from ..domain.corrections import (
 )
 from ..domain.enums import ErrorCode, ReviewQueueStatus, ReviewReason
 from ..domain.quotes import QuoteDetailOut
-from ..storage.models import Annotation, Gap, Quote, ReviewItem, Scene
+from ..storage.models import Annotation, Gap, Quote, ReviewItem, Scene, SpeakerGroup
 from .invalidator import upsert_review_item
 from .scenes import label_map_for_scene
 
@@ -293,10 +293,22 @@ def build_quote_detail(
     )
     detail.review_items = [review_item_out(item) for item in items]
     detail.can_correct = True
-    detail.scene_groups = [
-        SceneGroupRefOut(group_id=group_id, label=label)
-        for group_id, label in sorted(label_map.items(), key=lambda pair: pair[1])
-    ]
+    detail.scene_groups = (
+        [
+            SceneGroupRefOut(
+                group_id=group.id,
+                label=group.display_label,
+                canonical_name=(group.canonical_name or "").strip() or None,
+            )
+            for group in session.execute(
+                select(SpeakerGroup)
+                .where(SpeakerGroup.scene_id == scene.id)
+                .order_by(SpeakerGroup.display_label)
+            ).scalars()
+        ]
+        if scene is not None
+        else []
+    )
     return detail
 
 

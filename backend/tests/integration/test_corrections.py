@@ -21,7 +21,14 @@ from fixtures.corrections import (
     session_scope,
 )
 from ndr.config import Settings
-from ndr.storage.models import Annotation, AnnotationHistory, Correction, InferenceRun, ReviewItem
+from ndr.storage.models import (
+    Annotation,
+    AnnotationHistory,
+    Correction,
+    InferenceRun,
+    ReviewItem,
+    SpeakerGroup,
+)
 from ndr.storage.transactions import transaction
 
 
@@ -163,6 +170,27 @@ def test_quote_detail_and_review_flag_work_for_unprocessed_quote(
     assert detail_item["annotation"] is None
     assert "assign_existing" in detail_item["allowed_actions"]
     assert detail_item["context_after"] or detail_item["context_before"]
+
+
+def test_quote_detail_exposes_confirmed_speaker_names(
+    fake_provider_client: TestClient, migrated_settings: Settings
+) -> None:
+    data = _prepare(fake_provider_client, migrated_settings)
+    annotation = annotations_of(fake_provider_client, data["book_id"])["items"][0]
+
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        group = session.get(SpeakerGroup, annotation["speaker_group_id"])
+        assert group is not None
+        group.canonical_name = "绫濑沙季"
+
+    detail = fake_provider_client.get(f"/api/quotes/{annotation['quote_id']}")
+    assert detail.status_code == 200, detail.text
+    groups = detail.json()["data"]["scene_groups"]
+    current = next(
+        group for group in groups if group["group_id"] == annotation["speaker_group_id"]
+    )
+    assert current["label"].startswith("S")
+    assert current["canonical_name"] == "绫濑沙季"
 
 def test_assign_existing_locks_quote_without_model_call_and_marks_downstream(
     fake_provider_client: TestClient, migrated_settings: Settings

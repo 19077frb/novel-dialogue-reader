@@ -112,7 +112,7 @@ export function CorrectionForm({
           >
             {sceneGroups.map((group) => (
               <option key={group.group_id} value={group.group_id}>
-                {labelText(group.label)} {group.label}
+                {group.canonical_name || group.label}
               </option>
             ))}
           </select>
