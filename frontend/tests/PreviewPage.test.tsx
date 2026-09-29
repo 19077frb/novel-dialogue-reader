@@ -565,6 +565,40 @@ describe('PreviewPage', () => {
     await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'))
   })
 
+  it('单个章节失败不会把后续章节统一标为失败', async () => {
+    const threeChapters = [
+      { ...CHAPTERS[0], dialogue_processed: false },
+      { ...CHAPTERS[0], id: 'c2', ordinal: 1, title: '第二章', start_cp: 20, end_cp: 40, dialogue_processed: false },
+      { ...CHAPTERS[0], id: 'c3', ordinal: 2, title: '第三章', start_cp: 40, end_cp: 60, dialogue_processed: false },
+    ] as ChapterOut[]
+    const meteredJob = {
+      ...JOB,
+      unknown_usage_runs: 0,
+      usage: { input_tokens: 30, output_tokens: 10, total_tokens: 40, unknown_runs: 0 },
+    } as JobDetailOut
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue(threeChapters)
+    vi.mocked(charactersApi.analyzeCharacterRoster)
+      .mockRejectedValueOnce(new Error('第一章人物识别失败'))
+      .mockResolvedValue(meteredJob)
+    vi.mocked(jobsApi.createJob).mockResolvedValue(meteredJob)
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await screen.findByTestId('batch-processor')
+    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '2' } })
+
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await screen.findByTestId('batch-estimate')
+    await userEvent.click(screen.getByTestId('batch-run'))
+
+    await waitFor(() => expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(3))
+    await waitFor(() =>
+      expect(screen.getByTestId('batch-progress')).toHaveTextContent('成功 2 章，失败 1 章'),
+    )
+    expect(screen.getByTestId('batch-error')).toHaveTextContent('2 章成功，1 章失败')
+    expect(jobsApi.createJob).toHaveBeenCalledTimes(4)
+    expect(booksApi.completeChapterProcessing).toHaveBeenCalledTimes(2)
+  })
+
   it('批量运行时切换为逐任务进度面板，停止后不再派发排队窗口', async () => {
     const meteredJob = {
       ...JOB,

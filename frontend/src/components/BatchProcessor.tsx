@@ -8,9 +8,15 @@ import {
 } from '../api/characters'
 import { createJob, estimateRange, freshIdempotencyKey } from '../api/jobs'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
-import { createTaskLimiter, mapWithConcurrency } from '../processing/concurrency'
+import { createTaskLimiter } from '../processing/concurrency'
 
 const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'])
+
+class BatchAbortError extends Error {}
+
+function isBatchAbortError(reason: unknown): reason is BatchAbortError {
+  return reason instanceof BatchAbortError
+}
 const TASK_STATE_LABELS: Record<BatchTaskState, string> = {
   queued: '排队中',
   running: '处理中',
@@ -215,6 +221,7 @@ async function waitForJob(job: JobDetailOut, stopped: () => boolean): Promise<Jo
     await new Promise((resolve) => window.setTimeout(resolve, 800))
     current = await fetchJob(current.id)
   }
+  if (stopped()) throw new Error('批量处理已停止')
   return current
 }
 
@@ -304,6 +311,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     let warningOpen = false
     const limiter = createTaskLimiter(concurrency)
     const pendingWork: Promise<void>[] = []
+    const failedChapterIds = new Set<string>()
     stopRef.current = false
     batchStopRequests.delete(bookId)
     setRunning(true)
@@ -359,7 +367,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         String(tokenLimit),
       )
       warningOpen = false
-      if (answer === null) throw new Error('已在额度接近上限时停止')
+      if (answer === null) throw new BatchAbortError('已在额度接近上限时停止')
       const nextLimit = Number(answer.trim())
       if (nextLimit === 0) {
         spent = 0
@@ -368,7 +376,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         return
       }
       if (!Number.isFinite(nextLimit) || nextLimit <= spent) {
-        throw new Error(`新额度必须大于当前已使用的 ${spent.toLocaleString()} tokens`)
+        throw new BatchAbortError(`新额度必须大于当前已使用的 ${spent.toLocaleString()} tokens`)
       }
       tokenLimit = Math.floor(nextLimit)
       setTokenLimitText(String(tokenLimit))
@@ -380,7 +388,9 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       limiter.run(async () => {
         if (batchShouldStop(bookId, stopRef.current)) throw new Error('批量处理已停止')
         const available = tokenLimit === null ? null : tokenLimit - spent - reserved
-        if (available !== null && available <= 0) throw new Error('已达到本次 Token 使用上限')
+        if (available !== null && available <= 0) {
+          throw new BatchAbortError('已达到本次 Token 使用上限')
+        }
         // 用启动前的本地估算预留额度；所有在途任务的预留之和不会超过
         // 当前批次剩余额度，完成后再按提供方返回的实测用量结算。
         const reservation = available === null
@@ -396,10 +406,28 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
 
     const recordUsage = (job: JobDetailOut, stage: string) => {
       if (tokenLimit !== null && job.unknown_usage_runs > 0) {
-        throw new Error(`模型没有返回${stage}用量，无法可靠执行 Token 上限，批量处理已停止`)
+        throw new BatchAbortError(`模型没有返回${stage}用量，无法可靠执行 Token 上限，批量处理已停止`)
       }
       spent += jobTokens(job)
       checkBudgetReminder()
+    }
+
+    const markChapterTaskFailure = (
+      chapterId: string,
+      taskId: string,
+      state: BatchTaskState,
+      error: string | null,
+    ) => {
+      updateBatchTask(bookId, taskId, state, error)
+      if (state !== 'failed') return
+      failedChapterIds.add(chapterId)
+      updateChapterProgress(bookId, chapterId, { state: 'failed', error })
+      const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
+      publishBatch(bookId, {
+        tasks: current.tasks.map((task) => task.chapterId === chapterId && task.state === 'queued'
+          ? { ...task, state: 'cancelled' as const, error: null }
+          : task),
+      })
     }
 
     const scheduleRoster = (plan: ChapterPlan, index: number) => {
@@ -446,9 +474,9 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         } catch (reason) {
           const message = reason instanceof Error ? reason.message : '人物识别失败'
           const stopped = batchShouldStop(bookId, stopRef.current)
-          updateBatchTask(bookId, taskId, stopped ? 'cancelled' : 'failed', message)
-          updateChapterProgress(bookId, chapter.id, { state: stopped ? 'stopped' : 'failed', error: message })
-          throw reason
+          markChapterTaskFailure(chapter.id, taskId, stopped ? 'cancelled' : 'failed', message)
+          if (stopped) throw new BatchAbortError('批量处理已停止')
+          if (isBatchAbortError(reason)) throw reason
         }
       })
     }
@@ -456,6 +484,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     const scheduleDialogue = (plan: ChapterPlan, index: number) => {
       const { chapter, estimate } = plan
       const prefix = `${index + 1}/${selectedPlans.length} ${chapter.title || `第 ${chapter.ordinal + 1} 章`}`
+      let chapterFailed = false
       const jobs = (estimate.windows ?? []).map((window) => {
         const windowId = String(window.window_id)
         const taskId = `dialogue:${chapter.id}:${windowId}`
@@ -487,14 +516,23 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
           } catch (reason) {
             const message = reason instanceof Error ? reason.message : '对白窗口处理失败'
             const stopped = batchShouldStop(bookId, stopRef.current)
-            updateBatchTask(bookId, taskId, stopped ? 'cancelled' : 'failed', message)
-            updateChapterProgress(bookId, chapter.id, { state: stopped ? 'stopped' : 'failed', error: message })
-            throw reason
+            markChapterTaskFailure(chapter.id, taskId, stopped ? 'cancelled' : 'failed', message)
+            chapterFailed = true
+            if (stopped) throw new BatchAbortError('批量处理已停止')
+            if (isBatchAbortError(reason)) throw reason
           }
         })
       })
       return Promise.all(jobs).then(async () => {
-        await completeChapterProcessing(bookId, chapter.id, bookVersionId)
+        if (chapterFailed || failedChapterIds.has(chapter.id)) return
+        try {
+          await completeChapterProcessing(bookId, chapter.id, bookVersionId)
+        } catch (reason) {
+          const message = reason instanceof Error ? reason.message : '章节完成状态更新失败'
+          failedChapterIds.add(chapter.id)
+          updateChapterProgress(bookId, chapter.id, { state: 'failed', error: message })
+          return
+        }
         const message = `${prefix}：已完成；本次累计 ${spent.toLocaleString()} tokens`
         setProgress(message)
         const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
@@ -526,18 +564,29 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         return
       }
 
-      await mapWithConcurrency(selectedPlans, concurrency, async (plan, index) => {
+      const outcomes = await Promise.allSettled(selectedPlans.map(async (plan, index) => {
         const rosterPromise = scheduleRoster(plan, index)
         pendingWork.push(rosterPromise)
         await rosterPromise
-        if (batchShouldStop(bookId, stopRef.current)) throw new Error('批量处理已停止')
+        if (failedChapterIds.has(plan.chapter.id)) return
+        if (batchShouldStop(bookId, stopRef.current)) throw new BatchAbortError('批量处理已停止')
         const dialoguePromise = scheduleDialogue(plan, index)
         pendingWork.push(dialoguePromise)
         await dialoguePromise
-      })
+      }))
+      const abortOutcome = outcomes.find((outcome) =>
+        outcome.status === 'rejected' && isBatchAbortError(outcome.reason)
+      )
+      if (abortOutcome?.status === 'rejected') throw abortOutcome.reason
       const skipped = requested.length - selectedPlans.length
-      const summary = `批量处理完成：新处理 ${selectedPlans.length} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
+      const succeededCount = selectedPlans.length - failedChapterIds.size
+      const summary = failedChapterIds.size > 0
+        ? `批量处理结束：成功 ${succeededCount} 章，失败 ${failedChapterIds.size} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
+        : `批量处理完成：新处理 ${selectedPlans.length} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
       setProgress(summary)
+      if (failedChapterIds.size > 0) {
+        setError(`批量处理结束：${succeededCount} 章成功，${failedChapterIds.size} 章失败；具体原因见任务列表。`)
+      }
       publishBatch(bookId, { running: false, stopRequested: false, message: summary })
       onFinished()
     } catch (reason) {
@@ -551,7 +600,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         stopRequested: false,
         message,
         tasks: current.tasks.map((task) => task.state === 'queued'
-          ? { ...task, state: 'cancelled' as const, error: null }
+          ? { ...task, state: batchStopRequests.has(bookId) ? 'cancelled' as const : 'failed' as const, error: null }
           : task),
         chapterStates: Object.fromEntries(Object.entries(current.chapterStates).map(([chapterId, chapter]) => [
           chapterId,
