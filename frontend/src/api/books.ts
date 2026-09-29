@@ -143,6 +143,15 @@ export function fetchQuoteNormalizations(
   )
 }
 
+export function clearQuoteLabeling(
+  bookId: string,
+): Promise<QuoteNormalizationRefreshOut> {
+  return apiData<QuoteNormalizationRefreshOut>(
+    `/api/books/${bookId}/quote-normalizations/clear-labeling`,
+    { method: 'POST' },
+  )
+}
+
 export function refreshQuoteNormalizations(
   bookId: string,
 ): Promise<QuoteNormalizationRefreshOut> {

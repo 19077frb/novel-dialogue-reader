@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from ..corrections.review import build_quote_detail as _build_quote_detail
@@ -45,7 +45,7 @@ from ..quotes.service import (
     locate,
     scan_and_store,
 )
-from ..storage.models import BookVersion, Job, Quote, QuoteNormalization
+from ..storage.models import Annotation, BookVersion, Job, Quote, QuoteNormalization
 from ..storage.transactions import check_version, transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
@@ -387,6 +387,53 @@ def update_quote_normalization_route(
             status_code=409,
         ) from exc
     return DataEnvelope(data=payload_out, request_id=current_request_id(request))
+
+
+@router.post(
+    "/{book_id}/quote-normalizations/clear-labeling",
+    status_code=202,
+    response_model=DataEnvelope[QuoteNormalizationRefreshOut],
+    summary="清除当前版本的标注投影并重新检测引号修复",
+)
+def clear_quote_labeling_route(
+    request: Request,
+    book_id: str,
+) -> DataEnvelope[QuoteNormalizationRefreshOut]:
+    """显式清除本版本所有标注后重扫；历史表保留，用于审计。"""
+
+    settings = request.app.state.settings
+    factory = request.app.state.session_factory
+    try:
+        with transaction(factory) as session:
+            book, version = _active_version_or_409(session, book_id)
+            session.execute(
+                delete(Annotation).where(Annotation.quote_id.in_(
+                    select(Quote.id).where(Quote.book_version_id == version.id)
+                ))
+            )
+            text = load_canonical_text(settings, version)
+            upsert_suggestions(
+                session,
+                version.id,
+                detect_auto_close_suggestions(text),
+            )
+            outcome = scan_and_store(session, settings, version)
+            job = _record_scan_job(session, book, version, outcome)
+            payload = QuoteNormalizationRefreshOut(
+                book_id=book.id,
+                book_version_id=version.id,
+                created=0,
+                active=_active_normalization_count(session, version.id),
+                scan=_scan_payload(book, version, job.id, outcome),
+            )
+    except ScanConflict as exc:
+        raise ApiError(
+            ErrorCode.VERSION_CONFLICT,
+            str(exc),
+            details={"book_id": book_id, "reason": "USER_LABELING_PRESENT"},
+            status_code=409,
+        ) from exc
+    return DataEnvelope(data=payload, request_id=current_request_id(request))
 
 
 @quote_router.get(

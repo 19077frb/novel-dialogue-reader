@@ -459,6 +459,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/quote-normalizations/clear-labeling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 清除当前版本的标注投影并重新检测引号修复
+         * @description 显式清除本版本所有标注后重扫；历史表保留，用于审计。
+         */
+        post: operations["clear_quote_labeling_route_api_books__book_id__quote_normalizations_clear_labeling_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/quotes/{quote_id}": {
         parameters: {
             query?: never;
@@ -3898,6 +3918,37 @@ export interface operations {
                 "application/json": components["schemas"]["QuoteNormalizationUpdateIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_QuoteNormalizationRefreshOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_quote_labeling_route_api_books__book_id__quote_normalizations_clear_labeling_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             202: {

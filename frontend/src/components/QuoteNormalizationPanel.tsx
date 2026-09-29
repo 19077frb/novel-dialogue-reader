@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
+  clearQuoteLabeling,
   fetchQuoteNormalizations,
   queryKeys,
   refreshQuoteNormalizations,
   updateQuoteNormalization,
 } from '../api/books'
+import { ApiError } from '../api/client'
 import type { QuoteNormalizationOut } from '../api/types'
 
 interface QuoteNormalizationPanelProps {
@@ -27,6 +29,8 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
   const queryClient = useQueryClient()
   const [drafts, setDrafts] = useState<Record<string, DraftState>>({})
   const [error, setError] = useState<string | null>(null)
+  const [labelingConflict, setLabelingConflict] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
 
   const normalizations = useQuery({
     queryKey: queryKeys.quoteNormalizations(bookId),
@@ -48,7 +52,24 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
       setDrafts({})
       invalidate()
     },
-    onError: (err: unknown) => setError(err instanceof Error ? err.message : '重新检测失败'),
+    onError: (err: unknown) => {
+      if (err instanceof ApiError && err.status === 409) {
+        setLabelingConflict(true)
+      }
+      setError(err instanceof Error ? err.message : '重新检测失败')
+    },
+  })
+
+  const clearMutation = useMutation({
+    mutationFn: () => clearQuoteLabeling(bookId),
+    onSuccess: () => {
+      setError(null)
+      setLabelingConflict(false)
+      setConfirmClear(false)
+      setDrafts({})
+      invalidate()
+    },
+    onError: (err: unknown) => setError(err instanceof Error ? err.message : '清除标注失败'),
   })
 
   const updateMutation = useMutation({
@@ -93,6 +114,31 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
         </p>
       )}
       {error && <p className="status-error" role="alert">{error}</p>}
+      {labelingConflict && (
+        <div className="ndr-normalization-conflict" data-testid="quote-normalization-conflict">
+          <p>
+            当前版本的标注投影会被重扫覆盖。这里提供显式清除入口：清除后本版本所有模型/人工标注都会删除，
+            审计历史保留。如果需要保留结果，请先导出备份。
+          </p>
+          <label>
+            <input
+              type="checkbox"
+              checked={confirmClear}
+              onChange={(event) => setConfirmClear(event.target.checked)}
+              data-testid="quote-normalization-confirm-clear"
+            />
+            我已了解会删除本版本当前标注
+          </label>
+          <button
+            type="button"
+            disabled={!confirmClear || clearMutation.isPending}
+            onClick={() => clearMutation.mutate()}
+            data-testid="quote-normalization-clear-labeling"
+          >
+            {clearMutation.isPending ? '正在清除并重扫…' : '清除当前标注并重新检测'}
+          </button>
+        </div>
+      )}
       {normalizations.isSuccess && activeItems.length > 0 && (
         <p className="status-warning" data-testid="quote-normalization-warning">
           已启用 {activeItems.length} 条虚拟闭合；处理前请检查它们是否符合原文语义。

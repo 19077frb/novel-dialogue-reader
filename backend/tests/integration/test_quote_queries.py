@@ -277,6 +277,47 @@ def test_user_cannot_move_quote_normalization_across_paragraph(
     assert updated.json()["error"]["message"] == "闭合点必须在开引号所在段落内"
 
 
+def test_clear_labeling_allows_quote_normalization_refresh(
+    migrated_client: TestClient,
+    migrated_settings: Settings,
+) -> None:
+    data = _import(migrated_client)
+    book_id = data["book_id"]
+    quote_id = _quotes(migrated_client, book_id)[0]["quote_id"]
+
+    engine = create_db_engine(migrated_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            session.add(
+                Annotation(
+                    quote_id=quote_id,
+                    kind=QuoteKind.SPEECH,
+                    status=AnnotationStatus.USER_CONFIRMED,
+                    source=AnnotationSource.USER,
+                    user_locked=True,
+                )
+            )
+    finally:
+        engine.dispose()
+
+    response = migrated_client.post(
+        f"/api/books/{book_id}/quote-normalizations/clear-labeling"
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["data"]["active"] == 0
+    assert _quotes(migrated_client, book_id)
+
+    engine = create_db_engine(migrated_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            assert session.execute(select(func.count(Annotation.id))).scalar_one() == 0
+    finally:
+        engine.dispose()
+
+
 def test_scanning_creates_no_annotations_or_scenes(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:

@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '../src/api/client'
 import * as annotationsApi from '../src/api/annotations'
 import * as booksApi from '../src/api/books'
 import * as charactersApi from '../src/api/characters'
@@ -44,6 +45,7 @@ vi.mock('../src/api/books', () => ({
   completeChapterProcessing: vi.fn(),
   fetchQuoteNormalizations: vi.fn(),
   refreshQuoteNormalizations: vi.fn(),
+  clearQuoteLabeling: vi.fn(),
   updateQuoteNormalization: vi.fn(),
 }))
 
@@ -290,6 +292,7 @@ describe('PreviewPage', () => {
     vi.mocked(booksApi.completeChapterProcessing).mockReset()
     vi.mocked(booksApi.fetchQuoteNormalizations).mockReset()
     vi.mocked(booksApi.refreshQuoteNormalizations).mockReset()
+    vi.mocked(booksApi.clearQuoteLabeling).mockReset()
     vi.mocked(booksApi.updateQuoteNormalization).mockReset()
     vi.mocked(booksApi.fetchQuoteNormalizations).mockResolvedValue([])
     vi.mocked(annotationsApi.fetchAnnotations).mockReset()
@@ -758,6 +761,44 @@ describe('PreviewPage', () => {
 
     await userEvent.click(screen.getByTestId('quote-normalization-refresh'))
     await waitFor(() => expect(booksApi.refreshQuoteNormalizations).toHaveBeenCalledWith('b1'))
+  })
+
+  it('标注冲突时提供显式清除入口并重新检测', async () => {
+    vi.mocked(booksApi.refreshQuoteNormalizations).mockRejectedValue(
+      new ApiError(409, { code: 'VERSION_CONFLICT', message: '存在标注投影' }),
+    )
+    const refreshed = {
+      book_id: 'b1',
+      book_version_id: 'v1',
+      created: 0,
+      active: 0,
+      scan: {
+        book_id: 'b1',
+        book_version_id: 'v1',
+        job_id: 'scan1',
+        scanner_version: 'quote-scan-1',
+        quote_count: 0,
+        top_level_quote_count: 0,
+        gap_count: 0,
+        warnings: [],
+        stats: {},
+      },
+    } as QuoteNormalizationRefreshOut
+    vi.mocked(booksApi.clearQuoteLabeling).mockResolvedValue(refreshed)
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+
+    await userEvent.click(await screen.findByTestId('quote-normalization-refresh'))
+    expect(await screen.findByTestId('quote-normalization-conflict'))
+      .toHaveTextContent('当前版本的标注投影会被重扫覆盖')
+    expect(screen.getByTestId('quote-normalization-clear-labeling')).toBeDisabled()
+
+    await userEvent.click(screen.getByTestId('quote-normalization-confirm-clear'))
+    await userEvent.click(screen.getByTestId('quote-normalization-clear-labeling'))
+
+    await waitFor(() => expect(booksApi.clearQuoteLabeling).toHaveBeenCalledWith('b1'))
+    await waitFor(() =>
+      expect(screen.queryByTestId('quote-normalization-conflict')).not.toBeInTheDocument(),
+    )
   })
 
 
