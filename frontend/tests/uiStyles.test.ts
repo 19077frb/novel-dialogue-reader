@@ -22,6 +22,8 @@ describe('shared UI design rules', () => {
   it('uses shared controls, labels and book navigation instead of old page-specific styles', () => {
     expect(css).not.toContain('.ndr-preview-nav')
     expect(css).toContain('.ndr-book-nav a')
+    expect(css).toContain('button,\n.ndr-button,\n.ndr-book-nav a {')
+    expect(css).toContain('.ndr-book-nav a,\n.ndr-book-nav button {\n  padding: 6px 12px;')
     expect(css).toContain('.ndr-field,')
     expect(css).toContain("input[type='password'],")
     expect(css).toContain("input[type='number'],")

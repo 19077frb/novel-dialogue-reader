@@ -205,6 +205,23 @@ test.describe('可访问性与布局检查', () => {
         await page.goto(route)
         await expect(page.locator('h1')).toHaveCount(1)
         await expectNoHorizontalOverflow(page, label)
+        if (label === '阅读页') {
+          for (const colorScheme of ['light', 'dark'] as const) {
+            await page.emulateMedia({ colorScheme })
+            const styles = await page.locator('.ndr-book-nav').evaluate(nav =>
+              Array.from(nav.querySelectorAll('a, button')).map(control => {
+                const css = getComputedStyle(control)
+                return {
+                  font: css.font, lineHeight: css.lineHeight, padding: css.padding,
+                  border: css.border, radius: css.borderRadius, background: css.backgroundColor,
+                  color: css.color, display: css.display, height: control.getBoundingClientRect().height,
+                }
+              }))
+            expect(styles.length).toBeGreaterThan(3)
+            for (const style of styles) expect(style).toEqual(styles[0])
+          }
+          await page.emulateMedia({ colorScheme: 'light' })
+        }
       }
     }
 
