@@ -124,7 +124,8 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
               draft.status !== item.status
 
             return (
-              <article className="ndr-normalization-card" key={item.id}>
+              <details className="ndr-normalization-card" key={item.id}>
+                <summary>{item.status === 'ACTIVE' ? '已启用' : '已停用'} · {item.original_text.slice(0, 80)}{item.original_text.length > 80 ? '…' : ''}</summary>
                 <div className="ndr-normalization-summary">
                   <code>{item.normalized_text}</code>
                   <small>
@@ -172,7 +173,7 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
                     保存并重扫
                   </button>
                 </div>
-              </article>
+              </details>
             )
           })}
         </div>

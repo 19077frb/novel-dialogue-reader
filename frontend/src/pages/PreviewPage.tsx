@@ -31,7 +31,6 @@ import { ExportDialog } from '../components/ExportDialog'
 import { JobPanel } from '../components/JobPanel'
 import { RangePicker, type RangeValue } from '../components/RangePicker'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
-import { QuoteNormalizationPanel } from '../components/QuoteNormalizationPanel'
 import { SpeakerLegend } from '../components/SpeakerLegend'
 import { UsageSummary } from '../components/UsageSummary'
 import { WindowPicker } from '../components/WindowPicker'
@@ -425,7 +424,11 @@ export default function PreviewPage() {
         />
       )}
 
-      <QuoteNormalizationPanel bookId={bookId} />
+      <section className="card">
+        <h3>书籍预处理</h3>
+        <p className="hint">引号修复已移至独立预处理页，按需检查，不影响下面的处理流程。</p>
+        <Link className="ndr-button" to={`/books/${bookId}/preprocessing${returnChapterId ? `?chapterId=${encodeURIComponent(returnChapterId)}` : ''}`}>打开预处理</Link>
+      </section>
 
       <section className="card ndr-step-card" data-testid="processing-mode-picker">
         <div className="ndr-step-heading">
