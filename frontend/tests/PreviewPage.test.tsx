@@ -386,11 +386,12 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('annotation-span')
 
-    await userEvent.click(screen.getByTestId('preview-estimate'))
     await waitFor(() => expect(jobsApi.estimateRange).toHaveBeenCalledTimes(1))
     expect(await screen.findByTestId('estimate-summary')).toHaveTextContent('1260 token')
     expect(await screen.findByTestId('estimate-windows')).toHaveTextContent('2')
     expect(screen.getByTestId('window-picker')).toHaveTextContent('窗口 1')
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
     await userEvent.click(screen.getByTestId('window-w2'))
 
     await userEvent.click(screen.getByTestId('preview-run'))
@@ -413,7 +414,6 @@ describe('PreviewPage', () => {
   it('单章正式处理按并发配置拆分所选窗口并在全覆盖后标记完成', async () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('annotation-span')
-    await userEvent.click(screen.getByTestId('preview-estimate'))
     await screen.findByTestId('window-picker')
 
     fireEvent.change(screen.getByTestId('preview-concurrency'), { target: { value: '2' } })
@@ -425,6 +425,90 @@ describe('PreviewPage', () => {
       ['w2'],
     ])
     expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1')
+  })
+
+  it('人物尚未确认时也提前显示窗口，清空选择后禁止启动', async () => {
+    vi.mocked(charactersApi.fetchCharacterRoster).mockResolvedValue({
+      ...ROSTER, status: 'DRAFT', confirmed_characters: [], pov_character_id: null,
+    })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    expect(await screen.findByTestId('window-picker')).toHaveTextContent('人物识别仍会读取本章全文')
+    expect(screen.getByTestId('windows-selection-summary')).toHaveTextContent('已选 2/2')
+    await userEvent.click(screen.getByTestId('windows-clear'))
+    expect(screen.getByTestId('windows-selection-summary')).toHaveTextContent('已选 0/2')
+    expect(screen.getByTestId('preview-process')).toBeDisabled()
+    await userEvent.click(screen.getByTestId('windows-select-all'))
+    expect(screen.getByTestId('window-w1')).toBeChecked()
+    expect(screen.getByTestId('window-w2')).toBeChecked()
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
+  })
+
+  it('可以选择不连续的多个窗口，正式处理不扩大范围或标记整章完成', async () => {
+    vi.mocked(jobsApi.estimateRange).mockResolvedValue({
+      ...ESTIMATE, window_count: 3, windows: [
+        ...(ESTIMATE.windows ?? []),
+        { ...ESTIMATE.windows![1], window_id: 'w3', ordinal: 3 },
+      ],
+    })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('window-w3')
+    await userEvent.click(screen.getByTestId('windows-clear'))
+    expect(screen.getByTestId('preview-process')).toBeDisabled()
+    await userEvent.click(screen.getByTestId('window-w1'))
+    await userEvent.click(screen.getByTestId('window-w3'))
+    await userEvent.click(screen.getByTestId('preview-process'))
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(jobsApi.createJob).mock.calls.map(([input]) => input.selectedWindowIds)).toEqual([
+      ['w1'], ['w3'],
+    ])
+    expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
+  })
+
+  it('重新预览同一窗口计划或修改预算后保留窗口勾选', async () => {
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('window-picker')
+    await userEvent.click(screen.getByTestId('window-w2'))
+    await userEvent.click(screen.getByTestId('preview-estimate'))
+    await waitFor(() => expect(jobsApi.estimateRange).toHaveBeenCalledTimes(2))
+    expect(screen.getByTestId('window-w2')).not.toBeChecked()
+    fireEvent.change(screen.getByTestId('budget-max-input'), { target: { value: '50000' } })
+    await waitFor(() => expect(jobsApi.estimateRange).toHaveBeenCalledTimes(3))
+    await screen.findByTestId('window-picker')
+    expect(screen.getByTestId('window-w1')).toBeChecked()
+    expect(screen.getByTestId('window-w2')).not.toBeChecked()
+  })
+
+  it('窗口预览失败时不允许处理，重试成功后恢复多选', async () => {
+    vi.mocked(jobsApi.estimateRange).mockRejectedValueOnce(new Error('窗口规划不可用'))
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    expect(await screen.findByRole('alert')).toHaveTextContent('窗口预览失败：窗口规划不可用')
+    expect(screen.getByTestId('preview-process')).toBeDisabled()
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '重新读取' }))
+    await screen.findByTestId('window-picker')
+    await waitFor(() => expect(screen.getByTestId('preview-process')).toBeEnabled())
+  })
+
+  it('切换章节后迟到的预览结果不会覆盖当前章窗口', async () => {
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue([
+      ...CHAPTERS,
+      { ...CHAPTERS[0], id: 'c2', ordinal: 1, start_cp: 20, end_cp: 40 },
+    ])
+    let resolveOld!: (estimate: EstimateOut) => void
+    vi.mocked(jobsApi.estimateRange).mockImplementation((_bookId, input) =>
+      input.range.chapterId === 'c1'
+        ? new Promise((resolve) => { resolveOld = resolve })
+        : Promise.resolve({ ...ESTIMATE, windows: [{ ...ESTIMATE.windows![0], window_id: 'chapter2' }] }),
+    )
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await waitFor(() => expect(jobsApi.estimateRange).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId('preview-process')).toBeDisabled()
+    await userEvent.selectOptions(screen.getByTestId('range-chapter'), 'c2')
+    await screen.findByTestId('window-chapter2')
+    resolveOld(ESTIMATE)
+    await waitFor(() => expect(screen.getByTestId('window-chapter2')).toBeChecked())
+    expect(screen.queryByTestId('window-w1')).not.toBeInTheDocument()
   })
 
   it('原文/标注切换只改显示，不触发任何模型调用', async () => {
@@ -717,7 +801,8 @@ describe('PreviewPage', () => {
     )
     expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
     expect(jobsApi.createJob).not.toHaveBeenCalled()
-    expect(jobsApi.estimateRange).not.toHaveBeenCalled()
+    // 默认单章页可自动做本地窗口预览，但批量跳过的章节不得重新估算。
+    expect(vi.mocked(jobsApi.estimateRange).mock.calls.every((call) => call.length === 3)).toBe(true)
   })
 
   it('开启强制重做会重新估算并处理已经完成的章节', async () => {

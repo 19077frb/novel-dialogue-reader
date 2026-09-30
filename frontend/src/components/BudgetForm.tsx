@@ -2,7 +2,7 @@ import type { BudgetInput } from '../api/jobs'
 
 /**
  * 预算表单：把上限直接交给后端；留空表示不设该上限。
- * 这里不做任何估算/调用，改动只在提交估算或创建任务时生效。
+ * 表单本身不调用模型；使用它的页面可在预算改变后重新进行本地窗口估算。
  */
 export interface BudgetFormProps {
   value: BudgetInput

@@ -20,7 +20,7 @@ import {
   type BudgetInput,
 } from '../api/jobs'
 import { fetchProfiles, profileKeys } from '../api/profiles'
-import type { AnnotationItemOut, EstimateOut, JobDetailOut } from '../api/types'
+import type { AnnotationItemOut, JobDetailOut } from '../api/types'
 import { BudgetForm } from '../components/BudgetForm'
 import { BatchProcessor, useBatchProgress } from '../components/BatchProcessor'
 import { CharacterRosterPanel } from '../components/CharacterRosterPanel'
@@ -34,6 +34,7 @@ import { ReadErrorNotice } from '../components/ReadErrorNotice'
 import { QuoteNormalizationPanel } from '../components/QuoteNormalizationPanel'
 import { SpeakerLegend } from '../components/SpeakerLegend'
 import { UsageSummary } from '../components/UsageSummary'
+import { WindowPicker } from '../components/WindowPicker'
 import { mapWithConcurrency } from '../processing/concurrency'
 
 const DEFAULT_BUDGET: BudgetInput = {
@@ -65,8 +66,8 @@ export default function PreviewPage() {
   const [concurrency, setConcurrency] = useState(2)
   const [profileId, setProfileId] = useState('')
   const [viewMode, setViewMode] = useState<'annotated' | 'original'>('annotated')
-  const [estimate, setEstimate] = useState<EstimateOut | null>(null)
   const [selectedWindowIds, setSelectedWindowIds] = useState<string[]>([])
+  const selectionKeyRef = useRef('')
   const [jobId, setJobId] = useState<string | null>(null)
   const [currentJob, setCurrentJob] = useState<JobDetailOut | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -167,31 +168,44 @@ export default function PreviewPage() {
     [items, viewMode],
   )
 
-  const estimateMutation = useMutation({
-    mutationFn: () =>
+  const estimateQuery = useQuery({
+    queryKey: ['window-preview', bookId, book.data?.active_version_id, range, resolvedEnd, budget],
+    queryFn: ({ signal }) =>
       estimateRange(bookId as string, {
         bookVersionId: book.data?.active_version_id ?? null,
         range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
         readingMode: PROCESSING_READING_MODE,
         visibleHorizonCp: null,
         budget,
-      }),
-    onSuccess: (data) => {
-      setEstimate(data)
-      setSelectedWindowIds(
-        (data.windows ?? []).map((window) => String(window.window_id)),
-      )
-      setError(null)
-    },
-    onError: (err: unknown) => setError(err instanceof Error ? err.message : '估算失败'),
+      }, signal),
+    enabled: Boolean(bookId) && rangeValid && range.chapterId !== null
+      && processingMode === 'single' && !batchProgress.running,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    retry: false,
   })
+  const estimate = rangeValid ? estimateQuery.data ?? null : null
+  useEffect(() => {
+    if (!estimate) return
+    const ids = (estimate.windows ?? []).map((window) => String(window.window_id))
+    const key = JSON.stringify([bookId, estimate.book_version_id, range.chapterId, range.startCp, resolvedEnd, ids])
+    if (key === selectionKeyRef.current) return
+    selectionKeyRef.current = key
+    setSelectedWindowIds(ids)
+  }, [estimate, bookId, range.chapterId, range.startCp, resolvedEnd])
 
   const jobMutation = useMutation({
     mutationFn: async (mode: 'preview' | 'process') => {
       const versionId = book.data?.active_version_id ?? null
+      if (range.chapterId && (!estimate || estimateQuery.isFetching || estimateQuery.isError || selectedWindowIds.length === 0)) {
+        throw new Error('请等待窗口预览完成并选择至少一个窗口')
+      }
       const plannedWindows = range.chapterId && estimate?.windows?.length
         ? (estimate.windows ?? []).filter((window) => selectedWindowIds.includes(String(window.window_id)))
         : []
+      if (range.chapterId && plannedWindows.length === 0) {
+        throw new Error('没有选中当前章节的有效窗口，不能开始处理')
+      }
       if (plannedWindows.length === 0) {
         return createJob({
           bookId: bookId as string,
@@ -298,7 +312,10 @@ export default function PreviewPage() {
   if (!rangeValid) runBlockers.push('处理范围无效')
   if (profileId === '') runBlockers.push('未选择模型配置（见第一步）')
   if (rosterRequired && !rosterConfirmed) runBlockers.push('尚未确认本章人物（见第二步）')
-  if (range.chapterId && estimate?.windows?.length && selectedWindowIds.length === 0) {
+  if (range.chapterId && (!estimate || estimateQuery.isFetching || estimateQuery.isError)) {
+    runBlockers.push(estimateQuery.isError ? '窗口预览失败，请重新读取' : '正在读取窗口预览')
+  }
+  if (range.chapterId && estimate && !(estimate.windows ?? []).some((window) => selectedWindowIds.includes(String(window.window_id)))) {
     runBlockers.push('尚未选择要处理的窗口')
   }
   const runDisabled = runBlockers.length > 0 || jobMutation.isPending
@@ -393,7 +410,7 @@ export default function PreviewPage() {
           canonicalLengthCp={canonicalLengthCp}
           onChange={(next) => {
             setRange(next)
-            setEstimate(null)
+            selectionKeyRef.current = ''
             setSelectedWindowIds([])
             setNotice(null)
           }}
@@ -421,6 +438,20 @@ export default function PreviewPage() {
             </p>
           )}
         </fieldset>
+        {range.chapterId && (
+          <>
+            {estimateQuery.isFetching && <p className="hint" role="status">正在生成窗口预览（不调用模型）…</p>}
+            {estimateQuery.isError && <ReadErrorNotice label="窗口预览失败" error={estimateQuery.error}
+              retrying={estimateQuery.isFetching} onRetry={() => void estimateQuery.refetch()} />}
+            {estimate && (estimate.windows?.length ?? 0) > 0 && <WindowPicker
+              windows={estimate.windows ?? []} selectedIds={selectedWindowIds}
+              onChange={setSelectedWindowIds} disabled={jobMutation.isPending || estimateQuery.isFetching}
+            />}
+            {estimate && !estimateQuery.isFetching && (estimate.windows?.length ?? 0) === 0 && (
+              <p className="hint">本章没有可处理的对白窗口。</p>
+            )}
+          </>
+        )}
       </section>
 
       <CharacterRosterPanel
@@ -461,11 +492,11 @@ export default function PreviewPage() {
         <div className="ndr-form-actions">
           <button
             type="button"
-            onClick={() => estimateMutation.mutate()}
-            disabled={!rangeValid || estimateMutation.isPending}
+            onClick={() => void estimateQuery.refetch()}
+            disabled={!rangeValid || estimateQuery.isFetching || jobMutation.isPending}
             data-testid="preview-estimate"
           >
-            本地估算（不调用模型）
+            重新预览窗口与估算（不调用模型）
           </button>
           <button
             type="button"
@@ -495,43 +526,16 @@ export default function PreviewPage() {
             {error}
           </p>
         )}
+        {!range.chapterId && estimateQuery.isError && (
+          <ReadErrorNotice label="本地估算失败" error={estimateQuery.error}
+            retrying={estimateQuery.isFetching} onRetry={() => void estimateQuery.refetch()} />
+        )}
         {notice && (
           <p className="hint" data-testid="preview-notice">
             {notice}
           </p>
         )}
         {estimate && <EstimateSummary estimate={estimate} />}
-        {range.chapterId && (estimate?.windows?.length ?? 0) > 0 && (
-          <fieldset className="ndr-window-picker" data-testid="window-picker">
-            <legend>选择要处理的窗口（可多选）</legend>
-            <p className="hint">人物识别仍会读取本章全文；这里只限制对白归属窗口。</p>
-            {(estimate?.windows ?? []).map((window) => {
-              const windowId = String(window.window_id)
-              const checked = selectedWindowIds.includes(windowId)
-              return (
-                <label key={windowId} className="ndr-window-option">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(event) =>
-                      setSelectedWindowIds((current) =>
-                        event.target.checked
-                          ? [...current, windowId]
-                          : current.filter((item) => item !== windowId),
-                      )
-                    }
-                    data-testid={`window-${windowId}`}
-                  />
-                  <span>
-                    窗口 {String(window.ordinal)} · {String(window.target_count)} 句对白 · 约{' '}
-                    {Number(window.estimated_tokens).toLocaleString()} tokens
-                    <small>{String(window.preview || '（无文本预览）')}</small>
-                  </span>
-                </label>
-              )
-            })}
-          </fieldset>
-        )}
       </section>
 
       {jobId && (

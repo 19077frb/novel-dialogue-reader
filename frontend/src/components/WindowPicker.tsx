@@ -1,0 +1,38 @@
+import type { EstimateOut } from '../api/types'
+
+export function WindowPicker({ windows, selectedIds, onChange, disabled = false }: {
+  windows: NonNullable<EstimateOut['windows']>
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+  disabled?: boolean
+}) {
+  const selected = windows.filter((window) => selectedIds.includes(String(window.window_id)))
+  const tokens = selected.reduce((total, window) => total + Number(window.estimated_tokens || 0), 0)
+  return (
+    <fieldset className="ndr-window-picker" data-testid="window-picker" disabled={disabled}>
+      <legend>选择要处理的窗口（可多选）</legend>
+      <p className="hint">这里只限制对白归属窗口；人物识别仍会读取本章全文。默认全选，可选择不连续的多个窗口。</p>
+      <div className="ndr-form-actions">
+        <button type="button" onClick={() => onChange(windows.map((window) => String(window.window_id)))} data-testid="windows-select-all">全选窗口</button>
+        <button type="button" onClick={() => onChange([])} data-testid="windows-clear">清空选择</button>
+      </div>
+      <p className="hint" data-testid="windows-selection-summary">
+        已选 {selected.length}/{windows.length} 个窗口 · 约 {tokens.toLocaleString()} tokens（仅对白归属估算）
+      </p>
+      {windows.map((window) => {
+        const id = String(window.window_id)
+        return (
+          <label key={id} className="ndr-window-option">
+            <input type="checkbox" checked={selectedIds.includes(id)}
+              onChange={(event) => onChange(event.target.checked ? [...selectedIds, id] : selectedIds.filter((item) => item !== id))}
+              data-testid={`window-${id}`} />
+            <span>
+              窗口 {String(window.ordinal)} · {String(window.target_count)} 句对白 · 约 {Number(window.estimated_tokens).toLocaleString()} tokens
+              <small>{String(window.preview || '（无文本预览）')}</small>
+            </span>
+          </label>
+        )
+      })}
+    </fieldset>
+  )
+}
