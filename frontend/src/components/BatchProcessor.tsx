@@ -247,9 +247,10 @@ interface BatchProcessorProps {
   profiles: ModelProfileOut[]
   onFinished: () => void
   showConfiguration?: boolean
+  initialChapterId?: string | null
 }
 
-export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished, showConfiguration = true }: BatchProcessorProps) {
+export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished, showConfiguration = true, initialChapterId }: BatchProcessorProps) {
   const batchProgress = useBatchProgress(bookId)
   const [startId, setStartId] = useState('')
   const [endId, setEndId] = useState('')
@@ -270,7 +271,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     if (!profileId && profiles.length > 0) setProfileId(profiles[0].id)
   }, [profileId, profiles])
 
-  const firstId = startId || chapters[0]?.id || ''
+  const firstId = startId || chapters.find((chapter) => chapter.id === initialChapterId)?.id || chapters[0]?.id || ''
   const lastId = endId || chapters.at(-1)?.id || ''
   const startIndex = chapters.findIndex((chapter) => chapter.id === firstId)
   const endIndex = chapters.findIndex((chapter) => chapter.id === lastId)

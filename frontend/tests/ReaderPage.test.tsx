@@ -203,6 +203,7 @@ describe('ReaderPage', () => {
     expect(await screen.findByText(/第二章的正文/)).toBeInTheDocument()
     const active = screen.getByRole('button', { current: true })
     expect(active).toHaveTextContent('第二章')
+    expect(screen.getByRole('link', { name: '预览与处理' })).toHaveAttribute('href', '/books/b1/preview?chapterId=c2')
   })
 
   it('书籍读取失败时显示具体错误并允许重新读取', async () => {
@@ -232,6 +233,7 @@ describe('ReaderPage', () => {
       expectedVersion: 3,
     })
     expect(await screen.findByText(/第一章的正文/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '预览与处理' })).toHaveAttribute('href', '/books/b1/preview?chapterId=c1')
   })
 
   it('显示候选引语覆盖，并可关闭（覆盖不等于识别结果）', async () => {

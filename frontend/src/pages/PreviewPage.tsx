@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { annotationKeys, fetchAnnotations } from '../api/annotations'
 import {
@@ -70,9 +70,11 @@ const PROCESSING_READING_MODE = 'reread' as const
  */
 export default function PreviewPage() {
   const { bookId } = useParams<{ bookId: string }>()
+  const [searchParams] = useSearchParams()
+  const requestedChapterId = searchParams.get('chapterId')
   const queryClient = useQueryClient()
   const documentRef = useRef<HTMLDivElement>(null)
-  const initializedRef = useRef(false)
+  const initializedRef = useRef<string | null>(null)
 
   const [range, setRange] = useState<RangeValue>({ chapterId: null, startCp: 0, endCp: null })
   const [processingMode, setProcessingMode] = useState<'single' | 'batch'>('single')
@@ -106,14 +108,16 @@ export default function PreviewPage() {
     queryFn: ({ signal }) => fetchProfiles(signal),
   })
 
-  // 默认范围：第一章（只做一次，之后完全由用户控制）。
+  // 阅读页传入当前章节；按本书目录验证，只在进入该链接时初始化，之后由用户控制。
   useEffect(() => {
-    if (initializedRef.current) return
+    const key = JSON.stringify([bookId, requestedChapterId])
+    if (initializedRef.current === key) return
     const list = chapters.data
     if (!list || list.length === 0) return
-    initializedRef.current = true
-    setRange({ chapterId: list[0].id, startCp: list[0].start_cp, endCp: list[0].end_cp })
-  }, [chapters.data])
+    const chapter = list.find((item) => item.id === requestedChapterId) ?? list[0]
+    initializedRef.current = key
+    setRange({ chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp })
+  }, [bookId, requestedChapterId, chapters.data])
 
   useEffect(() => {
     if (profileId !== '' || !profiles.data || profiles.data.length === 0) return
@@ -639,6 +643,7 @@ export default function PreviewPage() {
       {(processingMode === 'batch' || batchProgress.running || batchProgress.tasks.length > 0) && (
         <BatchProcessor
           bookId={bookId}
+          initialChapterId={requestedChapterId}
           bookVersionId={book.data?.active_version_id}
           chapters={chapters.data ?? []}
           profiles={profiles.data ?? []}

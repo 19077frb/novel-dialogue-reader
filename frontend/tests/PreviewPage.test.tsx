@@ -382,6 +382,35 @@ describe('PreviewPage', () => {
     expect(screen.queryByText('金额')).not.toBeInTheDocument()
   })
 
+  it('继承阅读页传入的章节为单章范围和批量开始章节，允许手动调整', async () => {
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue([
+      ...CHAPTERS, { ...CHAPTERS[0], id: 'c2', ordinal: 1, start_cp: 20, end_cp: 40 },
+    ])
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview?chapterId=c2')
+    await screen.findByTestId('window-picker')
+    expect(screen.getByTestId('range-chapter')).toHaveValue('c2')
+    expect(screen.getByTestId('range-summary')).toHaveTextContent('20 – 40')
+    expect(jobsApi.estimateRange).toHaveBeenCalledWith('b1', expect.objectContaining({
+      range: { chapterId: 'c2', startCp: 20, endCp: 40 },
+    }), expect.any(AbortSignal))
+    await userEvent.selectOptions(screen.getByTestId('range-chapter'), 'c1')
+    expect(screen.getByTestId('range-chapter')).toHaveValue('c1')
+    await userEvent.click(screen.getByTestId('processing-mode-batch'))
+    expect(await screen.findByTestId('batch-start')).toHaveValue('c2')
+    await userEvent.selectOptions(screen.getByTestId('batch-start'), 'c1')
+    expect(screen.getByTestId('batch-start')).toHaveValue('c1')
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
+  })
+
+  it('链接章节不存在或不属于本书时，两种处理范围都回退到第一章', async () => {
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview?chapterId=foreign-chapter')
+    await screen.findByTestId('window-picker')
+    expect(screen.getByTestId('range-chapter')).toHaveValue('c1')
+    await userEvent.click(screen.getByTestId('processing-mode-batch'))
+    expect(await screen.findByTestId('batch-start')).toHaveValue('c1')
+  })
+
   it('估算只走本地接口，试运行用 preview 模式创建任务并轮询', async () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('annotation-span')
