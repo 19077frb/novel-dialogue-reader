@@ -132,7 +132,7 @@ test.describe('待确认队列与确认抽屉', () => {
     await expect(page.getByTestId('drawer-notice')).toContainText('已跳过')
     await page.getByTestId('drawer-close').click()
     await page.getByTestId('review-status').selectOption('DEFERRED')
-    await expect(page.getByTestId('review-item').first()).toContainText('DEFERRED')
+    await expect(page.getByTestId('review-item').first()).toContainText('已延后')
 
   })
 

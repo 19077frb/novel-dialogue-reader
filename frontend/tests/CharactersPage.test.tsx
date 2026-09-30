@@ -3,12 +3,16 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '../src/api/characters'
+import * as booksApi from '../src/api/books'
 import type { CharacterDirectoryOut } from '../src/api/types'
 import CharactersPage from '../src/pages/CharactersPage'
 import { renderRoute } from './helpers'
 
 vi.mock('../src/api/characters', () => ({
   fetchCharacterDirectory: vi.fn(), editBookCharacter: vi.fn(), mergeBookCharacter: vi.fn(),
+}))
+vi.mock('../src/api/books', () => ({
+  fetchBook: vi.fn(), queryKeys: { book: (id: string) => ['book', id] },
 }))
 
 const entries: CharacterDirectoryOut[] = [
@@ -19,6 +23,7 @@ const entries: CharacterDirectoryOut[] = [
 
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.mocked(booksApi.fetchBook).mockResolvedValue({ id: 'b1', title: '测试小说' } as never)
   vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(entries)
   vi.mocked(api.editBookCharacter).mockResolvedValue(entries[0])
   vi.mocked(api.mergeBookCharacter).mockResolvedValue(entries[0])
@@ -32,6 +37,8 @@ describe('CharactersPage', () => {
   it('列出全书与未关联人物，保留阅读章节并可按别名搜索', async () => {
     renderPage()
     await screen.findByText('共 3 个人物')
+    expect(await screen.findByRole('heading', { name: '全书人物：测试小说' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: '本书导航' })).toHaveClass('ndr-book-nav')
     expect(screen.getByRole('link', { name: '去阅读' })).toHaveAttribute('href', '/books/b1/read?chapterId=c2')
     expect(screen.getByRole('article', { name: '人物 女店员' })).toBeInTheDocument()
     await userEvent.type(screen.getByLabelText('搜索人物'), '哥哥')
@@ -43,6 +50,8 @@ describe('CharactersPage', () => {
     renderPage()
     const card = within(await screen.findByRole('article', { name: '人物 浅村悠太' }))
     await userEvent.clear(card.getByLabelText('姓名'))
+    expect(card.getByRole('button', { name: '保存人物资料' })).toBeDisabled()
+    expect(card.getByText('请填写人物姓名后再保存。')).toBeInTheDocument()
     await userEvent.type(card.getByLabelText('姓名'), '浅村优太')
     await userEvent.type(card.getByLabelText('别名（用、分隔）'), '悠太、哥哥')
     await userEvent.clear(card.getByLabelText('说明'))
@@ -58,12 +67,15 @@ describe('CharactersPage', () => {
     renderPage()
     const card = within(await screen.findByRole('article', { name: '人物 浅村悠太' }))
     const select = card.getByLabelText('合并到全书人物')
+    expect(card.getByRole('button', { name: '合并人物…' })).toBeDisabled()
+    expect(card.getByText('请选择合并目标后再合并。')).toBeInTheDocument()
     expect(within(select).queryByRole('option', { name: '浅村悠太' })).not.toBeInTheDocument()
     expect(within(select).queryByRole('option', { name: '女店员' })).not.toBeInTheDocument()
     await userEvent.selectOptions(select, 'u1')
     expect(card.getByText('目标说明：男主角')).toBeInTheDocument()
     await userEvent.click(card.getByRole('button', { name: '合并人物…' }))
     expect(api.mergeBookCharacter).not.toHaveBeenCalled()
+    expect(card.getByRole('button', { name: '确认合并' })).toHaveClass('ndr-danger')
     await userEvent.click(card.getByRole('button', { name: '确认合并' }))
     await waitFor(() => expect(api.mergeBookCharacter).toHaveBeenCalledWith('b1', 'u2', {
       target_character_id: 'u1', expected_version: 1, expected_target_version: 2,

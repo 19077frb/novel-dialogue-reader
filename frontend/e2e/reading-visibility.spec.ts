@@ -65,12 +65,12 @@ test.describe('证据时点与定位回归', () => {
     await openReader(page, 'sample-utf8')
     await runWholeBook(page, profileName, 'fake-model-merge')
 
-    // 回到阅读页第一章：两个声音必须是两种颜色/编号（合并证据在第二章末尾）
+    // 回到阅读页第一章：两个声音必须是两种颜色/称呼（合并证据在第二章末尾）
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
     await expect
       .poll(async () => page.getByTestId('annotation-label').allTextContents())
-      .toEqual(['〔S1〕', '〔S2〕'])
+      .toEqual(['〔第一个声音〕', '〔第二个声音〕'])
     const colors = await page
       .getByTestId('annotation-span')
       .evaluateAll((nodes) => nodes.slice(0, 2).map((node) => getComputedStyle(node).color))
@@ -79,12 +79,12 @@ test.describe('证据时点与定位回归', () => {
     await expect(page.getByTestId('reader-horizon')).toContainText('初读')
     await expect(page.getByTestId('reader-horizon')).toContainText('身份合并')
 
-    // 切到重读：合并生效，两处同色同号
+    // 切到重读：合并生效，两处显示相同人物称呼
     await page.getByTestId('reader-reading-mode').selectOption('reread')
     await expect(page.getByTestId('reader-horizon')).toHaveCount(0)
     await expect
       .poll(async () => page.getByTestId('annotation-label').allTextContents())
-      .toEqual(['〔S1〕', '〔S1〕'])
+      .toEqual(['〔第一个声音〕', '〔第一个声音〕'])
   })
 
   test('：emoji 与扩展汉字按码点着色，不切坏代理对', async ({ page }) => {
@@ -103,8 +103,8 @@ test.describe('证据时点与定位回归', () => {
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
     const spans = page.getByTestId('annotation-span')
-    await expect(spans.first()).toHaveText('〔S1〕「😀𠮷！」')
-    await expect(spans.nth(1)).toHaveText('〔S1〕「第二句。」')
+    await expect(spans.first()).toHaveText('〔确定性测试说话人〕「😀𠮷！」')
+    await expect(spans.nth(1)).toHaveText('〔确定性测试说话人〕「第二句。」')
     // 原文完整（emoji 与扩展汉字都在，没有被截断）
     await expect(page.getByTestId('document-renderer')).toContainText('「😀𠮷！」她笑了。')
   })
@@ -126,7 +126,7 @@ test.describe('证据时点与定位回归', () => {
     await page.locator('.ndr-chapter').first().click()
     // 注音仍在 <rt> 里，正文只保留基底文字
     await expect(page.locator('rt').first()).toHaveText('かん')
-    await expect(page.getByTestId('annotation-span').first()).toHaveText('〔S1〕「对白」')
+    await expect(page.getByTestId('annotation-span').first()).toHaveText('〔确定性测试说话人〕「对白」')
     // 跨块的同一句发言也被着色（范围跨越两个节点时编号只出现一次）
     await expect(
       page.getByTestId('annotation-span').filter({ hasText: '「跨块的同一句发言，」' }),

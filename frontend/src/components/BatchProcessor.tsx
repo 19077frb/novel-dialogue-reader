@@ -750,6 +750,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     {taskList}
     <section className="card ndr-step-card" data-testid="batch-processor">
       <div className="ndr-step-heading">
+        <span className="ndr-step-badge" aria-hidden="true">1</span>
         <div>
           <h3>批量处理配置</h3>
           <p className="hint">人物按章节顺序确认；上一章人物完成后，本章对白窗口会与下一章人物识别共享并发任务池。</p>

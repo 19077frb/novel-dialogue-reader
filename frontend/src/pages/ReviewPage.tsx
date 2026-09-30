@@ -158,7 +158,7 @@ export default function ReviewPage() {
             过滤条件与「未知/暂定/过期」数量都要一起看。
           </p>
         </div>
-        <nav className="ndr-preview-nav">
+        <nav className="ndr-book-nav" aria-label="本书导航">
           <Link to={`/books/${bookId}/read`}>去阅读</Link>
           <Link to={`/books/${bookId}/preview`}>预览与处理</Link>
           <Link to={`/books/${bookId}/characters`}>全书人物</Link>

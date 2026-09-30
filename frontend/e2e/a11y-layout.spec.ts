@@ -208,14 +208,16 @@ test.describe('可访问性与布局检查', () => {
       }
     }
 
-    // 窄屏下的关键控件仍然可见、可点
+    // 窄屏允许纵向滚动；关键控件必须能滚动到视口并操作
     await page.setViewportSize({ width: 360, height: 740 })
     await page.goto('/library')
+    await page.getByTestId('import-submit').scrollIntoViewIfNeeded()
     await expect(page.getByTestId('import-submit')).toBeInViewport()
     await expect(page.getByTestId('book-card').first()).toBeVisible()
 
     await page.goto(`/books/${bookId}/read`)
     await expect(page.locator('.ndr-chapter').first()).toBeVisible()
+    await page.getByTestId('open-export').scrollIntoViewIfNeeded()
     await expect(page.getByTestId('open-export')).toBeInViewport()
 
     // 导出对话框在 360px 下不超出视口

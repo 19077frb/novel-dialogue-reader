@@ -397,7 +397,7 @@ export default function PreviewPage() {
             先选择单章或批量处理，再展开对应配置；处理结果直接用于正式阅读。
           </p>
         </div>
-        <nav className="ndr-preview-nav" aria-label="本书导航">
+        <nav className="ndr-book-nav" aria-label="本书导航">
           <Link to={`/books/${bookId}/read${returnChapterId ? `?chapterId=${encodeURIComponent(returnChapterId)}` : ''}`}>去阅读</Link>
           <Link to={`/books/${bookId}/characters${returnChapterId ? `?chapterId=${encodeURIComponent(returnChapterId)}` : ''}`}>全书人物</Link>
           <Link to={`/books/${bookId}/review`}>待确认队列</Link>

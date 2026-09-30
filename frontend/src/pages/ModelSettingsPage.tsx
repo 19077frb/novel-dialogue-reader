@@ -202,8 +202,16 @@ export default function ModelSettingsPage() {
 
   return (
     <div className="ndr-page ndr-settings">
+      <header className="card ndr-page-header">
+        <div>
+          <h2>模型配置</h2>
+          <p className="hint">
+            管理 API 提供方、模型与密钥；密钥只在提交时发送，界面不回显。
+          </p>
+        </div>
+      </header>
       <section className="card">
-        <h2>模型配置</h2>
+        <h2>新增或更新配置</h2>
         <p className="hint">
           在这里填写 API 根地址、模型名与密钥；不需要改源码。密钥只在提交时出现，
           保存后接口只返回 <code>has_key</code>，不会回传密钥本身。保存前可以用

@@ -79,7 +79,7 @@ test.describe('完整联调：导入 → 处理 → 导出', () => {
     // 处理结果回到阅读页
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
-    await expect(page.getByTestId('annotation-label').first()).toHaveText('〔S1〕')
+    await expect(page.getByTestId('annotation-label').first()).toHaveText('〔确定性测试说话人〕')
 
     // 一次会话里导出两种格式
     await page.getByTestId('open-export').click()
@@ -91,7 +91,7 @@ test.describe('完整联调：导入 → 处理 → 导出', () => {
     expect(html.suggestedFilename().endsWith('.html')).toBe(true)
     const htmlBody = fs.readFileSync((await html.path()) as string).toString('utf-8')
     expect(htmlBody).toContain('「雨停了。」')
-    expect(htmlBody).toContain('〔S1〕')
+    expect(htmlBody).toContain('〔确定性测试说话人〕')
     expect(htmlBody).not.toContain('http://')
     expect(htmlBody).not.toContain('https://')
     expect(htmlBody).not.toContain('<script')
@@ -109,7 +109,7 @@ test.describe('完整联调：导入 → 处理 → 导出', () => {
 
     // 导出对话框关闭后，阅读页仍可用（导出只读快照，不改标注）
     await page.getByTestId('export-close').click()
-    await expect(page.getByTestId('annotation-label').first()).toHaveText('〔S1〕')
+    await expect(page.getByTestId('annotation-label').first()).toHaveText('〔确定性测试说话人〕')
   })
 
   test('EPUB：导入 → 处理 → EPUB 与 HTML 都能生成并下载', async ({ page }) => {

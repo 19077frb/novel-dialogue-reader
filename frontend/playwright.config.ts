@@ -25,6 +25,8 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   use: {
+    // Optional installed Chromium channel (e.g. msedge); otherwise Playwright Chromium.
+    channel: process.env.NDR_E2E_BROWSER_CHANNEL,
     baseURL: `http://127.0.0.1:${E2E_UI_PORT}`,
     trace: 'retain-on-failure',
   },

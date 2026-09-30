@@ -103,7 +103,7 @@ test.describe('导出对话框与下载闭环', () => {
     expect(file).toBeTruthy()
     const body = fs.readFileSync(file as string).toString('utf-8')
     expect(body).toContain('「雨停了。」')
-    expect(body).toContain('〔S1〕') // 颜色被覆盖时靠编号辨认
+    expect(body).toContain('〔确定性测试说话人〕') // 颜色被覆盖时仍能靠可读称呼辨认
     expect(body).not.toContain('http://')
     expect(body).not.toContain('https://')
     expect(body).not.toContain('<script')

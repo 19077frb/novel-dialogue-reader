@@ -48,7 +48,8 @@ test.describe('预览与按章处理', () => {
     await expect(page.getByTestId('import-result')).toContainText('导入完成：TXT')
     await openPreview(page, 'sample-utf8')
 
-    // 默认选中第一章（范围来自目录的真实起止码点）
+    // 阅读跳转会继承书签章节；本用例显式选择第一章以隔离其他用例的阅读进度。
+    await page.getByTestId('range-chapter').selectOption({ index: 1 })
     await expect(page.getByTestId('range-summary')).toContainText('本次范围：0 – ')
     await page
       .getByTestId('preview-profile')
@@ -69,12 +70,12 @@ test.describe('预览与按章处理', () => {
     expect(Number(await page.getByTestId('job-calls').innerText())).toBeGreaterThan(0)
     await expect(page.getByTestId('preview-notice')).toContainText('标注投影')
 
-    // TXT 能着色，并且编号是真实文本节点
+    // TXT 能着色，并且可读人物称呼是真实文本节点
     const span = page.getByTestId('annotation-span').first()
     await expect(span).toBeAttached()
     await expect(span).toHaveAttribute('data-status', 'ACCEPTED')
-    await expect(page.getByTestId('annotation-label').first()).toHaveText('〔S1〕')
-    await expect(page.getByTestId('speaker-legend')).toContainText('S1')
+    await expect(page.getByTestId('annotation-label').first()).toHaveText('〔确定性测试说话人〕')
+    await expect(page.getByTestId('speaker-legend')).toContainText('确定性测试说话人')
     const color = await span.evaluate((element) => getComputedStyle(element).color)
     expect(color).not.toBe('')
 
@@ -109,7 +110,7 @@ test.describe('预览与按章处理', () => {
     await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
 
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()
-    await expect(page.getByTestId('annotation-label').first()).toHaveText('〔S1〕')
+    await expect(page.getByTestId('annotation-label').first()).toHaveText('〔确定性测试说话人〕')
     // ruby 注音仍在 <rt> 里，没有被当正文重复输出
     await expect(page.locator('rt').first()).toHaveText('かん')
   })
@@ -138,6 +139,6 @@ test.describe('预览与按章处理', () => {
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()
-    await expect(page.getByTestId('annotation-label').first()).toHaveText('〔S1〕')
+    await expect(page.getByTestId('annotation-label').first()).toHaveText('〔确定性测试说话人〕')
   })
 })

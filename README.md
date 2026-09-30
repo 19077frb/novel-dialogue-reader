@@ -268,6 +268,18 @@ data/                 本地运行数据，不提交到 Git
 
 开发约定和关键架构边界见 [DEVELOPMENT.md](DEVELOPMENT.md)。自动化修改规则见 [AGENTS.md](AGENTS.md)。
 
+### 界面与布局检查
+
+各页面统一使用标题与说明页头；书籍页面的导航按「去阅读 → 预览与处理 → 全书人物 → 待确认队列 →（导出）→ 返回书架」排列，省略当前页。单章处理保留三个步骤，批量配置从步骤 1 开始。表单、危险按钮和章节状态使用共享样式与主题变量，自动适配系统暗色模式；窄屏页头纵向排列，页面允许纵向滚动。
+
+修改界面时遵循 [AGENTS.md](AGENTS.md) 的 UI 规范。可运行以下隔离端到端检查，覆盖七个页面的浅色、暗色与窄屏布局，并生成截图（位于不提交的 `frontend/test-results/`）：
+
+```powershell
+npm --prefix frontend run test:e2e -- ui-unification.spec.ts a11y-layout.spec.ts
+```
+
+默认使用 Playwright Chromium；如未安装其浏览器，可使用本机已安装的 Edge：先设置 `$env:NDR_E2E_BROWSER_CHANNEL = 'msedge'`，再执行上述命令。测试使用独立书库和离线测试模型，不读取真实书库、不调用付费模型。
+
 ## 已知限制
 
 - 对白归属取决于文本线索和所选模型，结果仍需要人工复核。

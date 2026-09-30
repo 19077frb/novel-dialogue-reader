@@ -106,6 +106,14 @@ export default function LibraryPage() {
 
   return (
     <div className="ndr-page ndr-library">
+      <header className="card ndr-page-header">
+        <div>
+          <h2>书架</h2>
+          <p className="hint">
+            导入 TXT/EPUB 书籍后即可阅读原文；识别说话人后按人物着色，可随时导出。
+          </p>
+        </div>
+      </header>
       <section className="card">
         <h2>导入书籍</h2>
         <p className="hint">
@@ -220,7 +228,7 @@ export default function LibraryPage() {
       </section>
 
       <section className="card">
-        <h2>书架</h2>
+        <h2>全部书籍</h2>
         {deleteError && <p className="status-error" role="alert" data-testid="delete-book-error">{deleteError}</p>}
         {deleteNotice && <p className="status-ok" role="status">{deleteNotice}</p>}
         {books.isPending && <p className="hint">正在读取书架…</p>}

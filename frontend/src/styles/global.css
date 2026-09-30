@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --ndr-bg: #f7f7f5;
   --ndr-fg: #1f2328;
   --ndr-muted: #5c6570;
@@ -11,11 +12,33 @@
   --ndr-panel: #f2f4f7;
   --ndr-shadow: 0 1px 2px rgba(15, 18, 22, 0.06), 0 6px 20px rgba(15, 18, 22, 0.05);
   --ndr-shadow-hover: 0 2px 6px rgba(15, 18, 22, 0.1), 0 12px 28px rgba(15, 18, 22, 0.09);
+  --ndr-danger: #b42318;
+  --ndr-danger-strong: #8f1d14;
+  --ndr-warning: #9a5a00;
+  --ndr-warning-border: #d9972d;
+  --ndr-st-queued: #64748b;
+  --ndr-st-roster: #f59e0b;
+  --ndr-st-dialogue: #3b82f6;
+  --ndr-st-processed: #22c55e;
+  --ndr-st-failed: #ef4444;
+  --ndr-on-solid: #ffffff;
+  --ndr-export-paper: #ffffff;
+  --ndr-overlay: rgba(15, 18, 22, 0.45);
+  --ndr-shadow-drawer: -8px 0 24px rgba(0, 0, 0, 0.18);
+  --ndr-radius-xs: 3px;
+  --ndr-radius-sm: 4px;
+  --ndr-radius-field: 6px;
+  --ndr-radius-control: 8px;
+  --ndr-radius-dialog: 10px;
+  --ndr-radius-card: 12px;
+  --ndr-radius-pill: 999px;
+  --ndr-radius-round: 50%;
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
     --ndr-bg: #17191c;
     --ndr-fg: #e6e8eb;
     --ndr-muted: #a3abb5;
@@ -28,6 +51,18 @@
     --ndr-panel: #262a30;
     --ndr-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.35);
     --ndr-shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.5), 0 14px 32px rgba(0, 0, 0, 0.45);
+    --ndr-danger: #ff8a80;
+    --ndr-danger-strong: #ffa69e;
+    --ndr-warning: #f0b35c;
+    --ndr-warning-border: #b97f1f;
+    --ndr-st-queued: #94a3b8;
+    --ndr-st-roster: #fbbf24;
+    --ndr-st-dialogue: #60a5fa;
+    --ndr-st-processed: #4ade80;
+    --ndr-st-failed: #f87171;
+    --ndr-on-solid: #10131a;
+    --ndr-overlay: rgba(0, 0, 0, 0.7);
+    --ndr-shadow-drawer: -8px 0 24px rgba(0, 0, 0, 0.5);
   }
 }
 
@@ -71,7 +106,7 @@ h3 {
 .card {
   background: var(--ndr-card);
   border: 1px solid var(--ndr-border);
-  border-radius: 12px;
+  border-radius: var(--ndr-radius-card);
   padding: 18px 20px;
   margin-top: 16px;
   box-shadow: var(--ndr-shadow);
@@ -107,7 +142,7 @@ dd {
 button {
   font: inherit;
   padding: 6px 14px;
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   border: 1px solid var(--ndr-border);
   background: transparent;
   color: inherit;
@@ -126,21 +161,45 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* 文本类控件统一外观：任何页面新增 input/select/textarea 自动继承，不再单独写样式 */
 input[type='text'],
-select {
+input[type='password'],
+input[type='number'],
+input:not([type]),
+select,
+textarea {
   font: inherit;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--ndr-radius-field);
   border: 1px solid var(--ndr-border);
   background: transparent;
   color: inherit;
   width: 100%;
 }
 
+/* 表单字段标签统一规格；新表单直接给 label 加 .ndr-field 即可获得相同样式 */
+.ndr-field,
+.ndr-toolbar label,
+.ndr-profile-form label,
+.ndr-range-picker label,
+.ndr-budget-form label,
+.ndr-preview-model label,
+.ndr-review-filters label,
+.ndr-correction-form label,
+.ndr-recheck label,
+.ndr-character-card label,
+.ndr-normalization-edit label,
+.ndr-range-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: var(--ndr-muted);
+}
+
 code,
 pre {
-  background: rgba(127, 127, 127, 0.14);
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--ndr-muted) 14%, transparent);
+  border-radius: var(--ndr-radius-sm);
 }
 
 code {
@@ -161,20 +220,39 @@ a {
 .ndr-primary {
   background: var(--ndr-accent);
   border-color: var(--ndr-accent);
-  color: #ffffff;
+  color: var(--ndr-on-solid);
   font-weight: 600;
 }
 
 .ndr-primary:hover:not(:disabled) {
   background: var(--ndr-accent-strong);
   border-color: var(--ndr-accent-strong);
-  color: #ffffff;
+  color: var(--ndr-on-solid);
 }
 
 @media (prefers-color-scheme: dark) {
   .ndr-primary,
   .ndr-primary:hover:not(:disabled) {
-    color: #10131a;
+    color: var(--ndr-on-solid);
+  }
+}
+
+/* 危险操作按钮：删除/停止等破坏性动作统一使用 */
+.ndr-danger {
+  border-color: var(--ndr-danger);
+  color: var(--ndr-danger);
+  font-weight: 600;
+}
+
+.ndr-danger:hover:not(:disabled) {
+  background: var(--ndr-danger-strong);
+  border-color: var(--ndr-danger-strong);
+  color: var(--ndr-on-solid);
+}
+
+@media (prefers-color-scheme: dark) {
+  .ndr-danger:hover:not(:disabled) {
+    color: var(--ndr-on-solid);
   }
 }
 
@@ -187,7 +265,7 @@ a {
   top: 0;
   background: var(--ndr-card);
   border: 1px solid var(--ndr-accent);
-  border-radius: 6px;
+  border-radius: var(--ndr-radius-field);
   padding: 6px 10px;
   z-index: 40;
 }
@@ -232,13 +310,13 @@ textarea:focus-visible {
   gap: 2px;
   background: var(--ndr-card);
   border: 1px solid var(--ndr-border);
-  border-radius: 999px;
+  border-radius: var(--ndr-radius-pill);
   padding: 3px;
 }
 
 .ndr-app-nav a {
   padding: 6px 16px;
-  border-radius: 999px;
+  border-radius: var(--ndr-radius-pill);
   color: var(--ndr-muted);
   text-decoration: none;
   font-weight: 600;
@@ -252,12 +330,12 @@ textarea:focus-visible {
 
 .ndr-app-nav a.active {
   background: var(--ndr-accent);
-  color: #ffffff;
+  color: var(--ndr-on-solid);
 }
 
 @media (prefers-color-scheme: dark) {
   .ndr-app-nav a.active {
-    color: #10131a;
+    color: var(--ndr-on-solid);
   }
 }
 
@@ -269,14 +347,14 @@ textarea:focus-visible {
   color: var(--ndr-muted);
   background: var(--ndr-card);
   border: 1px solid var(--ndr-border);
-  border-radius: 999px;
+  border-radius: var(--ndr-radius-pill);
   padding: 6px 14px;
 }
 
 .ndr-health-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--ndr-radius-round);
   background: var(--ndr-ok);
   flex: none;
 }
@@ -290,7 +368,7 @@ textarea:focus-visible {
 
 .ndr-dropzone {
   border: 2px dashed var(--ndr-border);
-  border-radius: 10px;
+  border-radius: var(--ndr-radius-dialog);
   padding: 24px;
   text-align: center;
   margin: 12px 0;
@@ -298,7 +376,7 @@ textarea:focus-visible {
 
 .ndr-dropzone.dragging {
   border-color: var(--ndr-accent);
-  background: rgba(47, 111, 235, 0.08);
+  background: color-mix(in srgb, var(--ndr-accent) 8%, transparent);
 }
 
 .ndr-import-controls {
@@ -338,7 +416,7 @@ textarea:focus-visible {
 .ndr-badge {
   font-size: 0.75rem;
   border: 1px solid var(--ndr-border);
-  border-radius: 999px;
+  border-radius: var(--ndr-radius-pill);
   padding: 1px 8px;
   color: var(--ndr-muted);
 }
@@ -414,15 +492,15 @@ textarea:focus-visible {
   width: 8px;
   height: 8px;
   margin-right: 4px;
-  border-radius: 50%;
-  background: #94a3b8;
+  border-radius: var(--ndr-radius-round);
+  background: var(--ndr-muted);
 }
 
-.ndr-chapter-status-legend .queued::before { background: #64748b; }
-.ndr-chapter-status-legend .roster::before { background: #f59e0b; }
-.ndr-chapter-status-legend .dialogue::before { background: #3b82f6; }
-.ndr-chapter-status-legend .processed::before { background: #22c55e; }
-.ndr-chapter-status-legend .failed::before { background: #ef4444; }
+.ndr-chapter-status-legend .queued::before { background: var(--ndr-st-queued); }
+.ndr-chapter-status-legend .roster::before { background: var(--ndr-st-roster); }
+.ndr-chapter-status-legend .dialogue::before { background: var(--ndr-st-dialogue); }
+.ndr-chapter-status-legend .processed::before { background: var(--ndr-st-processed); }
+.ndr-chapter-status-legend .failed::before { background: var(--ndr-st-failed); }
 
 .ndr-chapter {
   display: flex;
@@ -440,33 +518,33 @@ textarea:focus-visible {
 }
 
 .ndr-chapter-unprocessed {
-  border-left: 4px solid #94a3b8;
+  border-left: 4px solid var(--ndr-muted);
 }
 
 .ndr-chapter-queued {
-  border-left: 4px solid #64748b;
-  background: color-mix(in srgb, #64748b 8%, transparent);
+  border-left: 4px solid var(--ndr-st-queued);
+  background: color-mix(in srgb, var(--ndr-st-queued) 8%, transparent);
 }
 
 .ndr-chapter-roster {
-  border-left: 4px solid #f59e0b;
-  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  border-left: 4px solid var(--ndr-st-roster);
+  background: color-mix(in srgb, var(--ndr-st-roster) 12%, transparent);
 }
 
 .ndr-chapter-dialogue {
-  border-left: 4px solid #3b82f6;
-  background: color-mix(in srgb, #3b82f6 10%, transparent);
+  border-left: 4px solid var(--ndr-st-dialogue);
+  background: color-mix(in srgb, var(--ndr-st-dialogue) 10%, transparent);
 }
 
 .ndr-chapter-processed {
-  border-left: 4px solid #22c55e;
-  background: color-mix(in srgb, #22c55e 10%, transparent);
+  border-left: 4px solid var(--ndr-st-processed);
+  background: color-mix(in srgb, var(--ndr-st-processed) 10%, transparent);
 }
 
 .ndr-chapter-failed,
 .ndr-chapter-stopped {
-  border-left: 4px solid #ef4444;
-  background: color-mix(in srgb, #ef4444 9%, transparent);
+  border-left: 4px solid var(--ndr-st-failed);
+  background: color-mix(in srgb, var(--ndr-st-failed) 9%, transparent);
 }
 
 .ndr-chapter-range {
@@ -480,8 +558,8 @@ textarea:focus-visible {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, #ef4444 45%, transparent);
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--ndr-st-failed) 45%, transparent);
+  border-radius: var(--ndr-radius-control);
 }
 
 .ndr-reader-content {
@@ -501,7 +579,7 @@ textarea:focus-visible {
   gap: 8px;
   padding: 8px;
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
 }
 
 .ndr-window-option small {
@@ -593,7 +671,7 @@ textarea:focus-visible {
 /* 候选引语覆盖：只是扫描器提出的候选，用虚线提示；不表示说话人。 */
 .ndr-candidate {
   border-bottom: 1px dashed var(--ndr-muted);
-  background: rgba(127, 127, 127, 0.08);
+  background: color-mix(in srgb, var(--ndr-muted) 8%, transparent);
   cursor: default;
 }
 
@@ -619,29 +697,9 @@ textarea:focus-visible {
   max-width: 720px;
 }
 
-.ndr-profile-form label {
-  display: grid;
-  gap: 4px;
-  font-size: 0.9rem;
-  color: var(--ndr-muted);
-}
-
-.ndr-profile-form input[type='text'],
-.ndr-profile-form input[type='password'],
-.ndr-profile-form textarea,
-.ndr-profile-form select {
-  font: inherit;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--ndr-border);
-  background: transparent;
-  color: inherit;
-  width: 100%;
-}
-
 .ndr-profile-form fieldset {
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   padding: 12px;
   display: grid;
   gap: 8px;
@@ -674,7 +732,7 @@ textarea:focus-visible {
 
 .ndr-profile-card {
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   padding: 12px;
   display: grid;
   gap: 8px;
@@ -694,7 +752,7 @@ textarea:focus-visible {
 
 .ndr-connection-result {
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   padding: 10px 12px;
   margin-top: 10px;
 }
@@ -740,7 +798,7 @@ textarea:focus-visible {
 .ndr-legend-swatch {
   width: 12px;
   height: 12px;
-  border-radius: 3px;
+  border-radius: var(--ndr-radius-xs);
   border: 1px solid var(--ndr-border);
   display: inline-block;
 }
@@ -756,24 +814,24 @@ textarea:focus-visible {
 
 /* ---------- 预览与按章处理页 ---------- */
 
-.ndr-preview-nav {
+.ndr-book-nav {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.ndr-preview-nav a {
+.ndr-book-nav a {
   display: inline-block;
   padding: 6px 12px;
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   text-decoration: none;
   color: inherit;
   transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-.ndr-preview-nav a:hover {
+.ndr-book-nav a:hover {
   border-color: var(--ndr-accent);
   color: var(--ndr-accent);
 }
@@ -787,37 +845,16 @@ textarea:focus-visible {
 .ndr-budget-form,
 .ndr-preview-model {
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   padding: 12px;
   display: grid;
   gap: 8px;
-}
-
-.ndr-range-picker label,
-.ndr-budget-form label,
-.ndr-preview-model label {
-  display: grid;
-  gap: 4px;
-  font-size: 0.9rem;
-  color: var(--ndr-muted);
 }
 
 .ndr-range-cp {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-}
-
-.ndr-range-picker input,
-.ndr-budget-form input,
-.ndr-preview-model select {
-  font: inherit;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--ndr-border);
-  background: transparent;
-  color: inherit;
-  width: 100%;
 }
 
 .ndr-preview-viewbar {
@@ -863,23 +900,6 @@ textarea:focus-visible {
   align-items: end;
 }
 
-.ndr-review-filters label {
-  display: grid;
-  gap: 4px;
-  font-size: 0.9rem;
-  color: var(--ndr-muted);
-}
-
-.ndr-review-filters select {
-  font: inherit;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--ndr-border);
-  background: transparent;
-  color: inherit;
-  width: 100%;
-}
-
 .ndr-review-list {
   list-style: none;
   padding: 0;
@@ -890,7 +910,7 @@ textarea:focus-visible {
 
 .ndr-review-list li {
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   padding: 10px;
   display: grid;
   gap: 8px;
@@ -923,7 +943,7 @@ textarea:focus-visible {
   overflow-y: auto;
   background: var(--ndr-card);
   border-left: 1px solid var(--ndr-border);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--ndr-shadow-drawer);
   padding: 16px;
   z-index: 20;
   display: grid;
@@ -962,31 +982,10 @@ textarea:focus-visible {
 .ndr-gap-decision,
 .ndr-quote-context {
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   padding: 12px;
   display: grid;
   gap: 8px;
-}
-
-.ndr-correction-form label,
-.ndr-recheck label {
-  display: grid;
-  gap: 4px;
-  font-size: 0.9rem;
-  color: var(--ndr-muted);
-}
-
-.ndr-correction-form select,
-.ndr-correction-form input,
-.ndr-recheck select,
-.ndr-recheck input {
-  font: inherit;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--ndr-border);
-  background: transparent;
-  color: inherit;
-  width: 100%;
 }
 
 .ndr-context-line {
@@ -996,7 +995,7 @@ textarea:focus-visible {
 }
 
 .ndr-context-target {
-  background: rgba(47, 111, 235, 0.18);
+  background: color-mix(in srgb, var(--ndr-accent) 18%, transparent);
   color: inherit;
 }
 
@@ -1014,7 +1013,7 @@ textarea:focus-visible {
 .ndr-dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 18, 22, 0.45);
+  background: var(--ndr-overlay);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -1026,7 +1025,7 @@ textarea:focus-visible {
 .ndr-dialog {
   background: var(--ndr-card);
   border: 1px solid var(--ndr-border);
-  border-radius: 10px;
+  border-radius: var(--ndr-radius-dialog);
   padding: 16px;
   width: min(720px, 100%);
   display: grid;
@@ -1045,7 +1044,7 @@ textarea:focus-visible {
 .ndr-export-policy,
 .ndr-export-format {
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   padding: 10px 12px;
   display: grid;
   gap: 6px;
@@ -1077,8 +1076,8 @@ textarea:focus-visible {
   width: 100%;
   min-height: 220px;
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
-  background: #ffffff;
+  border-radius: var(--ndr-radius-control);
+  background: var(--ndr-export-paper);
 }
 
 .ndr-export-progress {
@@ -1115,34 +1114,15 @@ textarea:focus-visible {
 
 .ndr-character-card {
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   padding: 12px;
   display: grid;
   gap: 10px;
   background: color-mix(in srgb, var(--ndr-panel) 88%, transparent);
 }
 
-.ndr-character-card label {
-  display: grid;
-  gap: 4px;
-  font-size: 0.9rem;
-  color: var(--ndr-muted);
-}
-
 .ndr-character-card .ndr-radio-row {
   align-items: center;
-}
-
-.ndr-character-card input,
-.ndr-character-card select,
-.ndr-character-card textarea {
-  font: inherit;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--ndr-border);
-  background: transparent;
-  color: inherit;
-  width: 100%;
 }
 
 .ndr-character-card input[type='checkbox'],
@@ -1170,11 +1150,6 @@ textarea:focus-visible {
 
 .ndr-batch-progress .ndr-step-heading {
   justify-content: space-between;
-}
-
-.ndr-batch-progress .ndr-danger {
-  color: var(--ndr-error);
-  border-color: var(--ndr-error);
 }
 
 .ndr-batch-progress-summary {
@@ -1222,19 +1197,19 @@ textarea:focus-visible {
   min-width: 4.2em;
   padding: 2px 7px;
   border: 1px solid var(--ndr-border);
-  border-radius: 999px;
+  border-radius: var(--ndr-radius-pill);
   text-align: center;
   white-space: nowrap;
 }
 
 .ndr-task-running {
-  color: #9a5a00;
-  border-color: #d9972d;
+  color: var(--ndr-warning);
+  border-color: var(--ndr-warning-border);
 }
 
 .ndr-task-completed {
-  color: #16803a;
-  border-color: #42a866;
+  color: var(--ndr-ok);
+  border-color: color-mix(in srgb, var(--ndr-ok) 60%, transparent);
 }
 
 .ndr-task-failed,
@@ -1243,6 +1218,11 @@ textarea:focus-visible {
 }
 
 @media (max-width: 640px) {
+  .ndr-page-header.ndr-reader-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .ndr-batch-progress-summary {
     grid-template-columns: 1fr;
   }
@@ -1254,9 +1234,9 @@ textarea:focus-visible {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 50%;
+  border-radius: var(--ndr-radius-round);
   background: var(--ndr-accent);
-  color: #ffffff;
+  color: var(--ndr-on-solid);
   font-weight: 700;
   font-size: 0.9rem;
   flex: none;
@@ -1264,7 +1244,7 @@ textarea:focus-visible {
 
 @media (prefers-color-scheme: dark) {
   .ndr-step-badge {
-    color: #10131a;
+    color: var(--ndr-on-solid);
   }
 }
 
@@ -1284,7 +1264,7 @@ textarea:focus-visible {
 .ndr-quote-legend {
   background: var(--ndr-panel);
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   padding: 8px 12px;
 }
 
@@ -1295,7 +1275,7 @@ textarea:focus-visible {
 
 .ndr-normalization-card {
   border: 1px solid var(--ndr-border);
-  border-radius: 8px;
+  border-radius: var(--ndr-radius-control);
   padding: 12px;
   display: grid;
   gap: 10px;
@@ -1307,7 +1287,7 @@ textarea:focus-visible {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   padding: 8px;
-  border-radius: 6px;
+  border-radius: var(--ndr-radius-field);
   background: color-mix(in srgb, var(--ndr-accent) 8%, transparent);
 }
 
@@ -1324,23 +1304,28 @@ textarea:focus-visible {
   align-items: end;
 }
 
-.ndr-normalization-edit label {
-  display: grid;
-  gap: 4px;
-  font-size: 0.9rem;
-  color: var(--ndr-muted);
-}
-
-.ndr-normalization-edit input,
-.ndr-normalization-edit select {
-  font: inherit;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--ndr-border);
-  background: transparent;
-  color: inherit;
-}
-
 .status-warning {
-  color: #9a5a00;
+  color: var(--ndr-warning);
+}
+
+/* ---------- 工具行与批量配置栅格 ---------- */
+
+.ndr-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+
+.ndr-toolbar label {
+  flex: 1 1 240px;
+}
+
+.ndr-range-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
 }
