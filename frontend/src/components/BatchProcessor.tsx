@@ -236,9 +236,10 @@ interface BatchProcessorProps {
   chapters: ChapterOut[]
   profiles: ModelProfileOut[]
   onFinished: () => void
+  showConfiguration?: boolean
 }
 
-export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished }: BatchProcessorProps) {
+export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished, showConfiguration = true }: BatchProcessorProps) {
   const batchProgress = useBatchProgress(bookId)
   const [startId, setStartId] = useState('')
   const [endId, setEndId] = useState('')
@@ -644,21 +645,26 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     }
   }
 
-  if (batchProgress.running) {
+  const taskList = (() => {
+    if (!batchProgress.running && batchProgress.tasks.length === 0) return null
     const finishedTasks = batchProgress.tasks.filter((task) =>
       ['completed', 'failed', 'cancelled'].includes(task.state),
     ).length
     const runningTasks = batchProgress.tasks.filter((task) => task.state === 'running').length
     return (
-      <section className="card ndr-step-card ndr-batch-progress" data-testid="batch-progress-panel">
+      <section
+        id="batch-task-list"
+        className="card ndr-step-card ndr-batch-progress"
+        data-testid={batchProgress.running ? 'batch-progress-panel' : 'batch-result-panel'}
+      >
         <div className="ndr-step-heading">
           <div>
-            <h3>批量处理进度</h3>
+            <h3>{batchProgress.running ? '批量处理进度' : '最近一次批量任务列表'}</h3>
             <p className="hint" aria-live="polite" data-testid="batch-progress-message">
               {batchProgress.message}
             </p>
           </div>
-          <button
+          {batchProgress.running && <button
             type="button"
             className="ndr-danger"
             disabled={batchProgress.stopRequested}
@@ -666,7 +672,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
             data-testid="batch-stop"
           >
             {batchProgress.stopRequested ? '正在停止…' : '停止批量处理'}
-          </button>
+          </button>}
         </div>
         <div className="ndr-batch-progress-summary">
           <progress value={finishedTasks} max={Math.max(1, batchProgress.tasks.length)} />
@@ -682,6 +688,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
                 <th>处理类型</th>
                 <th>章节</th>
                 <th>窗口</th>
+                <th>原因 / 错误详情</th>
               </tr>
             </thead>
             <tbody>
@@ -692,19 +699,29 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
                   <td>{task.chapterTitle}</td>
                   <td title={task.windowId ?? undefined}>
                     {task.windowLabel}
-                    {task.error && <small className="status-error">{task.error}</small>}
+                  </td>
+                  <td className={task.error ? 'status-error' : undefined}>
+                    {task.error || (task.type === 'roster'
+                      ? batchProgress.chapterStates[task.chapterId]?.error
+                      : null) || '—'}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="hint">停止后不会再派发排队任务；已经发给模型的请求会安全收尾。</p>
+        <p className="hint">{batchProgress.running
+          ? '停止后不会再派发排队任务；已经发给模型的请求会安全收尾。'
+          : '任务列表保留到下一批启动，可在应用内切换页面后返回查看；刷新或关闭页面会清除本列表。'}</p>
       </section>
     )
-  }
+  })()
+
+  if (batchProgress.running || !showConfiguration) return taskList
 
   return (
+    <>
+    {taskList}
     <section className="card ndr-step-card" data-testid="batch-processor">
       <div className="ndr-step-heading">
         <div>
@@ -774,7 +791,10 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       {!profileId && <p className="hint">请选择批量处理使用的模型配置。</p>}
       {!validRange && <p className="status-error">结束章节不能早于开始章节。</p>}
       {progress && <p className="hint" data-testid="batch-progress">{progress}</p>}
-      {error && <p className="status-error" data-testid="batch-error">{error}</p>}
+      {error && <p className="status-error" data-testid="batch-error">
+        {error} {taskList && <a href="#batch-task-list">查看任务列表</a>}
+      </p>}
     </section>
+    </>
   )
 }

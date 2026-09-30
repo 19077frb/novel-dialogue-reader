@@ -557,12 +557,13 @@ export default function PreviewPage() {
         </>
       )}
 
-      {(processingMode === 'batch' || batchProgress.running) && (
+      {(processingMode === 'batch' || batchProgress.running || batchProgress.tasks.length > 0) && (
         <BatchProcessor
           bookId={bookId}
           bookVersionId={book.data?.active_version_id}
           chapters={chapters.data ?? []}
           profiles={profiles.data ?? []}
+          showConfiguration={processingMode === 'batch'}
           onFinished={() => {
             void queryClient.invalidateQueries({ queryKey: ['annotations'] })
             void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })

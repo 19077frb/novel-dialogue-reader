@@ -623,8 +623,16 @@ describe('PreviewPage', () => {
       expect(screen.getByTestId('batch-progress')).toHaveTextContent('成功 2 章，失败 1 章'),
     )
     expect(screen.getByTestId('batch-error')).toHaveTextContent('2 章成功，1 章失败')
+    const resultPanel = screen.getByTestId('batch-result-panel')
+    expect(within(resultPanel).getByText('第一章人物识别失败')).toBeInTheDocument()
+    expect(within(resultPanel).getByRole('columnheader', { name: '原因 / 错误详情' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看任务列表' })).toHaveAttribute('href', '#batch-task-list')
+    expect(screen.getByTestId('batch-run')).toBeEnabled()
     expect(jobsApi.createJob).toHaveBeenCalledTimes(4)
     expect(booksApi.completeChapterProcessing).toHaveBeenCalledTimes(2)
+    await userEvent.click(screen.getByTestId('processing-mode-single'))
+    expect(screen.getByTestId('batch-result-panel')).toHaveTextContent('第一章人物识别失败')
+    expect(screen.queryByTestId('batch-processor')).not.toBeInTheDocument()
   })
 
   it('无人物的插图章跳过对白，后续章节仍按顺序处理', async () => {
@@ -686,6 +694,8 @@ describe('PreviewPage', () => {
 
     resolveWindow(meteredJob)
     await waitFor(() => expect(screen.queryByTestId('batch-progress-panel')).not.toBeInTheDocument())
+    expect(screen.getByTestId('batch-result-panel')).toBeInTheDocument()
+    expect(screen.queryByTestId('batch-stop')).not.toBeInTheDocument()
     expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('batch-error')).toHaveTextContent('批量处理已停止')
   })
