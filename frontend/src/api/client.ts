@@ -61,6 +61,7 @@ async function readJson<T>(response: Response): Promise<T> {
     }
     throw new ApiError(response.status, payload)
   }
+  if (response.status === 204) return undefined as T
   return (await response.json()) as T
 }
 

@@ -29,6 +29,7 @@ from ..domain.documents import (
     ReadingProgressOut,
 )
 from ..domain.enums import ErrorCode
+from ..ingest.deletion import delete_book
 from ..ingest.encoding import DecodeFailure
 from ..ingest.epub import EpubError, EpubLimits
 from ..ingest.query import (
@@ -53,6 +54,20 @@ TXT_SUFFIX = ".txt"
 EPUB_SUFFIX = ".epub"
 SUPPORTED_SUFFIXES = (TXT_SUFFIX, EPUB_SUFFIX)
 MAX_IMPORT_BYTES_FALLBACK = 50 * 1024 * 1024
+
+
+@router.delete("/{book_id}", status_code=204, summary="删除书籍与关联记录，文件移入回收区")
+def delete_book_route(request: Request, book_id: str) -> Response:
+    try:
+        delete_book(request.app.state.session_factory, request.app.state.settings, book_id)
+    except OSError as exc:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            "删除时无法移动书籍文件，请关闭占用文件的程序或检查数据目录权限后重试",
+            details={"book_id": book_id, "reason": str(exc)},
+            status_code=503,
+        ) from exc
+    return Response(status_code=204)
 
 
 def _epub_limits(settings: Settings) -> EpubLimits:

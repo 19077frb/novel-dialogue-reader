@@ -139,6 +139,16 @@ function batchShouldStop(bookId: string, localStop: boolean): boolean {
   return localStop || batchStopRequests.has(bookId)
 }
 
+export function isBatchRunning(bookId: string): boolean {
+  return batchSnapshots.get(bookId)?.running ?? false
+}
+
+export function clearBatchProgress(bookId: string) {
+  batchSnapshots.delete(bookId)
+  batchStopRequests.delete(bookId)
+  batchListeners.forEach((listener) => listener())
+}
+
 export function requestBatchStop(bookId: string) {
   batchStopRequests.add(bookId)
   const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH

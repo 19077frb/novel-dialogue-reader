@@ -1,8 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, readRetryDelay, shouldRetryReadRequest } from '../src/api/client'
+import { ApiError, apiRequest, readRetryDelay, shouldRetryReadRequest } from '../src/api/client'
 
 describe('read query retry policy', () => {
+  it('删除成功的 204 响应不尝试读取 JSON', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
+    try {
+      await expect(apiRequest<void>('/api/books/b1', { method: 'DELETE' })).resolves.toBeUndefined()
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
   it('只重试网络错误、限流和服务端临时错误，且最多两次', () => {
     expect(shouldRetryReadRequest(0, new TypeError('network'))).toBe(true)
     expect(shouldRetryReadRequest(1, new ApiError(503, { code: 'TEMP', message: 'busy' }))).toBe(true)

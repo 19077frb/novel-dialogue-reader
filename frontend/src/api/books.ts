@@ -1,5 +1,5 @@
 /** 书籍/导入/阅读/候选引语相关的查询与写操作封装（TanStack Query 使用）。 */
-import { apiData, apiUpload } from './client'
+import { apiData, apiRequest, apiUpload } from './client'
 import type {
   BookOut,
   ChapterOut,
@@ -36,6 +36,10 @@ export function fetchBooks(signal?: AbortSignal): Promise<CursorPageBook> {
 
 export function fetchBook(bookId: string, signal?: AbortSignal): Promise<BookOut> {
   return apiData<BookOut>(`/api/books/${bookId}`, { signal })
+}
+
+export async function deleteBook(bookId: string): Promise<void> {
+  await apiRequest<void>(`/api/books/${bookId}`, { method: 'DELETE' })
 }
 
 export function fetchChapters(bookId: string, signal?: AbortSignal): Promise<ChapterOut[]> {

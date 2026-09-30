@@ -15,7 +15,11 @@ function statusLabel(book: BookOut): string {
   }
 }
 
-export function BookCard({ book }: { book: BookOut }) {
+export function BookCard({ book, onDelete, deleting = false }: {
+  book: BookOut
+  onDelete?: (book: BookOut) => void
+  deleting?: boolean
+}) {
   const version = book.active_version
   const warnings = version?.warnings ?? []
   return (
@@ -34,6 +38,8 @@ export function BookCard({ book }: { book: BookOut }) {
         </dd>
         <dt>阅读位置</dt>
         <dd>{book.read_position_cp}</dd>
+        <dt>导入时间</dt>
+        <dd>{new Date(book.created_at).toLocaleString('zh-CN')}</dd>
       </dl>
       {warnings.length > 0 && (
         <details>
@@ -48,6 +54,13 @@ export function BookCard({ book }: { book: BookOut }) {
       <Link className="ndr-primary-link" to={`/books/${book.id}/read`}>
         开始阅读
       </Link>
+      {onDelete && <button
+        type="button"
+        className="ndr-danger"
+        disabled={deleting}
+        onClick={() => onDelete(book)}
+        data-testid={`delete-book-${book.id}`}
+      >{deleting ? '正在删除…' : '删除'}</button>}
     </article>
   )
 }

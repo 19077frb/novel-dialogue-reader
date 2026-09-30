@@ -24,6 +24,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 书籍详情 */
+        get: operations["get_book_route_api_books__book_id__get"];
+        put?: never;
+        post?: never;
+        /** 删除书籍与关联记录，文件移入回收区 */
+        delete: operations["delete_book_route_api_books__book_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/import": {
         parameters: {
             query?: never;
@@ -50,23 +68,6 @@ export interface paths {
         };
         /** 书籍列表 */
         get: operations["list_books_route_api_books_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/books/{book_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 书籍详情 */
-        get: operations["get_book_route_api_books__book_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3066,6 +3067,66 @@ export interface operations {
             };
         };
     };
+    get_book_route_api_books__book_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_BookOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_book_route_api_books__book_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     import_book_api_books_import_post: {
         parameters: {
             query?: never;
@@ -3118,37 +3179,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_CursorPage_BookOut__"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_book_route_api_books__book_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                book_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEnvelope_BookOut_"];
                 };
             };
             /** @description Validation Error */

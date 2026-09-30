@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as books from '../src/api/books'
 import { ApiError } from '../src/api/client'
-import type { ImportResult } from '../src/api/types'
+import type { BookOut, ImportResult } from '../src/api/types'
 import LibraryPage from '../src/pages/LibraryPage'
 import { renderWithProviders } from './helpers'
 
@@ -16,6 +16,7 @@ vi.mock('../src/api/books', () => ({
   fetchBooks: vi.fn(),
   importBook: vi.fn(),
   fetchJob: vi.fn(),
+  deleteBook: vi.fn(),
 }))
 
 const mockedFetchBooks = vi.mocked(books.fetchBooks)
@@ -48,6 +49,8 @@ async function pickFile() {
 
 describe('LibraryPage', () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.mocked(books.deleteBook).mockReset()
     mockedFetchBooks.mockReset()
     mockedImport.mockReset()
     mockedFetchJob.mockReset()
@@ -77,6 +80,39 @@ describe('LibraryPage', () => {
   it('空书架给出无需 API 配置即可阅读的提示', async () => {
     renderWithProviders(<LibraryPage />)
     expect(await screen.findByTestId('library-empty')).toHaveTextContent('不需要填写任何 API 配置')
+  })
+
+  const duplicateBooks = ['b1', 'b2'].map((id) => ({
+    id, title: '义妹人生', format: 'EPUB', import_status: 'COMPLETED',
+    read_position_cp: 0, active_version: null, created_at: '2026-09-30T12:00:00Z',
+  } as BookOut))
+
+  it('确认后只删除选中同名书，更新书架', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockedFetchBooks.mockResolvedValue({ items: duplicateBooks, next_cursor: null })
+    vi.mocked(books.deleteBook).mockResolvedValue(undefined)
+    renderWithProviders(<LibraryPage />)
+    await screen.findByTestId('delete-book-b1')
+    mockedFetchBooks.mockResolvedValue({ items: [duplicateBooks[1]], next_cursor: null })
+    await userEvent.click(screen.getByTestId('delete-book-b1'))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('书籍 ID：b1'))
+    expect(books.deleteBook).toHaveBeenCalledWith('b1')
+    await waitFor(() => expect(screen.queryByTestId('delete-book-b1')).not.toBeInTheDocument())
+    expect(screen.getByTestId('delete-book-b2')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('已删除《义妹人生》')
+  })
+
+  it('取消确认不删除，删除失败保留书籍并显示具体原因', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    mockedFetchBooks.mockResolvedValue({ items: duplicateBooks, next_cursor: null })
+    renderWithProviders(<LibraryPage />)
+    await userEvent.click(await screen.findByTestId('delete-book-b1'))
+    expect(books.deleteBook).not.toHaveBeenCalled()
+    confirm.mockReturnValue(true)
+    vi.mocked(books.deleteBook).mockRejectedValue(new Error('本书仍有任务正在运行'))
+    await userEvent.click(screen.getByTestId('delete-book-b1'))
+    expect(await screen.findByTestId('delete-book-error')).toHaveTextContent('本书仍有任务正在运行')
+    expect(screen.getAllByTestId('book-card')).toHaveLength(2)
   })
 
   it('导入成功后显示章节/节点数量与警告', async () => {

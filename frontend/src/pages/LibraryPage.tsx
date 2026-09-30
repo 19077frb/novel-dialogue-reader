@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { fetchBooks, importBook, queryKeys } from '../api/books'
+import { deleteBook, fetchBooks, importBook, queryKeys } from '../api/books'
 import { ApiError } from '../api/client'
-import type { ImportResult } from '../api/types'
+import type { BookOut, ImportResult } from '../api/types'
 import { BookCard } from '../components/BookCard'
 import { ImportDropzone } from '../components/ImportDropzone'
 import { JobPanel } from '../components/JobPanel'
+import { clearBatchProgress, isBatchRunning } from '../components/BatchProcessor'
 
 const ENCODING_OPTIONS = [
   { value: '', label: '自动检测（推荐）' },
@@ -35,6 +36,8 @@ export default function LibraryPage() {
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<ImportResult | null>(null)
   const [error, setError] = useState<ApiError | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null)
 
   const books = useQuery({
     queryKey: queryKeys.books(),
@@ -66,6 +69,36 @@ export default function LibraryPage() {
       )
     },
   })
+
+  const deleteMutation = useMutation({
+    mutationFn: (book: BookOut) => deleteBook(book.id),
+    onSuccess: (_data, book) => {
+      clearBatchProgress(book.id)
+      if (result?.book_id === book.id) setResult(null)
+      queryClient.removeQueries({ predicate: (query) => query.queryKey.includes(book.id) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.books() })
+      setDeleteError(null)
+      setDeleteNotice(`已删除《${book.title}》；书籍文件已移入数据目录回收区，应用内无法撤销。`)
+    },
+    onError: (reason) => {
+      setDeleteError(reason instanceof Error ? reason.message : '删除失败')
+    },
+  })
+
+  const handleDelete = (book: BookOut) => {
+    setDeleteError(null)
+    setDeleteNotice(null)
+    if (isBatchRunning(book.id)) {
+      setDeleteError('本书仍在批量处理，请先停止批量处理并等待结束后再删除。')
+      return
+    }
+    if (!window.confirm(
+      `确定删除《${book.title}》吗？\n导入时间：${new Date(book.created_at).toLocaleString('zh-CN')}\n` +
+      `书籍 ID：${book.id}\n\n将删除本书的阅读进度、人物、标注和任务记录，应用内无法撤销。` +
+      '书籍及导出文件移入数据目录回收区。同名的其他书籍不会受影响。',
+    )) return
+    deleteMutation.mutate(book)
+  }
 
   const preview = typeof error?.details?.preview === 'string' ? error.details.preview : ''
   const candidates = candidatesOf(error)
@@ -188,6 +221,8 @@ export default function LibraryPage() {
 
       <section className="card">
         <h2>书架</h2>
+        {deleteError && <p className="status-error" role="alert" data-testid="delete-book-error">{deleteError}</p>}
+        {deleteNotice && <p className="status-ok" role="status">{deleteNotice}</p>}
         {books.isPending && <p className="hint">正在读取书架…</p>}
         {books.isError && <p className="status-error">书架读取失败，请确认后端已启动。</p>}
         {books.isSuccess && books.data.items.length === 0 && (
@@ -198,7 +233,8 @@ export default function LibraryPage() {
         {books.isSuccess && books.data.items.length > 0 && (
           <div className="ndr-book-grid">
             {books.data.items.map((book) => (
-              <BookCard key={book.id} book={book} />
+              <BookCard key={book.id} book={book} onDelete={handleDelete}
+                deleting={deleteMutation.isPending && deleteMutation.variables?.id === book.id} />
             ))}
           </div>
         )}
