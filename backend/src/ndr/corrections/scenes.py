@@ -32,6 +32,13 @@ class SceneMoveResult:
 def ensure_scene_for_quote(session: Session, *, book_version_id: str, quote: Quote) -> Scene:
     """找到包含该位置的场景；没有就新建一个（用户可以先更正未处理的对白）。"""
 
+    # Persisted membership is authoritative. Independently processed ranges can
+    # leave overlapping open scenes; their SQL/index order must not reassign a quote.
+    scene_id = session.scalar(select(Annotation.scene_id).where(Annotation.quote_id == quote.id))
+    if scene_id:
+        assigned = session.get(Scene, scene_id)
+        if assigned is not None and assigned.book_version_id == book_version_id:
+            return assigned
     rows = session.execute(
         select(Scene)
         .where(Scene.book_version_id == book_version_id, Scene.start_cp <= quote.start_cp)
@@ -183,9 +190,7 @@ def ensure_membership(session: Session, *, quote_id: str, scene_id: str, revisio
     ).scalar_one_or_none()
     if row is not None:
         return
-    session.add(
-        SceneMembership(quote_id=quote_id, scene_id=scene_id, valid_from_revision=revision)
-    )
+    session.add(SceneMembership(quote_id=quote_id, scene_id=scene_id, valid_from_revision=revision))
 
 
 def label_map_for_scene(session: Session, scene_id: str) -> dict[str, str]:

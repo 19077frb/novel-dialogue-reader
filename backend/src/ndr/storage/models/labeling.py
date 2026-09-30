@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.enums import (
@@ -24,7 +24,10 @@ class Annotation(IdMixin, TimestampMixin, VersionMixin, Base):
     """
 
     __tablename__ = "annotations"
-    __table_args__ = (UniqueConstraint("quote_id", name="uq_annotations_quote_id"),)
+    __table_args__ = (
+        UniqueConstraint("quote_id", name="uq_annotations_quote_id"),
+        Index("ix_annotations_scene_dependency", "scene_id", "dependency_hash"),
+    )
 
     quote_id: Mapped[str] = mapped_column(
         ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False, index=True

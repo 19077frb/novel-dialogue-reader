@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
@@ -22,13 +22,14 @@ from ..storage.transactions import check_version
 from .service import _character_out, _json_list, list_book_characters
 
 
-def _groups(session: Session, version: BookVersion) -> list[SpeakerGroup]:
+def _groups(session: Session, version: BookVersion, *filters) -> list[SpeakerGroup]:  # noqa: ANN002
     return list(
         session.scalars(
             select(SpeakerGroup)
             .join(Scene)
             .where(
                 Scene.book_version_id == version.id,
+                *filters,
             )
         )
     )
@@ -39,7 +40,7 @@ def directory(session: Session, version: BookVersion) -> list[CharacterDirectory
         CharacterDirectoryOut(**_character_out(row).model_dump(), version=row.version)
         for row in list_book_characters(session, version)
     ]
-    for group in _groups(session, version):
+    for group in _groups(session, version, SpeakerGroup.character_id.is_(None)):
         if not group.character_id:
             entries.append(
                 CharacterDirectoryOut(
@@ -72,10 +73,12 @@ def _resolve(
 
 def _guard(session: Session, version: BookVersion) -> None:
     job = session.scalars(
-        select(Job).where(
+        select(Job)
+        .where(
             Job.book_version_id == version.id,
             Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
         )
+        .limit(1)
     ).first()
     if job:
         raise ApiError(
@@ -91,7 +94,14 @@ def _sync(
     source_group_id: str | None = None,
 ) -> None:
     """Update live references, roster snapshots and resumable checkpoints atomically."""
-    for group in _groups(session, version):
+    for group in _groups(
+        session,
+        version,
+        or_(
+            SpeakerGroup.character_id.in_([value for value in (target.id, source_id) if value]),
+            SpeakerGroup.id == source_group_id if source_group_id else False,
+        ),
+    ):
         if (group.character_id and group.character_id in {target.id, source_id}) or (
             group.id == source_group_id
         ):
@@ -169,11 +179,18 @@ def _sync(
                 value["aliases"] = _json_list(target.aliases_json)
         return value
 
-    for job in session.scalars(select(Job).where(Job.book_version_id == version.id)):
+    for job in session.scalars(
+        select(Job).where(
+            Job.book_version_id == version.id,
+            Job.state != JobState.COMPLETED,
+            Job.checkpoint_json.is_not(None),
+        )
+    ):
         if job.checkpoint_json and job.state is not JobState.COMPLETED:
-            job.checkpoint_json = json.dumps(
-                rewrite(json.loads(job.checkpoint_json)), ensure_ascii=False
-            )
+            checkpoint = json.loads(job.checkpoint_json)
+            updated = rewrite(checkpoint)
+            if updated != checkpoint:
+                job.checkpoint_json = json.dumps(updated, ensure_ascii=False)
     session.flush()
 
 

@@ -11,7 +11,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
@@ -75,7 +75,9 @@ def review_target_text(session: Session, item: ReviewItem, canonical_text: str) 
     target = (
         session.get(Quote, item.quote_id)
         if item.quote_id
-        else session.get(Gap, item.gap_id) if item.gap_id else None
+        else session.get(Gap, item.gap_id)
+        if item.gap_id
+        else None
     )
     if target is None:
         return ""
@@ -107,25 +109,31 @@ def _version_scope(book_version_id: str):  # noqa: ANN202
 
 
 def review_counts(session: Session, book_version_id: str) -> ReviewItemCountsOut:
-    rows = list(
-        session.execute(select(ReviewItem).where(_version_scope(book_version_id))).scalars()
+    # Count in SQLite: large candidate JSON payloads are irrelevant to counters.
+    scope = _version_scope(book_version_id)
+    target = case(
+        (ReviewItem.quote_id.is_not(None), "quote:" + ReviewItem.quote_id),
+        else_="gap:" + ReviewItem.gap_id,
     )
-    by_status: dict[str, int] = {}
-    by_reason: dict[str, int] = {}
-    targets: set[str] = set()
-    targets_by_status: dict[str, set[str]] = {}
-    for row in rows:
-        target = f"quote:{row.quote_id}" if row.quote_id else f"gap:{row.gap_id}"
-        targets.add(target)
-        by_status[row.queue_status.value] = by_status.get(row.queue_status.value, 0) + 1
-        by_reason[row.reason.value] = by_reason.get(row.reason.value, 0) + 1
-        targets_by_status.setdefault(row.queue_status.value, set()).add(target)
+    status_rows = session.execute(
+        select(
+            ReviewItem.queue_status,
+            func.count(),
+            func.count(func.distinct(target)),
+        )
+        .where(scope)
+        .group_by(ReviewItem.queue_status)
+    ).all()
+    reason_rows = session.execute(
+        select(ReviewItem.reason, func.count()).where(scope).group_by(ReviewItem.reason)
+    ).all()
+    total_targets = session.scalar(select(func.count(func.distinct(target))).where(scope))
     return ReviewItemCountsOut(
-        total=len(rows),
-        by_status=by_status,
-        by_reason=by_reason,
-        targets_total=len(targets),
-        targets_by_status={key: len(value) for key, value in targets_by_status.items()},
+        total=sum(count for _, count, _ in status_rows),
+        by_status={status.value: count for status, count, _ in status_rows},
+        by_reason={reason.value: count for reason, count in reason_rows},
+        targets_total=total_targets or 0,
+        targets_by_status={status.value: targets for status, _, targets in status_rows},
     )
 
 
@@ -134,6 +142,7 @@ def get_review_item_or_404(session: Session, item_id: str) -> ReviewItem:
     if item is None:
         raise ApiError.not_found("待确认项不存在", review_item_id=item_id)
     return item
+
 
 def list_review_items(
     session: Session,
@@ -147,9 +156,21 @@ def list_review_items(
     cursor: str | None = None,
     canonical_text: str = "",
 ) -> tuple[list[ReviewItemOut], str | None]:
-    from ..api.pagination import decode_cursor, encode_cursor
+    from ..api.pagination import chronological_cursor, encode_cursor
 
-    stmt = select(ReviewItem).where(_version_scope(book_version_id))
+    stmt = (
+        select(
+            ReviewItem,
+            func.coalesce(Quote.start_cp, Gap.start_cp),
+            func.coalesce(Quote.end_cp, Gap.end_cp),
+        )
+        .outerjoin(
+            Quote,
+            ReviewItem.quote_id == Quote.id,
+        )
+        .outerjoin(Gap, ReviewItem.gap_id == Gap.id)
+        .where(_version_scope(book_version_id))
+    )
     if chapter_id:
         stmt = stmt.where(
             ReviewItem.quote_id.in_(select(Quote.id).where(Quote.chapter_id == chapter_id))
@@ -165,19 +186,20 @@ def list_review_items(
     if queue_status is not None:
         stmt = stmt.where(ReviewItem.queue_status == queue_status)
     if cursor:
-        parts = decode_cursor(cursor)
-        if not parts:
-            raise ApiError.validation("cursor 内容为空")
-        stmt = stmt.where(ReviewItem.id > str(parts[0]))
+        stmt = stmt.where(chronological_cursor(session, ReviewItem, cursor))
     stmt = stmt.order_by(ReviewItem.created_at, ReviewItem.id).limit(limit + 1)
-    rows = list(session.execute(stmt).scalars())
+    rows = list(session.execute(stmt))
     has_more = len(rows) > limit
     rows = rows[:limit]
     items = [
-        review_item_out(row, target_text=review_target_text(session, row, canonical_text))
-        for row in rows
+        review_item_out(row, target_text=canonical_text[start:end] if start is not None else "")
+        for row, start, end in rows
     ]
-    next_cursor = encode_cursor([rows[-1].id]) if has_more and rows else None
+    next_cursor = (
+        encode_cursor([rows[-1][0].created_at.isoformat(), rows[-1][0].id])
+        if has_more and rows
+        else None
+    )
     return items, next_cursor
 
 
@@ -204,9 +226,7 @@ def review_item_detail(
             context_after = canonical_text[gap.end_cp : gap.end_cp + 120]
     label_map = label_map_for_scene(session, scene.id) if scene is not None else {}
     return ReviewItemDetailOut(
-        item=review_item_out(
-            item, target_text=review_target_text(session, item, canonical_text)
-        ),
+        item=review_item_out(item, target_text=review_target_text(session, item, canonical_text)),
         annotation=annotation_out(annotation, label_map) if annotation is not None else None,
         scene=scene_ref_out(scene) if scene is not None else None,
         context_before=context_before,
@@ -268,6 +288,7 @@ def defer_review_item(session: Session, *, item: ReviewItem, note: str = "") -> 
     session.flush()
     return review_item_out(item)
 
+
 def build_quote_detail(
     session: Session,
     settings: Any,
@@ -299,9 +320,7 @@ def build_quote_detail(
         ).scalars()
     )
     detail.annotation = annotation_out(annotation, label_map) if annotation is not None else None
-    detail.scene = (
-        SceneRefOut(**scene_ref_out(scene)) if scene is not None else None
-    )
+    detail.scene = SceneRefOut(**scene_ref_out(scene)) if scene is not None else None
     detail.review_items = [review_item_out(item) for item in items]
     detail.can_correct = True
     detail.scene_groups = (

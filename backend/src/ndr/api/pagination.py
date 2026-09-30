@@ -10,7 +10,11 @@ import base64
 import binascii
 import json
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
+
+from sqlalchemy import select, tuple_
+from sqlalchemy.orm import Session
 
 from ..domain.common import CursorPage
 from ..domain.enums import ErrorCode
@@ -26,9 +30,7 @@ def parse_limit(
     if limit is None:
         return default
     if limit < 1:
-        raise ApiError(
-            ErrorCode.VALIDATION_ERROR, "limit 必须大于 0", details={"limit": limit}
-        )
+        raise ApiError(ErrorCode.VALIDATION_ERROR, "limit 必须大于 0", details={"limit": limit})
     if limit > maximum:
         raise ApiError(
             ErrorCode.VALIDATION_ERROR,
@@ -53,6 +55,27 @@ def decode_cursor(cursor: str) -> list[Any]:
     if not isinstance(value, list):
         raise ApiError(ErrorCode.VALIDATION_ERROR, "cursor 不是合法游标")
     return value
+
+
+def chronological_cursor(session: Session, model: Any, cursor: str) -> Any:
+    """Seek by the exact (created_at, id) order; accept legacy ID-only cursors."""
+    parts = decode_cursor(cursor)
+    if len(parts) == 1:
+        row_id = str(parts[0])
+        created = session.scalar(select(model.created_at).where(model.id == row_id))
+        if created is None:
+            raise ApiError.validation("游标对应记录不存在，请重新读取列表")
+    elif len(parts) == 2:
+        try:
+            created = datetime.fromisoformat(str(parts[0]))
+        except ValueError as exc:
+            raise ApiError.validation("cursor 时间不合法") from exc
+        if created.tzinfo is None:
+            raise ApiError.validation("cursor 时间必须包含时区")
+        row_id = str(parts[1])
+    else:
+        raise ApiError.validation("cursor 内容不合法")
+    return tuple_(model.created_at, model.id) > (created, row_id)
 
 
 def build_page(items: list[Any], *, next_cursor: str | None = None) -> CursorPage[Any]:

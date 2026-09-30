@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from bisect import bisect_left, bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -128,9 +129,16 @@ def _hash(*parts: Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def _window_id(*, book_version_id: str, target_ids: Sequence[str], policy_version: str,
-               prompt_version: str, reading_mode: ReadingMode, horizon: int | None,
-               scene_ref: str) -> str:
+def _window_id(
+    *,
+    book_version_id: str,
+    target_ids: Sequence[str],
+    policy_version: str,
+    prompt_version: str,
+    reading_mode: ReadingMode,
+    horizon: int | None,
+    scene_ref: str,
+) -> str:
     digest = _hash(
         book_version_id,
         list(target_ids),
@@ -178,6 +186,41 @@ def _split_targets(
     warnings: list[str] = []
     groups: list[list[QuoteView]] = []
     current: list[QuoteView] = []
+    current_tokens = 0
+    last_target_end = max((quote.end_cp for quote in ordered_targets), default=0)
+    # Gaps are normally disjoint and ordered. Prefix sums avoid re-tokenizing
+    # every preceding quote/gap for each prospective window extension.
+    relevant_gaps = sorted(
+        (
+            gap
+            for gap in inputs.gaps
+            if ordered_targets
+            and gap.start_cp >= ordered_targets[0].start_cp
+            and gap.end_cp <= last_target_end
+            and gap.end_cp > gap.start_cp
+        ),
+        key=lambda gap: gap.start_cp,
+    )
+    starts = [gap.start_cp for gap in relevant_gaps]
+    ends = [gap.end_cp for gap in relevant_gaps]
+    costs = [
+        inputs.estimator.estimate(inputs.canonical_text[gap.start_cp : gap.end_cp])
+        for gap in relevant_gaps
+    ]
+    prefix = [0]
+    for cost in costs:
+        prefix.append(prefix[-1] + cost)
+    monotonic = all(left <= right for left, right in zip(ends, ends[1:], strict=False))
+
+    def gap_cost(first: int, last: int) -> int:
+        if monotonic:
+            left, right = bisect_left(starts, first), bisect_right(ends, last)
+            return prefix[right] - prefix[left] if right > left else 0
+        return sum(
+            cost
+            for gap, cost in zip(relevant_gaps, costs, strict=True)
+            if gap.start_cp >= first and gap.end_cp <= last
+        )
 
     for quote in ordered_targets:
         quote_tokens = inputs.estimator.estimate(
@@ -188,21 +231,21 @@ def _split_targets(
             if current:
                 groups.append(current)
                 current = []
+                current_tokens = 0
             groups.append([quote])  # 单个目标独立成窗口，绝不截断
             continue
 
         candidate = [*current, quote]
-        cost = _required_tokens(
-            text=inputs.canonical_text,
-            targets=candidate,
-            gaps=inputs.gaps,
-            estimator=inputs.estimator,
-        )
+        cost = current_tokens + quote_tokens
+        if current:
+            cost += gap_cost(current[0].start_cp, quote.end_cp)
         if current and cost > inputs.policy.context_tokens:
             groups.append(current)
             current = [quote]
+            current_tokens = quote_tokens
         else:
             current = candidate
+            current_tokens += quote_tokens
 
     if current:
         groups.append(current)
@@ -218,9 +261,7 @@ def plan_windows(
     """把目标对白与证据组织成受预算约束的窗口列表。"""
 
     quote_by_id = {quote.quote_id: quote for quote in inputs.quotes}
-    ordered = [
-        quote_by_id[quote_id] for quote_id in target_quote_ids if quote_id in quote_by_id
-    ]
+    ordered = [quote_by_id[quote_id] for quote_id in target_quote_ids if quote_id in quote_by_id]
     ordered.sort(key=lambda quote: quote.start_cp)
     missing = [quote_id for quote_id in target_quote_ids if quote_id not in quote_by_id]
 
@@ -234,7 +275,7 @@ def plan_windows(
     for index, group in enumerate(groups):
         selection = select_evidence(
             canonical_text=inputs.canonical_text,
-            quotes=list(inputs.quotes),
+            quotes=list(group),
             gaps=list(inputs.gaps),
             target_quote_ids=[quote.quote_id for quote in group],
             policy=inputs.policy,
@@ -277,9 +318,7 @@ def plan_windows(
             "output_tokens": summary["output_tokens"],
             "total_tokens": summary["total_tokens"],
             "target_tokens": sum(
-                inputs.estimator.estimate(
-                    inputs.canonical_text[quote.start_cp : quote.end_cp]
-                )
+                inputs.estimator.estimate(inputs.canonical_text[quote.start_cp : quote.end_cp])
                 for quote in group
             ),
             "overlap_tokens": sum(
@@ -330,9 +369,7 @@ def plan_windows(
             1 for window in windows if any(w.startswith(OVERSIZED_WARNING) for w in window.warnings)
         ),
         "omitted_fragments": sum(len(window.omitted) for window in windows),
-        "total_context_tokens": sum(
-            window.budget["context_tokens"] for window in windows
-        ),
+        "total_context_tokens": sum(window.budget["context_tokens"] for window in windows),
     }
     return WindowPlan(
         windows=tuple(windows),

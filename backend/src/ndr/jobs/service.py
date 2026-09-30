@@ -114,9 +114,7 @@ def estimate_inference(
     windows: list[dict[str, Any]] = []
     for index, window in enumerate(plan.windows):
         positions = [
-            quote_positions[item]
-            for item in window.target_quote_ids
-            if item in quote_positions
+            quote_positions[item] for item in window.target_quote_ids if item in quote_positions
         ]
         window_start = min((item[0] for item in positions), default=start_cp)
         window_end = max((item[1] for item in positions), default=window_start)
@@ -211,14 +209,18 @@ def create_inference_job(
     # from two tabs. Reuse an equivalent active job even when each event has a
     # fresh idempotency key; otherwise both jobs race to overwrite the same
     # annotation projection.
-    active_duplicate = session.execute(
-        select(Job)
-        .where(
-            Job.request_digest == digest,
-            Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
+    active_duplicate = (
+        session.execute(
+            select(Job)
+            .where(
+                Job.request_digest == digest,
+                Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
+            )
+            .order_by(Job.created_at.desc())
         )
-        .order_by(Job.created_at.desc())
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if active_duplicate is not None:
         return active_duplicate, False
 
@@ -267,17 +269,22 @@ def job_detail(session: Session, job: Job) -> JobDetailOut:
     """任务状态快照（窗口 + 用量 + 剩余）：`POST /api/jobs` 与局部复核共用。"""
 
     rows = job_windows(session, job.id)
+    runs = list(
+        session.execute(
+            select(
+                InferenceRun.window_id,
+                InferenceRun.usage_json,
+                InferenceRun.state,
+                InferenceRun.error_code,
+            ).where(InferenceRun.job_id == job.id)
+        )
+    )
     attempts_by_window: dict[str, int] = {}
-    for run in session.execute(
-        select(InferenceRun).where(InferenceRun.job_id == job.id)
-    ).scalars():
+    for run in runs:
         if run.window_id:
             attempts_by_window[run.window_id] = attempts_by_window.get(run.window_id, 0) + 1
     windows = [window_out(row, attempts_by_window.get(row.window_id, 0)) for row in rows]
-    usage = spent_tokens(session, job.id)
-    runs = list(
-        session.execute(select(InferenceRun).where(InferenceRun.job_id == job.id)).scalars()
-    )
+    usage = _spent_tokens(runs)
     unknown_runs = sum(1 for run in runs if run.usage_json is None)
     progress = json.loads(job.progress_json) if job.progress_json else None
     return JobDetailOut(
@@ -306,6 +313,7 @@ def job_detail(session: Session, job: Job) -> JobDetailOut:
         updated_at=job.updated_at.isoformat(),
     )
 
+
 def job_windows(session: Session, job_id: str) -> list[JobWindow]:
     return list(
         session.execute(
@@ -319,7 +327,12 @@ def usage_summary(session: Session, book_id: str) -> dict[str, Any]:
 
     rows = list(
         session.execute(
-            select(InferenceRun, Job)
+            select(
+                InferenceRun.state,
+                InferenceRun.usage_json,
+                InferenceRun.profile_snapshot_json,
+                Job.profile_snapshot_json.label("job_profile_snapshot_json"),
+            )
             .join(Job, InferenceRun.job_id == Job.id, isouter=True)
             .where(Job.book_id == book_id)
         )
@@ -328,13 +341,11 @@ def usage_summary(session: Session, book_id: str) -> dict[str, Any]:
     unknown_runs = 0
     by_state: dict[str, int] = {}
     by_model: dict[str, int] = {}
-    for run, job in rows:
+    for run in rows:
         by_state[run.state.value] = by_state.get(run.state.value, 0) + 1
         # 按**每次尝试自己的**配置快照归属模型（成本路由会为个别窗口换模型，
         # 只看任务级快照会把强模型用量算到基础模型头上）。
-        snapshot_raw = run.profile_snapshot_json or (
-            job.profile_snapshot_json if job is not None else None
-        )
+        snapshot_raw = run.profile_snapshot_json or (run.job_profile_snapshot_json)
         model = ""
         if snapshot_raw:
             try:
@@ -352,8 +363,7 @@ def usage_summary(session: Session, book_id: str) -> dict[str, Any]:
             unknown_runs += 1
             continue
         if usage.get("unknown") or all(
-            usage.get(key) is None
-            for key in ("input_tokens", "output_tokens", "total_tokens")
+            usage.get(key) is None for key in ("input_tokens", "output_tokens", "total_tokens")
         ):
             unknown_runs += 1
             continue
@@ -376,8 +386,16 @@ def spent_tokens(session: Session, job_id: str) -> dict[str, int]:
     """已结算的 token（未知用量按预留口径计入 ``unknown_runs``）。"""
 
     rows = list(
-        session.execute(select(InferenceRun).where(InferenceRun.job_id == job_id)).scalars()
+        session.execute(
+            select(InferenceRun.usage_json, InferenceRun.state, InferenceRun.error_code).where(
+                InferenceRun.job_id == job_id
+            )
+        )
     )
+    return _spent_tokens(rows)
+
+
+def _spent_tokens(rows) -> dict[str, int]:  # noqa: ANN001
     input_tokens = output_tokens = 0
     unknown_runs = 0
     for run in rows:

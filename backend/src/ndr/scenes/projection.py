@@ -15,7 +15,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..domain.annotations import (
@@ -131,48 +131,56 @@ def build_projection(
     }
     annotations = list(
         session.execute(
-            select(Annotation).where(Annotation.quote_id.in_(quote_rows.keys() or [""]))
+            select(Annotation)
+            .join(Quote, Annotation.quote_id == Quote.id)
+            .where(
+                Quote.book_version_id == book_version_id,
+                Quote.nesting_depth == 0,
+                Quote.start_cp < end_cp,
+                Quote.end_cp > start_cp,
+            )
         ).scalars()
     )
     scenes = {
         row.id: row
         for row in session.execute(
-            select(Scene).where(Scene.book_version_id == book_version_id)
+            select(Scene).where(
+                Scene.book_version_id == book_version_id,
+                Scene.start_cp < end_cp,
+                or_(Scene.end_cp.is_(None), Scene.end_cp == 0, Scene.end_cp > start_cp),
+            )
         ).scalars()
     }
     groups = list(
         session.execute(
-            select(SpeakerGroup)
-            .where(SpeakerGroup.scene_id.in_(scenes.keys() or [""]))
-            .order_by(SpeakerGroup.first_quote_id)
-        ).scalars()
+            select(
+                SpeakerGroup.id,
+                SpeakerGroup.scene_id,
+                SpeakerGroup.first_quote_id,
+                SpeakerGroup.character_id,
+                SpeakerGroup.canonical_name,
+                SpeakerGroup.description,
+                Quote.start_cp.label("first_start_cp"),
+                BookCharacter.preferred_color_index,
+            )
+            .join(Scene, SpeakerGroup.scene_id == Scene.id)
+            .outerjoin(Quote, SpeakerGroup.first_quote_id == Quote.id)
+            .outerjoin(BookCharacter, SpeakerGroup.character_id == BookCharacter.id)
+            .where(Scene.book_version_id == book_version_id)
+        )
     )
 
     # 已确认真实姓名是章节/书籍级身份键：跨场景的同名人物共享颜色。
     # 没有姓名的分组仍以 group_id 隔离，绝不因为都叫 S1 就误合并。
-    first_quote_ids = [group.first_quote_id for group in groups if group.first_quote_id]
-    first_positions = {
-        quote_id: start_cp
-        for quote_id, start_cp in session.execute(
-            select(Quote.id, Quote.start_cp).where(Quote.id.in_(first_quote_ids or [""]))
-        )
-    }
     groups.sort(
         key=lambda group: (
-            first_positions.get(group.first_quote_id or "", 2**63 - 1),
+            group.first_start_cp if group.first_start_cp is not None else 2**63 - 1,
             group.id,
         )
     )
-    character_ids = {group.character_id for group in groups if group.character_id}
-    characters = {
-        row.id: row
-        for row in session.execute(
-            select(BookCharacter).where(BookCharacter.id.in_(character_ids or [""]))
-        ).scalars()
-    }
     reserved_colors = {
         row.preferred_color_index
-        for row in characters.values()
+        for row in groups
         if row.preferred_color_index is not None and row.preferred_color_index >= 0
     }
     identity_by_group: dict[str, str] = {}
@@ -180,9 +188,10 @@ def build_projection(
     label_by_group: dict[str, str] = {}
     description_by_group: dict[str, str] = {}
     color_by_identity: dict[str, int] = {}
-    representative_by_identity: dict[str, SpeakerGroup] = {}
+    representative_by_identity: dict[str, Any] = {}
     ordered_identities: list[str] = []
     used_colors: set[int] = set()
+    next_free_color = 0
     for group in groups:
         name = (group.canonical_name or "").strip()
         if group.character_id:
@@ -192,14 +201,13 @@ def build_projection(
         else:
             identity = f"group:{group.id}"
         if identity not in color_by_identity:
-            character = characters.get(group.character_id or "")
-            preferred = character.preferred_color_index if character is not None else None
+            preferred = group.preferred_color_index
             if preferred is not None and preferred >= 0 and preferred not in used_colors:
                 color = preferred
             else:
-                color = 0
-                while color in used_colors or color in reserved_colors:
-                    color += 1
+                while next_free_color in used_colors or next_free_color in reserved_colors:
+                    next_free_color += 1
+                color = next_free_color
             color_by_identity[identity] = color
             used_colors.add(color)
             representative_by_identity[identity] = group
@@ -238,9 +246,7 @@ def build_projection(
             counts["stale"] += 1
 
         group_id = (
-            annotation.speaker_id
-            if annotation.status is not AnnotationStatus.UNKNOWN
-            else None
+            annotation.speaker_id if annotation.status is not AnnotationStatus.UNKNOWN else None
         )
         if group_id:
             # 初读：后文才揭示的身份修订在这里被还原（只影响展示，不改数据库）
@@ -263,9 +269,13 @@ def build_projection(
                 description = description_by_group.get(group_id, "")
                 # Only visible utterances may contribute identity descriptions.
                 # A name-only first group must not hide a later informative description.
-                if description and description != label and (
-                    identity not in description_position_by_identity
-                    or quote.start_cp < description_position_by_identity[identity]
+                if (
+                    description
+                    and description != label
+                    and (
+                        identity not in description_position_by_identity
+                        or quote.start_cp < description_position_by_identity[identity]
+                    )
                 ):
                     description_by_identity[identity] = description
                     description_position_by_identity[identity] = quote.start_cp

@@ -13,10 +13,14 @@ from __future__ import annotations
 import html as html_module
 import json
 from dataclasses import dataclass, field
+from itertools import groupby
 from typing import Any
+
+from sqlalchemy import select
 
 from ..domain.enums import ContentNodeType, ExportStylePreset
 from ..ingest.query import load_canonical_text
+from ..intervals import SpanIndex
 from ..storage.models import Book, BookVersion, Chapter, ContentNode
 
 EXPORTER_VERSION = "exporter-2"
@@ -120,6 +124,7 @@ class RenderedBook:
                     ids.append(block.resource_id)
         return ids
 
+
 def style_uses(style: ExportStylePreset) -> tuple[bool, bool]:
     """返回 ``(use_color, use_label)``：样式只影响显示，不重新识别任何对白。"""
 
@@ -163,9 +168,7 @@ def _slices(
     """按标注边界切分 `[start_cp, end_cp)`；嵌套时取最内层。"""
 
     relevant = [
-        item
-        for item in items
-        if int(item["start_cp"]) < end_cp and int(item["end_cp"]) > start_cp
+        item for item in items if int(item["start_cp"]) < end_cp and int(item["end_cp"]) > start_cp
     ]
     if not relevant:
         return [(start_cp, end_cp, None)]
@@ -189,6 +192,7 @@ def _slices(
                 chosen = item
         slices.append((left, right, chosen))
     return slices
+
 
 def _runs_for_node(
     text: str,
@@ -238,26 +242,33 @@ def render_book(
     use_color, use_label = style_uses(style)
     canonical = load_canonical_text(settings, version)
     selected = set(chapter_ids or [])
-    chapters = [
-        row
-        for row in session.query(Chapter)
-        .filter(Chapter.book_version_id == version.id)
-        .order_by(Chapter.ordinal)
-        .all()
-        if not selected or row.id in selected
-    ]
+    chapter_stmt = select(Chapter).where(Chapter.book_version_id == version.id)
+    if selected:
+        chapter_stmt = chapter_stmt.where(Chapter.id.in_(selected))
+    chapters = list(session.scalars(chapter_stmt.order_by(Chapter.ordinal)))
     usable = usable_items(projection_payload)
     items = list(usable.values())
+    item_index = SpanIndex(
+        items, start=lambda item: int(item["start_cp"]), end=lambda item: int(item["end_cp"])
+    )
+    node_stmt = (
+        select(ContentNode)
+        .join(Chapter)
+        .where(
+            Chapter.book_version_id == version.id,
+        )
+        .order_by(Chapter.ordinal, ContentNode.start_cp, ContentNode.ordinal)
+    )
+    if selected:
+        node_stmt = node_stmt.where(Chapter.id.in_(selected))
+    node_stream = session.scalars(node_stmt.execution_options(yield_per=500))
+    node_groups = iter(groupby(node_stream, key=lambda node: node.chapter_id))
+    next_nodes = next(node_groups, None)
 
     rendered: list[RenderedChapter] = []
     for chapter in chapters:
-        nodes = (
-            session.query(ContentNode)
-            .filter(ContentNode.chapter_id == chapter.id)
-            .order_by(ContentNode.start_cp, ContentNode.ordinal)
-            .all()
-        )
         blocks: list[RenderedBlock] = []
+        nodes = next_nodes[1] if next_nodes and next_nodes[0] == chapter.id else ()
         for node in nodes:
             payload = _load_payload(node.tree_json)
             if node.node_type is ContentNodeType.IMAGE:
@@ -294,12 +305,14 @@ def render_book(
                         text,
                         node_start=start,
                         node_end=end,
-                        items=items,
+                        items=item_index.overlapping(start, end),
                         use_color=use_color,
                         use_label=use_label,
                     ),
                 )
             )
+        if next_nodes and next_nodes[0] == chapter.id:
+            next_nodes = next(node_groups, None)
         rendered.append(
             RenderedChapter(
                 chapter_id=chapter.id,
@@ -344,7 +357,8 @@ def export_filename(rendered: RenderedBook, *, suffix: str, selected: bool) -> s
     """安全的文件名：中文可用，去掉路径分隔与文件系统保留字符。"""
 
     raw = f"{rendered.title}{'（节选）' if selected else '（标注版）'}"
-    safe = "".join(
-        char for char in raw if char not in '<>:"/\\|?*' and ord(char) >= 32
-    ).strip() or "export"
+    safe = (
+        "".join(char for char in raw if char not in '<>:"/\\|?*' and ord(char) >= 32).strip()
+        or "export"
+    )
     return f"{safe}{suffix}"

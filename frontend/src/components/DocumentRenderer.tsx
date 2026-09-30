@@ -1,9 +1,10 @@
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 
 import { resourceUrl } from '../api/books'
 import type { AnnotationItemOut, ContentNodeOut, RubyAnnotation } from '../api/types'
 import { nodePayload } from '../api/types'
 import { cpLength, sliceByCodepoints, utf16IndexForCp } from '../text/codepoints'
+import { SpanIndex } from '../text/intervals'
 import { annotationColor, AnnotationLayer, labelText } from './AnnotationLayer'
 
 /** 候选引语范围（来自扫描器，只表示“这里有一段引号内容”，不含说话人）。 */
@@ -368,16 +369,25 @@ export function DocumentRenderer({
   onNodeClick,
   onQuoteClick,
 }: DocumentRendererProps) {
+  const candidateIndex = useMemo(() => new SpanIndex(candidates,
+    (item) => item.startCp, (item) => item.endCp), [candidates])
+  const annotationIndex = useMemo(() => new SpanIndex(annotations,
+    (item) => item.start_cp, (item) => item.end_cp), [annotations])
+  const spans = useMemo(() => nodes.map((node) => {
+    const end = node.end_cp > node.start_cp ? node.end_cp : node.start_cp + cpLength(node.text)
+    return { candidates: candidateIndex.overlapping(node.start_cp, end),
+      annotations: annotationIndex.overlapping(node.start_cp, end) }
+  }), [nodes, candidateIndex, annotationIndex])
   return (
     <AnnotationLayer annotations={annotations}>
       <div className="ndr-document" data-testid="document-renderer">
-        {nodes.map((node) => (
+        {nodes.map((node, index) => (
           <NodeView
             key={nodeKey(node)}
             node={node}
             bookId={bookId}
-            candidates={candidates}
-            annotations={annotations}
+            candidates={spans[index].candidates}
+            annotations={spans[index].annotations}
             onNodeClick={onNodeClick}
             onQuoteClick={onQuoteClick}
           />

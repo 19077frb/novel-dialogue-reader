@@ -12,10 +12,11 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..domain.enums import ReviewQueueStatus, ReviewReason, ReviewTargetType
+from ..storage.base import new_id
 from ..storage.models import Annotation, ReviewItem
 
 
@@ -35,6 +36,8 @@ def upsert_review_item(
     reason: ReviewReason,
     candidates: dict[str, Any] | None = None,
     annotation_version: int | None = None,
+    existing_items: dict[str, ReviewItem] | None = None,
+    flush: bool = True,
 ) -> ReviewItem:
     """按 (目标, reason) 幂等地取回或新建待确认项；已解决的项目会被重新打开。"""
 
@@ -42,7 +45,11 @@ def upsert_review_item(
         raise ValueError("review item 必须且只能有一个目标")
     filters = [ReviewItem.reason == reason]
     filters.append(ReviewItem.quote_id == quote_id if quote_id else ReviewItem.gap_id == gap_id)
-    existing = session.execute(select(ReviewItem).where(*filters)).scalar_one_or_none()
+    existing = (
+        existing_items.get(quote_id or gap_id or "")
+        if existing_items is not None
+        else session.execute(select(ReviewItem).where(*filters)).scalar_one_or_none()
+    )
     if existing is not None:
         if existing.queue_status is ReviewQueueStatus.RESOLVED:
             existing.queue_status = ReviewQueueStatus.PENDING
@@ -51,9 +58,11 @@ def upsert_review_item(
             existing.candidates_json = json.dumps(candidates, ensure_ascii=False)
         if annotation_version is not None:
             existing.annotation_version = annotation_version
-        session.flush()
+        if flush:
+            session.flush()
         return existing
     row = ReviewItem(
+        id=new_id(),
         target_type=ReviewTargetType.QUOTE if quote_id else ReviewTargetType.GAP,
         quote_id=quote_id,
         gap_id=gap_id,
@@ -63,7 +72,8 @@ def upsert_review_item(
         annotation_version=annotation_version,
     )
     session.add(row)
-    session.flush()
+    if flush:
+        session.flush()
     return row
 
 
@@ -106,9 +116,20 @@ def same_window_downstream(
 
     if not annotation.scene_id:
         return []
+    conditions = []
+    if annotation.dependency_hash is not None:
+        conditions.append(Annotation.dependency_hash == annotation.dependency_hash)
+    if previous_speaker_id is not None:
+        conditions.append(Annotation.speaker_id == previous_speaker_id)
+    if not conditions:
+        return []
     rows = list(
         session.execute(
-            select(Annotation).where(Annotation.scene_id == annotation.scene_id)
+            select(Annotation).where(
+                Annotation.scene_id == annotation.scene_id,
+                Annotation.user_locked.is_(False),
+                or_(*conditions),
+            )
         ).scalars()
     )
     result: list[Annotation] = []
@@ -138,6 +159,23 @@ def mark_stale(
 
     exclude = exclude_quote_ids or set()
     impact = DownstreamImpact()
+    target_ids = [
+        row.quote_id for row in annotations if row.quote_id not in exclude and not row.user_locked
+    ]
+    existing: dict[str, ReviewItem] = {}
+    # Keep each IN below SQLite's conservative variable limit, even on old builds.
+    for offset in range(0, len(target_ids), 500):
+        existing.update(
+            {
+                row.quote_id: row
+                for row in session.scalars(
+                    select(ReviewItem).where(
+                        ReviewItem.quote_id.in_(target_ids[offset : offset + 500]),
+                        ReviewItem.reason == ReviewReason.STALE_DEPENDENCY,
+                    )
+                )
+            }
+        )
     for annotation in annotations:
         if annotation.quote_id in exclude:
             continue
@@ -152,7 +190,10 @@ def mark_stale(
             reason=ReviewReason.STALE_DEPENDENCY,
             candidates={"correction_id": correction_id},
             annotation_version=annotation.version,
+            existing_items=existing,
+            flush=False,
         )
+        existing[annotation.quote_id] = item
         impact.quote_ids.append(annotation.quote_id)
         impact.review_item_ids.append(item.id)
         if annotation.dependency_hash:

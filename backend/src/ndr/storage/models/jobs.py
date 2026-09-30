@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.enums import InferenceRunState, JobKind, JobPurpose, JobState
@@ -18,7 +18,12 @@ from ..types import UtcDateTime
 
 class Job(IdMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "jobs"
-    __table_args__ = (UniqueConstraint("idempotency_key", name="uq_jobs_idempotency_key"),)
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_jobs_idempotency_key"),
+        Index("ix_jobs_book_created_id", "book_id", "created_at", "id"),
+        Index("ix_jobs_version_state", "book_version_id", "state"),
+        Index("ix_jobs_digest_state_created", "request_digest", "state", "created_at"),
+    )
 
     kind: Mapped[JobKind] = mapped_column(enum_type(JobKind, name="job_kind"), nullable=False)
     purpose: Mapped[JobPurpose | None] = mapped_column(

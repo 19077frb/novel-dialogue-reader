@@ -235,6 +235,8 @@ Copy-Item .env.example .env
 
 ## 测试
 
+性能分析、数据库优化结果和离线复测方法见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。本轮新增数据库索引迁移 `0013`；更新后停止旧服务并重新运行 `start.bat`，首次建立索引可能稍慢。请先备份 `data/`。
+
 运行后端静态检查、后端测试、OpenAPI 一致性检查、前端类型检查、前端测试和生产构建：
 
 ```powershell

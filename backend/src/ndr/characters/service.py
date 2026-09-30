@@ -95,10 +95,20 @@ def _roster_out(
         if isinstance(item, dict)
     ]
     character_ids = json.loads(row.confirmed_character_ids_json or "[]")
+    by_id = (
+        {
+            character.id: character
+            for character in session.scalars(
+                select(BookCharacter).where(BookCharacter.id.in_(character_ids))
+            )
+        }
+        if character_ids
+        else {}
+    )
     characters = [
         _character_out(character)
         for character_id in character_ids
-        if (character := session.get(BookCharacter, character_id)) is not None
+        if (character := by_id.get(character_id)) is not None
     ]
     return ChapterRosterOut(
         chapter_id=row.chapter_id,
@@ -134,13 +144,18 @@ def _match_existing(
     *,
     name: str | None,
     aliases: list[str],
+    characters: list[BookCharacter] | None = None,
 ) -> BookCharacter | None:
     keys = {_normalize(value) for value in [name, *aliases] if _normalize(value)}
     if not keys:
         return None
-    rows = session.execute(
-        select(BookCharacter).where(BookCharacter.book_version_id == version_id)
-    ).scalars()
+    rows = (
+        characters
+        if characters is not None
+        else session.execute(
+            select(BookCharacter).where(BookCharacter.book_version_id == version_id)
+        ).scalars()
+    )
     matches = []
     for row in rows:
         row_keys = {
@@ -148,8 +163,11 @@ def _match_existing(
             *{_normalize(alias) for alias in _json_list(row.aliases_json)},
         }
         if (keys - GENERIC_NAMES) & row_keys or (
-            name and undecorated_name(name) not in GENERIC_NAMES and matches_name(
-                name, [row.canonical_name or "", *_json_list(row.aliases_json)],
+            name
+            and undecorated_name(name) not in GENERIC_NAMES
+            and matches_name(
+                name,
+                [row.canonical_name or "", *_json_list(row.aliases_json)],
             )
         ):
             matches.append(row)
@@ -173,6 +191,7 @@ def store_roster_candidates(
         session.add(roster)
 
     records: list[dict[str, Any]] = []
+    existing = list_book_characters(session, version)
     seen_refs: set[str] = set()
     for candidate in output.characters:
         if not candidate.temp_ref or candidate.temp_ref in seen_refs:
@@ -183,6 +202,7 @@ def store_roster_candidates(
             version.id,
             name=candidate.name,
             aliases=candidate.aliases,
+            characters=existing,
         )
         character = matched
         if character is None:
@@ -201,6 +221,7 @@ def store_roster_candidates(
                     first_seen_cp=chapter.start_cp,
                 )
                 session.add(character)
+                existing.append(character)
         # Model analysis may rediscover an already confirmed person under a
         # different name. Confirmation is the authority boundary: later model
         # output may link to that person, but must never rewrite the identity
@@ -209,20 +230,34 @@ def store_roster_candidates(
             character.canonical_name = (
                 matched.canonical_name if matched else undecorated_name(candidate.name) or None
             )
-            character.aliases_json = json.dumps(list(dict.fromkeys([
-                *_json_list(character.aliases_json), *candidate.aliases,
-            ])), ensure_ascii=False)
+            character.aliases_json = json.dumps(
+                list(
+                    dict.fromkeys(
+                        [
+                            *_json_list(character.aliases_json),
+                            *candidate.aliases,
+                        ]
+                    )
+                ),
+                ensure_ascii=False,
+            )
             character.description = candidate.description
             character.version = (character.version or 0) + 1
         session.flush()
         duplicate = next(
-            (record for record in records if record["character_id"] == character.id), None,
+            (record for record in records if record["character_id"] == character.id),
+            None,
         )
         if duplicate is not None:
             duplicate["pov_candidate"] |= candidate.pov_candidate
-            duplicate["evidence_refs"] = list(dict.fromkeys([
-                *duplicate["evidence_refs"], *candidate.evidence_refs,
-            ]))
+            duplicate["evidence_refs"] = list(
+                dict.fromkeys(
+                    [
+                        *duplicate["evidence_refs"],
+                        *candidate.evidence_refs,
+                    ]
+                )
+            )
             continue
         records.append(
             {
@@ -357,11 +392,17 @@ def confirmed_roster_context(
     if roster is None or roster.status is not CharacterRosterStatus.CONFIRMED:
         return roster, []
     character_ids = json.loads(roster.confirmed_character_ids_json or "[]")
-    characters = [
-        character
-        for character_id in character_ids
-        if (character := session.get(BookCharacter, character_id)) is not None
-    ]
+    by_id = (
+        {
+            character.id: character
+            for character in session.scalars(
+                select(BookCharacter).where(BookCharacter.id.in_(character_ids))
+            )
+        }
+        if character_ids
+        else {}
+    )
+    characters = [by_id[character_id] for character_id in character_ids if character_id in by_id]
     return roster, characters
 
 
@@ -396,14 +437,18 @@ def create_roster_job(
             details={"idempotency_key": idempotency_key, "job_id": existing.id},
             status_code=409,
         )
-    active_duplicate = session.execute(
-        select(Job)
-        .where(
-            Job.request_digest == digest,
-            Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
+    active_duplicate = (
+        session.execute(
+            select(Job)
+            .where(
+                Job.request_digest == digest,
+                Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
+            )
+            .order_by(Job.created_at.desc())
         )
-        .order_by(Job.created_at.desc())
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if active_duplicate is not None:
         return active_duplicate, False
 

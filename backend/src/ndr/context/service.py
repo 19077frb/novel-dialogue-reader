@@ -36,8 +36,10 @@ def _window_material(session: Session, settings: Settings, version) -> WindowMat
             nesting_depth=row.nesting_depth,
         )
         for row in session.execute(
-            select(Quote).where(Quote.book_version_id == version.id).order_by(Quote.start_cp)
-        ).scalars()
+            select(Quote.id, Quote.start_cp, Quote.end_cp, Quote.nesting_depth)
+            .where(Quote.book_version_id == version.id)
+            .order_by(Quote.start_cp)
+        )
     )
     gaps = tuple(
         GapView(
@@ -48,12 +50,14 @@ def _window_material(session: Session, settings: Settings, version) -> WindowMat
             right_quote_id=row.right_quote_id,
         )
         for row in session.execute(
-            select(Gap).where(Gap.book_version_id == version.id).order_by(Gap.start_cp)
-        ).scalars()
+            select(Gap.id, Gap.start_cp, Gap.end_cp, Gap.left_quote_id, Gap.right_quote_id)
+            .where(Gap.book_version_id == version.id)
+            .order_by(Gap.start_cp)
+        )
     )
     paragraphs: list[ParagraphView] = []
     node_rows = session.execute(
-        select(ContentNode)
+        select(ContentNode.node_id, ContentNode.start_cp, ContentNode.end_cp)
         .join(Chapter, ContentNode.chapter_id == Chapter.id)
         .where(
             Chapter.book_version_id == version.id,
@@ -61,7 +65,7 @@ def _window_material(session: Session, settings: Settings, version) -> WindowMat
             ContentNode.start_cp.is_not(None),
         )
         .order_by(ContentNode.start_cp)
-    ).scalars()
+    )
     for node in node_rows:
         if node.start_cp is None or node.end_cp is None:
             continue

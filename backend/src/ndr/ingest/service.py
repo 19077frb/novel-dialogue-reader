@@ -234,11 +234,7 @@ def persist_parsed(
                     "resources": len(parsed.resources),
                     "canonical_length_cp": parsed.canonical_length_cp,
                     "quote_normalizations": auto_close_count,
-                    **(
-                        {"restored_annotations": restored_stats}
-                        if restored_stats
-                        else {}
-                    ),
+                    **({"restored_annotations": restored_stats} if restored_stats else {}),
                 },
                 ensure_ascii=False,
             ),
@@ -285,7 +281,7 @@ def _write_text(path: Path, text: str) -> None:
 
 
 def _insert_chapters(session: Session, version: BookVersion, parsed: ParsedBook) -> list[str]:
-    chapter_ids: list[str] = []
+    rows: list[Chapter] = []
     for chapter in parsed.chapters:
         row = Chapter(
             book_version_id=version.id,
@@ -296,9 +292,9 @@ def _insert_chapters(session: Session, version: BookVersion, parsed: ParsedBook)
             source_href=chapter.source_href,
         )
         session.add(row)
-        session.flush()
-        chapter_ids.append(row.id)
-    return chapter_ids
+        rows.append(row)
+    session.flush()
+    return [row.id for row in rows]
 
 
 def _insert_nodes(session: Session, parsed: ParsedBook, chapter_ids: list[str]) -> None:

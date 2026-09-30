@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.enums import (
@@ -26,6 +26,7 @@ class ReviewItem(IdMixin, TimestampMixin, VersionMixin, Base):
         CheckConstraint("(quote_id IS NULL) <> (gap_id IS NULL)", name="exactly_one_target"),
         UniqueConstraint("quote_id", "reason", name="uq_review_items_quote_id_reason"),
         UniqueConstraint("gap_id", "reason", name="uq_review_items_gap_id_reason"),
+        Index("ix_review_items_created_id", "created_at", "id"),
     )
 
     target_type: Mapped[ReviewTargetType] = mapped_column(

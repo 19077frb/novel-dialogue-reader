@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.enums import GapDecision, QuoteKind, SceneStatus
@@ -25,6 +25,8 @@ class Quote(IdMixin, TimestampMixin, Base):
             "scanner_version",
             name="uq_quotes_position",
         ),
+        Index("ix_quotes_version_start", "book_version_id", "start_cp"),
+        Index("ix_quotes_chapter_start", "chapter_id", "start_cp"),
     )
 
     book_version_id: Mapped[str] = mapped_column(
@@ -52,6 +54,7 @@ class Gap(IdMixin, TimestampMixin, Base):
     """相邻外层候选对白之间的叙述；允许跨章节，不能只按章节关闭。"""
 
     __tablename__ = "gaps"
+    __table_args__ = (Index("ix_gaps_version_start", "book_version_id", "start_cp"),)
 
     book_version_id: Mapped[str] = mapped_column(
         ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True
@@ -75,6 +78,7 @@ class Scene(IdMixin, TimestampMixin, VersionMixin, Base):
     """交谈关系连续的一组发言；边界变更保留历史。"""
 
     __tablename__ = "scenes"
+    __table_args__ = (Index("ix_scenes_version_start", "book_version_id", "start_cp"),)
 
     book_version_id: Mapped[str] = mapped_column(
         ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.enums import BookFormat, ContentNodeType, ImportStatus, ReadingMode
@@ -13,6 +13,7 @@ class Book(IdMixin, TimestampMixin, VersionMixin, Base):
     """书籍元数据；导入状态与推理状态分离，阅读位置不触发模型调用。"""
 
     __tablename__ = "books"
+    __table_args__ = (Index("ix_books_created_at_id", "created_at", "id"),)
 
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     format: Mapped[BookFormat] = mapped_column(
@@ -93,6 +94,7 @@ class ContentNode(IdMixin, TimestampMixin, Base):
     __tablename__ = "content_nodes"
     __table_args__ = (
         UniqueConstraint("chapter_id", "node_id", name="uq_content_nodes_chapter_id_node_id"),
+        Index("ix_content_nodes_chapter_start_ordinal", "chapter_id", "start_cp", "ordinal"),
     )
 
     chapter_id: Mapped[str] = mapped_column(

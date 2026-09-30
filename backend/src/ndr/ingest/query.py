@@ -10,11 +10,11 @@ import json
 import threading
 from collections import OrderedDict
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
-from ..api.pagination import decode_cursor, encode_cursor
+from ..api.pagination import chronological_cursor, decode_cursor, encode_cursor
 from ..config import Settings
 from ..domain.documents import (
     BookOut,
@@ -81,22 +81,37 @@ def list_books(
 ) -> tuple[list[BookOut], str | None]:
     stmt = select(Book).order_by(Book.created_at, Book.id).limit(limit + 1)
     if cursor:
-        parts = decode_cursor(cursor)
-        if not parts:
-            raise ApiError(ErrorCode.VALIDATION_ERROR, "cursor 内容为空")
-        stmt = stmt.where(Book.id > str(parts[0]))
+        stmt = stmt.where(chronological_cursor(session, Book, cursor))
     rows = list(session.execute(stmt).scalars())
     has_more = len(rows) > limit
     rows = rows[:limit]
-    items = [book_out(book, active_version(session, book)) for book in rows]
-    next_cursor = encode_cursor([rows[-1].id]) if has_more and rows else None
+    versions = (
+        {
+            row.id: row
+            for row in session.scalars(
+                select(BookVersion).where(
+                    BookVersion.id.in_(
+                        [book.active_version_id for book in rows if book.active_version_id]
+                    )
+                )
+            )
+        }
+        if rows
+        else {}
+    )
+    items = [book_out(book, versions.get(book.active_version_id)) for book in rows]
+    next_cursor = (
+        encode_cursor([rows[-1].created_at.isoformat(), rows[-1].id]) if has_more and rows else None
+    )
     return items, next_cursor
 
 
 def list_chapters(session: Session, version_id: str) -> list[ChapterOut]:
-    rows = list(session.execute(
-        select(Chapter).where(Chapter.book_version_id == version_id).order_by(Chapter.ordinal)
-    ).scalars())
+    rows = list(
+        session.execute(
+            select(Chapter).where(Chapter.book_version_id == version_id).order_by(Chapter.ordinal)
+        ).scalars()
+    )
     return [
         ChapterOut(
             id=row.id,
@@ -222,11 +237,19 @@ def content_nodes(
         range_start = 0 if start_cp is None else start_cp
         range_end = canonical_length if end_cp is None else end_cp
 
+    seek = None
     if cursor:
         parts = decode_cursor(cursor)
-        if not parts:
-            raise ApiError(ErrorCode.VALIDATION_ERROR, "cursor 内容为空")
-        range_start = max(range_start, int(parts[0]))
+        try:
+            if len(parts) == 1:
+                range_start = max(range_start, int(parts[0]))
+            elif len(parts) == 4:
+                seek = (int(parts[0]), int(parts[1]), int(parts[2]), str(parts[3]))
+                range_start = max(range_start, seek[0])
+            else:
+                raise ValueError("Unexpected cursor size")
+        except (TypeError, ValueError) as exc:
+            raise ApiError.validation("cursor 内容不合法") from exc
 
     if range_start < 0 or range_end > canonical_length or range_start > range_end:
         raise ApiError.validation(
@@ -244,9 +267,16 @@ def content_nodes(
         .where(Chapter.book_version_id == version.id)
         .where(ContentNode.start_cp >= range_start)
         .where(ContentNode.end_cp <= range_end)
-        .order_by(ContentNode.start_cp)
+        .order_by(ContentNode.start_cp, Chapter.ordinal, ContentNode.ordinal, ContentNode.id)
         .limit(limit + 1)
     )
+    if chapter is not None:
+        stmt = stmt.where(ContentNode.chapter_id == chapter.id)
+    if seek is not None:
+        stmt = stmt.where(
+            tuple_(ContentNode.start_cp, Chapter.ordinal, ContentNode.ordinal, ContentNode.id)
+            > seek
+        )
     rows = list(session.execute(stmt))
     has_more = len(rows) > limit
     rows = rows[:limit]
@@ -266,7 +296,18 @@ def content_nodes(
         )
         for node, chapter_row in rows
     ]
-    next_cursor = encode_cursor([nodes[-1].end_cp]) if has_more and nodes else None
+    next_cursor = (
+        encode_cursor(
+            [
+                rows[-1][0].start_cp,
+                rows[-1][1].ordinal,
+                rows[-1][0].ordinal,
+                rows[-1][0].id,
+            ]
+        )
+        if has_more and rows
+        else None
+    )
     return ContentResponse(
         book_id=book.id,
         book_version_id=version.id,

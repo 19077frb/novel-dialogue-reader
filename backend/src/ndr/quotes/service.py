@@ -7,10 +7,11 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
@@ -103,9 +104,7 @@ def scan_and_store(
         replace(
             quote,
             quote_id=generated_to_actual[quote.quote_id],
-            parent_quote_id=(
-                generated_to_actual.get(quote.parent_quote_id, quote.parent_quote_id)
-            ),
+            parent_quote_id=(generated_to_actual.get(quote.parent_quote_id, quote.parent_quote_id)),
         )
         for quote in result.quotes
     )
@@ -117,8 +116,17 @@ def scan_and_store(
             select(Chapter).where(Chapter.book_version_id == version.id).order_by(Chapter.ordinal)
         ).scalars()
     )
+    chapter_starts = [chapter.start_cp for chapter in chapters]
+    ordered_chapters = all(
+        left.end_cp <= right.start_cp for left, right in zip(chapters, chapters[1:], strict=False)
+    )
 
     def chapter_id_for(position_cp: int) -> str | None:
+        if ordered_chapters:
+            index = bisect_right(chapter_starts, position_cp) - 1
+            if index >= 0 and position_cp < chapters[index].end_cp:
+                return chapters[index].id
+            return chapters[-1].id if chapters else None
         for chapter in chapters:
             if chapter.start_cp <= position_cp < chapter.end_cp:
                 return chapter.id
@@ -158,13 +166,20 @@ def scan_and_store(
     session.flush()
 
     scanned_start_cps = {quote.start_cp for quote in scanned_quotes}
+    protected_ids = set(
+        session.scalars(
+            select(Annotation.quote_id)
+            .join(
+                Quote,
+                Annotation.quote_id == Quote.id,
+            )
+            .where(Quote.book_version_id == version.id)
+        )
+    )
     for row in existing_quotes.values():
         if row.start_cp in scanned_start_cps:
             continue
-        annotation_count = session.execute(
-            select(func.count(Annotation.id)).where(Annotation.quote_id == row.id)
-        ).scalar_one()
-        if annotation_count == 0:
+        if row.id not in protected_ids:
             session.delete(row)
     session.flush()
 
@@ -228,9 +243,7 @@ def _quote_out(quote: Quote, text: str, chapter: Chapter | None) -> QuoteOut:
         chapter_ordinal=chapter.ordinal if chapter is not None else None,
         start_cp=quote.start_cp,
         end_cp=quote.end_cp,
-        text=text[
-            quote.start_cp + len(opening) : quote.end_cp - len(closing)
-        ],
+        text=text[quote.start_cp + len(opening) : quote.end_cp - len(closing)],
         delimited_text=(
             text[quote.start_cp : quote.end_cp] + closing
             if quote.normalized
@@ -287,8 +300,6 @@ def list_quotes(
     canonical_text: str | None = None,
 ) -> tuple[list[QuoteOut], str | None]:
     text = canonical_text if canonical_text is not None else canonical_text_of(settings, version)
-    chapters = {chapter.id: chapter for chapter in _chapters(session, version.id)}
-
     stmt = select(Quote).where(Quote.book_version_id == version.id)
     if chapter_id is not None:
         stmt = stmt.where(Quote.chapter_id == chapter_id)
@@ -302,6 +313,15 @@ def list_quotes(
     rows = list(session.execute(stmt).scalars())
     has_more = len(rows) > limit
     rows = rows[:limit]
+    chapter_ids = {row.chapter_id for row in rows if row.chapter_id}
+    chapters = (
+        {
+            chapter.id: chapter
+            for chapter in session.scalars(select(Chapter).where(Chapter.id.in_(chapter_ids)))
+        }
+        if chapter_ids
+        else {}
+    )
     items = [_quote_out(row, text, chapters.get(row.chapter_id or "")) for row in rows]
     next_cursor = encode_cursor([rows[-1].start_cp]) if has_more and rows else None
     return items, next_cursor
@@ -321,7 +341,7 @@ def get_quote_detail(
     if quote is None or quote.book_version_id != version.id:
         raise ApiError.not_found("候选对白不存在", quote_id=quote_id)
 
-    chapters = {chapter.id: chapter for chapter in _chapters(session, version.id)}
+    chapter = session.get(Chapter, quote.chapter_id) if quote.chapter_id else None
     previous = session.execute(
         select(Quote)
         .where(Quote.book_version_id == version.id, Quote.start_cp < quote.start_cp)
@@ -339,7 +359,7 @@ def get_quote_detail(
     ).scalar_one_or_none()
 
     return QuoteDetailOut(
-        quote=_quote_out(quote, text, chapters.get(quote.chapter_id or "")),
+        quote=_quote_out(quote, text, chapter),
         previous_quote_id=previous.id if previous is not None else None,
         next_quote_id=following.id if following is not None else None,
         gap_before=_gap_out(gap, text) if gap is not None else None,
@@ -426,9 +446,7 @@ def locate(
                 mapping_ordinal=mapping.ordinal,
                 chapter_id=mapping.chapter_id,
                 chapter_ordinal=(
-                    chapters[mapping.chapter_id].ordinal
-                    if mapping.chapter_id in chapters
-                    else None
+                    chapters[mapping.chapter_id].ordinal if mapping.chapter_id in chapters else None
                 ),
                 node_id=mapping.node_id,
                 node_type=node.node_type if node is not None else None,
