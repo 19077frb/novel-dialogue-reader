@@ -206,6 +206,23 @@ describe('ReaderPage', () => {
     expect(screen.getByRole('link', { name: '预览与处理' })).toHaveAttribute('href', '/books/b1/preview?chapterId=c2')
   })
 
+  it('删除前文按钮，书签跳转保留章首并自动加载到目标分页', async () => {
+    vi.mocked(booksApi.fetchContent).mockImplementation(async (_bookId, query) => ({
+      book_id: 'b1', book_version_id: 'v1', canonical_length_cp: 60,
+      chapter_id: query?.chapterId ?? null, start_cp: 21, end_cp: 60,
+      nodes: query?.cursor
+        ? [{ ...nodesFor('c2')[0], node_id: 'later', start_cp: 40, end_cp: 45, text: '目标句子。' }]
+        : nodesFor('c2'),
+      next_cursor: query?.cursor ? null : 'second-page',
+    }))
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c2&positionCp=40')
+    expect(await screen.findByText(/目标句子/)).toBeInTheDocument()
+    expect(screen.getByText(/第二章的正文/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看本章前文' })).not.toBeInTheDocument()
+    expect(vi.mocked(booksApi.fetchContent).mock.calls).toHaveLength(2)
+    for (const [, query] of vi.mocked(booksApi.fetchContent).mock.calls) expect(query?.startCp).toBeUndefined()
+  })
+
   it('书籍读取失败时显示具体错误并允许重新读取', async () => {
     vi.mocked(booksApi.fetchBook).mockRejectedValueOnce(new Error('数据库暂时繁忙'))
     renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')

@@ -97,9 +97,9 @@ export default function ReaderPage() {
   }, [catalogRevision, bookId, queryClient])
 
   const content = useQuery({
-    queryKey: [...queryKeys.content(bookId ?? '', chapterId, cursor), resumeCp],
+    queryKey: queryKeys.content(bookId ?? '', chapterId, cursor),
     queryFn: ({ signal }) =>
-      fetchContent(bookId as string, { chapterId, cursor, limit: 500, startCp: resumeCp }, signal),
+      fetchContent(bookId as string, { chapterId, cursor, limit: 500 }, signal),
     enabled: Boolean(bookId) && chapterId !== null,
   })
 
@@ -163,7 +163,10 @@ export default function ReaderPage() {
     const target = sentence ?? Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [])
       .find(node => Number(node.dataset.endCp) > resumeCp && Number(node.dataset.startCp) <= resumeCp)
     if (target) { restoredRef.current = key; target.scrollIntoView?.({ block: 'start' }) }
-  }, [nodes, chapterId, resumeCp])
+    else if (content.data?.chapter_id === chapterId && content.data.next_cursor && !content.isFetching) {
+      setCursor(content.data.next_cursor)
+    }
+  }, [nodes, chapterId, resumeCp, content.data, content.isFetching])
 
   // 初读 horizon：本章末端。
   // 后文才出现的证据不会提前着色，也不会提前把两个声音合成同一个颜色。
@@ -366,7 +369,6 @@ export default function ReaderPage() {
           )}
           {nodes.length > 0 && (
             <>
-              {resumeCp !== null && activeChapter && resumeCp > activeChapter.start_cp && <button onClick={() => { setResumeCp(null); setPages([]) }}>查看本章前文</button>}
               <h1 className="ndr-chapter-heading">{activeChapter?.title ?? '正文'}</h1>
               <div className="ndr-quote-legend">
                 <label>
