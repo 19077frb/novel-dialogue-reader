@@ -1344,19 +1344,3 @@ textarea:focus-visible {
 .status-warning {
   color: #9a5a00;
 }
-
-.ndr-normalization-conflict {
-  border: 1px solid var(--ndr-error);
-  border-radius: 8px;
-  padding: 12px;
-  display: grid;
-  gap: 10px;
-  background: color-mix(in srgb, var(--ndr-error) 8%, transparent);
-}
-
-.ndr-normalization-conflict label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: inherit;
-}

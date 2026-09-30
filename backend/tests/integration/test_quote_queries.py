@@ -157,7 +157,7 @@ def test_rescan_is_idempotent(migrated_client: TestClient) -> None:
     assert job["state"] == "COMPLETED"
 
 
-def test_rescan_is_refused_when_user_labeling_exists(
+def test_rescan_preserves_user_labeling(
     migrated_client: TestClient, migrated_settings: Settings
 ) -> None:
     data = _import(migrated_client)
@@ -181,10 +181,22 @@ def test_rescan_is_refused_when_user_labeling_exists(
         engine.dispose()
 
     response = migrated_client.post(f"/api/books/{book_id}/quotes/scan")
-    assert response.status_code == 409
-    assert response.json()["error"]["details"]["reason"] == "USER_LABELING_PRESENT"
-    # 候选没有被覆盖：人工结果仍在，候选数量不变
-    assert len(_quotes(migrated_client, book_id)) == len(EXPECTED_QUOTES)
+    assert response.status_code == 202, response.text
+    assert [item["quote_id"] for item in _quotes(migrated_client, book_id)] == [
+        item["quote_id"] for item in _quotes(migrated_client, book_id)
+    ]
+
+    engine = create_db_engine(migrated_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            annotation = session.execute(
+                select(Annotation).where(Annotation.quote_id == quote_id)
+            ).scalar_one()
+            assert annotation.status is AnnotationStatus.USER_CONFIRMED
+            assert annotation.user_locked is True
+    finally:
+        engine.dispose()
 
 
 def test_import_applies_and_exposes_quote_normalization(migrated_client: TestClient) -> None:
@@ -277,7 +289,7 @@ def test_user_cannot_move_quote_normalization_across_paragraph(
     assert updated.json()["error"]["message"] == "闭合点必须在开引号所在段落内"
 
 
-def test_clear_labeling_allows_quote_normalization_refresh(
+def test_quote_normalization_refresh_preserves_user_labeling(
     migrated_client: TestClient,
     migrated_settings: Settings,
 ) -> None:
@@ -302,7 +314,7 @@ def test_clear_labeling_allows_quote_normalization_refresh(
         engine.dispose()
 
     response = migrated_client.post(
-        f"/api/books/{book_id}/quote-normalizations/clear-labeling"
+        f"/api/books/{book_id}/quote-normalizations/refresh"
     )
 
     assert response.status_code == 202, response.text
@@ -313,7 +325,10 @@ def test_clear_labeling_allows_quote_normalization_refresh(
     factory = create_session_factory(engine)
     try:
         with transaction(factory) as session:
-            assert session.execute(select(func.count(Annotation.id))).scalar_one() == 0
+            annotation = session.execute(
+                select(Annotation).where(Annotation.quote_id == quote_id)
+            ).scalar_one()
+            assert annotation.status is AnnotationStatus.USER_CONFIRMED
     finally:
         engine.dispose()
 

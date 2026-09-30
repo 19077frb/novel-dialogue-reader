@@ -14,10 +14,8 @@ from .scanner import (
     scan_quotes,
 )
 from .service import (
-    ScanConflict,
     ScanOutcome,
     get_quote_detail,
-    has_user_labeling,
     list_gaps,
     list_quotes,
     locate,
@@ -28,7 +26,6 @@ __all__ = [
     "DELIMITER_PAIRS",
     "SCANNER_VERSION",
     "DelimiterPair",
-    "ScanConflict",
     "ScanLimits",
     "ScanOutcome",
     "ScanResult",
@@ -38,7 +35,6 @@ __all__ = [
     "build_gaps",
     "gap_id_for",
     "get_quote_detail",
-    "has_user_labeling",
     "list_gaps",
     "list_quotes",
     "locate",

@@ -1,15 +1,14 @@
 """候选引语的持久化与查询。
 
-- ``scan_and_store``：扫描 + 构造 Gap + 落库；候选是**派生数据**，重新扫描会替换旧的候选行，
-  但 ID 由（版本+位置+扫描器版本）稳定派生，所以同一份文本重复扫描得到同一批 ID。
-- 已有用户标注时拒绝覆盖（``ScanConflict``）——人工结果永远优先于自动候选。
+- ``scan_and_store``：扫描 + 构造 Gap + 落库；已有候选按起点原地更新，
+  人工标注的引用保持稳定，不会因为引号边界修复而丢失。
 - 查询：候选列表、单条候选详情（含上下文与前置 Gap）、Gap 列表、按码点定位原文片段。
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -44,10 +43,6 @@ from .scanner import SCANNER_VERSION, AutoClosePoint, ScanLimits, scan_quotes
 CONTEXT_WINDOW_CP = 120
 
 
-class ScanConflict(RuntimeError):
-    """该版本已有用户标注，拒绝用重新扫描覆盖候选。"""
-
-
 @dataclass
 class ScanOutcome:
     scanner_version: str
@@ -64,17 +59,6 @@ def canonical_text_of(settings: Settings, version) -> str:  # noqa: ANN001
     return load_canonical_text(settings, version)
 
 
-def has_user_labeling(session: Session, version_id: str) -> bool:
-    """该版本下是否已存在任何标注（用户结果不能被自动候选覆盖）。"""
-
-    count = session.execute(
-        select(func.count(Annotation.id))
-        .join(Quote, Annotation.quote_id == Quote.id)
-        .where(Quote.book_version_id == version_id)
-    ).scalar_one()
-    return bool(count)
-
-
 def scan_and_store(
     session: Session,
     settings: Settings,
@@ -83,7 +67,6 @@ def scan_and_store(
     canonical_text: str | None = None,
     scanner_version: str = SCANNER_VERSION,
     limits: ScanLimits | None = None,
-    replace: bool = True,
     auto_close_points: Sequence[AutoClosePoint] | None = None,
 ) -> ScanOutcome:
     """扫描候选引语与 Gap 并落库；返回候选数量与警告。"""
@@ -104,21 +87,30 @@ def scan_and_store(
         limits=limits,
         auto_close_points=auto_close_points,
     )
-    gaps = build_gaps(
-        text,
-        result.quotes,
-        book_version_id=version.id,
-        scanner_version=scanner_version,
+    existing_quotes = {
+        row.start_cp: row
+        for row in session.execute(
+            select(Quote).where(Quote.book_version_id == version.id)
+        ).scalars()
+    }
+    generated_to_actual = {
+        quote.quote_id: existing_quotes[quote.start_cp].id
+        if quote.start_cp in existing_quotes
+        else quote.quote_id
+        for quote in result.quotes
+    }
+    scanned_quotes = tuple(
+        replace(
+            quote,
+            quote_id=generated_to_actual[quote.quote_id],
+            parent_quote_id=(
+                generated_to_actual.get(quote.parent_quote_id, quote.parent_quote_id)
+            ),
+        )
+        for quote in result.quotes
     )
-
-    if replace:
-        if has_user_labeling(session, version.id):
-            raise ScanConflict(
-                "该版本已有用户标注或更正，拒绝用重新扫描覆盖候选；请先撤销或确认人工修改。"
-            )
-        session.execute(delete(Gap).where(Gap.book_version_id == version.id))
-        session.execute(delete(Quote).where(Quote.book_version_id == version.id))
-        session.flush()
+    session.execute(delete(Gap).where(Gap.book_version_id == version.id))
+    session.flush()
 
     chapters = list(
         session.execute(
@@ -132,24 +124,51 @@ def scan_and_store(
                 return chapter.id
         return chapters[-1].id if chapters else None
 
-    for quote in result.quotes:
-        session.add(
-            Quote(
-                id=quote.quote_id,
-                book_version_id=version.id,
-                chapter_id=chapter_id_for(quote.start_cp),
-                start_cp=quote.start_cp,
-                end_cp=quote.end_cp,
-                delimiter=quote.delimiter,
-                nesting_depth=quote.nesting_depth,
-                parent_quote_id=quote.parent_quote_id,
-                utterance_id=None,
-                scanner_version=scanner_version,
-                kind_hint=quote.kind_hint,
-                normalized=quote.normalized,
+    for quote in scanned_quotes:
+        row = existing_quotes.get(quote.start_cp)
+        if row is None:
+            session.add(
+                Quote(
+                    id=quote.quote_id,
+                    book_version_id=version.id,
+                    chapter_id=chapter_id_for(quote.start_cp),
+                    start_cp=quote.start_cp,
+                    end_cp=quote.end_cp,
+                    delimiter=quote.delimiter,
+                    nesting_depth=quote.nesting_depth,
+                    parent_quote_id=quote.parent_quote_id,
+                    utterance_id=None,
+                    scanner_version=scanner_version,
+                    kind_hint=quote.kind_hint,
+                    normalized=quote.normalized,
+                )
             )
-        )
+            continue
+        row.end_cp = quote.end_cp
+        row.delimiter = quote.delimiter
+        row.nesting_depth = quote.nesting_depth
+        row.parent_quote_id = quote.parent_quote_id
+        row.scanner_version = scanner_version
+        row.kind_hint = quote.kind_hint
+        row.normalized = quote.normalized
+        row.chapter_id = chapter_id_for(quote.start_cp)
+        existing_quotes.pop(quote.start_cp, None)
     session.flush()
+
+    for row in existing_quotes.values():
+        annotation_count = session.execute(
+            select(func.count(Annotation.id)).where(Annotation.quote_id == row.id)
+        ).scalar_one()
+        if annotation_count == 0:
+            session.delete(row)
+    session.flush()
+
+    gaps = build_gaps(
+        text,
+        scanned_quotes,
+        book_version_id=version.id,
+        scanner_version=scanner_version,
+    )
 
     for gap in gaps:
         session.add(

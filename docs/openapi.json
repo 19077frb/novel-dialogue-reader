@@ -1291,7 +1291,7 @@
         "tags": [
           "quotes"
         ],
-        "summary": "重新扫描候选引语与 Gap（有用户标注时拒绝）",
+        "summary": "重新扫描候选引语与 Gap（保留已有标注）",
         "operationId": "scan_quotes_route_api_books__book_id__quotes_scan_post",
         "parameters": [
           {
@@ -1449,49 +1449,6 @@
             }
           }
         },
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataEnvelope_QuoteNormalizationRefreshOut_"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/books/{book_id}/quote-normalizations/clear-labeling": {
-      "post": {
-        "tags": [
-          "quotes"
-        ],
-        "summary": "清除当前版本的标注投影并重新检测引号修复",
-        "description": "显式清除本版本所有标注后重扫；历史表保留，用于审计。",
-        "operationId": "clear_quote_labeling_route_api_books__book_id__quote_normalizations_clear_labeling_post",
-        "parameters": [
-          {
-            "name": "book_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Book Id"
-            }
-          }
-        ],
         "responses": {
           "202": {
             "description": "Successful Response",
