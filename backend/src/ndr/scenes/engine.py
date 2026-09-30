@@ -42,6 +42,7 @@ from ..speakers.revisions import IdentityProposalView, evaluate_identity_proposa
 from ..storage.models import (
     Annotation,
     AnnotationHistory,
+    BookCharacter,
     IdentityRevision,
     ReviewItem,
     Scene,
@@ -149,6 +150,11 @@ def _ensure_group(
     slot,  # noqa: ANN001 - SpeakerSlot
     scene_id: str,
 ) -> str:
+    # Book-wide manual edits remain authoritative even for a resumed window.
+    character = session.get(BookCharacter, slot.character_id) if slot.character_id else None
+    if character is not None and character.user_confirmed:
+        slot.canonical_name = character.canonical_name or ""
+        slot.description = character.description or ""
     if slot.group_id:
         row = session.get(SpeakerGroup, slot.group_id)
         if row is not None:

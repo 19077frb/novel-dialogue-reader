@@ -8,6 +8,7 @@ import ModelSettingsPage from './pages/ModelSettingsPage'
 import PreviewPage from './pages/PreviewPage'
 import ReviewPage from './pages/ReviewPage'
 import ReaderPage from './pages/ReaderPage'
+import CharactersPage from './pages/CharactersPage'
 
 /** 后端连接状态：显示真实 /api/health 结果（不调用模型）。 */
 export function HealthBadge() {
@@ -68,6 +69,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/books/:bookId/read" element={<ReaderPage />} />
+          <Route path="/books/:bookId/characters" element={<CharactersPage />} />
           <Route path="/books/:bookId/preview" element={<PreviewPage />} />
           <Route path="/books/:bookId/review" element={<ReviewPage />} />
           <Route path="/settings/models" element={<ModelSettingsPage />} />

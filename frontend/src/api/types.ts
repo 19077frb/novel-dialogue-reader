@@ -6,6 +6,9 @@ import type { components } from './schema'
 
 export type BookOut = components['schemas']['BookOut']
 export type BookCharacterOut = components['schemas']['BookCharacterOut']
+export type CharacterDirectoryOut = components['schemas']['CharacterDirectoryOut']
+export type CharacterEditIn = components['schemas']['CharacterEditIn']
+export type CharacterMergeIn = components['schemas']['CharacterMergeIn']
 export type RosterCharacterCandidate = components['schemas']['RosterCharacterCandidate']
 export type ChapterRosterOut = components['schemas']['ChapterRosterOut']
 export type RosterAnalyzeIn = components['schemas']['RosterAnalyzeIn']

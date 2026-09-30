@@ -300,6 +300,7 @@ export default function ReaderPage() {
             待确认 {pending.data?.counts.targets_by_status?.PENDING ?? 0} 项
           </Link>
           <Link to={`/books/${bookId}/preview${chapterId ? `?chapterId=${encodeURIComponent(chapterId)}` : ''}`}>预览与处理</Link>
+          <Link to={`/books/${bookId}/characters${chapterId ? `?chapterId=${encodeURIComponent(chapterId)}` : ''}`}>全书人物</Link>
           <button type="button" onClick={() => setExportOpen(true)} data-testid="open-export">
             导出
           </button>

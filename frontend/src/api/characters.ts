@@ -4,11 +4,30 @@
 import { apiData } from './client'
 import type {
   BookCharacterOut,
+  CharacterDirectoryOut,
+  CharacterEditIn,
+  CharacterMergeIn,
   ChapterRosterOut,
   JobDetailOut,
   RosterConfirmCandidateIn,
   RosterConfirmIn,
 } from './types'
+
+export function fetchCharacterDirectory(bookId: string, signal?: AbortSignal) {
+  return apiData<CharacterDirectoryOut[]>(`/api/books/${bookId}/character-directory`, { signal })
+}
+
+export function editBookCharacter(bookId: string, entryId: string, body: CharacterEditIn) {
+  return apiData<CharacterDirectoryOut>(
+    `/api/books/${bookId}/character-directory/${encodeURIComponent(entryId)}`, { method: 'PUT', body },
+  )
+}
+
+export function mergeBookCharacter(bookId: string, entryId: string, body: CharacterMergeIn) {
+  return apiData<CharacterDirectoryOut>(
+    `/api/books/${bookId}/character-directory/${encodeURIComponent(entryId)}/merge`, { method: 'POST', body },
+  )
+}
 
 export const characterKeys = {
   book: (bookId: string, bookVersionId: string | null | undefined) =>

@@ -395,6 +395,7 @@ export default function PreviewPage() {
         </div>
         <nav className="ndr-preview-nav" aria-label="本书导航">
           <Link to={`/books/${bookId}/read${returnChapterId ? `?chapterId=${encodeURIComponent(returnChapterId)}` : ''}`}>去阅读</Link>
+          <Link to={`/books/${bookId}/characters${returnChapterId ? `?chapterId=${encodeURIComponent(returnChapterId)}` : ''}`}>全书人物</Link>
           <Link to={`/books/${bookId}/review`}>待确认队列</Link>
           <button type="button" onClick={() => setExportOpen(true)} data-testid="open-export">
             导出

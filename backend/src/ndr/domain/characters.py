@@ -16,6 +16,26 @@ class BookCharacterOut(ApiModel):
     user_confirmed: bool = False
 
 
+class CharacterDirectoryOut(BookCharacterOut):
+    kind: str = "book"
+    version: int = 1
+
+
+class CharacterEditIn(ApiModel):
+    book_version_id: str | None = None
+    name: str = Field(min_length=1, max_length=128)
+    aliases: list[str] = Field(default_factory=list, max_length=64)
+    description: str = Field(default="", max_length=512)
+    expected_version: int = Field(ge=1)
+
+
+class CharacterMergeIn(ApiModel):
+    book_version_id: str | None = None
+    target_character_id: str
+    expected_version: int = Field(ge=1)
+    expected_target_version: int = Field(ge=1)
+
+
 class RosterCharacterCandidate(ApiModel):
     temp_ref: str = Field(min_length=1, max_length=64)
     character_id: str | None = None

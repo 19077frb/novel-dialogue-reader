@@ -213,6 +213,7 @@ def store_roster_candidates(
                 *_json_list(character.aliases_json), *candidate.aliases,
             ])), ensure_ascii=False)
             character.description = candidate.description
+            character.version = (character.version or 0) + 1
         session.flush()
         duplicate = next(
             (record for record in records if record["character_id"] == character.id), None,
@@ -282,6 +283,7 @@ def _upsert_confirmed_character(
     character.description = item.description or (source or {}).get("description") or ""
     character.source = CharacterSource.USER
     character.user_confirmed = True
+    character.version = (character.version or 0) + 1
     session.flush()
     return character
 

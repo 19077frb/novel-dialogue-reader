@@ -167,6 +167,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/character-directory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全书人物管理目录 */
+        get: operations["character_directory_route_api_books__book_id__character_directory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/character-directory/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改全书人物资料 */
+        put: operations["edit_character_route_api_books__book_id__character_directory__entry_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/character-directory/{entry_id}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 合并到已有全书人物 */
+        post: operations["merge_character_route_api_books__book_id__character_directory__entry_id__merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/characters": {
         parameters: {
             query?: never;
@@ -1152,6 +1203,62 @@ export interface components {
              */
             version: number;
         };
+        /** CharacterDirectoryOut */
+        CharacterDirectoryOut: {
+            /** Character Id */
+            character_id: string;
+            /** Name */
+            name: string;
+            /** Aliases */
+            aliases?: string[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * User Confirmed
+             * @default false
+             */
+            user_confirmed: boolean;
+            /**
+             * Kind
+             * @default book
+             */
+            kind: string;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+        };
+        /** CharacterEditIn */
+        CharacterEditIn: {
+            /** Book Version Id */
+            book_version_id?: string | null;
+            /** Name */
+            name: string;
+            /** Aliases */
+            aliases?: string[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** CharacterMergeIn */
+        CharacterMergeIn: {
+            /** Book Version Id */
+            book_version_id?: string | null;
+            /** Target Character Id */
+            target_character_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Expected Target Version */
+            expected_target_version: number;
+        };
         /**
          * CharacterRosterStatus
          * @enum {string}
@@ -1354,6 +1461,15 @@ export interface components {
         /** DataEnvelope[ChapterRosterOut] */
         DataEnvelope_ChapterRosterOut_: {
             data: components["schemas"]["ChapterRosterOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[CharacterDirectoryOut] */
+        DataEnvelope_CharacterDirectoryOut_: {
+            data: components["schemas"]["CharacterDirectoryOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -1620,6 +1736,16 @@ export interface components {
         DataEnvelope_list_ChapterOut__: {
             /** Data */
             data: components["schemas"]["ChapterOut"][];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[list[CharacterDirectoryOut]] */
+        DataEnvelope_list_CharacterDirectoryOut__: {
+            /** Data */
+            data: components["schemas"]["CharacterDirectoryOut"][];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -3348,6 +3474,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_ReadingProgressOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    character_directory_route_api_books__book_id__character_directory_get: {
+        parameters: {
+            query?: {
+                book_version_id?: string | null;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_list_CharacterDirectoryOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_character_route_api_books__book_id__character_directory__entry_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CharacterEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CharacterDirectoryOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_character_route_api_books__book_id__character_directory__entry_id__merge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CharacterMergeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CharacterDirectoryOut_"];
                 };
             };
             /** @description Validation Error */
