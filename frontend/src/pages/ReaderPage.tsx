@@ -74,7 +74,7 @@ export default function ReaderPage() {
   const [readingModeOverride, setReadingModeOverride] = useState<ReadingMode | null>(null)
   const [selectedQuote, setSelectedQuote] = useState<{ quoteId: string; reviewItemId: string | null } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
-  const [bookmarksOpen, setBookmarksOpen] = useState(false)
+  const [sidebarTab, setSidebarTab] = useState<'chapters' | 'bookmarks'>('chapters')
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -158,7 +158,9 @@ export default function ReaderPage() {
   useEffect(() => {
     const key = `${chapterId}:${resumeCp}`
     if (resumeCp === null || !nodes.length || restoredRef.current === key) return
-    const target = Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [])
+    const sentence = Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-sentence-start]') ?? [])
+      .find(item => Number(item.dataset.sentenceStart) <= resumeCp && Number(item.dataset.sentenceEnd) > resumeCp)
+    const target = sentence ?? Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [])
       .find(node => Number(node.dataset.endCp) > resumeCp && Number(node.dataset.startCp) <= resumeCp)
     if (target) { restoredRef.current = key; target.scrollIntoView?.({ block: 'start' }) }
   }, [nodes, chapterId, resumeCp])
@@ -310,6 +312,21 @@ export default function ReaderPage() {
 
       <div className="ndr-reader-body">
         <aside className="card ndr-reader-sidebar">
+          <div className="ndr-sidebar-tabs" role="tablist" aria-label="阅读导航" onKeyDown={event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+            event.preventDefault()
+            const next = event.key === 'Home' ? 'chapters' : event.key === 'End' ? 'bookmarks' : sidebarTab === 'chapters' ? 'bookmarks' : 'chapters'
+            setSidebarTab(next)
+            document.getElementById(next === 'chapters' ? 'chapter-tab' : 'bookmark-tab')?.focus()
+          }}>
+            <button role="tab" id="chapter-tab" aria-selected={sidebarTab === 'chapters'} aria-controls="chapter-panel"
+              tabIndex={sidebarTab === 'chapters' ? 0 : -1}
+              className={sidebarTab === 'chapters' ? 'ndr-primary' : ''} onClick={() => setSidebarTab('chapters')}>目录</button>
+            <button role="tab" id="bookmark-tab" aria-selected={sidebarTab === 'bookmarks'} aria-controls="bookmark-panel"
+              tabIndex={sidebarTab === 'bookmarks' ? 0 : -1}
+              className={sidebarTab === 'bookmarks' ? 'ndr-primary' : ''} onClick={() => setSidebarTab('bookmarks')}>书签</button>
+          </div>
+          <div id="chapter-panel" role="tabpanel" aria-labelledby="chapter-tab" hidden={sidebarTab !== 'chapters'}>
           {chapters.isSuccess && (
             <ChapterNavigation
               chapters={chapters.data}
@@ -328,21 +345,15 @@ export default function ReaderPage() {
           )}
           <ReaderBatchMessage bookId={bookId} />
           {chapters.isPending && <p className="hint">正在读取目录…</p>}
+          </div>
+          {sidebarTab === 'bookmarks' && <div id="bookmark-panel" role="tabpanel" aria-labelledby="bookmark-tab">
+            <p className="hint">点击正文句旁的 ☆ 保存书签。</p>
+            <BookmarkList bookId={bookId} activeVersionId={book.data?.active_version_id} />
+            <Link className="ndr-button" to={`/books/${bookId}/bookmarks`}>打开独立书签页</Link>
+          </div>}
         </aside>
 
         <section className="card ndr-reader-content" ref={documentRef} onScroll={handleScroll}>
-          <details className="ndr-reader-bookmarks" onToggle={e => setBookmarksOpen(e.currentTarget.open)}>
-            <summary>书签</summary>
-            <p><Link to={`/books/${bookId}/bookmarks`}>管理全部书签</Link></p>
-            <button className="ndr-primary" data-testid="add-bookmark" disabled={bookmark.isPending || !activeChapter || !nodes.length || activeChapter.end_cp <= activeChapter.start_cp} onClick={() => {
-              const elements = Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [])
-              const cp = findCurrentStartCp(elements) ?? activeChapter!.start_cp
-              const note = window.prompt('书签备注（可留空，最多 512 字）', '')
-              if (note !== null) bookmark.mutate({ cp, note: note.slice(0, 512) })
-            }}>添加书签</button>
-            {!nodes.length && <p className="hint">正文读取后可添加书签。</p>}
-            {bookmarksOpen && <BookmarkList bookId={bookId} activeVersionId={book.data?.active_version_id} />}
-          </details>
           {chapterId === null && <p className="hint">这本书没有可显示的章节。</p>}
           {content.isPending && chapterId !== null && <p className="hint">正在读取正文…</p>}
           {content.isError && (
@@ -419,6 +430,12 @@ export default function ReaderPage() {
                 candidates={showCandidates ? candidates : []}
                 annotations={annotationItems}
                 onQuoteClick={(quoteId) => setSelectedQuote({ quoteId, reviewItemId: null })}
+                bookmarkPending={bookmark.isPending}
+                onBookmark={(cp, text) => {
+                  if (!activeChapter || !book.data?.active_version_id || bookmark.isPending) return
+                  const note = window.prompt(`保存这句话为书签：${text.trim().slice(0, 80)}\n备注（可留空，最多 512 字）`, '')
+                  if (note !== null) bookmark.mutate({ cp, note: note.slice(0, 512) })
+                }}
               />
             </>
           )}

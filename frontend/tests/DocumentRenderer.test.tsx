@@ -1,5 +1,5 @@
-import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { AnnotationItemOut, ContentNodeOut } from '../src/api/types'
 import { DocumentRenderer, sliceByAnnotations } from '../src/components/DocumentRenderer'
@@ -20,6 +20,18 @@ function node(
 }
 
 describe('DocumentRenderer', () => {
+  it('每句话提供独立书签位置，emoji 按码点计数且按钮不触发正文点击', () => {
+    const save = vi.fn()
+    const click = vi.fn()
+    render(<DocumentRenderer bookId="b1" nodes={[node({ node_id: 'sentence', node_type: 'paragraph', start_cp: 10, end_cp: 24, text: '「😀你好。第二句！」尾句' })]} onBookmark={save} onNodeClick={click} />)
+    const buttons = screen.getAllByRole('button', { name: /保存书签/ })
+    expect(buttons).toHaveLength(3)
+    fireEvent.click(buttons[1])
+    expect(save).toHaveBeenCalledWith(15, '第二句！」')
+    expect(click).not.toHaveBeenCalled()
+    expect(screen.getByTestId('document-renderer')).toHaveTextContent('「😀你好。')
+    expect(screen.getByTestId('document-renderer').textContent).toBe('「😀你好。第二句！」尾句')
+  })
   it('按节点类型渲染标题、段落、分隔符，并带上定位属性', () => {
     render(
       <DocumentRenderer

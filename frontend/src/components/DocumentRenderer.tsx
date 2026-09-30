@@ -5,6 +5,7 @@ import type { AnnotationItemOut, ContentNodeOut, RubyAnnotation } from '../api/t
 import { nodePayload } from '../api/types'
 import { cpLength, sliceByCodepoints, utf16IndexForCp } from '../text/codepoints'
 import { SpanIndex } from '../text/intervals'
+import { sentenceRanges } from '../text/sentences'
 import { annotationColor, AnnotationLayer, labelText } from './AnnotationLayer'
 
 /** 候选引语范围（来自扫描器，只表示“这里有一段引号内容”，不含说话人）。 */
@@ -29,6 +30,8 @@ export interface DocumentRendererProps {
   onNodeClick?: (node: ContentNodeOut) => void
   /** 点击某段引语：普通对白详情入口（打开确认抽屉）。 */
   onQuoteClick?: (quoteId: string) => void
+  onBookmark?: (positionCp: number, text: string) => void
+  bookmarkPending?: boolean
 }
 
 function nodeKey(node: ContentNodeOut): string {
@@ -260,6 +263,8 @@ function NodeView({
   annotations,
   onNodeClick,
   onQuoteClick,
+  onBookmark,
+  bookmarkPending,
 }: {
   node: ContentNodeOut
   bookId: string
@@ -267,6 +272,8 @@ function NodeView({
   annotations: AnnotationItemOut[]
   onNodeClick?: (node: ContentNodeOut) => void
   onQuoteClick?: (quoteId: string) => void
+  onBookmark?: (positionCp: number, text: string) => void
+  bookmarkPending?: boolean
 }) {
   const payload = nodePayload(node)
   const common = {
@@ -317,16 +324,17 @@ function NodeView({
   const relevantAnnotations = annotations.filter(
     (item) => item.start_cp < nodeEnd && item.end_cp > node.start_cp,
   )
-  const text =
+  const candidateTree = buildCandidateTree(relevant)
+  const renderRange = (from: number, to: number) =>
     relevant.length > 0
       ? renderNodes(
-          buildCandidateTree(relevant),
+          candidateTree,
           node.text,
           node.start_cp,
           payload.ruby,
           relevantAnnotations,
-          node.start_cp,
-          nodeEnd,
+          from,
+          to,
           onQuoteClick,
         )
       : renderAnnotatedText(
@@ -334,10 +342,19 @@ function NodeView({
           node.start_cp,
           payload.ruby,
           relevantAnnotations,
-          node.start_cp,
-          nodeEnd,
+          from,
+          to,
           onQuoteClick,
         )
+  const text = onBookmark && node.node_type === 'paragraph'
+    ? sentenceRanges(node.text, node.start_cp).map(sentence => <span key={sentence.startCp} className="ndr-sentence"
+        data-sentence-start={sentence.startCp} data-sentence-end={sentence.endCp}>
+        {renderRange(sentence.startCp, sentence.endCp)}
+        {sentence.text.trim() && <button type="button" className="ndr-sentence-bookmark" disabled={bookmarkPending}
+          aria-label={`保存书签：${sentence.text.trim().slice(0, 40)}`} title="保存这句话为书签"
+          onClick={event => { event.stopPropagation(); onBookmark(sentence.startCp, sentence.text) }} />}
+      </span>)
+    : renderRange(node.start_cp, nodeEnd)
 
   if (node.node_type === 'heading') {
     const level = Math.min(Math.max(payload.level ?? 1, 1), 3)
@@ -368,6 +385,8 @@ export function DocumentRenderer({
   annotations = [],
   onNodeClick,
   onQuoteClick,
+  onBookmark,
+  bookmarkPending,
 }: DocumentRendererProps) {
   const candidateIndex = useMemo(() => new SpanIndex(candidates,
     (item) => item.startCp, (item) => item.endCp), [candidates])
@@ -390,6 +409,8 @@ export function DocumentRenderer({
             annotations={spans[index].annotations}
             onNodeClick={onNodeClick}
             onQuoteClick={onQuoteClick}
+            onBookmark={onBookmark}
+            bookmarkPending={bookmarkPending}
           />
         ))}
       </div>

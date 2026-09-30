@@ -482,6 +482,37 @@ textarea:focus-visible {
   overflow-y: auto;
 }
 
+.ndr-sidebar-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.ndr-sidebar-tabs button { flex: 1; }
+.ndr-bookmark-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; margin: 12px 0; }
+.ndr-bookmark-card {
+  border: 1px solid var(--ndr-border);
+  border-radius: var(--ndr-radius-card);
+  padding: 14px;
+  background: var(--ndr-card);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.ndr-bookmark-card h3 { margin: 0 0 10px; font-size: 0.85rem; color: var(--ndr-muted); }
+.ndr-bookmark-card blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--ndr-border); line-height: 1.7; }
+.ndr-bookmark-card time { display: block; font-size: 0.75rem; margin: 12px 0; }
+.ndr-bookmark-note { font-size: 0.85rem; white-space: pre-wrap; }
+.ndr-bookmark-edit { margin-top: 12px; }
+.ndr-bookmark-edit summary { cursor: pointer; color: var(--ndr-muted); font-size: 0.85rem; }
+.ndr-bookmark-edit .ndr-field { margin: 12px 0; }
+.ndr-sentence-bookmark {
+  padding: 0 4px;
+  margin-left: 3px;
+  font-size: 0.8em;
+  vertical-align: baseline;
+  opacity: 0;
+}
+.ndr-sentence-bookmark::before { content: '☆'; }
+.ndr-sentence:hover .ndr-sentence-bookmark,
+.ndr-sentence:focus-within .ndr-sentence-bookmark { opacity: 1; }
+@media (hover: none) { .ndr-sentence-bookmark { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) { .ndr-sentence-bookmark { transition: opacity 120ms; } }
+
 .ndr-chapter-nav ol {
   list-style: none;
   margin: 0;

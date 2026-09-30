@@ -37,7 +37,7 @@ test.describe('导入与阅读', () => {
     await openBook(page, 'sample-utf8')
     await expect(page).toHaveURL(/\/books\/[^/]+\/read/)
     await expect(page.locator('.ndr-chapter-heading')).toHaveText('序章 雨夜')
-    await expect(page.getByText('「雨停了。」少女合上伞。')).toBeVisible()
+    await expect(page.getByTestId('ndr-node').filter({ hasText: '「雨停了。」少女合上伞。' }).first()).toBeVisible()
 
     // 候选引语覆盖（扫描器结果，不含说话人判断）
     const candidate = page.getByTestId('candidate-quote').first()
