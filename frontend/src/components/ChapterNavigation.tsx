@@ -28,7 +28,6 @@ function progressLabel(progress: ChapterProcessingProgress): string {
 export function ChapterNavigation({ chapters, activeChapterId, onSelect, processingStates = {} }: ChapterNavigationProps) {
   return (
     <nav className="ndr-chapter-nav" aria-label="章节导航">
-      <h2>目录</h2>
       {chapters.length === 0 ? (
         <p className="hint">这本书还没有章节。</p>
       ) : (

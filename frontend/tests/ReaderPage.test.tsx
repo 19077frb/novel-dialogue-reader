@@ -198,9 +198,13 @@ describe('ReaderPage', () => {
   })
 
   it('按书签位置打开对应章节并渲染正文', async () => {
+    // 目录标签已为侧栏命名，内容区无需重复标题。
     renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
 
     expect(await screen.findByText(/第二章的正文/)).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '目录' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('heading', { name: '目录' })).not.toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: '章节导航' })).toBeInTheDocument()
     const active = screen.getByRole('button', { current: true })
     expect(active).toHaveTextContent('第二章')
     expect(screen.getByRole('link', { name: '预览与处理' })).toHaveAttribute('href', '/books/b1/preview?chapterId=c2')
