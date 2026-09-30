@@ -47,7 +47,7 @@ class ExportArtifact(IdMixin, TimestampMixin, VersionMixin, Base):
     exporter_version: Mapped[str] = mapped_column(String(64), nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     job_id: Mapped[str | None] = mapped_column(
-        ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True
     )
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="QUEUED")
     relative_path: Mapped[str | None] = mapped_column(String(512), nullable=True)

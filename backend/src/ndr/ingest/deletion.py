@@ -64,6 +64,9 @@ def delete_book(
             artifact_ids = list(session.execute(select(ExportArtifact.id).join(
                 ExportSnapshot, ExportArtifact.snapshot_id == ExportSnapshot.id,
             ).where(ExportSnapshot.book_id == book_id)).scalars())
+            # 先完成可能耗时的数据库清理，再移动文件并立即提交。
+            # WAL 读者在事务提交前仍能看见旧记录，必须尽量保持正文可读。
+            session.execute(delete(Book).where(Book.id == book_id))
             candidates = [("books", book_id), *(("exports", item) for item in artifact_ids)]
             trash = Path("trash") / f"{book_id}-{new_id()}"
             for category, target_id in candidates:
@@ -81,8 +84,6 @@ def delete_book(
                 source.rename(destination)
                 moved.append((source, destination))
 
-            # 外键级联清理版本、目录、标注、队列、人物和任务等书籍专属数据。
-            session.execute(delete(Book).where(Book.id == book_id))
     except Exception:
         # 文件移动失败或事务回滚时，恢复已移动文件，确保仍可阅读原书。
         for source, destination in reversed(moved):

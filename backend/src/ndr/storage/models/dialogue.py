@@ -38,7 +38,7 @@ class Quote(IdMixin, TimestampMixin, Base):
     delimiter: Mapped[str] = mapped_column(String(16), nullable=False)
     nesting_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     parent_quote_id: Mapped[str | None] = mapped_column(
-        ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True, index=True
     )
     utterance_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     scanner_version: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -57,10 +57,10 @@ class Gap(IdMixin, TimestampMixin, Base):
         ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     left_quote_id: Mapped[str | None] = mapped_column(
-        ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True, index=True
     )
     right_quote_id: Mapped[str | None] = mapped_column(
-        ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True, index=True
     )
     start_cp: Mapped[int] = mapped_column(Integer, nullable=False)
     end_cp: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -115,7 +115,7 @@ class SpeakerGroup(IdMixin, TimestampMixin, VersionMixin, Base):
         ForeignKey("scenes.id", ondelete="CASCADE"), nullable=False, index=True
     )
     first_quote_id: Mapped[str | None] = mapped_column(
-        ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True, index=True
     )
     display_label: Mapped[str] = mapped_column(String(32), nullable=False)
     canonical_name: Mapped[str | None] = mapped_column(String(128), nullable=True)

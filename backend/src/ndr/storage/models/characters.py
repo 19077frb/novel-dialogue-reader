@@ -60,8 +60,8 @@ class ChapterCharacterRoster(IdMixin, TimestampMixin, VersionMixin, Base):
     candidates_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     confirmed_character_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     pov_character_id: Mapped[str | None] = mapped_column(
-        ForeignKey("book_characters.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("book_characters.id", ondelete="SET NULL"), nullable=True, index=True
     )
     analysis_job_id: Mapped[str | None] = mapped_column(
-        ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True
     )

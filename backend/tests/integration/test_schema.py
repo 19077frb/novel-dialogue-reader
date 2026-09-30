@@ -64,6 +64,23 @@ def test_empty_database_migrates_to_head(tmp_settings: Settings) -> None:
         engine.dispose()
 
 
+def test_all_foreign_keys_have_leading_indexes(migrated_settings: Settings) -> None:
+    """SQLite checks every referencing table for each deleted parent row."""
+    engine = create_db_engine(migrated_settings)
+    try:
+        inspector = inspect(engine)
+        for table in inspector.get_table_names():
+            indexes = inspector.get_indexes(table) + inspector.get_unique_constraints(table)
+            indexes.append({"column_names": inspector.get_pk_constraint(table)["constrained_columns"]})
+            for fk in inspector.get_foreign_keys(table):
+                columns = fk["constrained_columns"]
+                assert any(index["column_names"][:len(columns)] == columns for index in indexes), (
+                    table, columns,
+                )
+    finally:
+        engine.dispose()
+
+
 def test_cli_migration_creates_missing_data_directory(tmp_path, monkeypatch) -> None:
     data_dir = tmp_path / "first-run" / "data"
     monkeypatch.setenv("NDR_DATA_DIR", str(data_dir))

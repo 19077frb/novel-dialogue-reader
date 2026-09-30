@@ -51,9 +51,9 @@ export function BookCard({ book, onDelete, deleting = false }: {
           </ul>
         </details>
       )}
-      <Link className="ndr-primary-link" to={`/books/${book.id}/read`}>
+      {deleting ? <p role="status">正在清理书籍记录，请等待；暂不能阅读。</p> : <Link className="ndr-primary-link" to={`/books/${book.id}/read`}>
         开始阅读
-      </Link>
+      </Link>}
       {onDelete && <button
         type="button"
         className="ndr-danger"

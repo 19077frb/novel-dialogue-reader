@@ -12,6 +12,7 @@ from ndr.domain.enums import CorrectionAction, CorrectionTargetType, ExportForma
 from ndr.storage.engine import create_db_engine, create_session_factory
 from ndr.storage.models import (
     Annotation,
+    Book,
     BookVersion,
     Correction,
     ExportArtifact,
@@ -149,6 +150,8 @@ def test_file_move_failure_keeps_book_and_rolls_back_records(
     export_dir.mkdir(parents=True)
     original_rename = Path.rename
     def fail_move(path, target):
+        # 文件开始移动时，数据库清理已完成（仍未提交，对其他连接不可见）。
+        # 独立读取仍应见到原书，失败后则必须回滚全部记录和已移动文件。
         if path == export_dir:
             raise OSError("文件被占用")
         return original_rename(path, target)
@@ -159,3 +162,35 @@ def test_file_move_failure_keeps_book_and_rolls_back_records(
     assert migrated_client.get(f"/api/books/{imported['book_id']}").status_code == 200
     assert (migrated_settings.data_dir / "books" / imported["book_id"]).exists()
     assert export_dir.exists()
+
+
+def test_database_delete_precedes_file_move(
+    migrated_client: TestClient, migrated_settings: Settings, monkeypatch,
+) -> None:
+    from sqlalchemy import event
+
+    from ndr.ingest.deletion import delete_book
+
+    imported = import_book(migrated_client, "第一章\n「你好。」")
+    engine = create_db_engine(migrated_settings)
+    deleted = []
+
+    @event.listens_for(engine, "after_cursor_execute")
+    def track_delete(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith("DELETE FROM books"):
+            deleted.append(True)
+
+    original_rename = Path.rename
+
+    def check_move(path, target):
+        assert deleted, "正文文件不可先于数据库清理移走"
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", check_move)
+    try:
+        factory = create_session_factory(engine)
+        delete_book(factory, migrated_settings, imported["book_id"])
+        with transaction(factory) as session:
+            assert session.get(Book, imported["book_id"]) is None
+    finally:
+        engine.dispose()

@@ -68,5 +68,5 @@ class Correction(IdMixin, TimestampMixin, Base):
     expected_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     applied_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     undone_by: Mapped[str | None] = mapped_column(
-        ForeignKey("corrections.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("corrections.id", ondelete="SET NULL"), nullable=True, index=True
     )

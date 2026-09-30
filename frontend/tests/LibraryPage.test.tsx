@@ -115,6 +115,23 @@ describe('LibraryPage', () => {
     expect(screen.getAllByTestId('book-card')).toHaveLength(2)
   })
 
+  it('删除未结束时仅禁止目标书籍阅读，失败后恢复入口', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockedFetchBooks.mockResolvedValue({ items: duplicateBooks, next_cursor: null })
+    let rejectDelete!: (error: Error) => void
+    vi.mocked(books.deleteBook).mockImplementation(() => new Promise((_resolve, reject) => {
+      rejectDelete = reject
+    }))
+    renderWithProviders(<LibraryPage />)
+    await userEvent.click(await screen.findByTestId('delete-book-b1'))
+    expect(screen.getByTestId('delete-book-b1')).toBeDisabled()
+    expect(screen.getAllByRole('link', { name: '开始阅读' })).toHaveLength(1)
+    expect(screen.getByRole('link', { name: '开始阅读' })).toHaveAttribute('href', '/books/b2/read')
+    rejectDelete(new Error('删除失败'))
+    await screen.findByTestId('delete-book-error')
+    await waitFor(() => expect(screen.getAllByRole('link', { name: '开始阅读' })).toHaveLength(2))
+  })
+
   it('导入成功后显示章节/节点数量与警告', async () => {
     mockedImport.mockResolvedValue(IMPORT_RESULT)
     renderWithProviders(<LibraryPage />)
