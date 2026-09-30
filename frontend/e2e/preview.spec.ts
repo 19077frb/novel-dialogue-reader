@@ -66,9 +66,9 @@ test.describe('预览与按章处理', () => {
 
     // 试运行：真实任务驱动的结果
     await page.getByTestId('preview-run').click()
-    await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+    await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     expect(Number(await page.getByTestId('job-calls').innerText())).toBeGreaterThan(0)
-    await expect(page.getByTestId('preview-notice')).toContainText('标注投影')
+    await expect(page.getByTestId('preview-notice')).toContainText('阅读标注')
 
     // TXT 能着色，并且可读人物称呼是真实文本节点
     const span = page.getByTestId('annotation-span').first()
@@ -89,7 +89,7 @@ test.describe('预览与按章处理', () => {
     // 正式处理：同范围同输入 → 命中缓存，不再发送任何调用
     await page.getByTestId('preview-process').click()
     await expect(page.getByTestId('job-calls')).toHaveText('0', { timeout: 30_000 })
-    await expect(page.getByTestId('job-state')).toHaveText('COMPLETED')
+    await expect(page.getByTestId('job-state')).toHaveText('已完成')
     expect(Number(await page.getByTestId('job-cached-windows').innerText())).toBe(windows)
     // cache 命中后标注仍然来自同一份投影
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()
@@ -107,7 +107,7 @@ test.describe('预览与按章处理', () => {
     await confirmChapterRoster(page)
 
     await page.getByTestId('preview-run').click()
-    await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+    await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()
     await expect(page.getByTestId('annotation-label').first()).toHaveText('〔确定性测试说话人〕')
@@ -137,7 +137,7 @@ test.describe('预览与按章处理', () => {
     // 换章节后人物名单要重新确认，确认的是这一章的人物与主人公
     await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()
-    await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+    await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()
     await expect(page.getByTestId('annotation-label').first()).toHaveText('〔确定性测试说话人〕')
   })

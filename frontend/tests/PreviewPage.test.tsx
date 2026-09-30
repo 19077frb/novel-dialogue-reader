@@ -498,12 +498,12 @@ describe('PreviewPage', () => {
       selectedWindowIds: ['w1'],
     })
     expect(await screen.findByTestId('job-panel')).toBeInTheDocument()
-    expect(screen.getByTestId('job-state')).toHaveTextContent('COMPLETED')
+    expect(screen.getByTestId('job-state')).toHaveTextContent('已完成')
     expect(screen.getByTestId('job-calls')).toHaveTextContent('2')
     expect(screen.getByTestId('usage-current-total')).toHaveTextContent('40')
     expect(screen.getByRole('heading', { name: '本次任务消耗' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '本书累计消耗' })).toBeInTheDocument()
-    expect(screen.getByTestId('preview-notice')).toHaveTextContent('标注投影')
+    expect(screen.getByTestId('preview-notice')).toHaveTextContent('阅读标注')
   })
 
   it('单章正式处理按并发配置拆分所选窗口并在全覆盖后标记完成', async () => {

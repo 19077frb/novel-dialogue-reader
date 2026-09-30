@@ -48,7 +48,7 @@ async function processFirstChapter(page: Page, profileLabel: string) {
   // 逐句归属前必须先确认本章人物与第一视角主人公。
   await confirmChapterRoster(page)
   await page.getByTestId('preview-run').click()
-  await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+  await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 }
 
 async function openExportDialog(page: Page) {

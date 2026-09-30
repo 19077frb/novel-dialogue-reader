@@ -51,7 +51,7 @@ async function processFirstChapter(page: Page, profileLabel: string) {
   await page.getByTestId('preview-estimate').click()
   await expect(page.getByTestId('estimate-summary')).toBeVisible()
   await page.getByTestId('preview-run').click()
-  await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+  await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 }
 
 async function generate(page: Page, format: 'epub' | 'html') {

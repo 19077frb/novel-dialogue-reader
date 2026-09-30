@@ -22,6 +22,7 @@ import {
 import { fetchProfiles, profileKeys } from '../api/profiles'
 import type { AnnotationItemOut, JobDetailOut } from '../api/types'
 import { BudgetForm } from '../components/BudgetForm'
+import { OperationTimer, useRequestClock } from '../components/OperationTimer'
 import { BatchProcessor, useBatchProgress } from '../components/BatchProcessor'
 import { CharacterRosterPanel } from '../components/CharacterRosterPanel'
 import type { CandidateRange } from '../components/DocumentRenderer'
@@ -211,6 +212,7 @@ export default function PreviewPage() {
     retry: false,
   })
   const estimate = rangeValid ? estimateQuery.data ?? null : null
+  const estimateClock = useRequestClock(estimateQuery.isFetching)
   useEffect(() => {
     if (!estimate) return
     const ids = (estimate.windows ?? []).map((window) => String(window.window_id))
@@ -333,7 +335,7 @@ export default function PreviewPage() {
       setCurrentJob(job)
       setError(null)
       setNotice(job.state === 'COMPLETED'
-        ? '任务完成：结果已写入与正式阅读相同的标注投影（没有另一套临时存储）。'
+        ? '任务完成：阅读标注已保存，返回阅读即可查看结果。'
         : `任务结束于 ${SINGLE_TASK_LABELS[job.state] ?? job.state}，请在任务面板查看原因。`)
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : '创建任务失败'),
@@ -348,7 +350,7 @@ export default function PreviewPage() {
       }
       setNotice(
         job.state === 'COMPLETED'
-          ? '任务完成：结果已写入与正式阅读相同的标注投影（没有另一套临时存储）。'
+          ? '任务完成：阅读标注已保存，返回阅读即可查看结果。'
           : `任务结束于 ${job.state}，请在任务面板查看原因。`,
       )
       // 失效**整族**投影查询：阅读页用的是「初读 horizon = 本章末端」的另一个键，
@@ -430,7 +432,7 @@ export default function PreviewPage() {
 
       <section className="card">
         <h3>书籍预处理</h3>
-        <p className="hint">引号修复已移至独立预处理页，按需检查，不影响下面的处理流程。</p>
+        <p className="hint">检查章节名、分章边界和引号修复。导入时已自动检查，可在这里确认结果、调整或重试。</p>
         <Link className="ndr-button" to={`/books/${bookId}/preprocessing${returnChapterId ? `?chapterId=${encodeURIComponent(returnChapterId)}` : ''}`}>打开预处理</Link>
       </section>
 
@@ -592,6 +594,7 @@ export default function PreviewPage() {
             {notice}
           </p>
         )}
+        <OperationTimer {...estimateClock} />
         {estimate && <EstimateSummary estimate={estimate} />}
       </section>
 

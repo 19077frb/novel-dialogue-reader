@@ -79,7 +79,7 @@ test.describe('预算与故障恢复', () => {
 
     await page.getByTestId('budget-max-input').fill('1')
     await page.getByTestId('preview-run').click()
-    await expect(page.getByTestId('job-state')).toHaveText('BUDGET_EXHAUSTED', {
+    await expect(page.getByTestId('job-state')).toHaveText('额度已用完', {
       timeout: 30_000,
     })
     // 到顶后不再产生调用
@@ -91,7 +91,7 @@ test.describe('预算与故障恢复', () => {
 
     await page.getByTestId('budget-max-input').fill('200000')
     await page.getByTestId('preview-recompute').click()
-    await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+    await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()
   })
 
@@ -117,7 +117,7 @@ test.describe('预算与故障恢复', () => {
       .selectOption({ label: `${profileName} · chat-completions-compatible · fake-model-no-key` })
 
     await page.getByTestId('preview-run').click()
-    await expect(page.getByTestId('job-state')).toHaveText('FAILED', { timeout: 30_000 })
+    await expect(page.getByTestId('job-state')).toHaveText('失败', { timeout: 30_000 })
     await expect(page.getByTestId('recovery-summary')).toContainText('失败')
     await expect(page.getByTestId('job-action-open_settings')).toBeVisible()
 
@@ -142,7 +142,7 @@ test.describe('预算与故障恢复', () => {
     await confirmChapterRoster(page)
 
     await page.getByTestId('preview-run').click()
-    await expect(page.getByTestId('job-state')).toHaveText('NEEDS_RECONCILIATION', {
+    await expect(page.getByTestId('job-state')).toHaveText('结果未知，需确认', {
       timeout: 30_000,
     })
     await expect(page.getByTestId('recovery-summary')).toContainText('不会')
@@ -152,7 +152,7 @@ test.describe('预算与故障恢复', () => {
     await expect(page.getByTestId('job-unknown-usage')).toHaveText('1')
 
     await page.getByTestId('job-action-reconcile_keep').click()
-    await expect(page.getByTestId('job-state')).toHaveText('PARTIAL', { timeout: 30_000 })
+    await expect(page.getByTestId('job-state')).toHaveText('部分完成', { timeout: 30_000 })
     await expect(page.getByTestId('recovery-summary')).toContainText('部分完成')
   })
 })

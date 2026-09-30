@@ -291,7 +291,7 @@ describe('ReaderPage', () => {
     expect(span).toHaveTextContent('「第二章的正文。」')
     expect(screen.getAllByTestId('annotation-label')[0]).toHaveTextContent('〔S1〕')
     expect(screen.getByTestId('speaker-legend')).toHaveTextContent('S1')
-    expect(screen.getByText(/标注 1 条/)).toBeInTheDocument()
+    expect(screen.getByText(/已标注 1 句对白/)).toBeInTheDocument()
 
     const callsBefore = vi.mocked(annotationsApi.fetchAnnotations).mock.calls.length
     await userEvent.click(screen.getByTestId('toggle-annotations'))

@@ -31,7 +31,7 @@ export function BookCard({ book, onDelete, deleting = false }: {
       </header>
       <dl>
         <dt>正文长度</dt>
-        <dd>{version ? `${version.canonical_length_cp} 码点` : '—'}</dd>
+        <dd>{version ? `${version.canonical_length_cp} 字符` : '—'}</dd>
         <dt>编码</dt>
         <dd>
           {version ? (version.encoding === 'xml' ? 'XML（EPUB 文档自带）' : version.encoding) : '—'}

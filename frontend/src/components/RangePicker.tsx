@@ -48,7 +48,7 @@ export function RangePicker({ chapters, value, canonicalLengthCp, onChange }: Ra
       </label>
       <div className="ndr-range-cp">
         <label>
-          起始码点
+          起始字符位置
           <input
             type="number"
             min={0}
@@ -61,7 +61,7 @@ export function RangePicker({ chapters, value, canonicalLengthCp, onChange }: Ra
           />
         </label>
         <label>
-          结束码点（留空=到书末）
+          结束字符位置（留空=到书末）
           <input
             type="number"
             min={1}
@@ -82,8 +82,9 @@ export function RangePicker({ chapters, value, canonicalLengthCp, onChange }: Ra
       </div>
       <p className="hint" data-testid="range-summary">
         本次范围：{value.startCp} – {value.endCp ?? canonicalLengthCp}（共{' '}
-        {Math.max(0, (value.endCp ?? canonicalLengthCp) - value.startCp)} 码点）
+        {Math.max(0, (value.endCp ?? canonicalLengthCp) - value.startCp)} 字符）
       </p>
+      <p className="hint">字符位置从 0 开始，结束位置不包含在范围内；标点、换行和单个表情也计入字符数。</p>
     </fieldset>
   )
 }

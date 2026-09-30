@@ -380,7 +380,7 @@ export default function ReaderPage() {
                     onChange={(event) => setShowCandidates(event.target.checked)}
                     data-testid="toggle-candidates"
                   />
-                  候选引语 {candidates.length} 条（扫描器结果，尚未判定说话人）
+                  候选引语 {candidates.length} 条（检测到的引号内容，尚未判定说话人）
                   {quotes.data?.next_cursor ? '（本章还有更多候选未加载）' : ''}
                 </label>
                 <label>
@@ -390,7 +390,7 @@ export default function ReaderPage() {
                     onChange={(event) => setShowAnnotations(event.target.checked)}
                     data-testid="toggle-annotations"
                   />
-                  标注 {annotations.data?.items?.length ?? 0} 条（颜色/编号来自后端投影）
+                  本章已标注 {annotations.data?.items?.length ?? 0} 句对白
                 </label>
                 <label>
                   阅读模式
@@ -419,7 +419,7 @@ export default function ReaderPage() {
               )}
               {annotations.isError && (
                 <p className="hint" data-testid="annotations-error">
-                  标注投影读取失败（原文不受影响）。
+                  对白标注读取失败（原文不受影响）。
                 </p>
               )}
               {showAnnotations && (annotations.data?.legend?.length ?? 0) > 0 && (

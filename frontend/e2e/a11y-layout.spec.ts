@@ -155,7 +155,7 @@ test.describe('可访问性与布局检查', () => {
     })
     await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()
-    await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+    await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
 

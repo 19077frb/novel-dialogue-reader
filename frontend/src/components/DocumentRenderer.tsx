@@ -235,7 +235,7 @@ function renderNodes(
         data-quote-id={node.range.quoteId}
         data-start-cp={node.start}
         data-end-cp={node.end}
-        title="扫描器提出的候选引语（尚未判定说话人）"
+        title="检测到的引号内容（尚未判定说话人）"
         onClick={
           onQuoteClick
             ? (event) => {

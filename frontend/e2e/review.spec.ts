@@ -61,7 +61,7 @@ async function processFirstChapter(page: Page, profileLabel: string) {
   // 逐句归属前必须先确认本章人物与第一视角主人公。
   await confirmChapterRoster(page)
   await page.getByTestId('preview-run').click()
-  await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+  await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 }
 
 test.describe('待确认队列与确认抽屉', () => {
@@ -82,7 +82,7 @@ test.describe('待确认队列与确认抽屉', () => {
     const submitted = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/recheck'))
     await page.getByTestId('recheck-start').click()
     expect((await submitted).postDataJSON().inference_options).toEqual({ thinking_mode: 'enabled', reasoning_effort: 'low' })
-    await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+    await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     await page.getByTestId('drawer-close').click()
     await page.getByRole('link', { name: '预览与处理' }).click()
     await expect(page.getByTestId('processing-thinking-effort')).toHaveValue('low')
@@ -107,7 +107,7 @@ test.describe('待确认队列与确认抽屉', () => {
     await expect(page.getByTestId('drawer-annotation')).toContainText('ACCEPTED')
     // 展开原文只读本地原文（不产生任务面板）
     await page.getByTestId('expand-context').click()
-    await expect(page.getByTestId('quote-context')).toContainText('前后各 600 码点')
+    await expect(page.getByTestId('quote-context')).toContainText('前后各 600 字符')
 
     // 主动标记 → 队列里会出现这条
     await page.getByTestId('drawer-flag').click()

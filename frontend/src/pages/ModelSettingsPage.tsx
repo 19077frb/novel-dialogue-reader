@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { OperationTimer, useRequestClock } from '../components/OperationTimer'
 import { useState } from 'react'
 
 import { ApiError } from '../api/client'
@@ -215,6 +216,7 @@ export default function ModelSettingsPage() {
     },
   })
 
+  const testClock = useRequestClock(connectionTest.isPending)
   return (
     <div className="ndr-page ndr-settings">
       <header className="card ndr-page-header">
@@ -226,6 +228,7 @@ export default function ModelSettingsPage() {
         </div>
       </header>
       <section className="card">
+        <OperationTimer {...testClock} />
         <h2>新增或更新配置</h2>
         <p className="hint">
           在这里填写 API 根地址、模型名与密钥；不需要改源码。密钥只在提交时出现，
@@ -337,7 +340,7 @@ export default function ModelSettingsPage() {
               </select>
             </label>
             <p className="hint">处理页选择“沿用模型配置”时使用这里保存的默认值；模型服务默认表示不指定参数，并不等于关闭思考。
-              提供方需支持 thinking.type / reasoning_effort。关闭思考会清除默认强度，不会自动增加输出上限或超时。</p>
+              思考功能需要模型服务支持。关闭思考会清除默认强度，开启思考可能增加用量与等待时间。</p>
           </fieldset>
           <details>
             <summary>查看生成参数（只读）</summary>

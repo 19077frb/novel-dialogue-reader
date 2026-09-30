@@ -12,6 +12,7 @@ import { createTaskLimiter, mapWithConcurrency } from '../processing/concurrency
 import { waitForJobCompletion } from '../processing/jobCompletion'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
+import { OperationTimer } from './OperationTimer'
 
 class BatchAbortError extends Error {}
 
@@ -55,6 +56,8 @@ export interface BatchTaskProgress {
 }
 
 export interface BatchProgressSnapshot {
+  startedAt: number
+  finishedAt: number | null
   running: boolean
   stopRequested: boolean
   message: string
@@ -66,6 +69,8 @@ export interface BatchProgressSnapshot {
 }
 
 const EMPTY_BATCH: BatchProgressSnapshot = {
+  startedAt: 0,
+  finishedAt: null,
   running: false,
   stopRequested: false,
   message: '',
@@ -317,6 +322,8 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
     })
     publishBatch(bookId, {
       running: true,
+      startedAt: Date.now(),
+      finishedAt: null,
       stopRequested: false,
       message: '准备批量处理…',
       tasks,
@@ -615,6 +622,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
         ])),
       })
     } finally {
+      publishBatch(bookId, { finishedAt: Date.now() })
       batchStopRequests.delete(bookId)
     }
 }
@@ -718,6 +726,8 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         <div className="ndr-step-heading">
           <div>
             <h3>{batchProgress.running ? '批量处理进度' : '最近一次批量任务列表'}</h3>
+            <OperationTimer startedAt={batchProgress.startedAt} finishedAt={batchProgress.finishedAt}
+              completed={batchProgress.tasks.filter(task => task.state === 'completed').length} total={batchProgress.tasks.length} />
             <p className="hint" aria-live="polite" data-testid="batch-progress-message">
               {batchProgress.message}
             </p>

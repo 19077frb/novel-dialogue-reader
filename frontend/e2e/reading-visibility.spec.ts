@@ -56,7 +56,7 @@ async function runWholeBook(page: Page, profileName: string, model = 'fake-model
   })
   await page.getByTestId('range-chapter').selectOption('') // 整本
   await page.getByTestId('preview-run').click()
-  await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+  await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 }
 
 test.describe('证据时点与定位回归', () => {
@@ -104,7 +104,7 @@ test.describe('证据时点与定位回归', () => {
     })
     await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()
-    await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+    await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
@@ -126,7 +126,7 @@ test.describe('证据时点与定位回归', () => {
     })
     await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()
-    await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+    await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()

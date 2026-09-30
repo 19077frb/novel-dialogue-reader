@@ -12,6 +12,18 @@ import {
 } from '../api/jobs'
 import type { JobDetailOut } from '../api/types'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
+import { OperationTimer } from './OperationTimer'
+import { ReadErrorNotice } from './ReadErrorNotice'
+
+export const JOB_STATE_LABELS: Record<string, string> = {
+  QUEUED: '排队中', RUNNING: '处理中', PAUSING: '正在停止', PAUSED: '已暂停',
+  PARTIAL: '部分完成', COMPLETED: '已完成', FAILED: '失败',
+  BUDGET_EXHAUSTED: '额度已用完', NEEDS_RECONCILIATION: '结果未知，需确认',
+}
+const JOB_KIND_LABELS: Record<string, string> = {
+  IMPORT: '导入', INFERENCE: '对白归属', CHARACTER_ROSTER: '人物识别',
+  RECHECK: '局部复核', RECOMPUTE: '重新计算', EXPORT: '导出',
+}
 
 export function isTerminalJob(state: JobDetailOut['state']): boolean {
   return TERMINAL_JOB_STATES.has(state)
@@ -72,17 +84,20 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
   })
 
   if (job.isPending) return <p className="hint">正在查询任务状态…</p>
-  if (job.isError) return <p className="status-error">任务状态查询失败。</p>
+  if (job.isError) return <ReadErrorNotice label="任务状态查询失败" error={job.error} retrying={job.isFetching} onRetry={() => void job.refetch()} />
 
   const info = recovery.data
   const recoveryActions = info?.actions ?? []
   return (
     <div className="ndr-job-panel" data-testid="job-panel">
       <p role="status" aria-live="polite">
-        任务 {job.data.kind}
-        {job.data.purpose ? ` · ${job.data.purpose}` : ''} ·{' '}
-        <strong data-testid="job-state">{state}</strong>
+        {JOB_KIND_LABELS[job.data.kind] ?? job.data.kind}任务
+        {job.data.purpose === 'preview' ? ' · 试运行' : ''} ·{' '}
+        <strong data-testid="job-state" title={state}>{JOB_STATE_LABELS[state ?? ''] ?? state}</strong>
       </p>
+      <OperationTimer startedAt={Date.parse(job.data.created_at)}
+        finishedAt={state && isTerminalJob(state) ? Date.parse(job.data.updated_at) : null}
+        completed={job.data.windows_total - job.data.remaining_windows} total={job.data.windows_total} />
       <dl>
         <dt>窗口</dt>
         <dd>
@@ -100,13 +115,13 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
         <dd data-testid="job-unknown-usage">{job.data.unknown_usage_runs}</dd>
       </dl>
       {job.data.progress && (
-        <ul className="hint">
+        <details><summary>任务诊断详情</summary><ul className="hint">
           {Object.entries(job.data.progress).map(([key, value]) => (
             <li key={key}>
               {key}: {String(value)}
             </li>
           ))}
-        </ul>
+        </ul></details>
       )}
 
       {info && (
@@ -122,7 +137,7 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
           <div className="ndr-form-actions">
             {recoveryActions.map((item) =>
               item.action === 'open_settings' ? (
-                <Link key={item.action} to="/settings/models" data-testid="job-action-open_settings">
+                <Link className="ndr-button" key={item.action} to="/settings/models" data-testid="job-action-open_settings">
                   {item.label}
                 </Link>
               ) : item.action === 'wait' || item.action === 'new_job' ? (
@@ -154,6 +169,7 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
         </div>
       )}
       {job.data.last_error && <p className="status-error">{job.data.last_error}</p>}
+      {action.isError && <p className="status-error" role="alert">{action.error instanceof Error ? action.error.message : '任务操作失败，请重试。'}</p>}
     </div>
   )
 }

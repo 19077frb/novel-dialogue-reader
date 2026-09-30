@@ -22,6 +22,7 @@ import { ExportDownload } from './ExportDownload'
 import { ExportProgress } from './ExportProgress'
 import { ExportScopePicker } from './ExportScopePicker'
 import { ExportStylePreview } from './ExportStylePreview'
+import { OperationTimer, useOperationClock } from './OperationTimer'
 
 export interface ExportDialogProps {
   bookId: string
@@ -41,6 +42,7 @@ export function ExportDialog({
   readPositionCp = 0,
 }: ExportDialogProps) {
   const queryClient = useQueryClient()
+  const exportClock = useOperationClock()
   const [scope, setScope] = useState<'book' | 'chapters'>('book')
   const [selectedChapterIds, setSelectedChapterIds] = useState<string[]>([])
   const [style, setStyle] = useState<ExportStylePreset>('color_and_label')
@@ -109,6 +111,8 @@ export function ExportDialog({
   }, [open])
 
   const generation = useMutation({
+    onMutate: exportClock.start,
+    onSettled: exportClock.finish,
     mutationFn: (snapshotId: string) =>
       createExport(bookId, {
         snapshotId,
@@ -156,6 +160,7 @@ export function ExportDialog({
             关闭
           </button>
         </header>
+        <OperationTimer {...exportClock.clock} />
 
         <ExportScopePicker
           chapters={resolvedChapters}
@@ -186,7 +191,7 @@ export function ExportDialog({
               onChange={() => setVisibilityPolicy('reread')}
               data-testid="export-policy-reread"
             />
-            重读（显示全部有效投影）
+            重读（显示完整标注）
           </label>
         </fieldset>
 

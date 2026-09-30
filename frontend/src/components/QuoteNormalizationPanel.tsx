@@ -8,6 +8,8 @@ import {
   updateQuoteNormalization,
 } from '../api/books'
 import type { QuoteNormalizationOut } from '../api/types'
+import { OperationTimer, useRequestClock } from './OperationTimer'
+import { ReadErrorNotice } from './ReadErrorNotice'
 
 interface QuoteNormalizationPanelProps {
   bookId: string
@@ -72,6 +74,7 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
     onError: (err: unknown) => setError(err instanceof Error ? err.message : '保存失败'),
   })
 
+  const clock = useRequestClock(refreshMutation.isPending || updateMutation.isPending)
   return (
     <section className="card ndr-step-card" data-testid="quote-normalization-panel">
       <div className="ndr-step-heading">
@@ -91,13 +94,12 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
           {refreshMutation.isPending ? '正在检测…' : '重新检测'}
         </button>
       </div>
+      <OperationTimer {...clock} />
 
       {normalizations.isPending && <p className="hint">正在读取引号修复建议…</p>}
       {normalizations.isError && (
-        <p className="status-error">
-          引号修复建议读取失败：
-          {normalizations.error instanceof Error ? normalizations.error.message : '未知错误'}
-        </p>
+        <ReadErrorNotice label="引号修复建议读取失败" error={normalizations.error}
+          retrying={normalizations.isFetching} onRetry={() => void normalizations.refetch()} />
       )}
       {error && <p className="status-error" role="alert">{error}</p>}
       {normalizations.isSuccess && activeItems.length > 0 && (
@@ -159,7 +161,7 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
                 <code data-testid={`quote-normalization-preview-${item.id}`}>{chars.slice(0, offset).join('')}<mark className="ndr-context-target">{draft.replacement}</mark>{chars.slice(offset).join('')}</code>
                 <div className="ndr-normalization-edit">
                   <label>
-                    闭合位置（高级：码点）
+                    闭合字符位置（从 0 开始）
                     <input
                       type="number"
                       min={item.opening_cp + 1}

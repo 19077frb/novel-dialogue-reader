@@ -10,6 +10,9 @@ import {
   type AnalyzeRosterInput,
 } from '../api/characters'
 import { fetchJob } from '../api/books'
+import { OperationTimer } from './OperationTimer'
+import { ReadErrorNotice } from './ReadErrorNotice'
+import { JOB_STATE_LABELS } from './JobPanel'
 import { freshIdempotencyKey } from '../api/jobs'
 import type {
   JobDetailOut,
@@ -210,7 +213,7 @@ export function CharacterRosterPanel({
           <div>
             <h3>本章人物确认</h3>
             <p className="hint" data-testid="roster-no-chapter">
-              当前不是单章范围：整本或自定义码点范围不使用「本章人物」名单，可直接进行对白归属。
+              当前不是单章范围：整本或自定义文字范围不使用「本章人物」名单，可直接进行对白归属。
               需要确认人物与本章主人公时，请先在处理范围里选择具体章节。
             </p>
           </div>
@@ -279,8 +282,11 @@ export function CharacterRosterPanel({
         </p>
       )}
       {rosterJobId && job.data && !TERMINAL_JOB_STATES.has(job.data.state) && (
-        <p className="hint">人物分析任务进行中：{job.data.state}</p>
+        <p className="hint">人物分析任务：{JOB_STATE_LABELS[job.data.state] ?? job.data.state}</p>
       )}
+      {rosterJobId && job.data && <OperationTimer startedAt={Date.parse(job.data.created_at)}
+        finishedAt={TERMINAL_JOB_STATES.has(job.data.state) ? Date.parse(job.data.updated_at) : null} />}
+      {rosterJobId && job.isError && <ReadErrorNotice label="人物任务读取失败" error={job.error} retrying={job.isFetching} onRetry={() => void job.refetch()} />}
       {rosterJobId && job.data?.state === 'FAILED' && (
         <p className="status-error">人物分析失败：{job.data.last_error ?? '未知错误'}</p>
       )}

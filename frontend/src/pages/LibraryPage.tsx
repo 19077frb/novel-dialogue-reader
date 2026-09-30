@@ -9,6 +9,8 @@ import { BookCard } from '../components/BookCard'
 import { ImportDropzone } from '../components/ImportDropzone'
 import { JobPanel } from '../components/JobPanel'
 import { clearBatchProgress, isBatchRunning } from '../components/BatchProcessor'
+import { OperationTimer, useOperationClock } from '../components/OperationTimer'
+import { ReadErrorNotice } from '../components/ReadErrorNotice'
 
 const ENCODING_OPTIONS = [
   { value: '', label: '自动检测（推荐）' },
@@ -32,6 +34,8 @@ function candidatesOf(error: ApiError | null): EncodingCandidate[] {
 
 export default function LibraryPage() {
   const queryClient = useQueryClient()
+  const importClock = useOperationClock()
+  const deleteClock = useOperationClock()
   const [encoding, setEncoding] = useState('')
   const [title, setTitle] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -46,6 +50,8 @@ export default function LibraryPage() {
   })
 
   const importMutation = useMutation({
+    onMutate: importClock.start,
+    onSettled: importClock.finish,
     mutationFn: (vars: { file: File; encoding: string }) =>
       importBook({
         file: vars.file,
@@ -72,6 +78,8 @@ export default function LibraryPage() {
   })
 
   const deleteMutation = useMutation({
+    onMutate: deleteClock.start,
+    onSettled: deleteClock.finish,
     mutationFn: (book: BookOut) => deleteBook(book.id),
     onSuccess: (_data, book) => {
       clearBatchProgress(book.id)
@@ -160,6 +168,8 @@ export default function LibraryPage() {
         </div>
 
         {file && <p className="hint">已选择：{file.name}</p>}
+        {!file && !importMutation.isPending && <p className="hint">先选择 TXT 或 EPUB 文件，再开始导入。</p>}
+        <OperationTimer {...importClock.clock} />
 
         {importMutation.isPending && (
           <p data-testid="import-pending" className="hint">
@@ -235,7 +245,8 @@ export default function LibraryPage() {
         {deleteError && <p className="status-error" role="alert" data-testid="delete-book-error">{deleteError}</p>}
         {deleteNotice && <p className="status-ok" role="status">{deleteNotice}</p>}
         {books.isPending && <p className="hint">正在读取书架…</p>}
-        {books.isError && <p className="status-error">书架读取失败，请确认后端已启动。</p>}
+        {books.isError && <ReadErrorNotice label="书架读取失败" error={books.error} retrying={books.isFetching} onRetry={() => void books.refetch()} />}
+        <OperationTimer {...deleteClock.clock} />
         {books.isSuccess && books.data.items.length === 0 && (
           <p className="hint" data-testid="library-empty">
             还没有书。导入 TXT 或 EPUB 后即可阅读；不需要填写任何 API 配置。

@@ -86,7 +86,7 @@ describe('JobPanel', () => {
   it('显示真实计数、未知用量、退避建议与后端给出的恢复动作', async () => {
     renderWithProviders(<JobPanel jobId="j1" />)
 
-    expect(await screen.findByTestId('job-state')).toHaveTextContent('NEEDS_RECONCILIATION')
+    expect(await screen.findByTestId('job-state')).toHaveTextContent('结果未知，需确认')
     expect(screen.getByTestId('job-calls')).toHaveTextContent('3')
     expect(screen.getByTestId('job-cached-windows')).toHaveTextContent('1')
     expect(screen.getByTestId('job-unknown-usage')).toHaveTextContent('2')
@@ -96,6 +96,14 @@ describe('JobPanel', () => {
     // 付费动作必须显式标注
     expect(screen.getByTestId('job-action-reconcile_retry')).toHaveTextContent('可能计费')
     expect(screen.getByTestId('job-action-reconcile_keep')).not.toHaveTextContent('可能计费')
+  })
+
+  it('任务操作失败显示具体错误，不静默忽略按钮结果', async () => {
+    vi.mocked(jobsApi.reconcileJob).mockRejectedValue(new Error('任务正在变化，请重新读取后再试'))
+    renderWithProviders(<JobPanel jobId="j1" />)
+    await userEvent.click(await screen.findByTestId('job-action-reconcile_keep'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('任务正在变化，请重新读取后再试')
+    expect(screen.getByTestId('job-action-reconcile_keep')).toBeEnabled()
   })
 
   it('保留未知与确认重发分别调用 reconcile 的不同动作', async () => {

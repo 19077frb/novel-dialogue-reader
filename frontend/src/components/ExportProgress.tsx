@@ -7,6 +7,14 @@ const STATE_LABEL: Record<string, string> = {
   COMPLETED: '已完成',
   FAILED: '失败',
 }
+const CHECK_LABEL: Record<string, string> = {
+  non_empty: '文件包含内容', readable_zip: '压缩包可读取',
+  mimetype_first: '格式声明位于首项', mimetype_stored: '格式声明未压缩',
+  mimetype_value: '格式声明正确', has_container: '存在书籍入口',
+  has_opf: '存在书籍信息', has_nav: '存在目录', resource_closure: '图片等资源完整',
+  no_external_references: '无需外部资源', no_localhost: '不依赖本机服务',
+  text_consistency: '正文完整一致',
+}
 
 export interface ExportProgressProps {
   artifact: ExportArtifactOut | null
@@ -44,7 +52,7 @@ export function ExportProgress({ artifact, busy }: ExportProgressProps) {
       <ul className="hint" data-testid="export-checks">
         {Object.entries(internal.checks ?? {}).map(([name, ok]) => (
           <li key={name} data-testid={`export-check-${name}`}>
-            {ok ? '✓' : '✗'} {name}
+            {ok ? '✓' : '✗'} {CHECK_LABEL[name] ?? name}
           </li>
         ))}
       </ul>

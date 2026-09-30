@@ -32,7 +32,7 @@ test.describe('导入与阅读', () => {
     const result = page.getByTestId('import-result')
     await expect(result).toBeVisible()
     await expect(result).toContainText('导入完成：TXT')
-    await expect(result).toContainText('码点')
+    await expect(result).toContainText('字符')
 
     await openBook(page, 'sample-utf8')
     await expect(page).toHaveURL(/\/books\/[^/]+\/read/)
