@@ -14,6 +14,7 @@ import {
 import { addBookmark, bookmarkKey } from '../api/bookmarks'
 import { BookmarkList } from '../components/BookmarkList'
 import { useReadingProgress } from '../hooks/useReadingProgress'
+import { getGeneralSettings } from '../settings/preferences'
 import type { ChapterOut, ContentNodeOut, ReadingMode } from '../api/types'
 import { ChapterNavigation } from '../components/ChapterNavigation'
 import {
@@ -67,8 +68,8 @@ export default function ReaderPage() {
   const [cursor, setCursor] = useState<string | null>(null)
   const [pages, setPages] = useState<ContentNodeOut[][]>([])
   const [notice, setNotice] = useState<string | null>(null)
-  const [showCandidates, setShowCandidates] = useState(true)
-  const [showAnnotations, setShowAnnotations] = useState(true)
+  const [showCandidates, setShowCandidates] = useState(() => getGeneralSettings().showCandidates)
+  const [showAnnotations, setShowAnnotations] = useState(() => getGeneralSettings().showAnnotations)
   const [readingModeOverride, setReadingModeOverride] = useState<ReadingMode | null>(null)
   const [selectedQuote, setSelectedQuote] = useState<{ quoteId: string; reviewItemId: string | null } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
@@ -112,7 +113,7 @@ export default function ReaderPage() {
   useEffect(() => {
     const key = JSON.stringify([bookId, requestedChapterId, requestedPosition])
     if (!book.data || !chapters.data?.length || initializedChapterRef.current === key) return
-    const position = book.data.read_position_version_id && book.data.read_position_version_id !== book.data.active_version_id ? 0 : book.data.read_position_cp
+    const position = !getGeneralSettings().resumeReading || (book.data.read_position_version_id && book.data.read_position_version_id !== book.data.active_version_id) ? 0 : book.data.read_position_cp
     const match =
       chapters.data.find((chapter) => chapter.id === requestedChapterId) ??
       chapters.data.find((chapter) => position >= chapter.start_cp && position < chapter.end_cp) ??

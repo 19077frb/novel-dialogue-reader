@@ -1,4 +1,6 @@
 :root {
+  --ndr-reading-font-size: 16px;
+  --ndr-reading-line-height: 1.95;
   color-scheme: light;
   --ndr-bg: #f7f7f5;
   --ndr-fg: #1f2328;
@@ -603,7 +605,8 @@ textarea:focus-visible {
 }
 
 .ndr-document p {
-  line-height: 1.95;
+  font-size: var(--ndr-reading-font-size);
+  line-height: var(--ndr-reading-line-height);
   margin: 0 0 0.9em;
   text-indent: 2em;
 }
@@ -668,7 +671,7 @@ textarea:focus-visible {
   }
 
   .ndr-document p {
-    line-height: 1.8;
+    line-height: var(--ndr-reading-line-height);
     text-indent: 1.5em;
   }
 
@@ -1344,4 +1347,9 @@ textarea:focus-visible {
   gap: 12px;
   align-items: end;
   margin-bottom: 12px;
+}
+
+.ndr-settings-options {
+  display: grid;
+  gap: 12px;
 }

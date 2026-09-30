@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 
 import { queryKeys } from './api/books'
@@ -11,6 +12,8 @@ import ReaderPage from './pages/ReaderPage'
 import CharactersPage from './pages/CharactersPage'
 import BookmarksPage from './pages/BookmarksPage'
 import PreprocessingPage from './pages/PreprocessingPage'
+import SettingsPage from './pages/SettingsPage'
+import { useGeneralSettings } from './settings/preferences'
 
 /** 后端连接状态：显示真实 /api/health 结果（不调用模型）。 */
 export function HealthBadge() {
@@ -46,6 +49,11 @@ export function HealthBadge() {
 }
 
 export default function App() {
+  const [settings] = useGeneralSettings()
+  useEffect(() => {
+    document.documentElement.style.setProperty('--ndr-reading-font-size', `${settings.fontSize}px`)
+    document.documentElement.style.setProperty('--ndr-reading-line-height', String(settings.lineHeight))
+  }, [settings.fontSize, settings.lineHeight])
   return (
     <div className="app-shell">
       <a className="ndr-skip-link" href="#ndr-main">
@@ -62,6 +70,7 @@ export default function App() {
           {/* NavLink 会在当前页给出 aria-current="page"，键盘/读屏用户能知道自己在哪一页 */}
           <NavLink to="/library">书架</NavLink>
           <NavLink to="/settings/models">模型配置</NavLink>
+          <NavLink to="/settings/general">通用设置</NavLink>
         </nav>
         <HealthBadge />
       </header>
@@ -77,6 +86,7 @@ export default function App() {
           <Route path="/books/:bookId/preview" element={<PreviewPage />} />
           <Route path="/books/:bookId/review" element={<ReviewPage />} />
           <Route path="/settings/models" element={<ModelSettingsPage />} />
+          <Route path="/settings/general" element={<SettingsPage />} />
           <Route path="*" element={<p className="status-error">页面不存在。</p>} />
         </Routes>
       </main>

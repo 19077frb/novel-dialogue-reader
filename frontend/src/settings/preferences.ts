@@ -1,0 +1,40 @@
+import { useSyncExternalStore } from 'react'
+
+export const SETTINGS_KEY = 'ndr:general-settings:v1'
+export const defaultSettings = { fontSize: 16, lineHeight: 1.95, resumeReading: true, showCandidates: true, showAnnotations: true }
+export type GeneralSettings = typeof defaultSettings
+let fallback = JSON.stringify(defaultSettings)
+let rawCache: string | undefined
+let cache = defaultSettings
+const listeners = new Set<() => void>()
+export function getGeneralSettings(): GeneralSettings {
+  let raw = fallback
+  try { raw = localStorage.getItem(SETTINGS_KEY) ?? JSON.stringify(defaultSettings) } catch { /* 会话内回退 */ }
+  if (raw !== rawCache) {
+    rawCache = raw
+    try {
+      const value = JSON.parse(raw)
+      cache = { fontSize: Number.isFinite(value.fontSize) ? Math.min(28, Math.max(14, value.fontSize)) : 16,
+        lineHeight: Number.isFinite(value.lineHeight) ? Math.min(2.6, Math.max(1.5, value.lineHeight)) : 1.95,
+        resumeReading: typeof value.resumeReading === 'boolean' ? value.resumeReading : true,
+        showCandidates: typeof value.showCandidates === 'boolean' ? value.showCandidates : true,
+        showAnnotations: typeof value.showAnnotations === 'boolean' ? value.showAnnotations : true }
+    } catch { cache = defaultSettings }
+  }
+  return cache
+}
+export function updateGeneralSettings(patch: Partial<GeneralSettings>) {
+  fallback = JSON.stringify({ ...getGeneralSettings(), ...patch })
+  try { localStorage.setItem(SETTINGS_KEY, fallback) } catch { /* 会话内仍可使用 */ }
+  rawCache = undefined
+  listeners.forEach(listener => listener())
+}
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  const changed = (event: StorageEvent) => { if (event.key === SETTINGS_KEY || event.key === null) listener() }
+  window.addEventListener('storage', changed)
+  return () => { listeners.delete(listener); window.removeEventListener('storage', changed) }
+}
+export function useGeneralSettings() {
+  return [useSyncExternalStore(subscribe, getGeneralSettings), updateGeneralSettings] as const
+}
