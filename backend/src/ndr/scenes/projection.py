@@ -221,6 +221,8 @@ def build_projection(
     }
     items: list[AnnotationItemOut] = []
     quote_count_by_identity: dict[str, int] = {}
+    description_by_identity: dict[str, str] = {}
+    description_position_by_identity: dict[str, int] = {}
     for annotation in annotations:
         quote = quote_rows.get(annotation.quote_id)
         if quote is None:
@@ -258,6 +260,15 @@ def build_projection(
             identity = identity_by_group.get(group_id)
             if identity:
                 quote_count_by_identity[identity] = quote_count_by_identity.get(identity, 0) + 1
+                description = description_by_group.get(group_id, "")
+                # Only visible utterances may contribute identity descriptions.
+                # A name-only first group must not hide a later informative description.
+                if description and description != label and (
+                    identity not in description_position_by_identity
+                    or quote.start_cp < description_position_by_identity[identity]
+                ):
+                    description_by_identity[identity] = description
+                    description_position_by_identity[identity] = quote.start_cp
 
         items.append(
             AnnotationItemOut(
@@ -283,6 +294,11 @@ def build_projection(
             )
         )
 
+    for item in items:
+        if item.speaker_group_id and not item.withheld:
+            identity = identity_by_group.get(item.speaker_group_id, "")
+            item.speaker_description = description_by_identity.get(identity, "")
+
     legend = []
     for identity in ordered_identities:
         quote_count = quote_count_by_identity.get(identity, 0)
@@ -298,7 +314,7 @@ def build_projection(
                 scene_id=group.scene_id,
                 color_index=color_by_identity[identity],
                 first_quote_id=group.first_quote_id,
-                description=group.description or "",
+                description=description_by_identity.get(identity, ""),
                 quote_count=quote_count,
             )
         )

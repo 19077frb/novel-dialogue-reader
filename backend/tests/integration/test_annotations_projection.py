@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -115,8 +116,12 @@ def test_projection_reports_unknown_without_colors(
     assert payload["counts"]["unprocessed_quotes"] >= 0
 
 
+@pytest.mark.parametrize("first_description,late_description", [
+    ("义妹", False), ("绫濑沙季", False), ("绫濑沙季", True),
+])
 def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
-    fake_provider_client: TestClient, migrated_settings: Settings
+    fake_provider_client: TestClient, migrated_settings: Settings,
+    first_description: str, late_description: bool,
 ) -> None:
     """有明确归属时给颜色/编号；初读 horizon 之下的后文证据不下发颜色。"""
 
@@ -147,7 +152,7 @@ def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
                 first_quote_id=quotes[0].id,
                 display_label="S1",
                 canonical_name="绫濑沙季",
-                description="义妹",
+                description=first_description,
             )
             session.add(group)
             session.flush()
@@ -203,7 +208,7 @@ def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
                     speaker_id=same_person.id,
                     status=AnnotationStatus.ACCEPTED,
                     source="MODEL",
-                    visible_from_cp=quotes[0].end_cp,
+                    visible_from_cp=len(SAMPLE) if late_description else quotes[0].end_cp,
                 )
             )
     finally:
@@ -216,10 +221,13 @@ def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
     assert full["counts"]["accepted"] == 3
     assert [item["color_index"] for item in full["items"]] == [0, 0, 0]
     assert [item["label"] for item in full["items"]] == ["绫濑沙季"] * 3
-    assert "义妹" in {item["speaker_description"] for item in full["items"]}
+    expected_description = (
+        "义妹" if first_description == "义妹" else "同一人物在新场景再次出现"
+    )
+    assert {item["speaker_description"] for item in full["items"]} == {expected_description}
     assert len(full["legend"]) == 1
     assert full["legend"][0]["label"] == "绫濑沙季"
-    assert full["legend"][0]["description"] == "义妹"
+    assert full["legend"][0]["description"] == expected_description
     assert full["legend"][0]["quote_count"] == 3
 
     # 初读：horizon 卡在第一条之后 → 第二条证据尚未出现，不下发颜色/编号
@@ -227,10 +235,13 @@ def test_projection_assigns_stable_colors_and_horizon_withholds_late_evidence(
         f"/api/books/{book_id}/annotations",
         params={"start_cp": 0, "end_cp": len(SAMPLE), "visible_horizon_cp": SAMPLE.index("少年")},
     ).json()["data"]
-    assert early["counts"]["withheld"] == 1
+    assert early["counts"]["withheld"] == (2 if late_description else 1)
     withheld = [item for item in early["items"] if item["withheld"]]
     assert withheld and withheld[0]["label"] is None and withheld[0]["color_index"] is None
-    assert early["legend"][0]["quote_count"] == 2
+    assert early["legend"][0]["quote_count"] == (1 if late_description else 2)
+    if late_description:
+        assert early["legend"][0]["description"] == ""
+        assert all(item["speaker_description"] == "" for item in early["items"])
 
 
 def test_projection_is_read_only_and_needs_no_model(

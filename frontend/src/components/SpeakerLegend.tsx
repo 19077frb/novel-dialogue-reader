@@ -31,7 +31,7 @@ export function SpeakerLegend({ legend, onFocus }: SpeakerLegendProps) {
               className="ndr-legend-button"
               onClick={onFocus ? () => onFocus(item) : undefined}
               disabled={!onFocus}
-              title={item.description || `首次发言 ${item.first_quote_id ?? ''}`}
+              title={item.description ? `${item.label}：${item.description}` : item.label}
             >
               <span
                 className="ndr-legend-swatch"
