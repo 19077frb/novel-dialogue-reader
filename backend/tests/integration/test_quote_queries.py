@@ -8,7 +8,13 @@ from sqlalchemy import func, select
 from ndr.config import Settings
 from ndr.domain.enums import AnnotationSource, AnnotationStatus, QuoteKind
 from ndr.storage.engine import create_db_engine, create_session_factory
-from ndr.storage.models import Annotation, Quote, Scene, SpeakerGroup
+from ndr.storage.models import (
+    Annotation,
+    Quote,
+    QuoteNormalization,
+    Scene,
+    SpeakerGroup,
+)
 from ndr.storage.transactions import transaction
 
 SAMPLE = (
@@ -32,6 +38,12 @@ AUTO_CLOSE_SAMPLE = (
     "“我的话保留意见。”\n"
     "第二章 特典\n"
     "「继续。」\n"
+)
+
+AUTO_CLOSE_NESTED_SAMPLE = (
+    "第一章 电子书\n"
+    "“确实可以买到（电子版）。\n"
+    "“我的话保留意见。”\n"
 )
 
 
@@ -192,6 +204,86 @@ def test_rescan_preserves_user_labeling(
         with transaction(factory) as session:
             annotation = session.execute(
                 select(Annotation).where(Annotation.quote_id == quote_id)
+            ).scalar_one()
+            assert annotation.status is AnnotationStatus.USER_CONFIRMED
+            assert annotation.user_locked is True
+    finally:
+        engine.dispose()
+
+
+def test_refresh_reparents_existing_candidate_without_dropping_labeling(
+    migrated_client: TestClient,
+    migrated_settings: Settings,
+) -> None:
+    response = migrated_client.post(
+        "/api/books/import",
+        files={
+            "file": (
+                "auto-close-nested.txt",
+                AUTO_CLOSE_NESTED_SAMPLE.encode("utf-8"),
+                "text/plain",
+            )
+        },
+    )
+    assert response.status_code == 202, response.text
+    imported = response.json()["data"]
+    book_id = imported["book_id"]
+    version_id = imported["book_version_id"]
+
+    engine = create_db_engine(migrated_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            for row in session.execute(
+                select(QuoteNormalization).where(
+                    QuoteNormalization.book_version_id == version_id
+                )
+            ).scalars():
+                session.delete(row)
+
+        response = migrated_client.post(f"/api/books/{book_id}/quotes/scan")
+        assert response.status_code == 202, response.text
+        child_before = next(
+            quote
+            for quote in _quotes(migrated_client, book_id)
+            if quote["delimiter"] == "paren_fullwidth"
+        )
+        assert child_before["parent_quote_id"] is None
+
+        with transaction(factory) as session:
+            session.add(
+                Annotation(
+                    quote_id=child_before["quote_id"],
+                    kind=QuoteKind.OTHER,
+                    status=AnnotationStatus.USER_CONFIRMED,
+                    source=AnnotationSource.USER,
+                    user_locked=True,
+                )
+            )
+
+        response = migrated_client.post(
+            f"/api/books/{book_id}/quote-normalizations/refresh"
+        )
+        assert response.status_code == 202, response.text
+        assert response.json()["data"]["created"] == 1
+
+        items = _quotes(migrated_client, book_id)
+        child_after = next(
+            quote for quote in items if quote["quote_id"] == child_before["quote_id"]
+        )
+        assert child_after["parent_quote_id"] is not None
+        parent = next(
+            quote
+            for quote in items
+            if quote["quote_id"] == child_after["parent_quote_id"]
+        )
+        assert parent["normalized"] is True
+
+        with transaction(factory) as session:
+            annotation = session.execute(
+                select(Annotation).where(
+                    Annotation.quote_id == child_before["quote_id"]
+                )
             ).scalar_one()
             assert annotation.status is AnnotationStatus.USER_CONFIRMED
             assert annotation.user_locked is True

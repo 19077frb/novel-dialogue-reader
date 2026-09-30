@@ -124,38 +124,43 @@ def scan_and_store(
                 return chapter.id
         return chapters[-1].id if chapters else None
 
+    rows_by_quote_id = {}
     for quote in scanned_quotes:
         row = existing_quotes.get(quote.start_cp)
         if row is None:
-            session.add(
-                Quote(
-                    id=quote.quote_id,
-                    book_version_id=version.id,
-                    chapter_id=chapter_id_for(quote.start_cp),
-                    start_cp=quote.start_cp,
-                    end_cp=quote.end_cp,
-                    delimiter=quote.delimiter,
-                    nesting_depth=quote.nesting_depth,
-                    parent_quote_id=quote.parent_quote_id,
-                    utterance_id=None,
-                    scanner_version=scanner_version,
-                    kind_hint=quote.kind_hint,
-                    normalized=quote.normalized,
-                )
+            row = Quote(
+                id=quote.quote_id,
+                book_version_id=version.id,
+                chapter_id=chapter_id_for(quote.start_cp),
+                start_cp=quote.start_cp,
+                end_cp=quote.end_cp,
+                delimiter=quote.delimiter,
+                nesting_depth=quote.nesting_depth,
+                parent_quote_id=None,
+                utterance_id=None,
+                scanner_version=scanner_version,
+                kind_hint=quote.kind_hint,
+                normalized=quote.normalized,
             )
-            continue
-        row.end_cp = quote.end_cp
-        row.delimiter = quote.delimiter
-        row.nesting_depth = quote.nesting_depth
-        row.parent_quote_id = quote.parent_quote_id
-        row.scanner_version = scanner_version
-        row.kind_hint = quote.kind_hint
-        row.normalized = quote.normalized
-        row.chapter_id = chapter_id_for(quote.start_cp)
-        existing_quotes.pop(quote.start_cp, None)
+            session.add(row)
+        else:
+            row.end_cp = quote.end_cp
+            row.delimiter = quote.delimiter
+            row.nesting_depth = quote.nesting_depth
+            row.scanner_version = scanner_version
+            row.kind_hint = quote.kind_hint
+            row.normalized = quote.normalized
+            row.chapter_id = chapter_id_for(quote.start_cp)
+        rows_by_quote_id[quote.quote_id] = row
+    session.flush()
+    for quote in scanned_quotes:
+        rows_by_quote_id[quote.quote_id].parent_quote_id = quote.parent_quote_id
     session.flush()
 
+    scanned_start_cps = {quote.start_cp for quote in scanned_quotes}
     for row in existing_quotes.values():
+        if row.start_cp in scanned_start_cps:
+            continue
         annotation_count = session.execute(
             select(func.count(Annotation.id)).where(Annotation.quote_id == row.id)
         ).scalar_one()
