@@ -7,6 +7,7 @@ user can inspect, disable, or move a closing point before rescanning.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -45,7 +46,10 @@ def detect_auto_close_suggestions(canonical_text: str) -> tuple[AutoCloseSuggest
     """Find unmatched “ whose paragraph can be closed before a next opening quote."""
 
     stack: list[int] = []
+    delimiter_positions: list[int] = []
     for index, char in enumerate(canonical_text):
+        if char in (OPENING, CLOSING):
+            delimiter_positions.append(index)
         if char == OPENING:
             stack.append(index)
         elif char == CLOSING and stack:
@@ -56,15 +60,12 @@ def detect_auto_close_suggestions(canonical_text: str) -> tuple[AutoCloseSuggest
         close_cp = _paragraph_end(canonical_text, opening_cp)
         if close_cp <= opening_cp + 1:
             continue
-        next_delimiters = [
-            position
-            for position in (
-                canonical_text.find(OPENING, close_cp),
-                canonical_text.find(CLOSING, close_cp),
-            )
-            if position >= 0
-        ]
-        if not next_delimiters or min(next_delimiters) != canonical_text.find(OPENING, close_cp):
+        # 一次建立索引，避免每个缺失闭引号都重新扫描到书末。
+        next_index = bisect_left(delimiter_positions, close_cp)
+        if (
+            next_index == len(delimiter_positions)
+            or canonical_text[delimiter_positions[next_index]] != OPENING
+        ):
             continue
         original_text = canonical_text[opening_cp:close_cp]
         suggestions.append(
