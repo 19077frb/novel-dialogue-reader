@@ -379,7 +379,7 @@ export default function PreviewPage() {
   const runBlockers: string[] = []
   if (singleRunning) runBlockers.push('当前单章任务尚未结束，请等待或在任务面板停止')
   if (!rangeValid) runBlockers.push('处理范围无效')
-  if (profileId === '') runBlockers.push('未选择模型配置（见第一步）')
+  if (profileId === '') runBlockers.push('未选择模型配置（见上方模型配置与本次思考设置）')
   if (rosterRequired && !rosterConfirmed) runBlockers.push('尚未确认本章人物（见第二步）')
   if (range.chapterId && (!estimate || estimateQuery.isFetching || estimateQuery.isError)) {
     runBlockers.push(estimateQuery.isError ? '窗口预览失败，请重新读取' : '正在读取窗口预览')
@@ -468,7 +468,9 @@ export default function PreviewPage() {
         </div>
       </section>
 
-      <ThinkingSettings disabled={batchProgress.running || singleRunning} profile={profiles.data?.find(profile => profile.id === profileId)} />
+      <ThinkingSettings disabled={batchProgress.running || singleRunning} profiles={profiles.data ?? []}
+        profileId={profileId} onProfileChange={setProfileId}
+        profileTestId={processingMode === 'batch' ? 'batch-profile' : 'preview-profile'} />
 
       {processingMode === 'single' && !batchProgress.running && (
         <>
@@ -477,8 +479,8 @@ export default function PreviewPage() {
         <div className="ndr-step-heading">
           <span className="ndr-step-badge" aria-hidden="true">1</span>
           <div>
-            <h3>选择处理范围与模型</h3>
-            <p className="hint">决定要处理的范围和使用哪个模型配置。</p>
+            <h3>选择处理范围</h3>
+            <p className="hint">选择章节和对白窗口；模型配置使用上方的共用设置。</p>
           </div>
         </div>
         <RangePicker
@@ -492,29 +494,6 @@ export default function PreviewPage() {
             setNotice(null)
           }}
         />
-        <fieldset className="ndr-preview-model">
-          <legend>模型配置</legend>
-          <label>
-            模型配置
-            <select
-              value={profileId}
-              onChange={(event) => setProfileId(event.target.value)}
-              data-testid="preview-profile"
-            >
-              <option value="">（请选择模型配置）</option>
-              {(profiles.data ?? []).map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name} · {profile.protocol} · {profile.model}
-                </option>
-              ))}
-            </select>
-          </label>
-          {profiles.data && profiles.data.length === 0 && (
-            <p className="hint" data-testid="preview-no-profile">
-              还没有模型配置：请先到“模型配置”添加提供方（真实提供方需要密钥）。
-            </p>
-          )}
-        </fieldset>
         {range.chapterId && (
           <>
             {estimateQuery.isFetching && <p className="hint" role="status">正在生成窗口预览（不调用模型）…</p>}

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
 import * as profilesApi from '../src/api/profiles'
@@ -29,6 +29,9 @@ it('inherits shared thinking preferences, sends overrides and locks the running 
   updateProcessingPreferences({ profileId: 'p1', thinkingMode: 'enabled', thinkingEffort: 'low' })
   const mounted = renderWithProviders(<RecheckPanel quoteId="q1" />)
   expect(await screen.findByTestId('profile-thinking-defaults')).toHaveTextContent('模式 自适应；强度 高')
+  const settings = screen.getByTestId('model-thinking-settings')
+  expect(within(settings).getByTestId('recheck-profile')).toHaveValue('p1')
+  expect(within(settings).getByTestId('processing-thinking-mode')).toHaveValue('enabled')
   expect(screen.getByTestId('processing-thinking-mode')).toHaveValue('enabled')
   expect(screen.getByTestId('processing-thinking-effort')).toHaveValue('low')
   await userEvent.click(screen.getByTestId('recheck-start'))

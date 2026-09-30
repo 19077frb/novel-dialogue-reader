@@ -259,7 +259,6 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const { profileId, maxRechecks, concurrency } = preferences
   const options = inferenceOptions(preferences)
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
-  const setProfileId = (value: string) => setPreferences({ profileId: value })
   const setMaxRechecks = (value: number) => setPreferences({ maxRechecks: value })
   const setTokenLimitText = (value: string) => setPreferences({ tokenLimit: positiveIntegerOrNull(value) })
   const setConcurrency = (value: number) => setPreferences({ concurrency: value })
@@ -770,13 +769,6 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
           结束章节
           <select value={lastId} onChange={(event) => { setEndId(event.target.value); resetEstimate() }} disabled={running} data-testid="batch-end">
             {chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.title || `第 ${chapter.ordinal + 1} 章`}</option>)}
-          </select>
-        </label>
-        <label>
-          模型配置
-          <select value={profileId} onChange={(event) => { setProfileId(event.target.value); resetEstimate() }} disabled={running} data-testid="batch-profile">
-            <option value="">（请选择模型配置）</option>
-            {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.model}</option>)}
           </select>
         </label>
         <label>

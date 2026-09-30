@@ -71,22 +71,8 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
       <p className="hint">
         局部复核会围绕**本场景**重新调用模型，可能产生费用；它不改变任何人工锁定的对白。
       </p>
-      <label className="ndr-field">
-        模型配置
-        <select
-          value={effectiveProfileId}
-          disabled={running}
-          onChange={(event) => updatePreferences({ profileId: event.target.value })}
-          data-testid="recheck-profile"
-        >
-          {(profiles.data ?? []).map((profile) => (
-            <option key={profile.id} value={profile.id}>
-              {profile.name} · {profile.model}
-            </option>
-          ))}
-        </select>
-      </label>
-      <ThinkingSettings disabled={running} profile={selectedProfile} />
+      <ThinkingSettings disabled={running} profiles={profiles.data ?? []} profileId={effectiveProfileId}
+        onProfileChange={profileId => updatePreferences({ profileId })} profileTestId="recheck-profile" />
       <label className="ndr-field">
         输入 token 上限
         <input
