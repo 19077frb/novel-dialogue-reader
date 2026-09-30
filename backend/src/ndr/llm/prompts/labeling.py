@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from ..schemas import output_json_schema
 
-LABELING_PROMPT_VERSION = "labeling-11"
+LABELING_PROMPT_VERSION = "labeling-12"
 DATA_DELIMITER = "<<<NDR_DATA>>>"
 ESCAPED_DELIMITER = "<<<NDR_DATA_ESCAPED>>>"
 
@@ -57,9 +57,16 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
     new_speakers 声明，即使此人已在 confirmed_chapter_characters 中或刚在旧场景说过话。
 17. locked_results 中“最近已确认轮次”是上一窗口已落库的可靠接力信息。长段心理描写或观察到
     旁人不会自动更换交谈人；只有原文明示旁人开口，才把发言切给该人物。
-18. 每个 new_speakers[].description 必须填写面向读者、简短且尽量可区分的人物称呼。优先使用
-    原文明示的姓名；没有姓名时使用“女同学”“老师”“门外的男声”等称呼，绝不能填写 S1/S2、
-    new1、“未知人物”或空字符串。称呼只用于展示，不表示已经确认真实身份。
+18. 每个 new_speakers[].name 必须填写简短姓名或称呼（不超过32字）。有明确姓名时只写姓名；
+    没有姓名时写“轻浮男客”“女同学”“门外的男声”等可区分称呼。不得填 null、空字符串、
+    S1/S2、new1、“未知人物”或整句描述。详细身份、动作、关系只写在 description。
+    例如 name="读卖栞"、description="书店女店员，悠太的打工前辈"；
+    name="浅村悠太"，而不是“浅村悠太（本章第一人称叙述者，书店店员）”；
+    name="轻浮男客"，而不是“在书店向女店员搭讪的轻浮男客”。称呼不等于真实身份已确认。
+19. 在声明新人物前，必须先逐一核对 existing_speakers、confirmed_chapter_characters 和
+    known_chapter_characters 的姓名、别名与描述。证据能唯一确认同一人时复用其姓名，不另造
+    “姓名+身份描述”的人物；本场景已出现则用 EXISTING，跨场景首次出现仍用 NEW 但复用 name。
+    不得仅因同叫“男同学”就合并；关系描述如“悠太的父亲”不代表该人就是悠太。
 """.strip()
 
 

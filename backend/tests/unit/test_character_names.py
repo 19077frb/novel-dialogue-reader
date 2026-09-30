@@ -1,0 +1,80 @@
+from dataclasses import replace
+
+import pytest
+
+from ndr.characters.names import matches_name, valid_display_name
+from ndr.llm.schemas import output_json_schema
+from ndr.llm.validation import LabelingTargets, parse_and_validate
+from ndr.scenes.state import ConfirmedCharacter, SceneState
+from ndr.speakers.groups import SpeakerRegistry
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("浅村悠太", True),
+    ("浅村悠太（本章第一人称叙述者，书店店员）", True),
+    ("浅村悠太的父亲", False),
+    ("和浅村悠太一起的同学", False),
+])
+def test_decorations_not_relationships(value, expected):
+    assert matches_name(value, ["浅村悠太"]) is expected
+
+
+def test_role_plus_explicit_name():
+    assert matches_name("书店的女店员读卖栞（悠太的打工前辈）", ["读卖栞"])
+    assert not matches_name("读卖栞的同事", ["读卖栞"])
+
+
+def test_decorated_person_reuses_confirmed_scene_identity():
+    state = SceneState(confirmed_characters=[ConfirmedCharacter("yuta", "浅村悠太")])
+    registry = SpeakerRegistry(state)
+    first = registry.register_temp_speaker(
+        temp_ref="new1", first_quote_id="q1", canonical_name="浅村悠太",
+    )
+    second = registry.register_temp_speaker(
+        temp_ref="new2", first_quote_id="q2",
+        canonical_name="浅村悠太（本章第一人称叙述者，书店店员）",
+    )
+    assert second is first
+    assert second.character_id == "yuta"
+    assert second.canonical_name == "浅村悠太"
+    assert len(state.participants) == 1
+
+
+def test_ambiguous_alias_and_generic_names_are_not_merged():
+    state = SceneState(confirmed_characters=[
+        ConfirmedCharacter("a", "张三", aliases=("同桌",)),
+        ConfirmedCharacter("b", "李四", aliases=("同桌",)),
+    ])
+    assert state._confirmed_by_name("同桌") is None
+    registry = SpeakerRegistry(state)
+    first = registry.register_temp_speaker(temp_ref="new1", first_quote_id="q1", canonical_name="男生")
+    second = registry.register_temp_speaker(temp_ref="new2", first_quote_id="q2", canonical_name="男生")
+    assert first is not second
+
+
+@pytest.mark.parametrize("name", [
+    None, "", "S1", "未知人物", "浅村悠太（书店店员）", "在书店向女店员搭讪的轻浮男客",
+])
+def test_live_output_requires_separate_short_name(name):
+    targets = LabelingTargets(quote_ids=("q1",), require_display_names=True)
+    output = {
+        "new_speakers": [{"temp_ref": "new1", "scene_ref": "scene_current",
+                          "first_quote_id": "q1", "description": "书店的男店员"}],
+        "labels": [{"quote_id": "q1", "scene_ref": "scene_current", "kind": "speech",
+                    "assignment": "NEW", "speaker_ref": "new1", "basis": "DIRECT"}],
+    }
+    if name is not None:
+        output["new_speakers"][0]["name"] = name
+    assert not parse_and_validate(output, targets).ok
+    output["new_speakers"][0]["name"] = "轻浮男客"
+    assert parse_and_validate(output, targets).ok
+    # Historical output parsing remains compatible, but live calls are strict.
+    output["new_speakers"][0].pop("name")
+    assert parse_and_validate(output, replace(targets, require_display_names=False)).ok
+
+
+def test_prompt_schema_requires_name():
+    speaker_schema = output_json_schema()["$defs"]["NewSpeaker"]
+    assert "name" in speaker_schema["required"]
+    assert speaker_schema["properties"]["name"]["type"] == "string"
+    assert valid_display_name("轻浮男客")

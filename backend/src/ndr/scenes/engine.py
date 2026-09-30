@@ -424,7 +424,8 @@ def apply_window(
                     temp_ref=label.speaker_ref,
                     first_quote_id=label.quote_id,
                     description=declaration.description if declaration else "",
-                    canonical_name=label.speaker_name or "",
+                    canonical_name=(declaration.name if declaration else None)
+                    or label.speaker_name or "",
                     evidence_refs=tuple(evidence_ids),
                 )
                 speaker_id = _ensure_group(

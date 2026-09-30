@@ -41,13 +41,16 @@ class GapDecisionOut(ApiModel):
 
 
 class NewSpeaker(ApiModel):
+    # Nullable only for parsing historical cached outputs. Live calls require a name.
+    name: str | None = Field(default=None, min_length=1, max_length=32,
+                             description="必填简短姓名或称呼，如浅村悠太、轻浮男客；描述另填")
     temp_ref: str = Field(min_length=1, description="本次输出内的临时人物引用，如 new1")
     scene_ref: str = Field(min_length=1)
     first_quote_id: str = Field(min_length=1)
     description: str = Field(
         min_length=1,
         max_length=512,
-        description="面向读者的简短人物称呼或描述，例如姓名、女同学、门外的声音",
+        description="人物身份、特征和匹配依据的详细说明，不作为显示名称",
     )
     evidence_refs: list[str] = Field(default_factory=list)
 
@@ -128,7 +131,14 @@ class LlmOutput(ApiModel):
 def output_json_schema() -> dict[str, Any]:
     """导出 JSON Schema（提示词与文档用；不带 ``$defs`` 内联引用问题）。"""
 
-    return LlmOutput.model_json_schema(ref_template="#/$defs/{model}")
+    schema = LlmOutput.model_json_schema(ref_template="#/$defs/{model}")
+    speaker = schema["$defs"]["NewSpeaker"]
+    speaker["required"].append("name")
+    speaker["properties"]["name"] = {
+        "type": "string", "minLength": 1, "maxLength": 32,
+        "description": "简短姓名或称呼；不能是编号或描述句",
+    }
+    return schema
 
 
 class RosterCharacter(ApiModel):

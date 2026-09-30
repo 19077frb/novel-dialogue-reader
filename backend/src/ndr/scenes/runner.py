@@ -331,6 +331,7 @@ def _targets_for(window, state: SceneState):  # noqa: ANN001, ANN202
     from ..llm.validation import LabelingTargets
 
     return LabelingTargets(
+        require_display_names=True,
         quote_ids=tuple(window.target_quote_ids),
         gap_ids=tuple(
             fragment.fragment_id

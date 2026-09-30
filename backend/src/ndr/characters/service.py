@@ -40,6 +40,7 @@ from ..storage.models import (
     Job,
     ModelProfile,
 )
+from .names import GENERIC_NAMES, matches_name, undecorated_name
 
 
 def _json_list(raw: str | None) -> list[str]:
@@ -140,14 +141,19 @@ def _match_existing(
     rows = session.execute(
         select(BookCharacter).where(BookCharacter.book_version_id == version_id)
     ).scalars()
+    matches = []
     for row in rows:
         row_keys = {
             _normalize(row.canonical_name),
             *{_normalize(alias) for alias in _json_list(row.aliases_json)},
         }
-        if keys & row_keys:
-            return row
-    return None
+        if (keys - GENERIC_NAMES) & row_keys or (
+            name and undecorated_name(name) not in GENERIC_NAMES and matches_name(
+                name, [row.canonical_name or "", *_json_list(row.aliases_json)],
+            )
+        ):
+            matches.append(row)
+    return matches[0] if len(matches) == 1 else None
 
 
 def store_roster_candidates(
@@ -200,10 +206,23 @@ def store_roster_candidates(
         # output may link to that person, but must never rewrite the identity
         # the user approved.
         if not character.user_confirmed:
-            character.canonical_name = candidate.name
-            character.aliases_json = json.dumps(candidate.aliases, ensure_ascii=False)
+            character.canonical_name = (
+                matched.canonical_name if matched else undecorated_name(candidate.name) or None
+            )
+            character.aliases_json = json.dumps(list(dict.fromkeys([
+                *_json_list(character.aliases_json), *candidate.aliases,
+            ])), ensure_ascii=False)
             character.description = candidate.description
         session.flush()
+        duplicate = next(
+            (record for record in records if record["character_id"] == character.id), None,
+        )
+        if duplicate is not None:
+            duplicate["pov_candidate"] |= candidate.pov_candidate
+            duplicate["evidence_refs"] = list(dict.fromkeys([
+                *duplicate["evidence_refs"], *candidate.evidence_refs,
+            ]))
+            continue
         records.append(
             {
                 "temp_ref": candidate.temp_ref,

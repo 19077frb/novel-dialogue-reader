@@ -172,6 +172,7 @@ class FakeProviderAdapter:
                     "scene_ref": "scene_current",
                     "first_quote_id": targets[0],
                     "description": "第一个声音",
+                    "name": "第一个声音",
                     "evidence_refs": [],
                 },
                 {
@@ -179,6 +180,7 @@ class FakeProviderAdapter:
                     "scene_ref": "scene_current",
                     "first_quote_id": targets[1],
                     "description": "第二个声音",
+                    "name": "第二个声音",
                     "evidence_refs": [],
                 },
             ],
@@ -255,6 +257,7 @@ class FakeProviderAdapter:
                     "scene_ref": "scene_current",
                     "first_quote_id": targets[0],
                     "description": "确定性测试说话人",
+                    "name": "确定性测试说话人",
                     "evidence_refs": [],
                 }
             ]

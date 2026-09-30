@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from ..characters.names import GENERIC_NAMES
 from ..scenes.state import SceneState, SpeakerSlot
 
 
@@ -42,7 +43,9 @@ class SpeakerRegistry:
         existing = self.state.find(temp_ref)
         if existing is not None:
             return existing
-        named = self.state.find_by_name(canonical_name)
+        named = (
+            self.state.find_by_name(canonical_name) if canonical_name not in GENERIC_NAMES else None
+        )
         if named is None:
             confirmed = self.state._confirmed_by_name(canonical_name)
             if confirmed is not None:

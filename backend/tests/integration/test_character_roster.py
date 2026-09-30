@@ -61,7 +61,15 @@ def test_roster_analysis_cannot_overwrite_user_confirmed_identity(
                             "description": "模型生成的冲突说明",
                             "evidence_refs": ["L1"],
                             "pov_candidate": True,
-                        }
+                        },
+                        {
+                            "temp_ref": "C2",
+                            "name": "浅村悠太（本章第一人称叙述者，书店店员）",
+                            "aliases": [],
+                            "description": "同一人物的另一种模型说明",
+                            "evidence_refs": ["L2"],
+                            "pov_candidate": False,
+                        },
                     ],
                 }
             )
@@ -73,6 +81,8 @@ def test_roster_analysis_cannot_overwrite_user_confirmed_identity(
                 job_id=None,
             )
             record = json.loads(roster.candidates_json)[0]
+            assert len(json.loads(roster.candidates_json)) == 1
+            assert record["evidence_refs"] == ["L1", "L2"]
 
             assert record["character_id"] == confirmed_id
             assert record["canonical_name"] == "浅村悠太"

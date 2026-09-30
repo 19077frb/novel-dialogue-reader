@@ -17,6 +17,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from ..characters.names import valid_display_name
 from ..domain.enums import Assignment, GapDecision, QuoteKind
 from .errors import InvalidModelOutput, ProviderError, ProviderErrorKind
 from .schemas import LlmOutput, NewSpeaker, QuoteLabel
@@ -34,6 +35,7 @@ class LabelingTargets:
     speaker_refs: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
     confirmed_names: tuple[str, ...] = ()
+    require_display_names: bool = False
 
 
 @dataclass(frozen=True)
@@ -357,6 +359,11 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
     # 2) 新人物
     new_speakers: dict[str, str] = {}
     for speaker in output.new_speakers:
+        if targets.require_display_names and not valid_display_name(speaker.name):
+            issues.append(ValidationIssue(
+                "missing_speaker_name", "新人物必须在 name 填写简短姓名或称呼，详细描述另填",
+                speaker.temp_ref,
+            ))
         if speaker.temp_ref in new_speakers:
             issues.append(
                 ValidationIssue(

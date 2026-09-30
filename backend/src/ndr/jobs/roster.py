@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..characters.names import valid_display_name
 from ..characters.service import roster_messages, store_roster_candidates
 from ..config import Settings
 from ..context.budget import estimate_tokens
@@ -166,6 +167,8 @@ def run_character_roster_job(
             if not str(key).startswith("_")
         }
         output = RosterOutput.model_validate(payload)
+        if any(not valid_display_name(person.name) for person in output.characters):
+            raise ValueError("每个新人物必须填写简短 name（姓名或称呼），不能用描述或编号替代")
     except Exception as exc:  # noqa: BLE001
         with session_factory() as session:
             job = session.get(Job, job_id)

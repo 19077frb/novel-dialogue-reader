@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..characters.names import GENERIC_NAMES, matches_name, undecorated_name
 from ..domain.enums import GapDecision, SceneStatus
 
 SCENE_STATE_VERSION = "scene-state-5"
@@ -142,13 +143,12 @@ class SceneState:
         key = (value or "").strip().casefold()
         if not key:
             return None
-        for character in self.confirmed_characters:
-            if key in {
-                character.canonical_name.strip().casefold(),
-                *(alias.strip().casefold() for alias in character.aliases),
-            }:
-                return character
-        return None
+        if undecorated_name(value) in GENERIC_NAMES:
+            return None
+        matches = [character for character in self.confirmed_characters if matches_name(
+            value, (character.canonical_name, *character.aliases),
+        )]
+        return matches[0] if len(matches) == 1 else None
 
     def find_by_name(self, canonical_name: str | None) -> SpeakerSlot | None:
         key = (canonical_name or "").strip().casefold()
