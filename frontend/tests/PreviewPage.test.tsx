@@ -20,6 +20,7 @@ import type {
   QuoteNormalizationRefreshOut,
 } from '../src/api/types'
 import PreviewPage from '../src/pages/PreviewPage'
+import PreprocessingPage from '../src/pages/PreprocessingPage'
 import { renderRoute } from './helpers'
 
 vi.mock('../src/api/books', () => ({
@@ -1008,10 +1009,11 @@ describe('PreviewPage', () => {
     vi.mocked(booksApi.fetchQuoteNormalizations).mockResolvedValue([normalization])
     vi.mocked(booksApi.refreshQuoteNormalizations).mockResolvedValue(refreshed)
     vi.mocked(booksApi.updateQuoteNormalization).mockResolvedValue(refreshed)
-    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    renderRoute('/books/:bookId/preprocessing', <PreprocessingPage />, '/books/b1/preprocessing')
 
     expect(await screen.findByTestId('quote-normalization-warning'))
       .toHaveTextContent('已启用 1 条虚拟闭合')
+    await userEvent.click(document.querySelector('.ndr-normalization-card summary')!)
     expect(screen.getByText('“他说雨停了。”')).toBeInTheDocument()
 
     fireEvent.change(screen.getByTestId('quote-normalization-close-n1'), {
