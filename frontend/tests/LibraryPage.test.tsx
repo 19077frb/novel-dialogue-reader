@@ -24,6 +24,8 @@ const mockedImport = vi.mocked(books.importBook)
 const mockedFetchJob = vi.mocked(books.fetchJob)
 
 const IMPORT_RESULT: ImportResult = {
+  chapter_repairs_applied: 0,
+  quote_repairs_applied: 0,
   book_id: 'b1',
   book_version_id: 'v1',
   job_id: 'j1',
@@ -142,7 +144,9 @@ describe('LibraryPage', () => {
     await userEvent.click(screen.getByTestId('import-submit'))
 
     const result = await screen.findByTestId('import-result')
-    expect(result).toHaveTextContent('导入完成：TXT，3 章，12 个节点，143 码点')
+    expect(result).toHaveTextContent('导入完成：TXT，3 章，12 个节点，143 字符')
+    expect(result).toHaveTextContent('自动预处理完成：章节修复 0 处，引号修复 0 处。')
+    expect(screen.getByRole('link', { name: '检查预处理结果' })).toHaveAttribute('href', '/books/b1/preprocessing')
     expect(result).toHaveTextContent('编码 gb18030')
     expect(result).toHaveTextContent('synthetic')
     await waitFor(() => expect(mockedImport).toHaveBeenCalledTimes(1))

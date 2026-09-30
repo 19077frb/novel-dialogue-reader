@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { deleteBook, fetchBooks, importBook, queryKeys } from '../api/books'
 import { ApiError } from '../api/client'
@@ -170,10 +171,12 @@ export default function LibraryPage() {
           <div className="ndr-import-result" data-testid="import-result">
             <p className="status-ok">
               导入完成：{result.format}，{result.chapter_count} 章，{result.node_count} 个节点，
-              {result.canonical_length_cp} 码点
+              {result.canonical_length_cp} 字符
               {result.encoding ? `，编码 ${result.encoding}` : '（EPUB 文档自带编码）'}
               {result.reused_version ? '（复用已有版本）' : ''}
             </p>
+            <p className="hint">{result.reused_version ? '已复用原来的预处理结果，不覆盖你的调整。' : `自动预处理完成：章节修复 ${result.chapter_repairs_applied ?? 0} 处，引号修复 ${result.quote_repairs_applied ?? 0} 处。`}</p>
+            <Link className="ndr-button" to={`/books/${result.book_id}/preprocessing`}>检查预处理结果</Link>
             {warnings.length > 0 && (
               <ul className="hint">
                 {warnings.map((warning) => (

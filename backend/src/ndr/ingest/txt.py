@@ -107,6 +107,16 @@ def _split_chapters(
     """按可信标题行切分章节；返回章节、每行所属章节、警告。"""
 
     warnings: list[str] = []
+    rejected = sum(
+        1
+        for line in lines
+        if re.match(
+            r"^第[0-9０-９一二三四五六七八九十百千万零〇两]+[章节節回卷篇部]", line.text.strip()
+        )
+        and suspicious_heading(line.text.strip())
+    )
+    if rejected:
+        warnings.append(f"章节自动修复：已将 {rejected} 处正文式标题保留为正文。")
     chapter_of_line: list[int | None] = [None] * len(lines)
     chapters: list[ParsedChapter] = []
 
@@ -116,8 +126,9 @@ def _split_chapters(
         if (
             filtered
             and duplicate_heading(lines[filtered[-1]].text.strip(), lines[index].text.strip())
-            and all(line.blank for line in lines[filtered[-1] + 1:index])
+            and all(line.blank for line in lines[filtered[-1] + 1 : index])
         ):
+            warnings.append("章节自动修复：已合并 1 处相邻重复标题。")
             continue
         filtered.append(index)
     heading_indexes = filtered
@@ -172,9 +183,7 @@ def parse_txt(raw: bytes, *, encoding: str | None = None, title: str | None = No
     canonical_text = "".join(line.text + ("\n" if line.separator else "") for line in lines)
 
     warnings: list[str] = list(detection.warnings)
-    chapters, chapter_of_line, chapter_warnings = _split_chapters(
-        lines, len(canonical_text), title
-    )
+    chapters, chapter_of_line, chapter_warnings = _split_chapters(lines, len(canonical_text), title)
     warnings.extend(chapter_warnings)
 
     # 节点：每个非空行一个节点；标题行标记为 heading。

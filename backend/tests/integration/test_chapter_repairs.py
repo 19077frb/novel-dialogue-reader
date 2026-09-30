@@ -9,6 +9,26 @@ def test_txt_avoids_narrative_and_adjacent_duplicate_headings() -> None:
     parsed = parse_txt(novel.encode())
     assert [chapter.title for chapter in parsed.chapters] == ["第十卷 序章", "第一章 开始"]
     assert parsed.canonical_text == novel
+    assert any("合并" in warning for warning in parsed.warnings)
+
+
+def test_import_reports_automatic_preprocessing_and_preserves_edits_on_reimport(
+    migrated_client: TestClient,
+) -> None:
+    client = migrated_client
+    raw = "第十卷 序章\n\n序章\n“没有闭合\n“下一句。”\n".encode()
+    imported = client.post("/api/books/import", files={"file": ("auto.txt", raw)}).json()["data"]
+    assert imported["chapter_repairs_applied"] == 1
+    assert imported["quote_repairs_applied"] == 1
+    assert imported["chapter_count"] == 1
+    url = f"/api/books/{imported['book_id']}"
+    chapters = client.get(f"{url}/chapters").json()["data"]
+    assert chapters[0]["title"] == "第十卷 序章"
+    normalization = client.get(f"{url}/quote-normalizations").json()["data"]
+    assert normalization[0]["status"] == "ACTIVE"
+    again = client.post("/api/books/import", files={"file": ("auto.txt", raw)}).json()["data"]
+    assert again["reused_version"]
+    assert again["chapter_repairs_applied"] == again["quote_repairs_applied"] == 0
 
 
 def test_suggest_rename_merge_preserves_text_quotes_and_bookmarks(

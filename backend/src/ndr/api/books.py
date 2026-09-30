@@ -91,7 +91,7 @@ def _epub_limits(settings: Settings) -> EpubLimits:
     response_model=DataEnvelope[ImportResult],
     summary="导入 TXT/EPUB（202 + IMPORT 任务）",
 )
-async def import_book(
+def import_book(
     request: Request,
     file: UploadFile = File(..., description="TXT 或 EPUB 文件"),
     encoding: str | None = Form(default=None, description="显式编码；留空自动检测（仅 TXT）"),
@@ -108,8 +108,9 @@ async def import_book(
             status_code=415,
         )
 
-    raw = await file.read()
     max_bytes = getattr(settings, "max_import_bytes", MAX_IMPORT_BYTES_FALLBACK)
+    # 同步路由在工作线程运行；解析/写入不能阻塞阅读请求的事件循环。
+    raw = file.file.read(max_bytes + 1)
     if not raw:
         raise ApiError.validation("文件为空，无法导入", filename=filename)
     if len(raw) > max_bytes:
@@ -149,7 +150,18 @@ async def import_book(
                 import_status=outcome.book.import_status,
                 encoding=outcome.parsed.encoding,
                 encoding_confidence=outcome.parsed.encoding_confidence,
-                chapter_count=len(outcome.parsed.chapters),
+                chapter_count=int(
+                    session.scalar(
+                        select(func.count())
+                        .select_from(Chapter)
+                        .where(
+                            Chapter.book_version_id == outcome.version.id,
+                        )
+                    )
+                    or 0
+                ),
+                chapter_repairs_applied=outcome.chapter_repairs_applied,
+                quote_repairs_applied=outcome.quote_repairs_applied,
                 node_count=len(outcome.parsed.nodes),
                 resource_count=len(outcome.parsed.resources),
                 canonical_length_cp=outcome.parsed.canonical_length_cp,
@@ -250,29 +262,41 @@ def list_chapters_route(
 
 
 @router.get(
-    "/{book_id}/chapter-repairs", response_model=DataEnvelope[list[ChapterRepairSuggestion]],
+    "/{book_id}/chapter-repairs",
+    response_model=DataEnvelope[list[ChapterRepairSuggestion]],
 )
 def chapter_repair_suggestions_route(
-    request: Request, book_id: str, session: Session = Depends(get_session),
+    request: Request,
+    book_id: str,
+    session: Session = Depends(get_session),
 ) -> DataEnvelope[list[ChapterRepairSuggestion]]:
     return DataEnvelope(data=suggestions(session, book_id), request_id=current_request_id(request))
 
 
 @router.get("/{book_id}/processing-status", response_model=DataEnvelope[dict[str, int]])
 def processing_status_route(
-    request: Request, book_id: str, session: Session = Depends(get_session),
+    request: Request,
+    book_id: str,
+    session: Session = Depends(get_session),
 ) -> DataEnvelope[dict[str, int]]:
     get_book_or_404(session, book_id)
-    active = session.scalar(select(func.count(Job.id)).where(
-        Job.book_id == book_id,
-        Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
-    )) or 0
+    active = (
+        session.scalar(
+            select(func.count(Job.id)).where(
+                Job.book_id == book_id,
+                Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
+            )
+        )
+        or 0
+    )
     return DataEnvelope(data={"active_jobs": active}, request_id=current_request_id(request))
 
 
 @router.post("/{book_id}/chapter-repairs", response_model=DataEnvelope[list[ChapterOut]])
 def chapter_repair_route(
-    request: Request, book_id: str, payload: ChapterRepairsIn,
+    request: Request,
+    book_id: str,
+    payload: ChapterRepairsIn,
 ) -> DataEnvelope[list[ChapterOut]]:
     with transaction(request.app.state.session_factory) as session:
         apply_repairs(session, book_id, payload)

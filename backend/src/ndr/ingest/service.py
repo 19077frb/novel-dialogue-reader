@@ -19,13 +19,15 @@ EPUB 的 ``book_versions.encoding`` 记为 ``"xml"``：正文编码由各 XHTML 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import Settings
+from ..domain.documents import ChapterRepairIn, ChapterRepairsIn
 from ..domain.enums import BookFormat, ImportStatus, JobKind, JobState
 from ..exports.annotations import parse_annotations_manifest
 from ..quotes.normalization import detect_auto_close_suggestions, upsert_suggestions
@@ -42,6 +44,7 @@ from ..storage.models import (
 )
 from ..storage.paths import book_source_path, to_relative, version_canonical_path
 from .annotations_restore import restore_annotations_from_manifest
+from .chapter_repairs import apply_repairs, suggestions
 from .document import ParsedBook
 from .encoding import DecodeFailure
 from .epub import EpubError, EpubLimits, parse_epub
@@ -59,6 +62,8 @@ class ImportOutcome:
     parsed: ParsedBook
     reused_book: bool
     reused_version: bool
+    chapter_repairs_applied: int = 0
+    quote_repairs_applied: int = 0
 
 
 def record_failed_import(
@@ -161,6 +166,7 @@ def persist_parsed(
     written: list[Path] = []
     restored_stats: dict = {}
     auto_close_count = 0
+    chapter_repair_count = 0
     try:
         source_path = book_source_path(settings, book.id, _suffix_for(filename, parsed.format))
         if not source_path.exists():
@@ -190,6 +196,57 @@ def persist_parsed(
             _insert_nodes(session, parsed, chapter_ids)
             _insert_mappings(session, version, parsed, chapter_ids)
             _insert_resources(session, version, parsed)
+            session.flush()
+            book.active_version_id = version.id
+            chapter_repair_count = sum(
+                int(match.group(1))
+                for warning in parsed.warnings
+                if warning.startswith("章节自动修复：")
+                and (match := re.search(r"(\d+) 处", warning))
+            )
+            manifest = parse_annotations_manifest(raw) if parsed.format == "EPUB" else None
+            # 导出再导入时保留原章节身份，以便恢复标注与已处理状态。
+            if not reused_book and manifest is None:
+                chapters = list(
+                    session.scalars(
+                        select(Chapter)
+                        .where(Chapter.book_version_id == version.id)
+                        .order_by(Chapter.ordinal)
+                    )
+                )
+                positions = {chapter.id: index for index, chapter in enumerate(chapters)}
+                repairs = []
+                for suggestion in suggestions(session, book.id):
+                    index = positions[suggestion.chapter_id]
+                    previous_is_heading_only = index > 0 and (
+                        parsed.canonical_text[
+                            chapters[index - 1].start_cp : chapters[index - 1].end_cp
+                        ].strip()
+                        == (chapters[index - 1].title or "").strip()
+                    )
+                    if (suggestion.title or "").startswith("第") or previous_is_heading_only:
+                        repairs.append(
+                            ChapterRepairIn(
+                                chapter_id=suggestion.chapter_id,
+                                expected_title=suggestion.title,
+                                title=suggestion.suggested_title,
+                                merge_previous=suggestion.merge_previous,
+                            )
+                        )
+                if repairs:
+                    # 同一次导入事务已持有写锁，不再次 BEGIN。
+                    for offset in range(0, len(repairs), 500):
+                        apply_repairs(
+                            session,
+                            book.id,
+                            ChapterRepairsIn(
+                                book_version_id=version.id,
+                                repairs=repairs[offset : offset + 500],
+                            ),
+                            acquire_lock=False,
+                        )
+                    chapter_repair_count += len(repairs)
+                    session.flush()
             auto_close_count = upsert_suggestions(
                 session,
                 version.id,
@@ -204,15 +261,13 @@ def persist_parsed(
                 limits=ScanLimits(),
                 scanner_version=SCANNER_VERSION,
             )
-            if parsed.format == "EPUB":
-                manifest = parse_annotations_manifest(raw)
-                if manifest is not None:
-                    restored_stats = restore_annotations_from_manifest(
-                        session,
-                        version,
-                        manifest,
-                        canonical_text=parsed.canonical_text,
-                    )
+            if manifest is not None:
+                restored_stats = restore_annotations_from_manifest(
+                    session,
+                    version,
+                    manifest,
+                    canonical_text=parsed.canonical_text,
+                )
 
         book.active_version_id = version.id
         book.import_status = ImportStatus.COMPLETED
@@ -229,11 +284,18 @@ def persist_parsed(
                     "stage": "completed",
                     "reused_book": reused_book,
                     "reused_version": reused_version,
-                    "chapters": len(parsed.chapters),
+                    "chapters": session.scalar(
+                        select(func.count())
+                        .select_from(Chapter)
+                        .where(
+                            Chapter.book_version_id == version.id,
+                        )
+                    ),
                     "nodes": len(parsed.nodes),
                     "resources": len(parsed.resources),
                     "canonical_length_cp": parsed.canonical_length_cp,
                     "quote_normalizations": auto_close_count,
+                    "chapter_repairs": chapter_repair_count,
                     **({"restored_annotations": restored_stats} if restored_stats else {}),
                 },
                 ensure_ascii=False,
@@ -256,6 +318,8 @@ def persist_parsed(
         parsed=parsed,
         reused_book=reused_book,
         reused_version=reused_version,
+        chapter_repairs_applied=chapter_repair_count,
+        quote_repairs_applied=auto_close_count,
     )
 
 

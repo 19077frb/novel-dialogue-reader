@@ -2227,6 +2227,16 @@ export interface components {
         IdentityOperation: "MERGE" | "SPLIT";
         /** ImportResult */
         ImportResult: {
+            /**
+             * Chapter Repairs Applied
+             * @default 0
+             */
+            chapter_repairs_applied: number;
+            /**
+             * Quote Repairs Applied
+             * @default 0
+             */
+            quote_repairs_applied: number;
             /** Book Id */
             book_id: string;
             /** Book Version Id */

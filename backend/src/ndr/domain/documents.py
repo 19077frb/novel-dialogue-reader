@@ -134,6 +134,8 @@ class ReadingProgressOut(ApiModel):
 
 
 class ImportResult(ApiModel):
+    chapter_repairs_applied: int = Field(default=0, ge=0)
+    quote_repairs_applied: int = Field(default=0, ge=0)
     book_id: str
     book_version_id: str
     job_id: str

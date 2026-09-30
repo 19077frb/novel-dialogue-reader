@@ -6412,6 +6412,18 @@
       },
       "ImportResult": {
         "properties": {
+          "chapter_repairs_applied": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Chapter Repairs Applied",
+            "default": 0
+          },
+          "quote_repairs_applied": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Quote Repairs Applied",
+            "default": 0
+          },
           "book_id": {
             "type": "string",
             "title": "Book Id"

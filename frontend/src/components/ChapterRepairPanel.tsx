@@ -34,7 +34,8 @@ export function ChapterRepairPanel({ bookId, bookVersionId }: { bookId: string; 
   }
   return <section className="card" data-testid="chapter-repair-panel">
     <h3>章节名与边界修复</h3>
-    <p className="hint">自动提示正文式标题与重复序章；建议仅供检查，不调用模型。可改名，或将误识别的章节并入上一章。已有人物名单或标注的章节只能改名。</p>
+    <p className="hint">导入时已自动检查并修复明显的正文式标题与相邻重复标题。可检查结果、改名，或将误识别的章节并入上一章，不调用模型。已有人物名单或标注的章节只能改名。</p>
+    <button disabled={busy || suggestions.isFetching} onClick={() => { void suggestions.refetch(); void chapters.refetch() }}>重新检查章节</button>
     {chapters.isError && <ReadErrorNotice label="目录读取失败" error={chapters.error} retrying={chapters.isFetching} onRetry={() => void chapters.refetch()} />}
     {suggestions.isError && <ReadErrorNotice label="章节建议读取失败" error={suggestions.error} retrying={suggestions.isFetching} onRetry={() => void suggestions.refetch()} />}
     {chapters.isPending && <p className="hint">正在读取目录…</p>}
@@ -49,6 +50,7 @@ export function ChapterRepairPanel({ bookId, bookVersionId }: { bookId: string; 
         <label className="ndr-field">章节名<input value={draft.title} maxLength={512} disabled={busy} onChange={event => change({ title: event.target.value })} /></label>
         <label><input type="checkbox" checked={draft.merge} disabled={busy || index === 0 || chapter.dialogue_processed} onChange={event => change({ merge: event.target.checked })} />并入上一章（以上方名称命名合并后的章节）</label>
         <button className="ndr-primary" disabled={busy || !bookVersionId || !drafts[chapter.id] || !draft.title.trim()} onClick={() => void save(chapter.id, chapter.title ?? null)}>保存章节修复</button>
+        {!drafts[chapter.id] && <p className="hint">修改章节名或采用建议后即可保存。</p>}
       </details>
     })}
   </section>

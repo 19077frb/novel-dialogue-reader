@@ -65,8 +65,11 @@ def suggestions(session: Session, book_id: str) -> list[ChapterRepairSuggestion]
     return result
 
 
-def apply_repairs(session: Session, book_id: str, payload: ChapterRepairsIn) -> None:
-    session.execute(text("BEGIN IMMEDIATE"))
+def apply_repairs(
+    session: Session, book_id: str, payload: ChapterRepairsIn, *, acquire_lock: bool = True
+) -> None:
+    if acquire_lock:
+        session.execute(text("BEGIN IMMEDIATE"))
     book = get_book_or_404(session, book_id)
     if payload.book_version_id != book.active_version_id:
         raise ApiError.validation("书籍版本已变化，请重新读取目录")
