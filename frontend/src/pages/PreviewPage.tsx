@@ -125,6 +125,8 @@ export default function PreviewPage() {
   }, [profiles.data, profileId])
 
   const canonicalLengthCp = book.data?.active_version?.canonical_length_cp ?? 0
+  const returnChapterId = chapters.data?.some((chapter) => chapter.id === requestedChapterId)
+    ? requestedChapterId : range.chapterId
   const resolvedEnd = range.endCp ?? canonicalLengthCp
   const rangeValid = canonicalLengthCp > 0 && resolvedEnd > range.startCp
 
@@ -392,7 +394,7 @@ export default function PreviewPage() {
           </p>
         </div>
         <nav className="ndr-preview-nav" aria-label="本书导航">
-          <Link to={`/books/${bookId}/read`}>去阅读</Link>
+          <Link to={`/books/${bookId}/read${returnChapterId ? `?chapterId=${encodeURIComponent(returnChapterId)}` : ''}`}>去阅读</Link>
           <Link to={`/books/${bookId}/review`}>待确认队列</Link>
           <button type="button" onClick={() => setExportOpen(true)} data-testid="open-export">
             导出

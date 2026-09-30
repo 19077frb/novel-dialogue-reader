@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { annotationKeys, fetchAnnotations } from '../api/annotations'
 import { fetchReviewQueue } from '../api/review'
@@ -51,6 +51,9 @@ export function findCurrentStartCp(nodes: HTMLElement[]): number | null {
  */
 export default function ReaderPage() {
   const { bookId } = useParams<{ bookId: string }>()
+  const [searchParams] = useSearchParams()
+  const requestedChapterId = searchParams.get('chapterId')
+  const initializedChapterRef = useRef<string | null>(null)
   const queryClient = useQueryClient()
   const batchChapterProgress = useBatchChapterProgress(bookId)
   const annotationRevisions = useBatchAnnotationRevisions(bookId)
@@ -101,15 +104,18 @@ export default function ReaderPage() {
     enabled: Boolean(bookId) && chapterId !== null,
   })
 
-  // 默认章节：书签所在章节（没有书签就用第一章）。
+  // 明确跳转的章节优先于书签；只初始化一次，不覆盖用户后续目录选择。
   useEffect(() => {
-    if (!book.data || !chapters.data || chapterId !== null) return
+    const key = JSON.stringify([bookId, requestedChapterId])
+    if (!book.data || !chapters.data?.length || initializedChapterRef.current === key) return
     const position = book.data.read_position_cp
     const match =
+      chapters.data.find((chapter) => chapter.id === requestedChapterId) ??
       chapters.data.find((chapter) => position >= chapter.start_cp && position < chapter.end_cp) ??
       chapters.data[0]
+    initializedChapterRef.current = key
     setChapterId(match ? match.id : null)
-  }, [book.data, chapters.data, chapterId])
+  }, [bookId, requestedChapterId, book.data, chapters.data])
 
   useEffect(() => {
     setPages([])

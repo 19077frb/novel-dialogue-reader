@@ -395,6 +395,8 @@ describe('PreviewPage', () => {
     }), expect.any(AbortSignal))
     await userEvent.selectOptions(screen.getByTestId('range-chapter'), 'c1')
     expect(screen.getByTestId('range-chapter')).toHaveValue('c1')
+    // 即使临时处理其它章节，“去阅读”仍回到进入处理页之前的阅读章节。
+    expect(screen.getByRole('link', { name: '去阅读' })).toHaveAttribute('href', '/books/b1/read?chapterId=c2')
     await userEvent.click(screen.getByTestId('processing-mode-batch'))
     expect(await screen.findByTestId('batch-start')).toHaveValue('c2')
     await userEvent.selectOptions(screen.getByTestId('batch-start'), 'c1')
@@ -409,6 +411,7 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('range-chapter')).toHaveValue('c1')
     await userEvent.click(screen.getByTestId('processing-mode-batch'))
     expect(await screen.findByTestId('batch-start')).toHaveValue('c1')
+    expect(screen.getByRole('link', { name: '去阅读' })).toHaveAttribute('href', '/books/b1/read?chapterId=c1')
   })
 
   it('估算只走本地接口，试运行用 preview 模式创建任务并轮询', async () => {

@@ -219,6 +219,20 @@ describe('ReaderPage', () => {
     expect(await screen.findByText(/第二章的正文/)).toBeInTheDocument()
   })
 
+  it('返回链接的章节优先于旧书签，后续手动换章不会被链接覆盖', async () => {
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c1')
+    expect(await screen.findByText(/第一章的正文/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { current: true })).toHaveTextContent('第一章')
+    await userEvent.click(screen.getByRole('button', { name: /第二章/ }))
+    expect(await screen.findByText(/第二章的正文/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { current: true })).toHaveTextContent('第二章')
+  })
+
+  it('无效或外书章节链接回退到本书书签章节', async () => {
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=foreign-chapter')
+    expect(await screen.findByText(/第二章的正文/)).toBeInTheDocument()
+  })
+
   it('切换章节时保存阅读位置', async () => {
     renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
     await screen.findByText(/第二章的正文/)
