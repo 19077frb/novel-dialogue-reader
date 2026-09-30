@@ -9,6 +9,7 @@ import {
 import { createJob, estimateRange, freshIdempotencyKey } from '../api/jobs'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
 import { createTaskLimiter } from '../processing/concurrency'
+import { useProcessingPreferences } from '../processing/preferences'
 
 const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'])
 
@@ -254,10 +255,13 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const batchProgress = useBatchProgress(bookId)
   const [startId, setStartId] = useState('')
   const [endId, setEndId] = useState('')
-  const [profileId, setProfileId] = useState('')
-  const [maxRechecks, setMaxRechecks] = useState(0)
-  const [tokenLimitText, setTokenLimitText] = useState('')
-  const [concurrency, setConcurrency] = useState(2)
+  const [preferences, setPreferences] = useProcessingPreferences()
+  const { profileId, maxRechecks, concurrency } = preferences
+  const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
+  const setProfileId = (value: string) => setPreferences({ profileId: value })
+  const setMaxRechecks = (value: number) => setPreferences({ maxRechecks: value })
+  const setTokenLimitText = (value: string) => setPreferences({ tokenLimit: positiveIntegerOrNull(value) })
+  const setConcurrency = (value: number) => setPreferences({ concurrency: value })
   const [forceReprocess, setForceReprocess] = useState(false)
   const [running, setRunning] = useState(false)
   const [estimating, setEstimating] = useState(false)
@@ -268,8 +272,10 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const stopRef = useRef(false)
 
   useEffect(() => {
-    if (!profileId && profiles.length > 0) setProfileId(profiles[0].id)
-  }, [profileId, profiles])
+    if (profiles.length > 0 && !profiles.some(profile => profile.id === profileId)) {
+      setPreferences({ profileId: profiles[0].id })
+    }
+  }, [profileId, profiles, setPreferences])
 
   const firstId = startId || chapters.find((chapter) => chapter.id === initialChapterId)?.id || chapters[0]?.id || ''
   const lastId = endId || chapters.at(-1)?.id || ''
@@ -281,6 +287,15 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     setEstimatedTokens(null)
     setPlans([])
   }
+
+  // Shared settings can change from the single-chapter form or another tab.
+  // Do not run a saved estimate using a different model/recheck policy.
+  useEffect(() => {
+    if (!running) {
+      setEstimatedTokens(null)
+      setPlans([])
+    }
+  }, [profileId, maxRechecks, tokenLimitText, running])
 
   const calculateEstimate = async () => {
     if (!validRange) return

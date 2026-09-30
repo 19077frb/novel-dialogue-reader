@@ -282,6 +282,7 @@ const USAGE = {
 
 describe('PreviewPage', () => {
   beforeEach(() => {
+    localStorage.clear()
     vi.mocked(booksApi.fetchBook).mockReset()
     vi.mocked(booksApi.fetchChapters).mockReset()
     vi.mocked(booksApi.fetchContent).mockReset()
@@ -366,6 +367,37 @@ describe('PreviewPage', () => {
         updated_at: '2026-09-28T00:00:00+00:00',
       },
     ] as never)
+  })
+
+  it('单章与批量共享配置，重新进入页面仍保留配置', async () => {
+    const profiles = await profilesApi.fetchProfiles()
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([...profiles, { ...profiles[0], id: 'p2', name: '第二模型' }])
+    const mounted = renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByText('第二模型 · fake-provider · fake-model')
+    fireEvent.change(screen.getByTestId('preview-profile'), { target: { value: 'p2' } })
+    fireEvent.change(screen.getByTestId('budget-max-rechecks'), { target: { value: '7' } })
+    fireEvent.change(screen.getByTestId('preview-concurrency'), { target: { value: '4' } })
+    fireEvent.change(screen.getByTestId('budget-max-input'), { target: { value: '50000' } })
+    await userEvent.click(screen.getByTestId('processing-mode-batch'))
+    expect(screen.getByTestId('batch-profile')).toHaveValue('p2')
+    expect(screen.getByTestId('batch-max-rechecks')).toHaveValue(7)
+    expect(screen.getByTestId('batch-concurrency')).toHaveValue(4)
+    expect(screen.getByTestId('batch-token-limit')).toHaveValue(50000)
+    fireEvent.change(screen.getByTestId('batch-max-rechecks'), { target: { value: '3' } })
+    fireEvent.change(screen.getByTestId('batch-token-limit'), { target: { value: '' } })
+    mounted.unmount()
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await waitFor(() => expect(screen.getByTestId('preview-profile')).toHaveValue('p2'))
+    expect(screen.getByTestId('budget-max-rechecks')).toHaveValue(3)
+    expect(screen.getByTestId('preview-concurrency')).toHaveValue(4)
+    expect(screen.getByTestId('budget-max-input')).toHaveValue(null)
+  })
+
+  it('删除记忆中的模型后自动选择仍存在的模型', async () => {
+    localStorage.setItem('ndr:processing-preferences:v1', JSON.stringify({ profileId: 'deleted', maxRechecks: 5 }))
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await waitFor(() => expect(screen.getByTestId('preview-profile')).toHaveValue('p1'))
+    expect(screen.getByTestId('budget-max-rechecks')).toHaveValue(5)
   })
 
   it('默认选中第一章并显示范围内的标注与图例', async () => {

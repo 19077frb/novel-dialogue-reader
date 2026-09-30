@@ -37,6 +37,7 @@ import { UsageSummary } from '../components/UsageSummary'
 import { WindowPicker } from '../components/WindowPicker'
 import { mapWithConcurrency } from '../processing/concurrency'
 import { TERMINAL_JOB_STATES, waitForJobCompletion } from '../processing/jobCompletion'
+import { useProcessingPreferences } from '../processing/preferences'
 
 interface SingleWindowTask {
   windowId: string
@@ -49,12 +50,6 @@ const SINGLE_TASK_LABELS: Record<string, string> = {
   QUEUED: '排队中', RUNNING: '处理中', PAUSING: '正在停止', PAUSED: '已停止',
   COMPLETED: '已完成', FAILED: '失败', BUDGET_EXHAUSTED: '额度耗尽',
   PARTIAL: '部分完成', NEEDS_RECONCILIATION: '需要确认调用结果',
-}
-
-const DEFAULT_BUDGET: BudgetInput = {
-  maxInputTokens: 200_000,
-  maxOutputTokens: null,
-  maxRechecks: 0,
 }
 
 // 处理只生成一套完整标注；初读/重读仅由阅读页在展示投影时切换。
@@ -78,9 +73,18 @@ export default function PreviewPage() {
 
   const [range, setRange] = useState<RangeValue>({ chapterId: null, startCp: 0, endCp: null })
   const [processingMode, setProcessingMode] = useState<'single' | 'batch'>('single')
-  const [budget, setBudget] = useState<BudgetInput>(DEFAULT_BUDGET)
-  const [concurrency, setConcurrency] = useState(2)
-  const [profileId, setProfileId] = useState('')
+  const [preferences, setPreferences] = useProcessingPreferences()
+  const { concurrency, profileId } = preferences
+  const budget = useMemo<BudgetInput>(() => ({
+    maxInputTokens: preferences.tokenLimit, maxOutputTokens: preferences.maxOutputTokens,
+    maxRechecks: preferences.maxRechecks,
+  }), [preferences.tokenLimit, preferences.maxOutputTokens, preferences.maxRechecks])
+  const setBudget = (value: BudgetInput) => setPreferences({
+    tokenLimit: value.maxInputTokens, maxOutputTokens: value.maxOutputTokens,
+    maxRechecks: value.maxRechecks,
+  })
+  const setConcurrency = (value: number) => setPreferences({ concurrency: value })
+  const setProfileId = useCallback((value: string) => setPreferences({ profileId: value }), [setPreferences])
   const [viewMode, setViewMode] = useState<'annotated' | 'original'>('annotated')
   const [selectedWindowIds, setSelectedWindowIds] = useState<string[]>([])
   const selectionKeyRef = useRef('')
@@ -120,9 +124,9 @@ export default function PreviewPage() {
   }, [bookId, requestedChapterId, chapters.data])
 
   useEffect(() => {
-    if (profileId !== '' || !profiles.data || profiles.data.length === 0) return
-    setProfileId(profiles.data[0].id)
-  }, [profiles.data, profileId])
+    if (!profiles.data || profiles.data.some(profile => profile.id === profileId)) return
+    setProfileId(profiles.data[0]?.id ?? '')
+  }, [profiles.data, profileId, setProfileId])
 
   const canonicalLengthCp = book.data?.active_version?.canonical_length_cp ?? 0
   const returnChapterId = chapters.data?.some((chapter) => chapter.id === requestedChapterId)
@@ -428,6 +432,7 @@ export default function PreviewPage() {
           <div>
             <h3>选择处理方式</h3>
             <p className="hint">单章可挑选窗口试运行；批量会自动识别人物并按章节流水线处理。</p>
+            <p className="hint">模型、复核数、并发数和额度自动保存，单章与批量共用，重新打开后仍保留。</p>
           </div>
         </div>
         <div className="ndr-radio-row">
