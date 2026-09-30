@@ -3,7 +3,7 @@
   "info": {
     "title": "Novel Dialogue Reader API",
     "description": "轻小说对话辅助阅读器本地后端。契约摘要见 docs/CONTRACTS.md，完整规格见 DEVELOPMENT.md。",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "paths": {
     "/api/health": {

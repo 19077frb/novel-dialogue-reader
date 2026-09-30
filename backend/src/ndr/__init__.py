@@ -7,7 +7,7 @@ from __future__ import annotations
 
 __all__ = ["__version__", "API_VERSION"]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # 公共 HTTP 契约版本；与 DEVELOPMENT.md 第 5 节一起演进。
 API_VERSION = "1"
