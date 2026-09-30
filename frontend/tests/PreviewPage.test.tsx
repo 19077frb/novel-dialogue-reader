@@ -379,15 +379,19 @@ describe('PreviewPage', () => {
     fireEvent.change(screen.getByTestId('budget-max-rechecks'), { target: { value: '7' } })
     fireEvent.change(screen.getByTestId('preview-concurrency'), { target: { value: '4' } })
     fireEvent.change(screen.getByTestId('budget-max-input'), { target: { value: '50000' } })
+    fireEvent.change(screen.getByTestId('processing-thinking-mode'), { target: { value: 'adaptive' } })
+    fireEvent.change(screen.getByTestId('processing-thinking-effort'), { target: { value: 'high' } })
     await userEvent.click(screen.getByTestId('processing-mode-batch'))
     expect(screen.getByTestId('batch-profile')).toHaveValue('p2')
     expect(screen.getByTestId('batch-max-rechecks')).toHaveValue(7)
     expect(screen.getByTestId('batch-concurrency')).toHaveValue(4)
     expect(screen.getByTestId('batch-token-limit')).toHaveValue(50000)
+    expect(screen.getByTestId('processing-thinking-mode')).toHaveValue('adaptive')
     fireEvent.change(screen.getByTestId('batch-max-rechecks'), { target: { value: '3' } })
     fireEvent.change(screen.getByTestId('batch-token-limit'), { target: { value: '' } })
     mounted.unmount()
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    expect(screen.getByTestId('processing-thinking-effort')).toHaveValue('high')
     await waitFor(() => expect(screen.getByTestId('preview-profile')).toHaveValue('p2'))
     expect(screen.getByTestId('budget-max-rechecks')).toHaveValue(3)
     expect(screen.getByTestId('preview-concurrency')).toHaveValue(4)
@@ -670,6 +674,8 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await userEvent.click(await screen.findByTestId('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
+    fireEvent.change(screen.getByTestId('processing-thinking-mode'), { target: { value: 'enabled' } })
+    fireEvent.change(screen.getByTestId('processing-thinking-effort'), { target: { value: 'low' } })
     expect(screen.queryByTestId('preview-profile')).not.toBeInTheDocument()
     expect(screen.getByTestId('batch-profile')).toHaveValue('p1')
 
@@ -691,13 +697,14 @@ describe('PreviewPage', () => {
     expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledWith(
       'b1',
       'c1',
-      expect.objectContaining({ profileId: 'p1', maxInputTokens: 2020 }),
+      expect.objectContaining({ profileId: 'p1', maxInputTokens: 2020, inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' } }),
     )
     expect(jobsApi.createJob).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: 'process',
         range: { chapterId: 'c1', startCp: 0, endCp: 20 },
         selectedWindowIds: ['w1'],
+        inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' },
         budget: expect.objectContaining({ maxRechecks: 2 }),
       }),
     )

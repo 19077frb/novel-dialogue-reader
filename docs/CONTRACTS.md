@@ -55,6 +55,8 @@
 
 ## 任务、缓存和幂等
 
+- 对白任务和章节人物识别请求支持可选 `inference_options`：`thinking_mode=default/disabled/enabled/adaptive`、`reasoning_effort=default/low/medium/high`。只覆盖任务配置快照中的 `thinking.type` / `reasoning_effort`，不修改模型配置；关闭思考时删除强度参数。覆盖项参与请求摘要和现有缓存的参数摘要，幂等键不能用于不同设置；后续编辑模型配置不改变已有任务快照。客户端共用一份记忆设置，运行中禁止修改。提供方必须支持相应参数；程序不自动提高输出上限或超时。
+
 - 创建任务的幂等键只能复用完全相同的请求摘要。
 - 同一幂等键对应不同请求时返回冲突。
 - 缓存键由语义输入生成，不包含任务 ID 或预览/正式处理标签。

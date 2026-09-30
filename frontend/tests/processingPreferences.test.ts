@@ -10,6 +10,7 @@ describe('shared processing preferences', () => {
     const rebooted = await import('../src/processing/preferences')
     expect(rebooted.getProcessingPreferences()).toEqual({
       profileId: 'chosen', concurrency: 5, maxRechecks: 8, tokenLimit: 12345, maxOutputTokens: 200,
+      thinkingMode: 'default', thinkingEffort: 'default',
     })
     rebooted.updateProcessingPreferences({ tokenLimit: null })
     expect(rebooted.getProcessingPreferences().profileId).toBe('chosen')
@@ -22,7 +23,7 @@ describe('shared processing preferences', () => {
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, '{bad')
     expect(module.getProcessingPreferences().concurrency).toBe(2)
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, JSON.stringify({ concurrency: 100, tokenLimit: -4, maxRechecks: 1.5, profileId: 42 }))
-    expect(module.getProcessingPreferences()).toEqual({ profileId: '', concurrency: 16, tokenLimit: null, maxOutputTokens: null, maxRechecks: 0 })
+    expect(module.getProcessingPreferences()).toEqual({ profileId: '', concurrency: 16, tokenLimit: null, maxOutputTokens: null, maxRechecks: 0, thinkingMode: 'default', thinkingEffort: 'default' })
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, 'null')
     expect(module.getProcessingPreferences().tokenLimit).toBeNull()
   })

@@ -115,39 +115,33 @@ describe('ModelSettingsPage', () => {
     expect(screen.getByTestId('profile-card')).toHaveTextContent('已保存密钥')
   })
 
-  it('生成参数不是合法 JSON 时本地拦截，不发起请求', async () => {
+  it('原始参数只读，常用参数超出范围时不能提交', async () => {
     renderWithProviders(<ModelSettingsPage />)
     await fillNewProfile()
-    await userEvent.clear(screen.getByTestId('profile-params'))
-    await userEvent.type(screen.getByTestId('profile-params'), '{{')
+    expect(screen.getByTestId('profile-params')).toHaveAttribute('readonly')
+    await userEvent.type(screen.getByTestId('profile-temperature'), '3')
 
     await userEvent.click(screen.getByTestId('profile-save'))
 
-    expect(await screen.findByTestId('settings-error')).toHaveTextContent('不是合法 JSON')
     expect(profilesApi.createProfile).not.toHaveBeenCalled()
   })
 
-  it('思考模式按钮写入 thinking.type，并补足输出预算与超时', async () => {
+  it('常用参数表单可调整输出预算与超时，清空则恢复默认', async () => {
     renderWithProviders(<ModelSettingsPage />)
     await fillNewProfile()
 
-    await userEvent.click(screen.getByTestId('thinking-adaptive'))
+    await userEvent.type(screen.getByTestId('profile-max_tokens'), '16000')
+    await userEvent.type(screen.getByTestId('profile-timeout_seconds'), '300')
     let parsed = JSON.parse((screen.getByTestId('profile-params') as HTMLTextAreaElement).value)
-    expect(parsed.thinking).toEqual({ type: 'adaptive' })
-    expect(parsed.max_tokens).toBeGreaterThanOrEqual(32000)
-    expect(parsed.timeout_seconds).toBeGreaterThanOrEqual(300)
+    expect(parsed.max_tokens).toBe(16000)
+    expect(parsed.timeout_seconds).toBe(300)
+    expect(parsed.thinking).toBeUndefined()
 
-    await userEvent.click(screen.getByTestId('thinking-disabled'))
+    await userEvent.clear(screen.getByTestId('profile-max_tokens'))
     parsed = JSON.parse((screen.getByTestId('profile-params') as HTMLTextAreaElement).value)
-    expect(parsed.thinking).toEqual({ type: 'disabled' })
-    // 关闭思考不修改已有预算（保留上一次写入的值）
-    expect(parsed.max_tokens).toBeGreaterThanOrEqual(32000)
-
-    // 非法 JSON 时给出本地错误，不写入
-    await userEvent.clear(screen.getByTestId('profile-params'))
-    await userEvent.type(screen.getByTestId('profile-params'), 'not-json')
-    await userEvent.click(screen.getByTestId('thinking-enabled'))
-    expect(await screen.findByTestId('settings-error')).toHaveTextContent('不是合法 JSON')
+    expect(parsed.max_tokens).toBeUndefined()
+    expect(parsed.timeout_seconds).toBe(300)
+    expect(screen.queryByTestId('thinking-enabled')).not.toBeInTheDocument()
   })
 
   it('编辑时“保持不变”不发送密钥字段', async () => {
@@ -164,6 +158,23 @@ describe('ModelSettingsPage', () => {
     expect(payload.api_key).toBeNull()
     expect(payload.remove_api_key).toBe(false)
     expect(payload.credential_mode).toBeNull()
+  })
+
+  it('常用参数编辑保留已有提供方专用参数，并验证连接草稿范围', async () => {
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile({ params: { custom: 'keep', thinking: { type: 'adaptive' }, temperature: 0.2 } })])
+    vi.mocked(profilesApi.updateProfile).mockResolvedValue(profile())
+    renderWithProviders(<ModelSettingsPage />)
+    await userEvent.click(await screen.findByTestId('profile-edit-p1'))
+    await userEvent.clear(screen.getByTestId('profile-temperature'))
+    await userEvent.type(screen.getByTestId('profile-temperature'), '3')
+    await userEvent.click(screen.getByTestId('profile-test-draft'))
+    expect(await screen.findByTestId('settings-error')).toHaveTextContent('超出允许范围')
+    expect(profilesApi.testConnection).not.toHaveBeenCalled()
+    await userEvent.clear(screen.getByTestId('profile-temperature'))
+    await userEvent.type(screen.getByTestId('profile-temperature'), '0.3')
+    await userEvent.click(screen.getByTestId('profile-save'))
+    await waitFor(() => expect(profilesApi.updateProfile).toHaveBeenCalled())
+    expect(vi.mocked(profilesApi.updateProfile).mock.calls[0][1].params).toEqual({ custom: 'keep', thinking: { type: 'adaptive' }, temperature: 0.3 })
   })
 
   it('编辑时“清除密钥”发送 remove_api_key', async () => {

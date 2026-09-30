@@ -30,7 +30,6 @@ async function createProfile(
   await page.selectOption('[data-testid=profile-protocol]', input.protocol ?? 'fake-provider')
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill(input.model ?? 'fake-model')
-  await page.getByTestId('profile-params').fill(input.params ?? '{}')
   await page.getByTestId('credential-mode-session').check()
   if (input.credentialMode === 'none') {
     await page.getByTestId('credential-mode-none').check()
@@ -38,7 +37,13 @@ async function createProfile(
   if (input.apiKey) {
     await page.getByTestId('profile-api-key').fill(input.apiKey)
   }
+  const created = page.waitForResponse(response => response.url().endsWith('/api/model-profiles') && response.request().method() === 'POST')
   await page.getByTestId('profile-save').click()
+  const profile = (await (await created).json()).data
+  if (input.params) {
+    const patched = await page.request.patch(`/api/model-profiles/${profile.id}`, { data: { params: JSON.parse(input.params) } })
+    expect(patched.ok()).toBeTruthy()
+  }
   await expect(page.getByTestId('profile-card').filter({ hasText: input.name })).toBeVisible()
 }
 

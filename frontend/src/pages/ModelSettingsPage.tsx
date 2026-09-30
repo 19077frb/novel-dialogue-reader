@@ -93,6 +93,17 @@ export default function ModelSettingsPage() {
         setError('生成参数必须是 JSON 对象，例如 {"temperature": 0.2}')
         return null
       }
+      for (const [key, min, max, integer] of [
+        ['max_tokens', 1, Infinity, true], ['timeout_seconds', 1, Infinity, true],
+        ['temperature', 0, 2, false], ['top_p', 0, 1, false],
+      ] as const) {
+        const value = parsed[key]
+        if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value)
+          || value < min || value > max || (integer && !Number.isSafeInteger(value)))) {
+          setError(`${key} 超出允许范围，请检查常用生成参数。`)
+          return null
+        }
+      }
       return parsed as Record<string, unknown>
     } catch {
       setError('生成参数不是合法 JSON')
@@ -100,25 +111,11 @@ export default function ModelSettingsPage() {
     }
   }
 
-  /** 思考模式快捷设置：写入 `thinking.type`，开启/自适应时同时补足输出预算与超时。 */
-  function applyThinkingMode(mode: 'disabled' | 'adaptive' | 'enabled') {
-    const parsed = parseParams()
-    if (!parsed) return
-    const current = parsed.thinking
-    const thinking: Record<string, unknown> =
-      current && typeof current === 'object' && !Array.isArray(current)
-        ? { ...(current as Record<string, unknown>) }
-        : {}
-    thinking.type = mode
-    parsed.thinking = thinking
-    if (mode !== 'disabled') {
-      const maxTokens = Number(parsed.max_tokens ?? 0)
-      if (!Number.isFinite(maxTokens) || maxTokens < 32000) parsed.max_tokens = 32000
-      const timeout = Number(parsed.timeout_seconds ?? 0)
-      if (!Number.isFinite(timeout) || timeout < 300) parsed.timeout_seconds = 300
-    }
-    setError(null)
-    setForm({ ...form, paramsText: JSON.stringify(parsed, null, 2) })
+  function changeParameter(key: string, value: string) {
+    const params = JSON.parse(form.paramsText) as Record<string, unknown>
+    if (value === '') delete params[key]
+    else params[key] = Number(value)
+    setForm({ ...form, paramsText: JSON.stringify(params, null, 2) })
   }
 
   const connectionTest = useMutation({
@@ -288,41 +285,27 @@ export default function ModelSettingsPage() {
             />
           </label>
 
-          <label>
-            生成参数（JSON，不能放密钥）
-            <textarea
-              value={form.paramsText}
-              rows={3}
-              data-testid="profile-params"
-              onChange={(event) => setForm({ ...form, paramsText: event.target.value })}
-            />
-          </label>
-
-          <div className="ndr-form-actions" data-testid="thinking-modes">
-            {(
-              [
-                ['disabled', '关闭思考'],
-                ['adaptive', '自适应思考'],
-                ['enabled', '开启思考'],
-              ] as const
-            ).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                data-testid={`thinking-${mode}`}
-                onClick={() => applyThinkingMode(mode)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <p className="hint" data-testid="thinking-hint">
-            思考模式会写入 <code>thinking.type</code>（提供方只接受 <code>enabled</code> /{' '}
-            <code>adaptive</code> / <code>disabled</code>，<code>high</code> 之类是强度不是类型）。
-            开启思考时推理 token 也计入 <code>max_tokens</code>，实测同一窗口「关闭 6.9 秒 / 2.5k 输出」
-            对「自适应 55 秒 / 14.5k 输出」，且更容易把每句都判成新人物；按钮会把{' '}
-            <code>max_tokens</code> 提到 32000、超时提到 300 秒，建议只在难窗口复核时开启。
-          </p>
+          <fieldset>
+            <legend>常用生成参数</legend>
+            <p className="hint">留空表示沿用提供方或任务默认值。输出上限是每次调用的上限，不是本次任务的总额度。
+              思考模式和强度请在「预览与处理」里调整。</p>
+            {([
+              ['max_tokens', '每次调用最大输出 Token', 1, undefined, 1],
+              ['temperature', '随机性（越低越稳定）', 0, 2, 0.1],
+              ['top_p', '采样范围', 0, 1, 0.05],
+              ['timeout_seconds', '请求超时（秒）', 1, undefined, 1],
+            ] as const).map(([key, label, min, max, step]) => <label className="ndr-field" key={key}>
+              {label}
+              <input type="number" data-testid={`profile-${key}`} min={min} max={max} step={step}
+                value={(JSON.parse(form.paramsText)[key] as number | undefined) ?? ''}
+                onChange={event => changeParameter(key, event.target.value)} />
+            </label>)}
+          </fieldset>
+          <details>
+            <summary>查看生成参数（只读）</summary>
+            <p className="hint">保留已有提供方专用参数；本页只调整上面的常用项，不会删除其它参数。</p>
+            <textarea value={form.paramsText} rows={5} readOnly data-testid="profile-params" aria-label="生成参数（只读）" />
+          </details>
 
           <fieldset>
             <legend>凭据</legend>

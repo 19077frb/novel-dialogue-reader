@@ -4,6 +4,7 @@
 import { apiData } from './client'
 import type {
   BookCharacterOut,
+  InferenceOptions,
   CharacterDirectoryOut,
   CharacterEditIn,
   CharacterMergeIn,
@@ -50,6 +51,7 @@ export function fetchBookCharacters(
 }
 
 export interface AnalyzeRosterInput {
+  inferenceOptions?: InferenceOptions
   bookVersionId: string | null | undefined
   profileId: string
   idempotencyKey: string
@@ -71,6 +73,7 @@ export function analyzeCharacterRoster(
       body: {
         book_version_id: input.bookVersionId ?? null,
         profile_id: input.profileId,
+        ...(input.inferenceOptions ? { inference_options: input.inferenceOptions } : {}),
         idempotency_key: input.idempotencyKey,
         max_input_tokens: input.maxInputTokens ?? null,
         run_now: input.runNow ?? true,

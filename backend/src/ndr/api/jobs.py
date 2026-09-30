@@ -83,6 +83,9 @@ def create_job_route(
             reading_mode=payload.reading_mode,
             visible_horizon_cp=payload.visible_horizon_cp,
             kind=payload.kind,
+            inference_options=(
+                payload.inference_options.model_dump() if payload.inference_options else None
+            ),
         )
         detail = job_detail(session, job)
 

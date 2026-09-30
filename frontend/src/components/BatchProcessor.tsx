@@ -9,7 +9,7 @@ import {
 import { createJob, estimateRange, freshIdempotencyKey } from '../api/jobs'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
 import { createTaskLimiter } from '../processing/concurrency'
-import { useProcessingPreferences } from '../processing/preferences'
+import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
 
 const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'])
 
@@ -257,6 +257,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const [endId, setEndId] = useState('')
   const [preferences, setPreferences] = useProcessingPreferences()
   const { profileId, maxRechecks, concurrency } = preferences
+  const options = inferenceOptions(preferences)
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
   const setProfileId = (value: string) => setPreferences({ profileId: value })
   const setMaxRechecks = (value: number) => setPreferences({ maxRechecks: value })
@@ -473,6 +474,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
             await analyzeCharacterRoster(bookId, chapter.id, {
               bookVersionId,
               profileId,
+              inferenceOptions: options,
               maxInputTokens: available,
               idempotencyKey: freshIdempotencyKey('batch-roster', `${bookId}:${chapter.id}:${profileId}`),
             }),
@@ -543,6 +545,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
                 selectedWindowIds: [windowId],
                 forceReprocess,
                 profileId,
+                inferenceOptions: options,
                 readingMode: 'reread',
                 visibleHorizonCp: null,
                 budget: { maxInputTokens: available, maxOutputTokens: available, maxRechecks },

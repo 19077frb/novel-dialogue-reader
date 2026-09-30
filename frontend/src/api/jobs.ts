@@ -7,6 +7,7 @@
 import { apiData } from './client'
 import type {
   EstimateOut,
+  InferenceOptions,
   JobDetailOut,
   JobRecoveryOut,
   ReadingMode,
@@ -102,6 +103,7 @@ export function estimateRange(
 }
 
 export interface CreateJobInput {
+  inferenceOptions?: InferenceOptions
   bookId: string
   mode: 'preview' | 'process'
   bookVersionId?: string | null
@@ -133,6 +135,7 @@ export function createJob(input: CreateJobInput, signal?: AbortSignal): Promise<
       selected_window_ids: input.selectedWindowIds ?? null,
       force_reprocess: input.forceReprocess ?? false,
       profile_id: input.profileId ?? null,
+      ...(input.inferenceOptions ? { inference_options: input.inferenceOptions } : {}),
       reading_mode: input.readingMode,
       visible_horizon_cp: input.visibleHorizonCp ?? null,
       budget: budgetPayload(input.budget),

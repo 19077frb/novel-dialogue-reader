@@ -41,6 +41,9 @@ for (const layout of [
       { name: 'characters', route: `/books/${bookId}/characters`, title: '全书人物', nav: ['去阅读', '预览与处理', '待确认队列', '返回书架'] },
       { name: 'review', route: `/books/${bookId}/review`, title: '待确认', nav: ['去阅读', '预览与处理', '全书人物', '返回书架'] },
       { name: 'models', route: '/settings/models', title: '模型配置', nav: [] },
+      { name: 'settings', route: '/settings/general', title: '通用设置', nav: [] },
+      { name: 'bookmarks', route: `/books/${bookId}/bookmarks`, title: '书签', nav: ['去阅读', '预览与处理', '全书人物', '待确认队列', '返回书架'] },
+      { name: 'preprocessing', route: `/books/${bookId}/preprocessing`, title: '预处理', nav: ['去阅读', '预览与处理', '全书人物', '待确认队列', '返回书架'] },
     ]
     for (const item of pages) {
       await page.goto(item.route)

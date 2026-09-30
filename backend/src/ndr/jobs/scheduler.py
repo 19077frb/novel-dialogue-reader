@@ -74,6 +74,7 @@ LABELING_MAX_TOKENS = 800
 OUTPUT_BASE_TOKENS = 256
 OUTPUT_TOKENS_PER_TARGET = 128
 
+
 def _json_list(raw: str | None) -> list[str]:
     try:
         value = json.loads(raw or "[]")
@@ -242,14 +243,13 @@ def _unresolved_targets(session: Session, window) -> list[str]:  # noqa: ANN001
     rows = session.execute(
         select(Annotation).where(
             Annotation.quote_id.in_(quote_ids),
-            Annotation.status.in_(
-                (AnnotationStatus.UNKNOWN, AnnotationStatus.PROVISIONAL)
-            ),
+            Annotation.status.in_((AnnotationStatus.UNKNOWN, AnnotationStatus.PROVISIONAL)),
             Annotation.user_locked.is_(False),
         )
     ).scalars()
     unresolved = {row.quote_id for row in rows}
     return [quote_id for quote_id in quote_ids if quote_id in unresolved]
+
 
 def _plan(
     session: Session,
@@ -490,7 +490,8 @@ def _run_recheck(
                 state=state,
             )
             cached_result = (
-                None if _range_of(job).get("force_reprocess")
+                None
+                if _range_of(job).get("force_reprocess")
                 else ResultCacheStore(session).get(cache_key)
             )
 
@@ -682,11 +683,7 @@ def _dispatch_with_bounded_retry(
             error = exc
         elapsed_ms = int((time.perf_counter() - started) * 1000)
 
-        if (
-            error is None
-            or error.kind not in AUTO_RETRY_KINDS
-            or index + 1 >= allowed
-        ):
+        if error is None or error.kind not in AUTO_RETRY_KINDS or index + 1 >= allowed:
             return raw, error, run_id, elapsed_ms
 
         backoff = backoff_seconds(index + 1, settings)
@@ -815,9 +812,7 @@ def run_job(
         if not roster_ok:
             job.state = JobState.FAILED
             job.last_error = roster_error
-            job.progress_json = json.dumps(
-                {"stage": "roster_not_confirmed"}, ensure_ascii=False
-            )
+            job.progress_json = json.dumps({"stage": "roster_not_confirmed"}, ensure_ascii=False)
             session.commit()
             outcome.state = JobState.FAILED
             outcome.errors.append("roster_not_confirmed")
@@ -827,7 +822,11 @@ def run_job(
         credential_mode = credential_mode_of(profile)
         credential_ref = credential_reference(profile)
         strong_profile = _strong_profile(session, job)
-        strong_snapshot = profile_snapshot(strong_profile) if strong_profile is not None else None
+        strong_snapshot = (
+            profile_snapshot(strong_profile, (snapshot or {}).get("inference_options"))
+            if strong_profile is not None
+            else None
+        )
         strong_mode = credential_mode_of(strong_profile)
         strong_ref = credential_reference(strong_profile)
         session.commit()
@@ -1003,7 +1002,8 @@ def run_job(
         # 缓存命中：不调用模型，也不新增推理尝试
         with session_factory() as session:
             cached_result = (
-                None if _range_of(job_snapshot).get("force_reprocess")
+                None
+                if _range_of(job_snapshot).get("force_reprocess")
                 else ResultCacheStore(session).get(cache_key)
             )
         if cached_result is not None:
@@ -1075,7 +1075,7 @@ def run_job(
             outcome.strong_windows += 1
 
         # 每个窗口最多两次调用：首次 + 一次「纠错重发」
-        #。
+        # 。
         # 每次调用都单独写 inference_runs 并各自结算用量，不是只记最后一次。
         correction: str | None = None
         retry_correction: str | None = None
@@ -1353,9 +1353,7 @@ def reconcile_stale_runs(
 def reconcile_job(session: Session, job: Job, *, action: str) -> dict[str, Any]:
     """处理 NEEDS_RECONCILIATION：``retry`` 显式重发；``keep_unknown`` 保留未知结果。"""
 
-    rows = list(
-        session.execute(select(JobWindow).where(JobWindow.job_id == job.id)).scalars()
-    )
+    rows = list(session.execute(select(JobWindow).where(JobWindow.job_id == job.id)).scalars())
     pending = [row for row in rows if row.state is JobState.NEEDS_RECONCILIATION]
     if action == "retry":
         for row in pending:

@@ -20,9 +20,15 @@ async function createProfile(page: Page, input: { name: string; model?: string; 
   await page.selectOption('[data-testid=profile-protocol]', 'fake-provider')
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill(input.model ?? 'fake-model')
-  await page.getByTestId('profile-params').fill(input.params ?? '{}')
   // fake-provider 不需要密钥：保留默认的「仅本会话」即可（空密钥不会影响离线提供方）
+  const created = page.waitForResponse(response => response.url().endsWith('/api/model-profiles') && response.request().method() === 'POST')
   await page.getByTestId('profile-save').click()
+  const profile = (await (await created).json()).data
+  // Fixture-only provider scripts are injected through the API, not the read-only UI.
+  if (input.params) {
+    const patched = await page.request.patch(`/api/model-profiles/${profile.id}`, { data: { params: JSON.parse(input.params) } })
+    expect(patched.ok()).toBeTruthy()
+  }
   await expect(page.getByTestId('profile-card').filter({ hasText: input.name })).toBeVisible()
 }
 

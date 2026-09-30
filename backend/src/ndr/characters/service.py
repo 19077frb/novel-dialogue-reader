@@ -415,6 +415,7 @@ def create_roster_job(
     profile: ModelProfile,
     idempotency_key: str,
     max_input_tokens: int | None = None,
+    inference_options: dict[str, Any] | None = None,
 ) -> tuple[Job, bool]:
     request_payload = {
         "kind": JobKind.CHARACTER_ROSTER.value,
@@ -423,6 +424,7 @@ def create_roster_job(
         "chapter_id": chapter.id,
         "profile_id": profile.id,
         "max_input_tokens": max_input_tokens,
+        "inference_options": inference_options or {},
     }
     digest = digest_request(request_payload)
     existing = session.execute(
@@ -466,7 +468,9 @@ def create_roster_job(
             },
             ensure_ascii=False,
         ),
-        profile_snapshot_json=json.dumps(profile_snapshot(profile), ensure_ascii=False),
+        profile_snapshot_json=json.dumps(
+            profile_snapshot(profile, inference_options), ensure_ascii=False
+        ),
         budget_json=json.dumps({"max_input_tokens": max_input_tokens}),
         progress_json=json.dumps({"stage": "queued", "calls": 0}, ensure_ascii=False),
         idempotency_key=idempotency_key,

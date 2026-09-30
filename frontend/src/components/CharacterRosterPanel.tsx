@@ -13,6 +13,7 @@ import { fetchJob } from '../api/books'
 import { freshIdempotencyKey } from '../api/jobs'
 import type {
   JobDetailOut,
+  InferenceOptions,
   RosterCharacterCandidate,
   RosterConfirmCandidateIn,
 } from '../api/types'
@@ -24,6 +25,7 @@ interface CharacterRosterPanelProps {
   bookVersionId: string | null | undefined
   chapterId: string | null
   profileId: string
+  inferenceOptions?: InferenceOptions
   disabled?: boolean
   onConfirmedChange: (confirmed: boolean) => void
 }
@@ -66,6 +68,7 @@ export function CharacterRosterPanel({
   bookVersionId,
   chapterId,
   profileId,
+  inferenceOptions,
   disabled = false,
   onConfirmedChange,
 }: CharacterRosterPanelProps) {
@@ -239,6 +242,7 @@ export function CharacterRosterPanel({
                 return
               }
               analyze.mutate({
+                inferenceOptions,
                 bookVersionId,
                 profileId,
                 idempotencyKey: freshIdempotencyKey(

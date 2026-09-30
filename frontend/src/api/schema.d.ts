@@ -2172,6 +2172,21 @@ export interface components {
          * @enum {string}
          */
         ImportStatus: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+        /** InferenceOptions */
+        InferenceOptions: {
+            /**
+             * Thinking Mode
+             * @default default
+             * @enum {string}
+             */
+            thinking_mode: "default" | "disabled" | "enabled" | "adaptive";
+            /**
+             * Reasoning Effort
+             * @default default
+             * @enum {string}
+             */
+            reasoning_effort: "default" | "low" | "medium" | "high";
+        };
         /** JobCreate */
         JobCreate: {
             /** Book Id */
@@ -2199,6 +2214,7 @@ export interface components {
             selected_window_ids?: string[] | null;
             /** Profile Id */
             profile_id?: string | null;
+            inference_options?: components["schemas"]["InferenceOptions"] | null;
             /**
              * Force Reprocess
              * @description 强制重新调用模型，跳过结果缓存；仍保留人工锁定标注
@@ -2954,6 +2970,7 @@ export interface components {
             book_version_id?: string | null;
             /** Profile Id */
             profile_id: string;
+            inference_options?: components["schemas"]["InferenceOptions"] | null;
             /** Idempotency Key */
             idempotency_key: string;
             /** Max Input Tokens */

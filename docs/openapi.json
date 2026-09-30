@@ -6229,6 +6229,35 @@
         "title": "ImportStatus",
         "description": "导入状态与推理状态分离。"
       },
+      "InferenceOptions": {
+        "properties": {
+          "thinking_mode": {
+            "type": "string",
+            "enum": [
+              "default",
+              "disabled",
+              "enabled",
+              "adaptive"
+            ],
+            "title": "Thinking Mode",
+            "default": "default"
+          },
+          "reasoning_effort": {
+            "type": "string",
+            "enum": [
+              "default",
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Reasoning Effort",
+            "default": "default"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "InferenceOptions"
+      },
       "JobCreate": {
         "properties": {
           "book_id": {
@@ -6287,6 +6316,16 @@
               }
             ],
             "title": "Profile Id"
+          },
+          "inference_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InferenceOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "force_reprocess": {
             "type": "boolean",
@@ -8119,6 +8158,16 @@
           "profile_id": {
             "type": "string",
             "title": "Profile Id"
+          },
+          "inference_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InferenceOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "idempotency_key": {
             "type": "string",

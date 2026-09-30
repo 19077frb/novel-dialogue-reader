@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import type { InferenceOptions } from '../api/types'
 
 export const PROCESSING_PREFERENCES_KEY = 'ndr:processing-preferences:v1'
 export interface ProcessingPreferences {
@@ -7,9 +8,12 @@ export interface ProcessingPreferences {
   maxRechecks: number
   tokenLimit: number | null
   maxOutputTokens: number | null
+  thinkingMode: NonNullable<InferenceOptions['thinking_mode']>
+  thinkingEffort: NonNullable<InferenceOptions['reasoning_effort']>
 }
 const defaults: ProcessingPreferences = {
   profileId: '', concurrency: 2, maxRechecks: 0, tokenLimit: null, maxOutputTokens: null,
+  thinkingMode: 'default', thinkingEffort: 'default',
 }
 let cachedRaw: string | null | undefined
 let cached = defaults
@@ -28,7 +32,13 @@ function normalize(value: Partial<ProcessingPreferences>): ProcessingPreferences
       && value.maxRechecks >= 0 ? value.maxRechecks : 0,
     tokenLimit: positive(value.tokenLimit),
     maxOutputTokens: positive(value.maxOutputTokens),
+    thinkingMode: ['default', 'disabled', 'enabled', 'adaptive'].includes(value.thinkingMode ?? '') ? value.thinkingMode! : 'default',
+    thinkingEffort: ['default', 'low', 'medium', 'high'].includes(value.thinkingEffort ?? '') ? value.thinkingEffort! : 'default',
   }
+}
+export function inferenceOptions(preferences: ProcessingPreferences): InferenceOptions | undefined {
+  if (preferences.thinkingMode === 'default' && preferences.thinkingEffort === 'default') return undefined
+  return { thinking_mode: preferences.thinkingMode, reasoning_effort: preferences.thinkingEffort }
 }
 export function getProcessingPreferences(): ProcessingPreferences {
   let raw = fallbackRaw

@@ -36,7 +36,8 @@ import { UsageSummary } from '../components/UsageSummary'
 import { WindowPicker } from '../components/WindowPicker'
 import { mapWithConcurrency } from '../processing/concurrency'
 import { TERMINAL_JOB_STATES, waitForJobCompletion } from '../processing/jobCompletion'
-import { useProcessingPreferences } from '../processing/preferences'
+import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
+import { ThinkingSettings } from '../components/ThinkingSettings'
 
 interface SingleWindowTask {
   windowId: string
@@ -74,6 +75,7 @@ export default function PreviewPage() {
   const [processingMode, setProcessingMode] = useState<'single' | 'batch'>('single')
   const [preferences, setPreferences] = useProcessingPreferences()
   const { concurrency, profileId } = preferences
+  const options = inferenceOptions(preferences)
   const budget = useMemo<BudgetInput>(() => ({
     maxInputTokens: preferences.tokenLimit, maxOutputTokens: preferences.maxOutputTokens,
     maxRechecks: preferences.maxRechecks,
@@ -238,6 +240,7 @@ export default function PreviewPage() {
           range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
           selectedWindowIds: null,
           profileId: profileId || null,
+          inferenceOptions: options,
           readingMode: PROCESSING_READING_MODE,
           visibleHorizonCp: null,
           budget,
@@ -285,6 +288,7 @@ export default function PreviewPage() {
           range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
           selectedWindowIds: [windowId],
           profileId: profileId || null,
+          inferenceOptions: options,
           readingMode: PROCESSING_READING_MODE,
           visibleHorizonCp: null,
           budget: {
@@ -464,6 +468,8 @@ export default function PreviewPage() {
         </div>
       </section>
 
+      <ThinkingSettings disabled={batchProgress.running || singleRunning} />
+
       {processingMode === 'single' && !batchProgress.running && (
         <>
 
@@ -531,6 +537,7 @@ export default function PreviewPage() {
         bookVersionId={book.data?.active_version_id ?? null}
         chapterId={range.chapterId}
         profileId={profileId}
+        inferenceOptions={options}
         onConfirmedChange={handleRosterConfirmedChange}
       />
 

@@ -143,18 +143,31 @@ def estimate_inference(
     )
 
 
-def profile_snapshot(profile: ModelProfile | None) -> dict[str, Any] | None:
+def profile_snapshot(
+    profile: ModelProfile | None, inference_options: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     """任务保存的配置快照：只有非敏感字段 + 提示/协议版本。**不含任何密钥**。"""
 
     if profile is None:
         return None
+    params = json.loads(profile.params_json or "{}")
+    options = inference_options or {}
+    mode = options.get("thinking_mode", "default")
+    if mode != "default":
+        current = params.get("thinking")
+        params["thinking"] = {**(current if isinstance(current, dict) else {}), "type": mode}
+    if mode == "disabled":
+        params.pop("reasoning_effort", None)
+    elif options.get("reasoning_effort", "default") != "default":
+        params["reasoning_effort"] = options["reasoning_effort"]
     return {
         "profile_id": profile.id,
         "name": profile.name,
         "protocol": profile.protocol,
         "base_url": profile.base_url,
         "model": profile.model,
-        "params": json.loads(profile.params_json or "{}"),
+        "params": params,
+        "inference_options": options,
         "credential_mode": profile.credential_mode.value,
     }
 
@@ -172,9 +185,11 @@ def create_inference_job(
     reading_mode: ReadingMode,
     visible_horizon_cp: int | None,
     kind: JobKind = JobKind.INFERENCE,
+    inference_options: dict[str, Any] | None = None,
 ) -> tuple[Job, bool]:
     """幂等创建任务；返回 ``(job, created)``。"""
 
+    snapshot = profile_snapshot(profile, inference_options)
     request_payload = {
         "kind": kind.value,
         "book_id": book.id,
@@ -184,6 +199,7 @@ def create_inference_job(
         "budget": budget,
         "reading_mode": reading_mode.value,
         "visible_horizon_cp": visible_horizon_cp,
+        "inference_options": inference_options or {},
     }
     digest = digest_request(request_payload)
 
@@ -238,7 +254,7 @@ def create_inference_job(
             },
             ensure_ascii=False,
         ),
-        profile_snapshot_json=json.dumps(profile_snapshot(profile), ensure_ascii=False)
+        profile_snapshot_json=json.dumps(snapshot, ensure_ascii=False)
         if profile
         else None,
         budget_json=json.dumps(budget, ensure_ascii=False),

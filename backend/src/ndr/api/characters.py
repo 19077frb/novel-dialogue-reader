@@ -164,6 +164,9 @@ def analyze_character_roster_route(
             profile=profile,
             idempotency_key=payload.idempotency_key,
             max_input_tokens=payload.max_input_tokens,
+            inference_options=(
+                payload.inference_options.model_dump() if payload.inference_options else None
+            ),
         )
         detail = job_detail(session, job)
 

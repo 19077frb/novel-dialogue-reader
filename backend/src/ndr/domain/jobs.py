@@ -8,6 +8,7 @@ from pydantic import Field
 
 from .common import ApiModel
 from .enums import JobKind, JobPurpose, JobState, ReadingMode
+from .inference_options import InferenceOptions
 
 
 class BudgetIn(ApiModel):
@@ -30,6 +31,7 @@ class JobCreate(ApiModel):
         description="只处理预估阶段选中的窗口；null 表示全部窗口",
     )
     profile_id: str | None = None
+    inference_options: InferenceOptions | None = None
     force_reprocess: bool = Field(
         default=False,
         description="强制重新调用模型，跳过结果缓存；仍保留人工锁定标注",

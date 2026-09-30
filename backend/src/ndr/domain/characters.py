@@ -6,6 +6,7 @@ from pydantic import Field, model_validator
 
 from .common import ApiModel
 from .enums import CharacterRosterStatus
+from .inference_options import InferenceOptions
 
 
 class BookCharacterOut(ApiModel):
@@ -59,6 +60,7 @@ class ChapterRosterOut(ApiModel):
 class RosterAnalyzeIn(ApiModel):
     book_version_id: str | None = None
     profile_id: str
+    inference_options: InferenceOptions | None = None
     idempotency_key: str = Field(min_length=1, max_length=128)
     max_input_tokens: int | None = Field(default=None, ge=1)
     run_now: bool = True
