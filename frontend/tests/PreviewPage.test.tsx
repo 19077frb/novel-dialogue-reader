@@ -534,7 +534,7 @@ describe('PreviewPage', () => {
     await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'))
   })
 
-  it('并发空闲时提前识别后续章节，且每章先人物后对白', async () => {
+  it('共享池有空闲时也必须等待上一章人物确认，人物与对白仍可并发', async () => {
     const threeChapters = [
       { ...CHAPTERS[0], dialogue_processed: false },
       { ...CHAPTERS[0], id: 'c2', ordinal: 1, title: '第二章', start_cp: 20, end_cp: 40, dialogue_processed: false },
@@ -546,7 +546,11 @@ describe('PreviewPage', () => {
       usage: { input_tokens: 30, output_tokens: 10, total_tokens: 40, unknown_runs: 0 },
     } as JobDetailOut
     const rosterResolvers = new Map<string, (job: JobDetailOut) => void>()
-    let rosterResolving = false
+    const dialogueResolvers: Array<(job: JobDetailOut) => void> = []
+    let confirmFirst!: () => void
+    vi.mocked(charactersApi.confirmCharacterRoster).mockImplementationOnce(() =>
+      new Promise((resolve) => { confirmFirst = () => resolve(ROSTER) }),
+    )
     vi.mocked(booksApi.fetchChapters).mockResolvedValue(threeChapters)
     vi.mocked(charactersApi.analyzeCharacterRoster).mockImplementation((_bookId, chapterId) => {
       return new Promise<JobDetailOut>((resolve) => {
@@ -554,8 +558,7 @@ describe('PreviewPage', () => {
       })
     })
     vi.mocked(jobsApi.createJob).mockImplementation(() => {
-      if (!rosterResolving) throw new Error('对白任务不能先于人物识别启动')
-      return Promise.resolve(meteredJob)
+      return new Promise<JobDetailOut>((resolve) => dialogueResolvers.push(resolve))
     })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await userEvent.click(await screen.findByTestId('processing-mode-batch'))
@@ -566,13 +569,27 @@ describe('PreviewPage', () => {
     await screen.findByTestId('batch-estimate')
     await userEvent.click(screen.getByTestId('batch-run'))
 
-    await waitFor(() => expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(3))
-    expect(vi.mocked(charactersApi.analyzeCharacterRoster).mock.calls.map((call) => call[1])).toEqual(['c1', 'c2', 'c3'])
+    await waitFor(() => expect(rosterResolvers.has('c1')).toBe(true))
+    expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
     expect(jobsApi.createJob).not.toHaveBeenCalled()
-
-    rosterResolving = true
-    rosterResolvers.forEach((resolve) => resolve(meteredJob))
+    rosterResolvers.get('c1')!(meteredJob)
+    await waitFor(() => expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledTimes(1))
+    expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    confirmFirst()
+    await waitFor(() => expect(rosterResolvers.has('c2')).toBe(true))
+    await waitFor(() => expect(dialogueResolvers).toHaveLength(2))
+    expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(2)
+    rosterResolvers.get('c2')!(meteredJob)
+    // 释放前章窗口后，第三章人物才有共享并发额度，但第二章确认已先完成。
+    dialogueResolvers.splice(0).forEach((resolve) => resolve(meteredJob))
+    await waitFor(() => expect(rosterResolvers.has('c3')).toBe(true))
+    expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledTimes(2)
+    rosterResolvers.get('c3')!(meteredJob)
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(4))
+    dialogueResolvers.splice(0).forEach((resolve) => resolve(meteredJob))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(6))
+    dialogueResolvers.splice(0).forEach((resolve) => resolve(meteredJob))
     await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'))
   })
 
@@ -608,6 +625,29 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('batch-error')).toHaveTextContent('2 章成功，1 章失败')
     expect(jobsApi.createJob).toHaveBeenCalledTimes(4)
     expect(booksApi.completeChapterProcessing).toHaveBeenCalledTimes(2)
+  })
+
+  it('无人物的插图章跳过对白，后续章节仍按顺序处理', async () => {
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue([
+      { ...CHAPTERS[0], title: '插图', dialogue_processed: false },
+      { ...CHAPTERS[0], id: 'c2', ordinal: 1, title: '第二章', dialogue_processed: false },
+    ] as ChapterOut[])
+    vi.mocked(charactersApi.fetchCharacterRoster).mockImplementation(async (_bookId, chapterId) =>
+      chapterId === 'c1' ? { ...ROSTER, candidates: [] } : ROSTER,
+    )
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await screen.findByTestId('batch-processor')
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await screen.findByTestId('batch-estimate')
+    await userEvent.click(screen.getByTestId('batch-run'))
+
+    await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('跳过无人物章节 1 章'))
+    expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(2)
+    expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledTimes(1)
+    expect(jobsApi.createJob).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(jobsApi.createJob).mock.calls.every(([input]) => input.range.chapterId === 'c2')).toBe(true)
+    expect(screen.queryByTestId('batch-error')).not.toBeInTheDocument()
   })
 
   it('批量运行时切换为逐任务进度面板，停止后不再派发排队窗口', async () => {

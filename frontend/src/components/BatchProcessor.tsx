@@ -313,6 +313,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     const limiter = createTaskLimiter(concurrency)
     const pendingWork: Promise<void>[] = []
     const failedChapterIds = new Set<string>()
+    const skippedEmptyChapterIds = new Set<string>()
     stopRef.current = false
     batchStopRequests.delete(bookId)
     setRunning(true)
@@ -454,7 +455,21 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
           recordUsage(rosterJob, '人物识别')
           const roster = await fetchCharacterRoster(bookId, chapter.id, bookVersionId)
           const accepted = (roster.candidates ?? []).filter((candidate) => Boolean(candidate.canonical_name))
-          if (accepted.length === 0) throw new Error(`${prefix}没有识别到可确认的人物`)
+          if (accepted.length === 0) {
+            skippedEmptyChapterIds.add(chapter.id)
+            updateBatchTask(bookId, taskId, 'completed')
+            updateChapterProgress(bookId, chapter.id, {
+              state: 'stopped', error: '未识别到人物，已跳过本章对白处理',
+            })
+            const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
+            publishBatch(bookId, {
+              message: `${prefix}：未识别到人物，跳过本章并继续下一章`,
+              tasks: current.tasks.map((task) => task.chapterId === chapter.id && task.state === 'queued'
+                ? { ...task, state: 'cancelled' as const, error: null }
+                : task),
+            })
+            return
+          }
           const pov = accepted.find((candidate) => candidate.pov_candidate) ?? accepted[0]
           await confirmCharacterRoster(bookId, chapter.id, {
             bookVersionId,
@@ -566,25 +581,37 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         return
       }
 
-      const outcomes = await Promise.allSettled(selectedPlans.map(async (plan, index) => {
-        const rosterPromise = scheduleRoster(plan, index)
-        pendingWork.push(rosterPromise)
+      const trackWork = (promise: Promise<void>) => {
+        pendingWork.push(promise)
+        // 后台对白与下一章人物同时运行，提前注册拒绝处理，最终统一收集结果。
+        void promise.catch(() => undefined)
+        return promise
+      }
+      let rosterPromise = trackWork(scheduleRoster(selectedPlans[0], 0))
+      for (let index = 0; index < selectedPlans.length; index += 1) {
+        const plan = selectedPlans[index]
         await rosterPromise
-        if (failedChapterIds.has(plan.chapter.id)) return
         if (batchShouldStop(bookId, stopRef.current)) throw new BatchAbortError('批量处理已停止')
-        const dialoguePromise = scheduleDialogue(plan, index)
-        pendingWork.push(dialoguePromise)
-        await dialoguePromise
-      }))
+        // 本章人物确认成功（或失败/空名单已记录）后，才启动下一章人物。
+        // 下一章人物可与已确认章节的对白窗口并发，但人物任务之间绝不并发。
+        if (index + 1 < selectedPlans.length) {
+          rosterPromise = trackWork(scheduleRoster(selectedPlans[index + 1], index + 1))
+        }
+        if (!failedChapterIds.has(plan.chapter.id) && !skippedEmptyChapterIds.has(plan.chapter.id)) {
+          trackWork(scheduleDialogue(plan, index))
+        }
+      }
+      const outcomes = await Promise.allSettled(pendingWork)
       const abortOutcome = outcomes.find((outcome) =>
         outcome.status === 'rejected' && isBatchAbortError(outcome.reason)
       )
       if (abortOutcome?.status === 'rejected') throw abortOutcome.reason
       const skipped = requested.length - selectedPlans.length
-      const succeededCount = selectedPlans.length - failedChapterIds.size
+      const succeededCount = selectedPlans.length - failedChapterIds.size - skippedEmptyChapterIds.size
+      const emptySummary = skippedEmptyChapterIds.size ? `，跳过无人物章节 ${skippedEmptyChapterIds.size} 章` : ''
       const summary = failedChapterIds.size > 0
-        ? `批量处理结束：成功 ${succeededCount} 章，失败 ${failedChapterIds.size} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
-        : `批量处理完成：${forceReprocess ? '重做' : '新处理'} ${selectedPlans.length} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
+        ? `批量处理结束：成功 ${succeededCount} 章，失败 ${failedChapterIds.size} 章${emptySummary}${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
+        : `批量处理完成：${forceReprocess ? '重做' : '新处理'} ${succeededCount} 章${emptySummary}${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
       setProgress(summary)
       if (failedChapterIds.size > 0) {
         setError(`批量处理结束：${succeededCount} 章成功，${failedChapterIds.size} 章失败；具体原因见任务列表。`)
@@ -602,12 +629,12 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         stopRequested: false,
         message,
         tasks: current.tasks.map((task) => task.state === 'queued'
-          ? { ...task, state: batchStopRequests.has(bookId) ? 'cancelled' as const : 'failed' as const, error: null }
+          ? { ...task, state: 'cancelled' as const, error: null }
           : task),
         chapterStates: Object.fromEntries(Object.entries(current.chapterStates).map(([chapterId, chapter]) => [
           chapterId,
           ['queued', 'roster', 'dialogue'].includes(chapter.state)
-            ? { ...chapter, state: batchStopRequests.has(bookId) ? 'stopped' as const : 'failed' as const, error: message }
+            ? { ...chapter, state: 'stopped' as const, error: message }
             : chapter,
         ])),
       })
