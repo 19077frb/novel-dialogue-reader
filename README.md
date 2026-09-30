@@ -47,7 +47,7 @@ Pop-Location
 ## 更多文档
 
 - [详细使用与维护指南](docs/USER_GUIDE.md)：模型与思考设置、窗口与批量处理、书签、数据管理及测试。
-- [开发说明](DEVELOPMENT.md) · [接口与数据契约](docs/CONTRACTS.md) · [性能分析](docs/PERFORMANCE.md)。
+- [开发说明](DEVELOPMENT.md) · [接口与数据契约](docs/CONTRACTS.md)。
 - [环境配置示例](.env.example) · [仓库协作规范](AGENTS.md)。
 
 技术栈：FastAPI / SQLAlchemy / SQLite，React / TypeScript / Vite；模型接口兼容 OpenAI Chat Completions。

@@ -61,5 +61,12 @@ Desktop.ini
 backend/pytest-sandbox/
 profile_output/
 
-# ---- Local collaboration plan (never publish) ----
-/修改计划.md
+# ---- Internal plans, work logs and performance retrospectives (never publish) ----
+/docs/internal/
+/docs/PERFORMANCE.md
+**/*修改计划*.md
+**/*开发计划*.md
+**/*工作记录*.md
+**/*工作日志*.md
+**/*开发日志*.md
+**/*性能复盘*.md
