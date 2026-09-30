@@ -427,6 +427,56 @@ describe('PreviewPage', () => {
     expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1')
   })
 
+  it('真实异步 QUEUED 返回后立即显示进度，并发槽位等待实际完成才释放', async () => {
+    const states: Record<string, JobDetailOut['state']> = {}
+    vi.mocked(jobsApi.createJob).mockImplementation(async (input) => {
+      const id = input.selectedWindowIds![0]
+      states[id] = 'QUEUED'
+      return { ...JOB, id, state: 'QUEUED' }
+    })
+    vi.mocked(booksApi.fetchJob).mockImplementation(async (id) => ({ ...JOB, id, state: states[id] }))
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('window-picker')
+    fireEvent.change(screen.getByTestId('preview-concurrency'), { target: { value: '1' } })
+    await userEvent.click(screen.getByTestId('preview-process'))
+    expect(await screen.findByTestId('single-task-w1')).toHaveTextContent('排队中')
+    expect(screen.getByTestId('single-task-w2')).toHaveTextContent('等待派发')
+    expect(await screen.findByTestId('job-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('preview-process')).toBeDisabled()
+    expect(screen.getByTestId('processing-mode-batch')).toBeDisabled()
+    expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
+    expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
+    states.w1 = 'RUNNING'
+    await waitFor(() => expect(screen.getByTestId('single-task-w1')).toHaveTextContent('处理中'), { timeout: 3000 })
+    expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
+    states.w1 = 'COMPLETED'
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    expect(screen.getByTestId('single-task-w2')).toHaveTextContent('排队中')
+    expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
+    states.w2 = 'COMPLETED'
+    await waitFor(() => expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1'), { timeout: 3000 })
+    expect(screen.getByTestId('single-task-w1')).toHaveTextContent('已完成')
+    expect(screen.getByTestId('single-task-w2')).toHaveTextContent('已完成')
+    expect(screen.queryByTestId('preview-error')).not.toBeInTheDocument()
+  })
+
+  it('失败任务仍保留执行面板及具体错误，不把其它后台任务遗留后立即解锁', async () => {
+    let finishOther!: (job: JobDetailOut) => void
+    vi.mocked(jobsApi.createJob).mockImplementation(async (input) => {
+      if (input.selectedWindowIds![0] === 'w1') return { ...JOB, id: 'failed', state: 'FAILED', last_error: '提供方拒绝请求' }
+      return new Promise((resolve) => { finishOther = resolve })
+    })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('window-picker')
+    await userEvent.click(screen.getByTestId('preview-process'))
+    expect(await screen.findByTestId('single-task-w1')).toHaveTextContent('提供方拒绝请求')
+    expect(screen.getByTestId('preview-process')).toBeDisabled()
+    finishOther({ ...JOB, id: 'done' })
+    expect(await screen.findByTestId('preview-error')).toHaveTextContent('提供方拒绝请求')
+    expect(screen.getByTestId('single-task-progress')).toBeInTheDocument()
+    expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
+  })
+
   it('人物尚未确认时也提前显示窗口，清空选择后禁止启动', async () => {
     vi.mocked(charactersApi.fetchCharacterRoster).mockResolvedValue({
       ...ROSTER, status: 'DRAFT', confirmed_characters: [], pov_character_id: null,

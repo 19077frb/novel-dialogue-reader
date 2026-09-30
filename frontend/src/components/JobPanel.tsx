@@ -11,11 +11,10 @@ import {
   runJobNow,
 } from '../api/jobs'
 import type { JobDetailOut } from '../api/types'
-
-const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'])
+import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 
 export function isTerminalJob(state: JobDetailOut['state']): boolean {
-  return TERMINAL_STATES.has(state)
+  return TERMINAL_JOB_STATES.has(state)
 }
 
 export interface JobPanelProps {

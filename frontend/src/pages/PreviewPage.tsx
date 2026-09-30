@@ -36,6 +36,20 @@ import { SpeakerLegend } from '../components/SpeakerLegend'
 import { UsageSummary } from '../components/UsageSummary'
 import { WindowPicker } from '../components/WindowPicker'
 import { mapWithConcurrency } from '../processing/concurrency'
+import { TERMINAL_JOB_STATES, waitForJobCompletion } from '../processing/jobCompletion'
+
+interface SingleWindowTask {
+  windowId: string
+  ordinal: string
+  job: JobDetailOut | null
+  error: string | null
+}
+
+const SINGLE_TASK_LABELS: Record<string, string> = {
+  QUEUED: '排队中', RUNNING: '处理中', PAUSING: '正在停止', PAUSED: '已停止',
+  COMPLETED: '已完成', FAILED: '失败', BUDGET_EXHAUSTED: '额度耗尽',
+  PARTIAL: '部分完成', NEEDS_RECONCILIATION: '需要确认调用结果',
+}
 
 const DEFAULT_BUDGET: BudgetInput = {
   maxInputTokens: 200_000,
@@ -70,6 +84,7 @@ export default function PreviewPage() {
   const selectionKeyRef = useRef('')
   const [jobId, setJobId] = useState<string | null>(null)
   const [currentJob, setCurrentJob] = useState<JobDetailOut | null>(null)
+  const [singleTasks, setSingleTasks] = useState<SingleWindowTask[]>([])
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
@@ -207,7 +222,7 @@ export default function PreviewPage() {
         throw new Error('没有选中当前章节的有效窗口，不能开始处理')
       }
       if (plannedWindows.length === 0) {
-        return createJob({
+        const job = await createJob({
           bookId: bookId as string,
           mode,
           bookVersionId: versionId,
@@ -220,6 +235,8 @@ export default function PreviewPage() {
           idempotencyKey: freshIdempotencyKey(`${mode}:${bookId}`, JSON.stringify({ versionId, range, profileId, budget })),
           runNow: true,
         })
+        setJobId(job.id)
+        return waitForJobCompletion(job, setCurrentJob)
       }
 
       const totalEstimated = plannedWindows.reduce(
@@ -228,10 +245,31 @@ export default function PreviewPage() {
       )
       const allocate = (limit: number | null, estimated: number) =>
         limit === null ? null : Math.max(1, Math.floor((limit * estimated) / totalEstimated))
+      setError(null)
+      setNotice(null)
+      setSingleTasks(plannedWindows.map((window) => ({
+        windowId: String(window.window_id), ordinal: String(window.ordinal), job: null, error: null,
+      })))
+      let stopDispatch = false
+      const updateTask = (windowId: string, job: JobDetailOut) => {
+        setSingleTasks((tasks) => tasks.map((task) => task.windowId === windowId ? { ...task, job } : task))
+        setCurrentJob(job)
+        queryClient.setQueryData(queryKeys.job(job.id), job)
+        if (TERMINAL_JOB_STATES.has(job.state)) {
+          void queryClient.invalidateQueries({ queryKey: ['annotations'] })
+          void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId ?? '') })
+        }
+      }
       const jobs = await mapWithConcurrency(plannedWindows, concurrency, async (window) => {
         const windowId = String(window.window_id)
         const estimated = Math.max(1, Number(window.estimated_tokens) || 1)
-        return createJob({
+        if (stopDispatch) {
+          setSingleTasks((tasks) => tasks.map((task) => task.windowId === windowId
+            ? { ...task, error: '前序任务提交或进度读取失败，本窗口尚未派发' } : task))
+          return null
+        }
+        try {
+          const job = await createJob({
           bookId: bookId as string,
           mode,
           bookVersionId: versionId,
@@ -250,11 +288,21 @@ export default function PreviewPage() {
             JSON.stringify({ versionId, range, profileId, budget, windowId }),
           ),
           runNow: true,
-        })
+          })
+          setJobId(job.id)
+          return await waitForJobCompletion(job, (current) => updateTask(windowId, current))
+        } catch (reason) {
+          stopDispatch = true
+          setSingleTasks((tasks) => tasks.map((task) => task.windowId === windowId
+            ? { ...task, error: reason instanceof Error ? reason.message : '任务提交或进度读取失败' } : task))
+          return null
+        }
       })
-      const failedJob = jobs.find((job) => job.state !== 'COMPLETED')
-      if (failedJob) {
-        throw new Error(failedJob.last_error || `窗口任务结束于 ${failedJob.state}`)
+      const failedJob = jobs.find((job) => job && job.state !== 'COMPLETED')
+      if (jobs.some((job) => job === null) || failedJob) {
+        throw new Error(failedJob?.last_error || (failedJob
+          ? `窗口任务结束于 ${SINGLE_TASK_LABELS[failedJob.state] ?? failedJob.state}，详见下方窗口任务进度`
+          : '任务提交或进度读取失败，详见下方窗口任务进度；后台任务可能仍在执行，请勿重复提交'))
       }
       if (
         mode === 'process' &&
@@ -263,6 +311,7 @@ export default function PreviewPage() {
         plannedWindows.length === (estimate?.windows?.length ?? 0)
       ) {
         await completeChapterProcessing(bookId as string, range.chapterId, versionId)
+        void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId as string) })
       }
       return jobs.at(-1) as JobDetailOut
     },
@@ -270,7 +319,9 @@ export default function PreviewPage() {
       setJobId(job.id)
       setCurrentJob(job)
       setError(null)
-      setNotice(null)
+      setNotice(job.state === 'COMPLETED'
+        ? '任务完成：结果已写入与正式阅读相同的标注投影（没有另一套临时存储）。'
+        : `任务结束于 ${SINGLE_TASK_LABELS[job.state] ?? job.state}，请在任务面板查看原因。`)
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : '创建任务失败'),
   })
@@ -278,7 +329,8 @@ export default function PreviewPage() {
   const handleJobUpdate = useCallback(
     (job: JobDetailOut) => {
       setCurrentJob(job)
-      if (!['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'].includes(job.state)) {
+      setSingleTasks((tasks) => tasks.map((task) => task.job?.id === job.id ? { ...task, job } : task))
+      if (!TERMINAL_JOB_STATES.has(job.state)) {
         return
       }
       setNotice(
@@ -308,7 +360,11 @@ export default function PreviewPage() {
   // 本章人物是逐句归属的前置：只有选中单一章节时才要求先确认名单与主人公；
   // 整本或自定义码点范围没有“本章”，后端也不会注入章节人物名单。
   const rosterRequired = range.chapterId !== null
+  const singleRunning = jobMutation.isPending || singleTasks.some(
+    (task) => task.job && !TERMINAL_JOB_STATES.has(task.job.state),
+  ) || Boolean(currentJob && !TERMINAL_JOB_STATES.has(currentJob.state))
   const runBlockers: string[] = []
+  if (singleRunning) runBlockers.push('当前单章任务尚未结束，请等待或在任务面板停止')
   if (!rangeValid) runBlockers.push('处理范围无效')
   if (profileId === '') runBlockers.push('未选择模型配置（见第一步）')
   if (rosterRequired && !rosterConfirmed) runBlockers.push('尚未确认本章人物（见第二步）')
@@ -373,7 +429,7 @@ export default function PreviewPage() {
               type="radio"
               name="processing-mode"
               checked={processingMode === 'single'}
-              disabled={batchProgress.running || jobMutation.isPending}
+              disabled={batchProgress.running || singleRunning}
               onChange={() => setProcessingMode('single')}
               data-testid="processing-mode-single"
             />
@@ -384,7 +440,7 @@ export default function PreviewPage() {
               type="radio"
               name="processing-mode"
               checked={processingMode === 'batch'}
-              disabled={batchProgress.running || jobMutation.isPending}
+              disabled={batchProgress.running || singleRunning}
               onChange={() => setProcessingMode('batch')}
               data-testid="processing-mode-batch"
             />
@@ -538,6 +594,25 @@ export default function PreviewPage() {
         {estimate && <EstimateSummary estimate={estimate} />}
       </section>
 
+      {singleTasks.length > 0 && (
+        <section className="card" data-testid="single-task-progress">
+          <h2>单章窗口任务进度</h2>
+          <p className="hint">提交后会先排队，再由后台执行。任务全部结束前不能新建任务；读取进度不会重新调用模型。</p>
+          <table>
+            <thead><tr><th>窗口</th><th>状态</th><th>详情</th></tr></thead>
+            <tbody>{singleTasks.map((task) => (
+              <tr key={task.windowId} data-testid={`single-task-${task.windowId}`}>
+                <td>窗口 {task.ordinal}</td>
+                <td>{task.job ? SINGLE_TASK_LABELS[task.job.state] ?? task.job.state : task.error ? '未派发' : '等待派发'}</td>
+                <td>
+                  {task.error || task.job?.last_error}
+                  {task.job && <button type="button" onClick={() => setJobId(task.job!.id)}>查看任务</button>}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </section>
+      )}
       {jobId && (
         <section className="card">
           <h2>任务</h2>
