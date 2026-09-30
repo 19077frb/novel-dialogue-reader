@@ -23,6 +23,12 @@ function draftKey(item: QuoteNormalizationOut): string {
   return `${item.id}:${item.version}:${item.close_cp}:${item.replacement}:${item.status}`
 }
 
+export function moveClosingPoint(text: string, offset: number, direction: -1 | 1): number {
+  const chars = Array.from(text)
+  const stops = chars.flatMap((char, index) => /[。！？!?，,；;：:、…]/u.test(char) ? [index + 1] : [])
+  return direction > 0 ? stops.find(point => point > offset) ?? chars.length : stops.reverse().find(point => point < offset) ?? 1
+}
+
 export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps) {
   const queryClient = useQueryClient()
   const [drafts, setDrafts] = useState<Record<string, DraftState>>({})
@@ -114,10 +120,13 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
               [key]: { ...draft, ...patch },
             }))
             const closeCp = Number(draft.close_cp)
+            const chars = Array.from(item.original_text)
+            const offset = Math.max(1, Math.min(chars.length, closeCp - item.opening_cp))
+            const move = (point: number) => update({ close_cp: String(item.opening_cp + point) })
             const valid =
               Number.isInteger(closeCp) &&
               closeCp > item.opening_cp &&
-              closeCp <= item.opening_cp + item.original_text.length
+              closeCp <= item.opening_cp + chars.length
             const dirty =
               draft.close_cp !== String(item.close_cp) ||
               draft.replacement !== item.replacement ||
@@ -132,13 +141,29 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
                     开引号 {item.opening_cp} · 虚拟闭合 {item.close_cp} · {item.reason}
                   </small>
                 </div>
+                <label className="ndr-field">
+                  原文定位（点击或用左右键移动光标，闭合插在光标处）
+                  <textarea readOnly rows={3} value={item.original_text} data-testid={`quote-normalization-text-${item.id}`} onSelect={event => {
+                    const input = event.currentTarget
+                    move(Math.max(1, Array.from(input.value.slice(0, input.selectionEnd)).length))
+                  }} />
+                </label>
+                <div className="ndr-form-actions">
+                  <button disabled={offset <= 1} onClick={() => move(offset - 1)}>前移一字</button>
+                  <button disabled={offset >= chars.length} onClick={() => move(offset + 1)}>后移一字</button>
+                  <button disabled={offset <= 1} onClick={() => move(moveClosingPoint(item.original_text, offset, -1))}>上一个标点后</button>
+                  <button disabled={offset >= chars.length} onClick={() => move(moveClosingPoint(item.original_text, offset, 1))}>下一个标点后</button>
+                  <button disabled={offset === chars.length} onClick={() => move(chars.length)}>移到段尾</button>
+                </div>
+                <p className="hint">预览只改变虚拟闭合位置；确认后点击“保存并重扫”。</p>
+                <code data-testid={`quote-normalization-preview-${item.id}`}>{chars.slice(0, offset).join('')}<mark className="ndr-context-target">{draft.replacement}</mark>{chars.slice(offset).join('')}</code>
                 <div className="ndr-normalization-edit">
                   <label>
-                    闭合码点（原段落内）
+                    闭合位置（高级：码点）
                     <input
                       type="number"
                       min={item.opening_cp + 1}
-                      max={item.opening_cp + item.original_text.length}
+                      max={item.opening_cp + chars.length}
                       value={draft.close_cp}
                       onChange={(event) => update({ close_cp: event.target.value })}
                       data-testid={`quote-normalization-close-${item.id}`}
@@ -167,11 +192,14 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
                   </label>
                   <button
                     type="button"
+                    className="ndr-primary"
                     disabled={!dirty || !valid || updateMutation.isPending}
                     onClick={() => updateMutation.mutate({ id: item.id, draft })}
                   >
                     保存并重扫
                   </button>
+                  {!dirty && <p className="hint">位置或状态尚未修改。</p>}
+                  {!valid && <p className="status-error">闭合位置必须位于当前原段落内。</p>}
                 </div>
               </details>
             )

@@ -1,9 +1,10 @@
-import { screen } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
 
 import * as books from '../src/api/books'
 import PreprocessingPage from '../src/pages/PreprocessingPage'
+import { moveClosingPoint } from '../src/components/QuoteNormalizationPanel'
 import { renderRoute } from './helpers'
 
 vi.mock('../src/api/books', () => ({
@@ -14,6 +15,26 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(books.fetchBook).mockResolvedValue({ title: '测试书' } as never)
   vi.mocked(books.fetchQuoteNormalizations).mockResolvedValue([{ id: 'q1', version: 1, book_version_id: 'v1', opening_cp: 10, close_cp: 17, replacement: '”', source: 'AUTO', status: 'ACTIVE', original_text: '“😀你好。世界', normalized_text: '“😀你好。世界”', reason: '未闭合' }] as never)
+})
+
+it('moves closing points by characters, punctuation or text selection without splitting emoji', async () => {
+  vi.mocked(books.updateQuoteNormalization).mockResolvedValue({} as never)
+  renderRoute('/books/:bookId/preprocessing', <PreprocessingPage />, '/books/b1/preprocessing')
+  await screen.findByTestId('quote-normalization-warning')
+  await userEvent.click(document.querySelector('.ndr-normalization-card summary')!)
+  await userEvent.click(screen.getByRole('button', { name: '前移一字' }))
+  expect(screen.getByTestId('quote-normalization-close-q1')).toHaveValue(16)
+  await userEvent.click(screen.getByRole('button', { name: '上一个标点后' }))
+  expect(screen.getByTestId('quote-normalization-preview-q1')).toHaveTextContent('“😀你好。”世界')
+  const input = screen.getByTestId('quote-normalization-text-q1') as HTMLTextAreaElement
+  input.focus()
+  input.setSelectionRange(3, 3)
+  fireEvent.select(input)
+  expect(screen.getByTestId('quote-normalization-close-q1')).toHaveValue(12)
+  await userEvent.click(screen.getByRole('button', { name: '保存并重扫' }))
+  await waitFor(() => expect(books.updateQuoteNormalization).toHaveBeenCalledWith('b1', 'q1', expect.objectContaining({ close_cp: 12 })))
+  expect(moveClosingPoint('“😀你好。世界', 2, 1)).toBe(5)
+  expect(moveClosingPoint('“😀你好。世界', 5, 1)).toBe(7)
 })
 it('keeps the chapter on return and collapses repair records until requested', async () => {
   renderRoute('/books/:bookId/preprocessing', <PreprocessingPage />, '/books/b1/preprocessing?chapterId=c2')
