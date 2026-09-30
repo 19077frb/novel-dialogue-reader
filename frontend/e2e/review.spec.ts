@@ -65,6 +65,29 @@ async function processFirstChapter(page: Page, profileLabel: string) {
 }
 
 test.describe('待确认队列与确认抽屉', () => {
+  test('局部复核共享思考设置并把覆盖参数传给任务', async ({ page }) => {
+    const profileName = '局部复核思考配置'
+    await createFakeProfile(page, profileName)
+    await importSample(page)
+    await openReader(page)
+    await processFirstChapter(page, `${profileName} · fake-provider · fake-model`)
+    await page.getByTestId('processing-thinking-mode').selectOption('enabled')
+    await page.getByTestId('processing-thinking-effort').selectOption('high')
+    await page.getByRole('link', { name: '去阅读' }).click()
+    await page.getByTestId('annotation-span').first().click()
+    await page.getByTestId('recheck-toggle').click()
+    await expect(page.getByTestId('processing-thinking-mode')).toHaveValue('enabled')
+    await expect(page.getByTestId('processing-thinking-effort')).toHaveValue('high')
+    await page.getByTestId('processing-thinking-effort').selectOption('low')
+    const submitted = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/recheck'))
+    await page.getByTestId('recheck-start').click()
+    expect((await submitted).postDataJSON().inference_options).toEqual({ thinking_mode: 'enabled', reasoning_effort: 'low' })
+    await expect(page.getByTestId('job-state')).toHaveText('COMPLETED', { timeout: 30_000 })
+    await page.getByTestId('drawer-close').click()
+    await page.getByRole('link', { name: '预览与处理' }).click()
+    await expect(page.getByTestId('processing-thinking-effort')).toHaveValue('low')
+  })
+
   test('阅读页入口：标记待确认、锁定未知、撤销，并同步阅读页颜色', async ({ page }) => {
     const profileName = '确认流程提供方 A'
     await createFakeProfile(page, profileName)

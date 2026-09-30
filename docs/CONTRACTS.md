@@ -55,6 +55,8 @@
 
 ## 任务、缓存和幂等
 
+- 局部复核 `POST /quotes/{quote_id}/recheck` 同样支持可选 `inference_options`，使用与对白处理一致的校验、任务快照和参数摘要；不指定时继承模型配置。复核面板共享模型选择、思考模式和强度偏好，输入额度仍单独确认；运行中禁用本面板配置和重复启动。完成或停止后的显式再次复核使用新的幂等键；传输重试保留原键。
+
 - 模型配置的 `params.thinking.type` 和 `params.reasoning_effort` 可在配置页作为默认值编辑。任务中 `default` 表示继承已保存值，没有已保存值时由提供方决定；实际思考模式（含继承默认）为 `disabled` 时，快照移除 `reasoning_effort`，不修改配置本身。
 
 - 对白任务和章节人物识别请求支持可选 `inference_options`：`thinking_mode=default/disabled/enabled/adaptive`、`reasoning_effort=default/low/medium/high`。只覆盖任务配置快照中的 `thinking.type` / `reasoning_effort`，不修改模型配置；关闭思考时删除强度参数。覆盖项参与请求摘要和现有缓存的参数摘要，幂等键不能用于不同设置；后续编辑模型配置不改变已有任务快照。客户端共用一份记忆设置，运行中禁止修改。提供方必须支持相应参数；程序不自动提高输出上限或超时。

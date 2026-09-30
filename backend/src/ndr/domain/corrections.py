@@ -32,6 +32,7 @@ from .enums import (
     ReviewTargetType,
     SpeakerBasis,
 )
+from .inference_options import InferenceOptions
 from .jobs import BudgetIn
 
 # 说话人级别的四种更正；其余动作各有专用端点（Gap / merge / split / undo）。
@@ -194,6 +195,7 @@ class RecheckIn(ApiModel):
     """`POST /api/quotes/{id}/recheck`：有上限的局部复核（**会创建真实付费任务**）。"""
 
     profile_id: str = Field(description="模型配置 ID；复核必须显式指定")
+    inference_options: InferenceOptions | None = None
     budget: BudgetIn = Field(default_factory=BudgetIn)
     reading_mode: ReadingMode = ReadingMode.INITIAL
     visible_horizon_cp: int | None = Field(default=None, ge=0)

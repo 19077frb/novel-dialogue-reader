@@ -10,6 +10,7 @@ import type {
   GapCorrectionOut,
   GapDecision,
   JobDetailOut,
+  InferenceOptions,
   QuoteKind,
   ReadingMode,
   ReviewItemDetailOut,
@@ -180,6 +181,7 @@ export function undoCorrection(correctionId: string, signal?: AbortSignal): Prom
 }
 
 export interface RecheckInput {
+  inferenceOptions?: InferenceOptions
   profileId: string
   maxInputTokens?: number | null
   maxRechecks?: number
@@ -199,6 +201,7 @@ export function recheckQuote(
     signal,
     body: {
       profile_id: input.profileId,
+      ...(input.inferenceOptions ? { inference_options: input.inferenceOptions } : {}),
       budget: {
         max_input_tokens: input.maxInputTokens ?? null,
         max_output_tokens: null,

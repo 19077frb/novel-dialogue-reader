@@ -28,7 +28,7 @@ export function ThinkingSettings({ disabled, profile }: { disabled: boolean; pro
       </label>
     </div>
     {profile && <p className="hint" data-testid="profile-thinking-defaults">当前配置「{profile.name}」默认：模式 {labels[thinking?.type ?? ''] ?? '模型服务默认'}；强度 {labels[String(params.reasoning_effort ?? '')] ?? '模型服务默认'}。</p>}
-    <p className="hint">单章、人物识别、试运行与批量共用并记忆此设置；不修改已保存的模型配置或运行中任务。
+    <p className="hint">单章、人物识别、试运行、批量与局部复核共用并记忆此设置；不修改已保存的模型配置或运行中任务。
       模式发送 thinking.type，强度发送 reasoning_effort；需提供方支持，不支持时请选择沿用配置。
       沿用模型配置时使用模型配置页保存的默认值；未指定则由模型服务决定。关闭思考时不发送强度。开启思考可能增加用量与等待时间，不会自动提高输出上限。</p>
   </section>

@@ -7754,6 +7754,16 @@
             "title": "Profile Id",
             "description": "模型配置 ID；复核必须显式指定"
           },
+          "inference_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InferenceOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "budget": {
             "$ref": "#/components/schemas/BudgetIn"
           },

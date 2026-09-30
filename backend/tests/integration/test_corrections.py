@@ -583,6 +583,7 @@ def test_recheck_creates_bounded_job_and_does_not_call_model_at_creation(
             "profile_id": profile_id,
             "budget": {"max_input_tokens": 5000, "max_rechecks": 1},
             "idempotency_key": "k-recheck-1",
+            "inference_options": {"thinking_mode": "enabled", "reasoning_effort": "high"},
             "run_now": False,
             "note": "人工触发",
         },
@@ -600,6 +601,9 @@ def test_recheck_creates_bounded_job_and_does_not_call_model_at_creation(
         job = session.get(Job, payload["id"])
         assert job is not None
         range_payload = json.loads(job.range_json)
+        params = json.loads(job.profile_snapshot_json)["params"]
+        assert params["thinking"] == {"type": "enabled"}
+        assert params["reasoning_effort"] == "high"
     assert range_payload["start_cp"] == scene["start_cp"]
     assert range_payload["end_cp"] == (scene["end_cp"] or range_payload["end_cp"])
 
@@ -610,12 +614,25 @@ def test_recheck_creates_bounded_job_and_does_not_call_model_at_creation(
             "profile_id": profile_id,
             "budget": {"max_input_tokens": 5000, "max_rechecks": 1},
             "idempotency_key": "k-recheck-1",
+            "inference_options": {"thinking_mode": "enabled", "reasoning_effort": "high"},
             "run_now": False,
             "note": "人工触发",
         },
     )
     assert again.status_code == 202
     assert again.json()["data"]["id"] == payload["id"]
+
+    changed = fake_provider_client.post(
+        f"/api/quotes/{target}/recheck",
+        json={
+            "profile_id": profile_id,
+            "budget": {"max_input_tokens": 5000, "max_rechecks": 1},
+            "idempotency_key": "k-recheck-1",
+            "run_now": False,
+            "inference_options": {"thinking_mode": "disabled"},
+        },
+    )
+    assert changed.status_code == 409
 
     missing = fake_provider_client.post(
         f"/api/quotes/{target}/recheck",

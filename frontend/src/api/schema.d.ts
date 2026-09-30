@@ -2797,6 +2797,7 @@ export interface components {
              * @description 模型配置 ID；复核必须显式指定
              */
             profile_id: string;
+            inference_options?: components["schemas"]["InferenceOptions"] | null;
             budget?: components["schemas"]["BudgetIn"];
             /** @default initial */
             reading_mode: components["schemas"]["ReadingMode"];
