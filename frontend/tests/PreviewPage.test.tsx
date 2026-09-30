@@ -670,6 +670,28 @@ describe('PreviewPage', () => {
     expect(jobsApi.estimateRange).not.toHaveBeenCalled()
   })
 
+  it('开启强制重做会重新估算并处理已经完成的章节', async () => {
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue(
+      CHAPTERS.map((chapter) => ({ ...chapter, dialogue_processed: true })),
+    )
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await screen.findByTestId('batch-processor')
+    await userEvent.click(screen.getByTestId('batch-run'))
+    expect(await screen.findByTestId('batch-estimate')).toHaveTextContent('0 tokens')
+
+    await userEvent.click(screen.getByTestId('batch-force-reprocess'))
+    expect(screen.queryByTestId('batch-estimate')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('batch-run'))
+    expect(await screen.findByTestId('batch-estimate')).toHaveTextContent('已包含已处理章节')
+    expect(jobsApi.estimateRange).toHaveBeenCalled()
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
+    expect(jobsApi.createJob).toHaveBeenCalledWith(expect.objectContaining({ forceReprocess: true }))
+    expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'))
+  })
+
   it('达到 Token 上限的 80% 时可原地修改额度并继续', async () => {
     const meteredJob = {
       ...JOB,

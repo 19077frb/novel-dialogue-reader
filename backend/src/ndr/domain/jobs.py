@@ -30,6 +30,10 @@ class JobCreate(ApiModel):
         description="只处理预估阶段选中的窗口；null 表示全部窗口",
     )
     profile_id: str | None = None
+    force_reprocess: bool = Field(
+        default=False,
+        description="强制重新调用模型，跳过结果缓存；仍保留人工锁定标注",
+    )
     reading_mode: ReadingMode = ReadingMode.INITIAL
     visible_horizon_cp: int | None = Field(default=None, ge=0)
     budget: BudgetIn = Field(default_factory=BudgetIn)

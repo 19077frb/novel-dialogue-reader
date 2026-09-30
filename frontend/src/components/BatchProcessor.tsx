@@ -246,6 +246,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const [maxRechecks, setMaxRechecks] = useState(0)
   const [tokenLimitText, setTokenLimitText] = useState('')
   const [concurrency, setConcurrency] = useState(2)
+  const [forceReprocess, setForceReprocess] = useState(false)
   const [running, setRunning] = useState(false)
   const [estimating, setEstimating] = useState(false)
   const [estimatedTokens, setEstimatedTokens] = useState<number | null>(null)
@@ -276,7 +277,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     setProgress('')
     try {
       const requested = chapters.slice(startIndex, endIndex + 1)
-      const selected = requested.filter((chapter) => !chapter.dialogue_processed)
+      const selected = requested.filter((chapter) => forceReprocess || !chapter.dialogue_processed)
       const estimates = await Promise.all(
         selected.map((chapter) => estimateRange(bookId, {
           bookVersionId,
@@ -303,7 +304,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const run = async () => {
     if (!validRange || !profileId || !bookVersionId) return
     const requested = chapters.slice(startIndex, endIndex + 1)
-    const selectedPlans = plans.filter(({ chapter }) => !chapter.dialogue_processed)
+    const selectedPlans = plans.filter(({ chapter }) => forceReprocess || !chapter.dialogue_processed)
     let tokenLimit = positiveIntegerOrNull(tokenLimitText)
     let spent = 0
     let reserved = 0
@@ -349,7 +350,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       chapterStates: Object.fromEntries(requested.map((chapter) => {
         const plan = selectedPlans.find((item) => item.chapter.id === chapter.id)
         return [chapter.id, {
-          state: chapter.dialogue_processed ? 'processed' : plan ? 'queued' : 'unprocessed',
+          state: plan ? 'queued' : chapter.dialogue_processed ? 'processed' : 'unprocessed',
           completedWindows: 0,
           totalWindows: plan?.estimate.windows?.length ?? 0,
           error: null,
@@ -498,6 +499,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
                 bookVersionId,
                 range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
                 selectedWindowIds: [windowId],
+                forceReprocess,
                 profileId,
                 readingMode: 'reread',
                 visibleHorizonCp: null,
@@ -582,7 +584,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       const succeededCount = selectedPlans.length - failedChapterIds.size
       const summary = failedChapterIds.size > 0
         ? `批量处理结束：成功 ${succeededCount} 章，失败 ${failedChapterIds.size} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
-        : `批量处理完成：新处理 ${selectedPlans.length} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
+        : `批量处理完成：${forceReprocess ? '重做' : '新处理'} ${selectedPlans.length} 章${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
       setProgress(summary)
       if (failedChapterIds.size > 0) {
         setError(`批量处理结束：${succeededCount} 章成功，${failedChapterIds.size} 章失败；具体原因见任务列表。`)
@@ -716,6 +718,19 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
           <input type="number" min={1} max={16} value={concurrency} onChange={(event) => setConcurrency(Math.min(16, Math.max(1, Number(event.target.value) || 1)))} disabled={running} data-testid="batch-concurrency" />
         </label>
       </div>
+      <label className="ndr-radio-row">
+        <input
+          type="checkbox"
+          checked={forceReprocess}
+          disabled={running || estimating}
+          onChange={(event) => { setForceReprocess(event.target.checked); resetEstimate() }}
+          data-testid="batch-force-reprocess"
+        />
+        强制重做已处理章节（重新调用模型，可能产生费用）
+      </label>
+      {forceReprocess && (
+        <p className="hint">所选范围内的全部章节将重新识别人物和处理对白，保留人工确认或锁定的标注。</p>
+      )}
       <p className="hint">并发数同时约束人物识别和对白窗口；设为 1 即按顺序处理，建议从 2 开始。</p>
       <div className="ndr-form-actions">
         <button type="button" className="ndr-primary" disabled={running || estimating || !validRange || !profileId || !bookVersionId} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
@@ -725,7 +740,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       {estimatedTokens !== null && (
         <p className="hint" data-testid="batch-estimate">
           整批预计约 {estimatedTokens.toLocaleString()} tokens（包含逐章人物识别预留与对白归属估算）。
-          {chapters.slice(startIndex, endIndex + 1).some((chapter) => chapter.dialogue_processed) ? ' 已处理章节不会重复计费或处理。' : ''}
+          {forceReprocess ? ' 已包含已处理章节的重做费用估算。' : chapters.slice(startIndex, endIndex + 1).some((chapter) => chapter.dialogue_processed) ? ' 已处理章节不会重复计费或处理。' : ''}
           {positiveIntegerOrNull(tokenLimitText) !== null && estimatedTokens > (positiveIntegerOrNull(tokenLimitText) ?? 0) ? ' 预计会超过当前上限，系统只会在剩余额度允许时派发新任务。' : ''}
         </p>
       )}

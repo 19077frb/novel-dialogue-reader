@@ -116,6 +116,17 @@ def test_preview_then_process_reuses_cache_and_idempotency(
     again = _create_job(fake_provider_client, book_id, profile_id, key="k-process", mode="process")
     assert again["id"] == process["id"]
 
+    # 强制重做必须真正调用模型，而不是再次应用同一份缓存。
+    forced = _create_job(
+        fake_provider_client, book_id, profile_id,
+        key="k-force-process", mode="process", force_reprocess=True,
+    )
+    third = _run_with_fake(migrated_settings, forced["id"], adapter)
+    assert third.state is JobState.COMPLETED
+    assert third.calls == 1
+    assert third.cached_windows == 0
+    assert len(adapter.calls) == 2
+
 
 def test_failed_model_output_error_keeps_raw_snippet(
     fake_provider_client: TestClient, migrated_settings: Settings

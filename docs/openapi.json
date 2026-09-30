@@ -5464,6 +5464,12 @@
             ],
             "title": "Profile Id"
           },
+          "force_reprocess": {
+            "type": "boolean",
+            "title": "Force Reprocess",
+            "description": "强制重新调用模型，跳过结果缓存；仍保留人工锁定标注",
+            "default": false
+          },
           "reading_mode": {
             "$ref": "#/components/schemas/ReadingMode",
             "default": "initial"

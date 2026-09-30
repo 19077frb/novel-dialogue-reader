@@ -1955,6 +1955,12 @@ export interface components {
             selected_window_ids?: string[] | null;
             /** Profile Id */
             profile_id?: string | null;
+            /**
+             * Force Reprocess
+             * @description 强制重新调用模型，跳过结果缓存；仍保留人工锁定标注
+             * @default false
+             */
+            force_reprocess: boolean;
             /** @default initial */
             reading_mode: components["schemas"]["ReadingMode"];
             /** Visible Horizon Cp */

@@ -107,6 +107,7 @@ export interface CreateJobInput {
   bookVersionId?: string | null
   range: RangeInput
   selectedWindowIds?: string[] | null
+  forceReprocess?: boolean
   profileId?: string | null
   readingMode: ReadingMode
   visibleHorizonCp?: number | null
@@ -130,6 +131,7 @@ export function createJob(input: CreateJobInput, signal?: AbortSignal): Promise<
         end_cp: input.range.endCp,
       },
       selected_window_ids: input.selectedWindowIds ?? null,
+      force_reprocess: input.forceReprocess ?? false,
       profile_id: input.profileId ?? null,
       reading_mode: input.readingMode,
       visible_horizon_cp: input.visibleHorizonCp ?? null,

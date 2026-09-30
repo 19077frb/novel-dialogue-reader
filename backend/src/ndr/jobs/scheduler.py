@@ -489,7 +489,10 @@ def _run_recheck(
                 snapshot=snapshot,
                 state=state,
             )
-            cached_result = ResultCacheStore(session).get(cache_key)
+            cached_result = (
+                None if _range_of(job).get("force_reprocess")
+                else ResultCacheStore(session).get(cache_key)
+            )
 
         raw: Any = None
         run_id: str | None = None
@@ -999,7 +1002,10 @@ def run_job(
 
         # 缓存命中：不调用模型，也不新增推理尝试
         with session_factory() as session:
-            cached_result = ResultCacheStore(session).get(cache_key)
+            cached_result = (
+                None if _range_of(job_snapshot).get("force_reprocess")
+                else ResultCacheStore(session).get(cache_key)
+            )
         if cached_result is not None:
             with session_factory() as session:
                 job = session.get(Job, job_id)

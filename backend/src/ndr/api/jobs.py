@@ -76,6 +76,7 @@ def create_job_route(
             range_payload={
                 **dict(payload.range),
                 "selected_window_ids": payload.selected_window_ids,
+                "force_reprocess": payload.force_reprocess,
             },
             budget=payload.budget.model_dump(),
             idempotency_key=payload.idempotency_key,
