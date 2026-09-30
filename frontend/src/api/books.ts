@@ -3,6 +3,8 @@ import { apiData, apiRequest, apiUpload } from './client'
 import type {
   BookOut,
   ChapterOut,
+  ChapterRepairSuggestion,
+  ChapterRepairIn,
   ChapterProcessingCompleteOut,
   ContentResponse,
   CursorPageBook,
@@ -44,6 +46,14 @@ export async function deleteBook(bookId: string): Promise<void> {
 
 export function fetchChapters(bookId: string, signal?: AbortSignal): Promise<ChapterOut[]> {
   return apiData<ChapterOut[]>(`/api/books/${bookId}/chapters`, { signal })
+}
+
+export function fetchChapterRepairs(bookId: string, signal?: AbortSignal): Promise<ChapterRepairSuggestion[]> {
+  return apiData(`/api/books/${bookId}/chapter-repairs`, { signal })
+}
+
+export function repairChapters(bookId: string, bookVersionId: string, repairs: ChapterRepairIn[]): Promise<ChapterOut[]> {
+  return apiData(`/api/books/${bookId}/chapter-repairs`, { method: 'POST', body: { book_version_id: bookVersionId, repairs } })
 }
 
 export function completeChapterProcessing(

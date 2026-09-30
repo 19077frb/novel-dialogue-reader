@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
 
@@ -8,12 +8,14 @@ import { moveClosingPoint } from '../src/components/QuoteNormalizationPanel'
 import { renderRoute } from './helpers'
 
 vi.mock('../src/api/books', () => ({
-  fetchBook: vi.fn(), fetchQuoteNormalizations: vi.fn(), refreshQuoteNormalizations: vi.fn(), updateQuoteNormalization: vi.fn(),
-  queryKeys: { book: (id: string) => ['book', id], quoteNormalizations: (id: string) => ['quote-normalizations', id] },
+  fetchBook: vi.fn(), fetchChapters: vi.fn(), fetchChapterRepairs: vi.fn(), repairChapters: vi.fn(), fetchQuoteNormalizations: vi.fn(), refreshQuoteNormalizations: vi.fn(), updateQuoteNormalization: vi.fn(),
+  queryKeys: { book: (id: string) => ['book', id], chapters: (id: string) => ['chapters', id], quoteNormalizations: (id: string) => ['quote-normalizations', id] },
 }))
 beforeEach(() => {
   vi.resetAllMocks()
-  vi.mocked(books.fetchBook).mockResolvedValue({ title: '测试书' } as never)
+  vi.mocked(books.fetchBook).mockResolvedValue({ title: '测试书', active_version_id: 'v1' } as never)
+  vi.mocked(books.fetchChapters).mockResolvedValue([{ id: 'c1', title: '第十卷 序章' }, { id: 'c2', title: '序章' }] as never)
+  vi.mocked(books.fetchChapterRepairs).mockResolvedValue([{ chapter_id: 'c2', title: '序章', suggested_title: '第十卷 序章', merge_previous: true, reason: '与上一章节标题重复' }])
   vi.mocked(books.fetchQuoteNormalizations).mockResolvedValue([{ id: 'q1', version: 1, book_version_id: 'v1', opening_cp: 10, close_cp: 17, replacement: '”', source: 'AUTO', status: 'ACTIVE', original_text: '“😀你好。世界', normalized_text: '“😀你好。世界”', reason: '未闭合' }] as never)
 })
 
@@ -45,4 +47,17 @@ it('keeps the chapter on return and collapses repair records until requested', a
   await userEvent.click(record.querySelector('summary')!)
   expect(record.open).toBe(true)
   expect(books.refreshQuoteNormalizations).not.toHaveBeenCalled()
+})
+
+it('previews chapter repair suggestions and only saves after confirmation', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(books.repairChapters).mockResolvedValue([])
+  renderRoute('/books/:bookId/preprocessing', <PreprocessingPage />, '/books/b1/preprocessing')
+  const panel = await screen.findByTestId('chapter-repair-panel')
+  const summary = await within(panel).findByText('序章 · 建议检查')
+  await userEvent.click(summary)
+  expect(books.repairChapters).not.toHaveBeenCalled()
+  await userEvent.click(within(panel).getByRole('button', { name: '采用建议（待保存）' }))
+  await userEvent.click(within(summary.closest('details')!).getByRole('button', { name: '保存章节修复' }))
+  await waitFor(() => expect(books.repairChapters).toHaveBeenCalledWith('b1', 'v1', [{ chapter_id: 'c2', expected_title: '序章', title: '第十卷 序章', merge_previous: true }]))
 })

@@ -93,6 +93,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/chapter-repairs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chapter Repair Suggestions Route */
+        get: operations["chapter_repair_suggestions_route_api_books__book_id__chapter_repairs_get"];
+        put?: never;
+        /** Chapter Repair Route */
+        post: operations["chapter_repair_route_api_books__book_id__chapter_repairs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/chapters/{chapter_id}/processing-complete": {
         parameters: {
             query?: never;
@@ -1276,6 +1294,43 @@ export interface components {
             /** Annotated Quote Count */
             annotated_quote_count: number;
         };
+        /** ChapterRepairIn */
+        ChapterRepairIn: {
+            /** Chapter Id */
+            chapter_id: string;
+            /** Expected Title */
+            expected_title: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Merge Previous
+             * @default false
+             */
+            merge_previous: boolean;
+        };
+        /** ChapterRepairSuggestion */
+        ChapterRepairSuggestion: {
+            /** Chapter Id */
+            chapter_id: string;
+            /** Title */
+            title: string | null;
+            /** Suggested Title */
+            suggested_title: string;
+            /**
+             * Merge Previous
+             * @default false
+             */
+            merge_previous: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /** ChapterRepairsIn */
+        ChapterRepairsIn: {
+            /** Book Version Id */
+            book_version_id: string;
+            /** Repairs */
+            repairs: components["schemas"]["ChapterRepairIn"][];
+        };
         /** ChapterRosterOut */
         ChapterRosterOut: {
             /** Chapter Id */
@@ -1853,6 +1908,16 @@ export interface components {
         DataEnvelope_list_ChapterOut__: {
             /** Data */
             data: components["schemas"]["ChapterOut"][];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[list[ChapterRepairSuggestion]] */
+        DataEnvelope_list_ChapterRepairSuggestion__: {
+            /** Data */
+            data: components["schemas"]["ChapterRepairSuggestion"][];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -3463,6 +3528,72 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_list_ChapterOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chapter_repair_suggestions_route_api_books__book_id__chapter_repairs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_list_ChapterRepairSuggestion__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chapter_repair_route_api_books__book_id__chapter_repairs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChapterRepairsIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

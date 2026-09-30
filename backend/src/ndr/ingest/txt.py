@@ -18,10 +18,11 @@ import re
 from dataclasses import dataclass
 
 from ..domain.enums import ContentNodeType
+from .chapter_repairs import duplicate_heading, suspicious_heading
 from .document import ParsedBook, ParsedChapter, ParsedMapping, ParsedNode, ParsedTxt
 from .encoding import detect_encoding
 
-PARSER_VERSION = "txt-1"
+PARSER_VERSION = "txt-2"
 NORMALIZATION_VERSION = "canonical-lf-1"
 
 _LINE_RE = re.compile(r"([^\r\n]*)(\r\n|\r|\n|$)")
@@ -64,6 +65,8 @@ class _Line:
     def heading(self) -> bool:
         stripped = self.text.strip()
         if not stripped or len(stripped) > _MAX_HEADING_CHARS:
+            return False
+        if stripped.startswith("第") and suspicious_heading(stripped):
             return False
         return bool(_HEADING_RE.match(stripped))
 
@@ -108,6 +111,16 @@ def _split_chapters(
     chapters: list[ParsedChapter] = []
 
     heading_indexes = [index for index, line in enumerate(lines) if line.heading]
+    filtered = []
+    for index in heading_indexes:
+        if (
+            filtered
+            and duplicate_heading(lines[filtered[-1]].text.strip(), lines[index].text.strip())
+            and all(line.blank for line in lines[filtered[-1] + 1:index])
+        ):
+            continue
+        filtered.append(index)
+    heading_indexes = filtered
     if not lines:
         return chapters, chapter_of_line, warnings
     if not heading_indexes:

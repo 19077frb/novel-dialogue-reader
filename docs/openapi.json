@@ -255,6 +255,98 @@
         }
       }
     },
+    "/api/books/{book_id}/chapter-repairs": {
+      "get": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Chapter Repair Suggestions Route",
+        "operationId": "chapter_repair_suggestions_route_api_books__book_id__chapter_repairs_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_list_ChapterRepairSuggestion__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Chapter Repair Route",
+        "operationId": "chapter_repair_route_api_books__book_id__chapter_repairs_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChapterRepairsIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_list_ChapterOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/books/{book_id}/chapters/{chapter_id}/processing-complete": {
       "post": {
         "tags": [
@@ -4019,6 +4111,109 @@
         ],
         "title": "ChapterProcessingCompleteOut"
       },
+      "ChapterRepairIn": {
+        "properties": {
+          "chapter_id": {
+            "type": "string",
+            "title": "Chapter Id"
+          },
+          "expected_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Title"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "merge_previous": {
+            "type": "boolean",
+            "title": "Merge Previous",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chapter_id",
+          "expected_title",
+          "title"
+        ],
+        "title": "ChapterRepairIn"
+      },
+      "ChapterRepairSuggestion": {
+        "properties": {
+          "chapter_id": {
+            "type": "string",
+            "title": "Chapter Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "suggested_title": {
+            "type": "string",
+            "title": "Suggested Title"
+          },
+          "merge_previous": {
+            "type": "boolean",
+            "title": "Merge Previous",
+            "default": false
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chapter_id",
+          "title",
+          "suggested_title",
+          "reason"
+        ],
+        "title": "ChapterRepairSuggestion"
+      },
+      "ChapterRepairsIn": {
+        "properties": {
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "repairs": {
+            "items": {
+              "$ref": "#/components/schemas/ChapterRepairIn"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Repairs"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_version_id",
+          "repairs"
+        ],
+        "title": "ChapterRepairsIn"
+      },
       "ChapterRosterOut": {
         "properties": {
           "chapter_id": {
@@ -5425,6 +5620,29 @@
           "request_id"
         ],
         "title": "DataEnvelope[list[ChapterOut]]"
+      },
+      "DataEnvelope_list_ChapterRepairSuggestion__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ChapterRepairSuggestion"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[list[ChapterRepairSuggestion]]"
       },
       "DataEnvelope_list_CharacterDirectoryOut__": {
         "properties": {

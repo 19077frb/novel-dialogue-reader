@@ -23,12 +23,15 @@ from ..domain.documents import (
     ChapterOut,
     ChapterProcessingCompleteIn,
     ChapterProcessingCompleteOut,
+    ChapterRepairsIn,
+    ChapterRepairSuggestion,
     ContentResponse,
     ImportResult,
     ReadingProgressIn,
     ReadingProgressOut,
 )
 from ..domain.enums import ErrorCode
+from ..ingest.chapter_repairs import apply_repairs, suggestions
 from ..ingest.deletion import delete_book
 from ..ingest.encoding import DecodeFailure
 from ..ingest.epub import EpubError, EpubLimits
@@ -244,6 +247,26 @@ def list_chapters_route(
         data=list_chapters(session, version.id),
         request_id=current_request_id(request),
     )
+
+
+@router.get(
+    "/{book_id}/chapter-repairs", response_model=DataEnvelope[list[ChapterRepairSuggestion]],
+)
+def chapter_repair_suggestions_route(
+    request: Request, book_id: str, session: Session = Depends(get_session),
+) -> DataEnvelope[list[ChapterRepairSuggestion]]:
+    return DataEnvelope(data=suggestions(session, book_id), request_id=current_request_id(request))
+
+
+@router.post("/{book_id}/chapter-repairs", response_model=DataEnvelope[list[ChapterOut]])
+def chapter_repair_route(
+    request: Request, book_id: str, payload: ChapterRepairsIn,
+) -> DataEnvelope[list[ChapterOut]]:
+    with transaction(request.app.state.session_factory) as session:
+        apply_repairs(session, book_id, payload)
+        session.flush()
+        result = list_chapters(session, payload.book_version_id)
+    return DataEnvelope(data=result, request_id=current_request_id(request))
 
 
 @router.post(

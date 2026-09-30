@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { fetchBook, queryKeys } from '../api/books'
 import { QuoteNormalizationPanel } from '../components/QuoteNormalizationPanel'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
+import { ChapterRepairPanel } from '../components/ChapterRepairPanel'
 
 export default function PreprocessingPage() {
   const { bookId = '' } = useParams()
@@ -17,5 +18,6 @@ export default function PreprocessingPage() {
     </header>
     {book.isError && <ReadErrorNotice label="书籍读取失败" error={book.error} retrying={book.isFetching} onRetry={() => void book.refetch()} />}
     <QuoteNormalizationPanel bookId={bookId} />
+    <ChapterRepairPanel bookId={bookId} bookVersionId={book.data?.active_version_id} />
   </div>
 }

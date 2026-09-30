@@ -59,6 +59,26 @@ class ChapterOut(ApiModel):
     dialogue_processed: bool = False
 
 
+class ChapterRepairSuggestion(ApiModel):
+    chapter_id: str
+    title: str | None
+    suggested_title: str
+    merge_previous: bool = False
+    reason: str
+
+
+class ChapterRepairIn(ApiModel):
+    chapter_id: str
+    expected_title: str | None
+    title: str = Field(min_length=1, max_length=512)
+    merge_previous: bool = False
+
+
+class ChapterRepairsIn(ApiModel):
+    book_version_id: str
+    repairs: list[ChapterRepairIn] = Field(min_length=1, max_length=500)
+
+
 class ChapterProcessingCompleteIn(ApiModel):
     """并发窗口全部完成后，由编排器请求确认章节覆盖状态。"""
 
