@@ -118,6 +118,24 @@ export default function ModelSettingsPage() {
     setForm({ ...form, paramsText: JSON.stringify(params, null, 2) })
   }
 
+  function changeThinkingDefault(key: 'mode' | 'effort', value: string) {
+    const params = JSON.parse(form.paramsText) as Record<string, unknown>
+    if (key === 'effort') {
+      if (value === 'default') delete params.reasoning_effort
+      else params.reasoning_effort = value
+    } else {
+      const current = params.thinking
+      const thinking = current && typeof current === 'object' && !Array.isArray(current)
+        ? { ...(current as Record<string, unknown>) } : {}
+      if (value === 'default') delete thinking.type
+      else thinking.type = value
+      if (Object.keys(thinking).length) params.thinking = thinking
+      else delete params.thinking
+      if (value === 'disabled') delete params.reasoning_effort
+    }
+    setForm({ ...form, paramsText: JSON.stringify(params, null, 2) })
+  }
+
   const connectionTest = useMutation({
     mutationFn: (payload: { profileId?: string; draftProfile?: Record<string, unknown> }) =>
       testConnection(
@@ -288,7 +306,7 @@ export default function ModelSettingsPage() {
           <fieldset>
             <legend>常用生成参数</legend>
             <p className="hint">留空表示沿用提供方或任务默认值。输出上限是每次调用的上限，不是本次任务的总额度。
-              思考模式和强度请在「预览与处理」里调整。</p>
+              下方思考设置作为模型配置默认值，也可在「预览与处理」中按任务覆盖。</p>
             {([
               ['max_tokens', '每次调用最大输出 Token', 1, undefined, 1],
               ['temperature', '随机性（越低越稳定）', 0, 2, 0.1],
@@ -300,6 +318,26 @@ export default function ModelSettingsPage() {
                 value={(JSON.parse(form.paramsText)[key] as number | undefined) ?? ''}
                 onChange={event => changeParameter(key, event.target.value)} />
             </label>)}
+          </fieldset>
+          <fieldset>
+            <legend>默认思考设置</legend>
+            <label className="ndr-field">默认思考模式
+              <select data-testid="profile-thinking-mode" value={JSON.parse(form.paramsText).thinking?.type ?? 'default'}
+                onChange={event => changeThinkingDefault('mode', event.target.value)}>
+                <option value="default">模型服务默认（不指定）</option>
+                <option value="disabled">关闭</option><option value="enabled">开启</option><option value="adaptive">自适应</option>
+              </select>
+            </label>
+            <label className="ndr-field">默认思考强度
+              <select data-testid="profile-thinking-effort" value={JSON.parse(form.paramsText).reasoning_effort ?? 'default'}
+                disabled={JSON.parse(form.paramsText).thinking?.type === 'disabled'}
+                onChange={event => changeThinkingDefault('effort', event.target.value)}>
+                <option value="default">模型服务默认（不指定）</option>
+                <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
+              </select>
+            </label>
+            <p className="hint">处理页选择“沿用模型配置”时使用这里保存的默认值；模型服务默认表示不指定参数，并不等于关闭思考。
+              提供方需支持 thinking.type / reasoning_effort。关闭思考会清除默认强度，不会自动增加输出上限或超时。</p>
           </fieldset>
           <details>
             <summary>查看生成参数（只读）</summary>

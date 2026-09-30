@@ -5,8 +5,32 @@ import json
 from fastapi.testclient import TestClient
 
 from ndr.config import Settings
+from ndr.domain.enums import CredentialMode
+from ndr.jobs.service import profile_snapshot
 from ndr.storage.engine import create_db_engine, create_session_factory
-from ndr.storage.models import Job
+from ndr.storage.models import Job, ModelProfile
+
+
+def test_inherited_defaults_and_explicit_overrides() -> None:
+    profile = ModelProfile(
+        id="profile",
+        name="default",
+        protocol="fake-provider",
+        model="fake",
+        base_url="http://127.0.0.1:1",
+        credential_mode=CredentialMode.NONE,
+        params_json=json.dumps({"thinking": {"type": "adaptive"}, "reasoning_effort": "high"}),
+    )
+    assert profile_snapshot(profile)["params"] == {
+        "thinking": {"type": "adaptive"},
+        "reasoning_effort": "high",
+    }
+    overridden = profile_snapshot(profile, {"thinking_mode": "enabled", "reasoning_effort": "low"})
+    assert overridden["params"] == {"thinking": {"type": "enabled"}, "reasoning_effort": "low"}
+    profile.params_json = json.dumps({"thinking": {"type": "disabled"}, "reasoning_effort": "high"})
+    inherited = profile_snapshot(profile, {"thinking_mode": "default", "reasoning_effort": "low"})
+    assert inherited["params"] == {"thinking": {"type": "disabled"}}
+    assert json.loads(profile.params_json)["reasoning_effort"] == "high"
 
 
 def test_roster_and_dialogue_freeze_options_without_changing_profile(

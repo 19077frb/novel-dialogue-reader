@@ -468,7 +468,7 @@ export default function PreviewPage() {
         </div>
       </section>
 
-      <ThinkingSettings disabled={batchProgress.running || singleRunning} />
+      <ThinkingSettings disabled={batchProgress.running || singleRunning} profile={profiles.data?.find(profile => profile.id === profileId)} />
 
       {processingMode === 'single' && !batchProgress.running && (
         <>

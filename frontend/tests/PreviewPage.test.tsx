@@ -370,6 +370,21 @@ describe('PreviewPage', () => {
     ] as never)
   })
 
+  it('显示当前模型的思考默认值，任务可覆盖默认关闭模式', async () => {
+    const profiles = await profilesApi.fetchProfiles()
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([{ ...profiles[0], params: { thinking: { type: 'disabled' } } }])
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    expect(await screen.findByTestId('profile-thinking-defaults')).toHaveTextContent('模式 关闭')
+    expect(screen.getByTestId('processing-thinking-effort')).toBeDisabled()
+    await userEvent.selectOptions(screen.getByTestId('processing-thinking-mode'), 'enabled')
+    expect(screen.getByTestId('processing-thinking-effort')).not.toBeDisabled()
+    await userEvent.selectOptions(screen.getByTestId('processing-thinking-effort'), 'high')
+    await screen.findByTestId('window-picker')
+    await userEvent.click(screen.getByTestId('preview-run'))
+    await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalled())
+    expect(jobsApi.createJob).toHaveBeenCalledWith(expect.objectContaining({ inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'high' } }))
+  })
+
   it('单章与批量共享配置，重新进入页面仍保留配置', async () => {
     const profiles = await profilesApi.fetchProfiles()
     vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([...profiles, { ...profiles[0], id: 'p2', name: '第二模型' }])

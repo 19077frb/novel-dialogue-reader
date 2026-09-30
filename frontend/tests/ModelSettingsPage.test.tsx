@@ -177,6 +177,27 @@ describe('ModelSettingsPage', () => {
     expect(vi.mocked(profilesApi.updateProfile).mock.calls[0][1].params).toEqual({ custom: 'keep', thinking: { type: 'adaptive' }, temperature: 0.3 })
   })
 
+  it('保存、回显和清除模型默认思考设置，不自动增加预算', async () => {
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile({ params: { custom: 'keep', thinking: { type: 'adaptive' }, reasoning_effort: 'high' } })])
+    vi.mocked(profilesApi.updateProfile).mockResolvedValue(profile())
+    renderWithProviders(<ModelSettingsPage />)
+    await userEvent.click(await screen.findByTestId('profile-edit-p1'))
+    expect(screen.getByTestId('profile-thinking-mode')).toHaveValue('adaptive')
+    expect(screen.getByTestId('profile-thinking-effort')).toHaveValue('high')
+    await userEvent.selectOptions(screen.getByTestId('profile-thinking-mode'), 'enabled')
+    await userEvent.selectOptions(screen.getByTestId('profile-thinking-effort'), 'low')
+    await userEvent.click(screen.getByTestId('profile-save'))
+    await waitFor(() => expect(profilesApi.updateProfile).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(profilesApi.updateProfile).mock.calls[0][1].params).toEqual({ custom: 'keep', thinking: { type: 'enabled' }, reasoning_effort: 'low' })
+    await userEvent.click(await screen.findByTestId('profile-edit-p1'))
+    await userEvent.selectOptions(screen.getByTestId('profile-thinking-mode'), 'disabled')
+    expect(screen.getByTestId('profile-thinking-effort')).toBeDisabled()
+    expect(JSON.parse((screen.getByTestId('profile-params') as HTMLTextAreaElement).value)).toEqual({ custom: 'keep', thinking: { type: 'disabled' } })
+    await userEvent.selectOptions(screen.getByTestId('profile-thinking-mode'), 'default')
+    expect(screen.getByTestId('profile-thinking-effort')).not.toBeDisabled()
+    expect(JSON.parse((screen.getByTestId('profile-params') as HTMLTextAreaElement).value)).toEqual({ custom: 'keep' })
+  })
+
   it('编辑时“清除密钥”发送 remove_api_key', async () => {
     vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile()])
     vi.mocked(profilesApi.updateProfile).mockResolvedValue(

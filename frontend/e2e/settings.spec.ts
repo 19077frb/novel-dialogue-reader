@@ -20,6 +20,8 @@ test.describe('模型配置', () => {
     await page.getByTestId('profile-base-url').fill('https://api.example.com/v1')
     await page.getByTestId('profile-model').fill('e2e-model')
     await page.getByTestId('profile-api-key').fill(SECRET)
+    await page.getByTestId('profile-thinking-mode').selectOption('adaptive')
+    await page.getByTestId('profile-thinking-effort').selectOption('high')
     await page.getByTestId('profile-save').click()
 
     const card = page.getByTestId('profile-card').filter({ hasText: name })
@@ -31,6 +33,8 @@ test.describe('模型配置', () => {
     // 编辑（保持不变 → 密钥仍在）
     await card.getByRole('button', { name: '编辑' }).click()
     await expect(page.getByTestId('key-action-keep')).toBeChecked()
+    await expect(page.getByTestId('profile-thinking-mode')).toHaveValue('adaptive')
+    await expect(page.getByTestId('profile-thinking-effort')).toHaveValue('high')
     await page.getByTestId('profile-model').fill('e2e-model-2')
     await page.getByTestId('profile-save').click()
     await expect(card).toContainText('e2e-model-2')
@@ -38,9 +42,15 @@ test.describe('模型配置', () => {
 
     // 清除密钥
     await card.getByRole('button', { name: '编辑' }).click()
+    await page.getByTestId('profile-thinking-mode').selectOption('disabled')
+    await expect(page.getByTestId('profile-thinking-effort')).toBeDisabled()
     await page.getByTestId('key-action-remove').check()
     await page.getByTestId('profile-save').click()
     await expect(card).toContainText('未保存密钥')
+    await card.getByRole('button', { name: '编辑' }).click()
+    await expect(page.getByTestId('profile-thinking-mode')).toHaveValue('disabled')
+    await expect(page.getByTestId('profile-thinking-effort')).toHaveValue('default')
+    await page.getByTestId('profile-cancel').click()
 
     // 删除
     await card.getByRole('button', { name: '删除' }).click()

@@ -156,7 +156,8 @@ def profile_snapshot(
     if mode != "default":
         current = params.get("thinking")
         params["thinking"] = {**(current if isinstance(current, dict) else {}), "type": mode}
-    if mode == "disabled":
+    effective_thinking = params.get("thinking")
+    if isinstance(effective_thinking, dict) and effective_thinking.get("type") == "disabled":
         params.pop("reasoning_effort", None)
     elif options.get("reasoning_effort", "default") != "default":
         params["reasoning_effort"] = options["reasoning_effort"]
