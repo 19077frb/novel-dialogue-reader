@@ -304,5 +304,7 @@ describe('ReaderPage', () => {
     expect(findCurrentStartCp([])).toBeNull()
     expect(findCurrentStartCp([make(-50, 5), make(10, 20)])).toBe(20)
     expect(findCurrentStartCp([make(-50, 5), make(-10, 9)])).toBe(9)
+    const partiallyVisible = { getBoundingClientRect: () => ({ top: -50, bottom: 30 }), dataset: { startCp: '5' } } as unknown as HTMLElement
+    expect(findCurrentStartCp([partiallyVisible, make(40, 20)])).toBe(5)
   })
 })

@@ -39,9 +39,10 @@ function ReaderBatchMessage({ bookId }: { bookId: string }) {
 export function findCurrentStartCp(nodes: HTMLElement[], clipTop = 0): number | null {
   if (nodes.length === 0) return null
   for (const node of nodes) {
-    const top = node.getBoundingClientRect().top
+    const rect = node.getBoundingClientRect()
+    const top = rect.top
     const raw = node.dataset.startCp
-    if (top >= clipTop && raw !== undefined) return Number(raw)
+    if ((top >= clipTop || rect.bottom > clipTop) && raw !== undefined) return Number(raw)
   }
   const last = nodes[nodes.length - 1]?.dataset.startCp
   return last !== undefined ? Number(last) : null
@@ -109,7 +110,7 @@ export default function ReaderPage() {
     enabled: Boolean(bookId) && chapterId !== null,
   })
 
-  // 明确跳转的章节优先于书签；只初始化一次，不覆盖用户后续目录选择。
+  // 明确跳转的章节优先于最后阅读位置；只初始化一次，不覆盖用户后续目录选择。
   useEffect(() => {
     const key = JSON.stringify([bookId, requestedChapterId, requestedPosition])
     if (!book.data || !chapters.data?.length || initializedChapterRef.current === key) return
