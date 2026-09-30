@@ -109,6 +109,7 @@ describe('ExportDialog', () => {
     expect(screen.getByTestId('export-check-mimetype_first')).toHaveTextContent('✓')
     expect(screen.getByTestId('export-standard')).toHaveTextContent('NOT_RUN')
     const link = screen.getByTestId('export-download-link')
+    expect(link).toHaveClass('ndr-button', 'ndr-primary')
     expect(link).toHaveAttribute('href', '/api/exports/a1/download')
   })
 

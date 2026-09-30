@@ -17,7 +17,7 @@ export function ExportDownload({ artifact }: ExportDownloadProps) {
   return (
     <div className="ndr-export-download" data-testid="export-download">
       <a
-        className="ndr-primary-link"
+        className="ndr-button ndr-primary"
         href={exportDownloadUrl(artifact.id)}
         download
         data-testid="export-download-link"

@@ -49,6 +49,20 @@ for (const layout of [
       // Reader heading is the book title, not a separate "阅读" title.
       if (item.name !== 'reader') await expect(header.locator('h2')).toContainText(item.title)
       await expect(header.locator('.hint')).not.toBeEmpty()
+      if (item.name === 'library') {
+        const card = page.getByTestId('book-card').first()
+        const read = card.getByRole('link', { name: '开始阅读' })
+        const remove = card.getByRole('button', { name: '删除', exact: true })
+        await expect(read).toHaveClass('ndr-button ndr-primary')
+        const readStyle = await read.evaluate(el => ({ radius: getComputedStyle(el).borderRadius, height: el.getBoundingClientRect().height }))
+        const deleteStyle = await remove.evaluate(el => ({ radius: getComputedStyle(el).borderRadius, height: el.getBoundingClientRect().height }))
+        expect(readStyle).toEqual(deleteStyle)
+      }
+      if (item.name === 'single') {
+        await expect(page.getByTestId('preview-process')).toHaveClass('ndr-primary')
+        await expect(page.getByTestId('preview-run')).not.toHaveClass(/ndr-primary/)
+        await expect(page.getByTestId('preview-estimate')).not.toHaveClass(/ndr-primary/)
+      }
       if (item.name === 'batch') {
         await page.getByTestId('processing-mode-batch').check()
         await expect(page.getByTestId('batch-processor').locator('.ndr-step-badge')).toHaveText('1')

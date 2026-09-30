@@ -519,6 +519,7 @@ export default function ModelSettingsPage() {
                 </button>
                 <button
                   type="button"
+                  className="ndr-danger"
                   onClick={() => remove.mutate(profile.id)}
                   data-testid={`profile-delete-${profile.id}`}
                 >

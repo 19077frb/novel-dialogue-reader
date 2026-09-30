@@ -93,6 +93,8 @@ describe('LibraryPage', () => {
     vi.mocked(books.deleteBook).mockResolvedValue(undefined)
     renderWithProviders(<LibraryPage />)
     await screen.findByTestId('delete-book-b1')
+    expect(screen.getAllByRole('link', { name: '开始阅读' })[0]).toHaveClass('ndr-button', 'ndr-primary')
+    expect(screen.getAllByRole('link', { name: '开始阅读' })[0]).toHaveAttribute('href', '/books/b1/read')
     mockedFetchBooks.mockResolvedValue({ items: [duplicateBooks[1]], next_cursor: null })
     await userEvent.click(screen.getByTestId('delete-book-b1'))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('书籍 ID：b1'))

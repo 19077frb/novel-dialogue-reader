@@ -568,7 +568,6 @@ export default function PreviewPage() {
           </button>
           <button
             type="button"
-            className="ndr-primary"
             onClick={() => jobMutation.mutate('preview')}
             disabled={runDisabled}
             data-testid="preview-run"
@@ -577,6 +576,7 @@ export default function PreviewPage() {
           </button>
           <button
             type="button"
+            className="ndr-primary"
             onClick={() => jobMutation.mutate('process')}
             disabled={runDisabled}
             data-testid="preview-process"

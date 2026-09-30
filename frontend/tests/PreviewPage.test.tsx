@@ -449,6 +449,9 @@ describe('PreviewPage', () => {
   it('估算只走本地接口，试运行用 preview 模式创建任务并轮询', async () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('annotation-span')
+    expect(screen.getByTestId('preview-process')).toHaveClass('ndr-primary')
+    expect(screen.getByTestId('preview-run')).not.toHaveClass('ndr-primary')
+    expect(screen.getByTestId('preview-estimate')).not.toHaveClass('ndr-primary')
 
     await waitFor(() => expect(jobsApi.estimateRange).toHaveBeenCalledTimes(1))
     expect(await screen.findByTestId('estimate-summary')).toHaveTextContent('1260 token')

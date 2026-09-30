@@ -139,8 +139,16 @@ dd {
   color: var(--ndr-error);
 }
 
-button {
+/* 链接式操作只复用按钮外观，保留链接的导航/下载语义。 */
+button,
+.ndr-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   font: inherit;
+  line-height: 1.5;
+  text-decoration: none;
   padding: 6px 14px;
   border-radius: var(--ndr-radius-control);
   border: 1px solid var(--ndr-border);
@@ -151,7 +159,8 @@ button {
     box-shadow 0.15s ease;
 }
 
-button:hover:not(:disabled) {
+button:hover:not(:disabled),
+.ndr-button:hover {
   border-color: var(--ndr-accent);
   color: var(--ndr-accent);
 }
@@ -1259,6 +1268,13 @@ textarea:focus-visible {
 .ndr-book-card:hover {
   box-shadow: var(--ndr-shadow-hover);
   transform: translateY(-2px);
+}
+
+.ndr-book-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .ndr-quote-legend {
