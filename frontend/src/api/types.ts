@@ -5,6 +5,8 @@
 import type { components } from './schema'
 
 export type BookOut = components['schemas']['BookOut']
+export type BookmarkOut = components['schemas']['BookmarkOut']
+export type BookmarkCreate = components['schemas']['BookmarkCreate']
 export type BookCharacterOut = components['schemas']['BookCharacterOut']
 export type CharacterDirectoryOut = components['schemas']['CharacterDirectoryOut']
 export type CharacterEditIn = components['schemas']['CharacterEditIn']

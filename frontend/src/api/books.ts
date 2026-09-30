@@ -63,6 +63,7 @@ export function completeChapterProcessing(
 }
 
 export interface ContentQuery {
+  startCp?: number | null
   chapterId?: string | null
   cursor?: string | null
   limit?: number
@@ -74,6 +75,7 @@ export function fetchContent(
   signal?: AbortSignal,
 ): Promise<ContentResponse> {
   const params = new URLSearchParams()
+  if (query.startCp !== undefined && query.startCp !== null) params.set('start_cp', String(query.startCp))
   if (query.chapterId) params.set('chapter_id', query.chapterId)
   if (query.cursor) params.set('cursor', query.cursor)
   params.set('limit', String(query.limit ?? 500))

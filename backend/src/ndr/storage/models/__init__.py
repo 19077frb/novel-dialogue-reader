@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from ..base import Base
 from .book import Book, BookVersion, Chapter, ContentNode, Resource
+from .bookmark import Bookmark
 from .characters import BookCharacter, ChapterCharacterRoster
 from .dialogue import Gap, Participant, Quote, Scene, SceneMembership, SpeakerGroup
 from .exports import ExportArtifact, ExportSnapshot
@@ -22,6 +23,7 @@ __all__ = [
     "AnnotationHistory",
     "Base",
     "Book",
+    "Bookmark",
     "BookCharacter",
     "BookVersion",
     "Chapter",

@@ -29,7 +29,7 @@ class Book(IdMixin, TimestampMixin, VersionMixin, Base):
         default=ImportStatus.PENDING,
     )
     read_position_cp: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # 书签所属版本（逻辑引用 book_versions.id；与 active_version_id 同理不建外键）。
+    # 最后阅读位置所属版本（逻辑引用 book_versions.id；与 active_version_id 同理不建外键）。
     read_position_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # 阅读模式：initial（初读，只用读到的证据）或 reread（重读，可用后文证据）。
     reading_mode: Mapped[ReadingMode] = mapped_column(

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from . import __version__
 from .api.annotations import router as annotations_router
+from .api.bookmarks import router as bookmarks_router
 from .api.books import router as books_router
 from .api.characters import router as characters_router
 from .api.corrections import (
@@ -89,9 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = session_factory
     # 凭据服务：system 用系统凭据库；测试/E2E 用 NDR_CREDENTIAL_BACKEND=session 隔离。
     app.state.credentials = CredentialService(
-        system=SystemCredentialStore(
-            enabled=resolved.credential_backend.lower() != "session"
-        )
+        system=SystemCredentialStore(enabled=resolved.credential_backend.lower() != "session")
     )
     # 默认值：未进入 lifespan（例如直接构造 app）时健康检查仍可用。
     app.state.started_at = datetime.now(tz=UTC)
@@ -113,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health_router, prefix="/api")
     app.include_router(books_router, prefix="/api")
+    app.include_router(bookmarks_router, prefix="/api")
     app.include_router(characters_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
     app.include_router(quotes_router, prefix="/api")

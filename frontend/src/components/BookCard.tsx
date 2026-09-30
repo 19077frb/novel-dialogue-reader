@@ -36,8 +36,8 @@ export function BookCard({ book, onDelete, deleting = false }: {
         <dd>
           {version ? (version.encoding === 'xml' ? 'XML（EPUB 文档自带）' : version.encoding) : '—'}
         </dd>
-        <dt>阅读位置</dt>
-        <dd>{book.read_position_cp}</dd>
+        <dt>最后读到</dt>
+        <dd>{book.last_read_chapter_title ?? '尚未记录'}</dd>
         <dt>导入时间</dt>
         <dd>{new Date(book.created_at).toLocaleString('zh-CN')}</dd>
       </dl>

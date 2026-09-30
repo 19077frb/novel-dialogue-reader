@@ -10,9 +10,10 @@ import {
   fetchContent,
   fetchQuotes,
   queryKeys,
-  saveReadingProgress,
 } from '../api/books'
-import { ApiError } from '../api/client'
+import { addBookmark, bookmarkKey } from '../api/bookmarks'
+import { BookmarkList } from '../components/BookmarkList'
+import { useReadingProgress } from '../hooks/useReadingProgress'
 import type { ChapterOut, ContentNodeOut, ReadingMode } from '../api/types'
 import { ChapterNavigation } from '../components/ChapterNavigation'
 import {
@@ -34,12 +35,12 @@ function ReaderBatchMessage({ bookId }: { bookId: string }) {
 }
 
 /** 找到视口内第一个节点对应的起点；用于保存阅读位置（纯函数，便于测试）。 */
-export function findCurrentStartCp(nodes: HTMLElement[]): number | null {
+export function findCurrentStartCp(nodes: HTMLElement[], clipTop = 0): number | null {
   if (nodes.length === 0) return null
   for (const node of nodes) {
     const top = node.getBoundingClientRect().top
     const raw = node.dataset.startCp
-    if (top >= 0 && raw !== undefined) return Number(raw)
+    if (top >= clipTop && raw !== undefined) return Number(raw)
   }
   const last = nodes[nodes.length - 1]?.dataset.startCp
   return last !== undefined ? Number(last) : null
@@ -53,13 +54,15 @@ export default function ReaderPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const [searchParams] = useSearchParams()
   const requestedChapterId = searchParams.get('chapterId')
+  const requestedPosition = searchParams.get('positionCp')
+  const [resumeCp, setResumeCp] = useState<number | null>(null)
+  const restoredRef = useRef<string | null>(null)
   const initializedChapterRef = useRef<string | null>(null)
   const queryClient = useQueryClient()
   const batchChapterProgress = useBatchChapterProgress(bookId)
   const annotationRevisions = useBatchAnnotationRevisions(bookId)
   const catalogRevision = useBatchCatalogRevision(bookId)
   const documentRef = useRef<HTMLDivElement>(null)
-  const lastSavedRef = useRef<number | null>(null)
   const [chapterId, setChapterId] = useState<string | null>(null)
   const [cursor, setCursor] = useState<string | null>(null)
   const [pages, setPages] = useState<ContentNodeOut[][]>([])
@@ -69,6 +72,7 @@ export default function ReaderPage() {
   const [readingModeOverride, setReadingModeOverride] = useState<ReadingMode | null>(null)
   const [selectedQuote, setSelectedQuote] = useState<{ quoteId: string; reviewItemId: string | null } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
+  const [bookmarksOpen, setBookmarksOpen] = useState(false)
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -91,9 +95,9 @@ export default function ReaderPage() {
   }, [catalogRevision, bookId, queryClient])
 
   const content = useQuery({
-    queryKey: queryKeys.content(bookId ?? '', chapterId, cursor),
+    queryKey: [...queryKeys.content(bookId ?? '', chapterId, cursor), resumeCp],
     queryFn: ({ signal }) =>
-      fetchContent(bookId as string, { chapterId, cursor, limit: 500 }, signal),
+      fetchContent(bookId as string, { chapterId, cursor, limit: 500, startCp: resumeCp }, signal),
     enabled: Boolean(bookId) && chapterId !== null,
   })
 
@@ -106,21 +110,23 @@ export default function ReaderPage() {
 
   // 明确跳转的章节优先于书签；只初始化一次，不覆盖用户后续目录选择。
   useEffect(() => {
-    const key = JSON.stringify([bookId, requestedChapterId])
+    const key = JSON.stringify([bookId, requestedChapterId, requestedPosition])
     if (!book.data || !chapters.data?.length || initializedChapterRef.current === key) return
-    const position = book.data.read_position_cp
+    const position = book.data.read_position_version_id && book.data.read_position_version_id !== book.data.active_version_id ? 0 : book.data.read_position_cp
     const match =
       chapters.data.find((chapter) => chapter.id === requestedChapterId) ??
       chapters.data.find((chapter) => position >= chapter.start_cp && position < chapter.end_cp) ??
       chapters.data[0]
     initializedChapterRef.current = key
     setChapterId(match ? match.id : null)
-  }, [bookId, requestedChapterId, book.data, chapters.data])
+    const target = requestedPosition !== null ? Number(requestedPosition) : requestedChapterId ? null : position
+    setResumeCp(match && target !== null && Number.isInteger(target) && target >= match.start_cp && target < match.end_cp ? target : null)
+    restoredRef.current = null
+  }, [bookId, requestedChapterId, requestedPosition, book.data, chapters.data])
 
   useEffect(() => {
     setPages([])
     setCursor(null)
-    lastSavedRef.current = null
   }, [chapterId])
 
   useEffect(() => {
@@ -141,6 +147,19 @@ export default function ReaderPage() {
   )
   const activeChapter = chapters.data?.find((chapter) => chapter.id === chapterId) ?? null
   const readingMode: ReadingMode = readingModeOverride ?? book.data?.reading_mode ?? 'initial'
+  const persist = useReadingProgress(bookId ?? '', book.data, setNotice)
+  const bookmark = useMutation({ mutationFn: ({ cp, note }: { cp: number; note: string }) => addBookmark(bookId!, {
+    book_version_id: book.data!.active_version_id!, chapter_id: chapterId!, position_cp: cp, note,
+  }), onSuccess: () => { setNotice('书签已添加。'); void queryClient.invalidateQueries({ queryKey: bookmarkKey(bookId!) }) },
+  onError: (error) => setNotice(`添加书签失败：${error.message}`) })
+
+  useEffect(() => {
+    const key = `${chapterId}:${resumeCp}`
+    if (resumeCp === null || !nodes.length || restoredRef.current === key) return
+    const target = Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [])
+      .find(node => Number(node.dataset.endCp) > resumeCp && Number(node.dataset.startCp) <= resumeCp)
+    if (target) { restoredRef.current = key; target.scrollIntoView?.({ block: 'start' }) }
+  }, [nodes, chapterId, resumeCp])
 
   // 初读 horizon：本章末端。
   // 后文才出现的证据不会提前着色，也不会提前把两个声音合成同一个颜色。
@@ -207,67 +226,31 @@ export default function ReaderPage() {
     enabled: Boolean(bookId),
   })
 
-  const progress = useMutation({
-    mutationFn: (input: {
-      readPositionCp: number
-      readingMode: ReadingMode
-      expectedVersion: number
-    }) =>
-      saveReadingProgress(bookId as string, {
-        bookVersionId: book.data?.active_version_id ?? '',
-        readPositionCp: input.readPositionCp,
-        readingMode: input.readingMode,
-        expectedVersion: input.expectedVersion,
-      }),
-    onSuccess: () => setNotice(null),
-    onError: async (error: unknown) => {
-      if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') {
-        // 服务端版本更新了：刷新书籍后按最新版本重试一次，绝不覆盖较新的写入。
-        const fresh = await book.refetch()
-        if (fresh.data) {
-          progress.mutate({
-            readPositionCp: fresh.data.read_position_cp,
-            readingMode: fresh.data.reading_mode,
-            expectedVersion: fresh.data.version,
-          })
-        }
-        return
-      }
-      setNotice('阅读位置保存失败，稍后会自动重试。')
-    },
-  })
-
-  const persistPosition = useCallback(
-    (readPositionCp: number) => {
-      if (!book.data) return
-      if (lastSavedRef.current === readPositionCp) return
-      lastSavedRef.current = readPositionCp
-      progress.mutate({
-        readPositionCp,
-        readingMode: book.data.reading_mode,
-        expectedVersion: book.data.version,
-      })
-    },
-    [book.data, progress],
-  )
-
   const handleScroll = useCallback(() => {
     const container = documentRef.current
     if (!container) return
+    const bounds = container.getBoundingClientRect()
+    if (bounds.top >= window.innerHeight || bounds.bottom < 0) return
     const elements = Array.from(
       container.querySelectorAll<HTMLElement>('[data-node-id]'),
     ) as HTMLElement[]
-    const startCp = findCurrentStartCp(elements)
-    if (startCp !== null) persistPosition(startCp)
-  }, [persistPosition])
+    const startCp = findCurrentStartCp(elements, Math.max(0, bounds.top))
+    if (startCp !== null && !content.isFetching) persist(startCp, readingMode)
+  }, [persist, readingMode, content.isFetching])
+
+  useEffect(() => {
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [handleScroll])
 
   const handleChapterSelect = useCallback(
     (chapter: ChapterOut) => {
       setChapterId(chapter.id)
+      setResumeCp(null)
       setNotice(null)
-      persistPosition(chapter.start_cp)
+      persist(chapter.start_cp, readingMode, true)
     },
-    [persistPosition],
+    [persist, readingMode],
   )
 
   const focusQuote = useCallback((quoteId: string | null | undefined) => {
@@ -292,7 +275,7 @@ export default function ReaderPage() {
           <p className="hint">
             {book.data?.format ?? ''}
             {encodingLabel ? ` · ${encodingLabel}` : ''}
-            {book.data ? ` · 书签位置 ${book.data.read_position_cp}` : ''}
+            {book.data ? ` · 最后读到：${book.data.last_read_chapter_title ?? activeChapter?.title ?? '尚未记录'}` : ''}
           </p>
         </div>
         <nav className="ndr-book-nav" aria-label="本书导航">
@@ -346,6 +329,18 @@ export default function ReaderPage() {
         </aside>
 
         <section className="card ndr-reader-content" ref={documentRef} onScroll={handleScroll}>
+          <details className="ndr-reader-bookmarks" onToggle={e => setBookmarksOpen(e.currentTarget.open)}>
+            <summary>书签</summary>
+            <p><Link to={`/books/${bookId}/bookmarks`}>管理全部书签</Link></p>
+            <button className="ndr-primary" data-testid="add-bookmark" disabled={bookmark.isPending || !activeChapter || !nodes.length || activeChapter.end_cp <= activeChapter.start_cp} onClick={() => {
+              const elements = Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [])
+              const cp = findCurrentStartCp(elements) ?? activeChapter!.start_cp
+              const note = window.prompt('书签备注（可留空，最多 512 字）', '')
+              if (note !== null) bookmark.mutate({ cp, note: note.slice(0, 512) })
+            }}>添加书签</button>
+            {!nodes.length && <p className="hint">正文读取后可添加书签。</p>}
+            {bookmarksOpen && <BookmarkList bookId={bookId} activeVersionId={book.data?.active_version_id} />}
+          </details>
           {chapterId === null && <p className="hint">这本书没有可显示的章节。</p>}
           {content.isPending && chapterId !== null && <p className="hint">正在读取正文…</p>}
           {content.isError && (
@@ -358,6 +353,7 @@ export default function ReaderPage() {
           )}
           {nodes.length > 0 && (
             <>
+              {resumeCp !== null && activeChapter && resumeCp > activeChapter.start_cp && <button onClick={() => { setResumeCp(null); setPages([]) }}>查看本章前文</button>}
               <h1 className="ndr-chapter-heading">{activeChapter?.title ?? '正文'}</h1>
               <div className="ndr-quote-legend">
                 <label>
@@ -384,7 +380,7 @@ export default function ReaderPage() {
                   <select
                     value={readingMode}
                     onChange={(event) =>
-                      setReadingModeOverride(event.target.value as ReadingMode)
+                      { const mode = event.target.value as ReadingMode; setReadingModeOverride(mode); persist(book.data?.read_position_cp ?? activeChapter?.start_cp ?? 0, mode, true) }
                     }
                     data-testid="reader-reading-mode"
                   >

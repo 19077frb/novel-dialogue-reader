@@ -39,6 +39,7 @@ from ..ingest.query import (
     get_book_or_404,
     list_books,
     list_chapters,
+    reading_chapter_titles,
 )
 from ..ingest.resources import get_resource_or_404, read_resource_bytes
 from ..ingest.service import import_epub, import_txt, record_failed_import
@@ -76,9 +77,7 @@ def _epub_limits(settings: Settings) -> EpubLimits:
         max_total_uncompressed_bytes=getattr(
             settings, "max_epub_total_uncompressed_bytes", 200 * 1024 * 1024
         ),
-        max_entry_uncompressed_bytes=getattr(
-            settings, "max_epub_entry_bytes", 32 * 1024 * 1024
-        ),
+        max_entry_uncompressed_bytes=getattr(settings, "max_epub_entry_bytes", 32 * 1024 * 1024),
         max_spine_items=getattr(settings, "max_epub_spine_items", 500),
     )
 
@@ -213,7 +212,11 @@ def get_book_route(
 ) -> DataEnvelope[BookOut]:
     book = get_book_or_404(session, book_id)
     return DataEnvelope(
-        data=book_out(book, active_version(session, book)),
+        data=book_out(
+            book,
+            active_version(session, book),
+            reading_chapter_titles(session, [book]).get(book.id),
+        ),
         request_id=current_request_id(request),
     )
 
@@ -373,9 +376,7 @@ def get_resource_route(
 
     name = Path(resource.relative_path).name or resource.resource_id
     ascii_name = name.encode("ascii", "ignore").decode("ascii") or "resource"
-    disposition = (
-        f'inline; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(name)}'
-    )
+    disposition = f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
     return Response(
         content=payload,
         media_type=resource.media_type or "application/octet-stream",
@@ -385,6 +386,7 @@ def get_resource_route(
             "X-Resource-Sha256": resource.sha256,
         },
     )
+
 
 @router.put(
     "/{book_id}/reading-progress",
@@ -396,7 +398,7 @@ def save_reading_progress_route(
     book_id: str,
     payload: ReadingProgressIn,
 ) -> DataEnvelope[ReadingProgressOut]:
-    """保存书签：只写数据库，不触发任何模型调用。"""
+    """保存最后阅读位置：只写数据库，不触发任何模型调用。"""
 
     factory = request.app.state.session_factory
     with transaction(factory) as session:

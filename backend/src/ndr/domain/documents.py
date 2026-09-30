@@ -39,6 +39,8 @@ class BookOut(ApiModel):
     source_sha256: str
     import_status: ImportStatus
     read_position_cp: int = Field(ge=0)
+    read_position_version_id: str | None = None
+    last_read_chapter_title: str | None = None
     reading_mode: ReadingMode = ReadingMode.INITIAL
     version: int = Field(ge=1)
     active_version_id: str | None = None
@@ -95,7 +97,7 @@ class ContentResponse(ApiModel):
 
 
 class ReadingProgressIn(ApiModel):
-    """保存阅读书签：不调用模型，只写位置与模式。"""
+    """保存最后阅读位置：不调用模型，只写位置与模式。"""
 
     book_version_id: str
     read_position_cp: int = Field(ge=0)

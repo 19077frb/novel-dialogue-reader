@@ -46,7 +46,9 @@ def version_out(version: BookVersion) -> BookVersionOut:
     )
 
 
-def book_out(book: Book, version: BookVersion | None) -> BookOut:
+def book_out(
+    book: Book, version: BookVersion | None, last_read_title: str | None = None
+) -> BookOut:
     return BookOut(
         id=book.id,
         title=book.title,
@@ -54,6 +56,8 @@ def book_out(book: Book, version: BookVersion | None) -> BookOut:
         source_sha256=book.source_sha256,
         import_status=book.import_status,
         read_position_cp=book.read_position_cp,
+        read_position_version_id=book.read_position_version_id,
+        last_read_chapter_title=last_read_title,
         reading_mode=book.reading_mode,
         version=book.version,
         active_version_id=book.active_version_id,
@@ -76,13 +80,44 @@ def get_book_or_404(session: Session, book_id: str) -> Book:
     return book
 
 
+def reading_chapter_titles(session: Session, books: list[Book]) -> dict[str, str | None]:
+    if not books:
+        return {}
+    return dict(
+        session.execute(
+            select(Book.id, Chapter.title)
+            .join(
+                Chapter,
+                (Chapter.book_version_id == Book.active_version_id)
+                & (Book.read_position_cp >= Chapter.start_cp)
+                & (Book.read_position_cp < Chapter.end_cp),
+            )
+            .where(Book.id.in_([book.id for book in books]))
+        ).all()
+    )
+
+
 def list_books(
     session: Session, *, limit: int, cursor: str | None
 ) -> tuple[list[BookOut], str | None]:
-    stmt = select(Book).order_by(Book.created_at, Book.id).limit(limit + 1)
+    last_title = (
+        select(Chapter.title)
+        .where(
+            Chapter.book_version_id == Book.active_version_id,
+            Book.read_position_version_id == Book.active_version_id,
+            Chapter.start_cp <= Book.read_position_cp,
+            Chapter.end_cp > Book.read_position_cp,
+        )
+        .correlate(Book)
+        .limit(1)
+        .scalar_subquery()
+    )
+    stmt = select(Book, last_title).order_by(Book.created_at, Book.id).limit(limit + 1)
     if cursor:
         stmt = stmt.where(chronological_cursor(session, Book, cursor))
-    rows = list(session.execute(stmt).scalars())
+    pairs = session.execute(stmt).all()
+    rows = [pair[0] for pair in pairs]
+    titles = {pair[0].id: pair[1] for pair in pairs}
     has_more = len(rows) > limit
     rows = rows[:limit]
     versions = (
@@ -99,7 +134,9 @@ def list_books(
         if rows
         else {}
     )
-    items = [book_out(book, versions.get(book.active_version_id)) for book in rows]
+    items = [
+        book_out(book, versions.get(book.active_version_id), titles.get(book.id)) for book in rows
+    ]
     next_cursor = (
         encode_cursor([rows[-1].created_at.isoformat(), rows[-1].id]) if has_more and rows else None
     )
@@ -233,6 +270,19 @@ def content_nodes(
         if chapter is None or chapter.book_version_id != version.id:
             raise ApiError.not_found("章节不存在或不属于当前版本", chapter_id=chapter_id)
         range_start, range_end = chapter.start_cp, chapter.end_cp
+        if start_cp is not None:
+            if not chapter.start_cp <= start_cp < chapter.end_cp:
+                raise ApiError.validation("续读位置不在所选章节内")
+            anchor = session.scalar(
+                select(ContentNode.start_cp)
+                .where(
+                    ContentNode.chapter_id == chapter.id,
+                    ContentNode.start_cp <= start_cp,
+                )
+                .order_by(ContentNode.start_cp.desc())
+                .limit(1)
+            )
+            range_start = anchor if anchor is not None else chapter.start_cp
     else:
         range_start = 0 if start_cp is None else start_cp
         range_end = canonical_length if end_cp is None else end_cp

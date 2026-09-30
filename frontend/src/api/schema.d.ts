@@ -157,7 +157,7 @@ export interface paths {
         get?: never;
         /**
          * 保存阅读位置与阅读模式（不调用模型）
-         * @description 保存书签：只写数据库，不触发任何模型调用。
+         * @description 保存最后阅读位置：只写数据库，不触发任何模型调用。
          */
         put: operations["save_reading_progress_route_api_books__book_id__reading_progress_put"];
         post?: never;
@@ -165,6 +165,42 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/bookmarks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Bookmarks */
+        get: operations["list_bookmarks_api_books__book_id__bookmarks_get"];
+        put?: never;
+        /** Create Bookmark */
+        post: operations["create_bookmark_api_books__book_id__bookmarks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/bookmarks/{bookmark_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Bookmark */
+        delete: operations["delete_bookmark_api_books__book_id__bookmarks__bookmark_id__delete"];
+        options?: never;
+        head?: never;
+        /** Edit Bookmark */
+        patch: operations["edit_bookmark_api_books__book_id__bookmarks__bookmark_id__patch"];
         trace?: never;
     };
     "/api/books/{book_id}/character-directory": {
@@ -1093,6 +1129,10 @@ export interface components {
             import_status: components["schemas"]["ImportStatus"];
             /** Read Position Cp */
             read_position_cp: number;
+            /** Read Position Version Id */
+            read_position_version_id?: string | null;
+            /** Last Read Chapter Title */
+            last_read_chapter_title?: string | null;
             /** @default initial */
             reading_mode: components["schemas"]["ReadingMode"];
             /** Version */
@@ -1132,6 +1172,58 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** BookmarkCreate */
+        BookmarkCreate: {
+            /** Book Version Id */
+            book_version_id: string;
+            /** Chapter Id */
+            chapter_id: string;
+            /** Position Cp */
+            position_cp: number;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** BookmarkOut */
+        BookmarkOut: {
+            /** Id */
+            id: string;
+            /** Book Id */
+            book_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Chapter Id */
+            chapter_id: string;
+            /** Chapter Title */
+            chapter_title: string;
+            /** Position Cp */
+            position_cp: number;
+            /** Excerpt */
+            excerpt: string;
+            /** Note */
+            note: string;
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** BookmarkPatch */
+        BookmarkPatch: {
+            /** Note */
+            note: string;
+            /** Expected Version */
+            expected_version: number;
         };
         /** BudgetIn */
         BudgetIn: {
@@ -1417,6 +1509,13 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /** CursorPage[BookmarkOut] */
+        CursorPage_BookmarkOut_: {
+            /** Items */
+            items: components["schemas"]["BookmarkOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
         /** CursorPage[GapOut] */
         CursorPage_GapOut_: {
             /** Items */
@@ -1443,6 +1542,15 @@ export interface components {
         /** DataEnvelope[BookOut] */
         DataEnvelope_BookOut_: {
             data: components["schemas"]["BookOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[BookmarkOut] */
+        DataEnvelope_BookmarkOut_: {
+            data: components["schemas"]["BookmarkOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -1506,6 +1614,15 @@ export interface components {
         /** DataEnvelope[CursorPage[BookOut]] */
         DataEnvelope_CursorPage_BookOut__: {
             data: components["schemas"]["CursorPage_BookOut_"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[CursorPage[BookmarkOut]] */
+        DataEnvelope_CursorPage_BookmarkOut__: {
+            data: components["schemas"]["CursorPage_BookmarkOut_"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -2630,7 +2747,7 @@ export interface components {
         ReadingMode: "initial" | "reread";
         /**
          * ReadingProgressIn
-         * @description 保存阅读书签：不调用模型，只写位置与模式。
+         * @description 保存最后阅读位置：不调用模型，只写位置与模式。
          */
         ReadingProgressIn: {
             /** Book Version Id */
@@ -3474,6 +3591,143 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_ReadingProgressOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_bookmarks_api_books__book_id__bookmarks_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CursorPage_BookmarkOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_bookmark_api_books__book_id__bookmarks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookmarkCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_BookmarkOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_bookmark_api_books__book_id__bookmarks__bookmark_id__delete: {
+        parameters: {
+            query: {
+                expected_version: number;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+                bookmark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_bookmark_api_books__book_id__bookmarks__bookmark_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                bookmark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookmarkPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_BookmarkOut_"];
                 };
             };
             /** @description Validation Error */

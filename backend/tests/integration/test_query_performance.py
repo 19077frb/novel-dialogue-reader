@@ -24,6 +24,7 @@ from ndr.domain.enums import (
 from ndr.ingest.query import content_nodes, list_books
 from ndr.ingest.service import import_txt
 from ndr.storage.base import Base
+from ndr.storage.engine import head_revision
 from ndr.storage.migrate import run_migrations
 from ndr.storage.models import Annotation, Book, Chapter, ContentNode, Quote, ReviewItem
 
@@ -195,7 +196,7 @@ def test_index_upgrade_preserves_existing_rows(tmp_settings: Settings) -> None:
         run_migrations(tmp_settings)
         with Session(engine) as session:
             assert session.get(Book, "preserved").title == "keep"
-            assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0013"
+            assert session.scalar(text("SELECT version_num FROM alembic_version")) == head_revision()
     finally:
         engine.dispose()
 
