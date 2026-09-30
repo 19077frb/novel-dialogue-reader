@@ -30,7 +30,7 @@ from ..domain.documents import (
     ReadingProgressIn,
     ReadingProgressOut,
 )
-from ..domain.enums import ErrorCode
+from ..domain.enums import ErrorCode, JobState
 from ..ingest.chapter_repairs import apply_repairs, suggestions
 from ..ingest.deletion import delete_book
 from ..ingest.encoding import DecodeFailure
@@ -46,7 +46,7 @@ from ..ingest.query import (
 )
 from ..ingest.resources import get_resource_or_404, read_resource_bytes
 from ..ingest.service import import_epub, import_txt, record_failed_import
-from ..storage.models import Annotation, BookVersion, Chapter, Quote
+from ..storage.models import Annotation, BookVersion, Chapter, Job, Quote
 from ..storage.transactions import apply_versioned_update, transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
@@ -256,6 +256,18 @@ def chapter_repair_suggestions_route(
     request: Request, book_id: str, session: Session = Depends(get_session),
 ) -> DataEnvelope[list[ChapterRepairSuggestion]]:
     return DataEnvelope(data=suggestions(session, book_id), request_id=current_request_id(request))
+
+
+@router.get("/{book_id}/processing-status", response_model=DataEnvelope[dict[str, int]])
+def processing_status_route(
+    request: Request, book_id: str, session: Session = Depends(get_session),
+) -> DataEnvelope[dict[str, int]]:
+    get_book_or_404(session, book_id)
+    active = session.scalar(select(func.count(Job.id)).where(
+        Job.book_id == book_id,
+        Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
+    )) or 0
+    return DataEnvelope(data={"active_jobs": active}, request_id=current_request_id(request))
 
 
 @router.post("/{book_id}/chapter-repairs", response_model=DataEnvelope[list[ChapterOut]])

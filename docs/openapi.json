@@ -347,6 +347,48 @@
         }
       }
     },
+    "/api/books/{book_id}/processing-status": {
+      "get": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Processing Status Route",
+        "operationId": "processing_status_route_api_books__book_id__processing_status_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_dict_str__int__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/books/{book_id}/chapters/{chapter_id}/processing-complete": {
       "post": {
         "tags": [
@@ -5574,6 +5616,29 @@
           "request_id"
         ],
         "title": "DataEnvelope[dict]"
+      },
+      "DataEnvelope_dict_str__int__": {
+        "properties": {
+          "data": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Data"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[dict[str, int]]"
       },
       "DataEnvelope_list_BookCharacterOut__": {
         "properties": {

@@ -29,6 +29,7 @@ import { ExportDialog } from '../components/ExportDialog'
 import { QuoteDetailDrawer } from '../components/QuoteDetailDrawer'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
 import { SpeakerLegend } from '../components/SpeakerLegend'
+import { AutomaticProcessing } from '../components/AutomaticProcessing'
 
 function ReaderBatchMessage({ bookId }: { bookId: string }) {
   const message = useBatchMessage(bookId)
@@ -347,6 +348,7 @@ export default function ReaderPage() {
             />
           )}
           <ReaderBatchMessage bookId={bookId} />
+          <AutomaticProcessing bookId={bookId} bookVersionId={book.data?.active_version_id} chapterId={chapterId} />
           {chapters.isPending && <p className="hint">正在读取目录…</p>}
           </div>
           {sidebarTab === 'bookmarks' && <div id="bookmark-panel" role="tabpanel" aria-labelledby="bookmark-tab">

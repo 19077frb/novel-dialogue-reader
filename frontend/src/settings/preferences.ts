@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
 export const SETTINGS_KEY = 'ndr:general-settings:v1'
-export const defaultSettings = { fontSize: 16, lineHeight: 1.95, resumeReading: true, showCandidates: true, showAnnotations: true }
+export const defaultSettings = { fontSize: 16, lineHeight: 1.95, resumeReading: true, showCandidates: true, showAnnotations: true, autoProcessing: false, lookAheadChapters: 2 }
 export type GeneralSettings = typeof defaultSettings
 let fallback = JSON.stringify(defaultSettings)
 let rawCache: string | undefined
@@ -18,7 +18,9 @@ export function getGeneralSettings(): GeneralSettings {
         lineHeight: Number.isFinite(value.lineHeight) ? Math.min(2.6, Math.max(1.5, value.lineHeight)) : 1.95,
         resumeReading: typeof value.resumeReading === 'boolean' ? value.resumeReading : true,
         showCandidates: typeof value.showCandidates === 'boolean' ? value.showCandidates : true,
-        showAnnotations: typeof value.showAnnotations === 'boolean' ? value.showAnnotations : true }
+        showAnnotations: typeof value.showAnnotations === 'boolean' ? value.showAnnotations : true,
+        autoProcessing: typeof value.autoProcessing === 'boolean' ? value.autoProcessing : false,
+        lookAheadChapters: Number.isSafeInteger(value.lookAheadChapters) ? Math.min(100, Math.max(0, value.lookAheadChapters)) : 2 }
     } catch { cache = defaultSettings }
   }
   return cache

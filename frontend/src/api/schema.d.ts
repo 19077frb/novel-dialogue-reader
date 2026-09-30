@@ -111,6 +111,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/processing-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Processing Status Route */
+        get: operations["processing_status_route_api_books__book_id__processing_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/chapters/{chapter_id}/processing-complete": {
         parameters: {
             query?: never;
@@ -1894,6 +1911,18 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[dict[str, int]] */
+        DataEnvelope_dict_str__int__: {
+            /** Data */
+            data: {
+                [key: string]: number;
+            };
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[list[BookCharacterOut]] */
         DataEnvelope_list_BookCharacterOut__: {
             /** Data */
@@ -3602,6 +3631,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_list_ChapterOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    processing_status_route_api_books__book_id__processing_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_dict_str__int__"];
                 };
             };
             /** @description Validation Error */

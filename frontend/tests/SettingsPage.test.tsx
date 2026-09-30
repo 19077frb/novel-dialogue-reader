@@ -4,9 +4,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import SettingsPage from '../src/pages/SettingsPage'
 import { getGeneralSettings, SETTINGS_KEY } from '../src/settings/preferences'
+import * as profiles from '../src/api/profiles'
+import { getProcessingPreferences } from '../src/processing/preferences'
 import { renderWithProviders } from './helpers'
 
-beforeEach(() => localStorage.clear())
+vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['profiles'] } }))
+beforeEach(() => { localStorage.clear(); vi.mocked(profiles.fetchProfiles).mockResolvedValue([]) })
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks() })
 it('persists display preferences and rehydrates the same values on reopening', async () => {
   const first = renderWithProviders(<SettingsPage />)
@@ -27,4 +30,15 @@ it('bounds corrupt stored values and falls back safely for invalid JSON', () => 
   expect(getGeneralSettings().fontSize).toBe(16)
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ fontSize: 1000, lineHeight: -1, showAnnotations: 'no' }))
   expect(getGeneralSettings()).toMatchObject({ fontSize: 28, lineHeight: 1.5, showAnnotations: true })
+})
+
+it('keeps automatic processing off by default and remembers look-ahead and shared limits', async () => {
+  renderWithProviders(<SettingsPage />)
+  expect(screen.getByLabelText(/阅读时自动处理当前章/)).not.toBeChecked()
+  await userEvent.click(screen.getByLabelText(/阅读时自动处理当前章/))
+  fireEvent.change(screen.getByLabelText('提前处理后续章节数'), { target: { value: '4' } })
+  fireEvent.change(screen.getByLabelText('最大并发任务数'), { target: { value: '3' } })
+  fireEvent.change(screen.getByLabelText('自动处理 Token 上限（留空＝不限）'), { target: { value: '50000' } })
+  expect(getGeneralSettings()).toMatchObject({ autoProcessing: true, lookAheadChapters: 4 })
+  expect(getProcessingPreferences()).toMatchObject({ concurrency: 3, tokenLimit: 50000 })
 })

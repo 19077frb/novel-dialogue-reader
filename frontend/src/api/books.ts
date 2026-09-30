@@ -52,6 +52,10 @@ export function fetchChapterRepairs(bookId: string, signal?: AbortSignal): Promi
   return apiData(`/api/books/${bookId}/chapter-repairs`, { signal })
 }
 
+export function fetchProcessingStatus(bookId: string, signal?: AbortSignal): Promise<{ active_jobs: number }> {
+  return apiData(`/api/books/${bookId}/processing-status`, { signal })
+}
+
 export function repairChapters(bookId: string, bookVersionId: string, repairs: ChapterRepairIn[]): Promise<ChapterOut[]> {
   return apiData(`/api/books/${bookId}/chapter-repairs`, { method: 'POST', body: { book_version_id: bookVersionId, repairs } })
 }

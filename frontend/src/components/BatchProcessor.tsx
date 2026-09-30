@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 
-import { completeChapterProcessing, fetchJob } from '../api/books'
+import { completeChapterProcessing } from '../api/books'
 import {
   analyzeCharacterRoster,
   confirmCharacterRoster,
@@ -8,10 +8,10 @@ import {
 } from '../api/characters'
 import { createJob, estimateRange, freshIdempotencyKey } from '../api/jobs'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
-import { createTaskLimiter } from '../processing/concurrency'
+import { createTaskLimiter, mapWithConcurrency } from '../processing/concurrency'
+import { waitForJobCompletion } from '../processing/jobCompletion'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
-
-const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'BUDGET_EXHAUSTED', 'PAUSED', 'PARTIAL'])
+import type { ProcessingPreferences } from '../processing/preferences'
 
 class BatchAbortError extends Error {}
 
@@ -144,6 +144,10 @@ export function isBatchRunning(bookId: string): boolean {
   return batchSnapshots.get(bookId)?.running ?? false
 }
 
+export function hasBatchWork(): boolean {
+  return [...batchSnapshots.values()].some(batch => batch.running)
+}
+
 export function clearBatchProgress(bookId: string) {
   batchSnapshots.delete(bookId)
   batchStopRequests.delete(bookId)
@@ -225,18 +229,12 @@ function jobTokens(job: JobDetailOut): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
-async function waitForJob(job: JobDetailOut, stopped: () => boolean): Promise<JobDetailOut> {
-  let current = job
-  while (!TERMINAL_STATES.has(current.state)) {
-    if (stopped()) throw new Error('批量处理已停止')
-    await new Promise((resolve) => window.setTimeout(resolve, 800))
-    current = await fetchJob(current.id)
-  }
-  if (stopped()) throw new Error('批量处理已停止')
-  return current
+async function waitForJob(job: JobDetailOut): Promise<JobDetailOut> {
+  // Stopping prevents dispatch; keep the slot until the submitted request really finishes.
+  return waitForJobCompletion(job, () => undefined)
 }
 
-interface ChapterPlan {
+export interface ChapterPlan {
   chapter: ChapterOut
   estimate: EstimateOut
 }
@@ -251,89 +249,37 @@ interface BatchProcessorProps {
   initialChapterId?: string | null
 }
 
-export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished, showConfiguration = true, initialChapterId }: BatchProcessorProps) {
-  const batchProgress = useBatchProgress(bookId)
-  const [startId, setStartId] = useState('')
-  const [endId, setEndId] = useState('')
-  const [preferences, setPreferences] = useProcessingPreferences()
-  const { profileId, maxRechecks, concurrency } = preferences
+export interface BatchExecution {
+  bookId: string
+  bookVersionId: string
+  requested: ChapterOut[]
+  plans: ChapterPlan[]
+  preferences: ProcessingPreferences
+  forceReprocess?: boolean
+  initialSpent?: number
+  onUsage?: (spent: number) => void
+  onProgress?: (message: string) => void
+  onError?: (message: string | null) => void
+  onTokenLimit?: (value: string) => void
+  onFinished?: () => void
+}
+
+/** Shared sequenced roster/window pipeline for manual batches and reader look-ahead. */
+export async function runBatchProcessing({ bookId, bookVersionId, requested, plans, preferences,
+  forceReprocess = false, initialSpent = 0, onUsage, onProgress = () => undefined,
+  onError = () => undefined, onTokenLimit = () => undefined, onFinished = () => undefined }: BatchExecution) {
+  if (isBatchRunning(bookId)) throw new Error('本书已有批量任务运行，请先等待或停止。')
+  const { profileId, concurrency, maxRechecks } = preferences
+  if (!profileId) throw new Error('请选择模型配置。')
   const options = inferenceOptions(preferences)
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
-  const setMaxRechecks = (value: number) => setPreferences({ maxRechecks: value })
-  const setTokenLimitText = (value: string) => setPreferences({ tokenLimit: positiveIntegerOrNull(value) })
-  const setConcurrency = (value: number) => setPreferences({ concurrency: value })
-  const [forceReprocess, setForceReprocess] = useState(false)
-  const [running, setRunning] = useState(false)
-  const [estimating, setEstimating] = useState(false)
-  const [estimatedTokens, setEstimatedTokens] = useState<number | null>(null)
-  const [plans, setPlans] = useState<ChapterPlan[]>([])
-  const [progress, setProgress] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const stopRef = useRef(false)
-
-  useEffect(() => {
-    if (profiles.length > 0 && !profiles.some(profile => profile.id === profileId)) {
-      setPreferences({ profileId: profiles[0].id })
-    }
-  }, [profileId, profiles, setPreferences])
-
-  const firstId = startId || chapters.find((chapter) => chapter.id === initialChapterId)?.id || chapters[0]?.id || ''
-  const lastId = endId || chapters.at(-1)?.id || ''
-  const startIndex = chapters.findIndex((chapter) => chapter.id === firstId)
-  const endIndex = chapters.findIndex((chapter) => chapter.id === lastId)
-  const validRange = startIndex >= 0 && endIndex >= startIndex
-
-  const resetEstimate = () => {
-    setEstimatedTokens(null)
-    setPlans([])
-  }
-
-  // Shared settings can change from the single-chapter form or another tab.
-  // Do not run a saved estimate using a different model/recheck policy.
-  useEffect(() => {
-    if (!running) {
-      setEstimatedTokens(null)
-      setPlans([])
-    }
-  }, [profileId, maxRechecks, tokenLimitText, running])
-
-  const calculateEstimate = async () => {
-    if (!validRange) return
-    setEstimating(true)
-    setError(null)
-    setProgress('')
-    try {
-      const requested = chapters.slice(startIndex, endIndex + 1)
-      const selected = requested.filter((chapter) => forceReprocess || !chapter.dialogue_processed)
-      const estimates = await Promise.all(
-        selected.map((chapter) => estimateRange(bookId, {
-          bookVersionId,
-          range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
-          readingMode: 'reread',
-          visibleHorizonCp: null,
-          budget: { maxInputTokens: null, maxOutputTokens: null, maxRechecks },
-        })),
-      )
-      setPlans(selected.map((chapter, index) => ({ chapter, estimate: estimates[index] })))
-      const rosterReserve = selected.reduce(
-        (total, chapter) => total + Math.max(0, chapter.end_cp - chapter.start_cp) + 2_000,
-        0,
-      )
-      setEstimatedTokens(estimates.reduce((total, estimate) => total + estimate.total_tokens, 0) + rosterReserve)
-      if (selected.length < requested.length) setProgress(`已跳过 ${requested.length - selected.length} 个已处理章节。`)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '批量 Token 估算失败')
-    } finally {
-      setEstimating(false)
-    }
-  }
-
-  const run = async () => {
-    if (!validRange || !profileId || !bookVersionId) return
-    const requested = chapters.slice(startIndex, endIndex + 1)
+  const setProgress = onProgress
+  const setError = onError
+  const setTokenLimitText = onTokenLimit
+  const stopRef = { current: false }
     const selectedPlans = plans.filter(({ chapter }) => forceReprocess || !chapter.dialogue_processed)
     let tokenLimit = positiveIntegerOrNull(tokenLimitText)
-    let spent = 0
+    let spent = initialSpent
     let reserved = 0
     let warnedAtEightyPercent = false
     let warningOpen = false
@@ -343,7 +289,6 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     const skippedEmptyChapterIds = new Set<string>()
     stopRef.current = false
     batchStopRequests.delete(bookId)
-    setRunning(true)
     setError(null)
     const tasks: BatchTaskProgress[] = selectedPlans.flatMap(({ chapter, estimate }) => {
       const chapterTitle = chapter.title || `第 ${chapter.ordinal + 1} 章`
@@ -400,12 +345,13 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       const nextLimit = Number(answer.trim())
       if (nextLimit === 0) {
         spent = 0
+        onUsage?.(0)
         warnedAtEightyPercent = false
         publishBatch(bookId, { message: '额度已刷新，继续后台处理…' })
         return
       }
-      if (!Number.isFinite(nextLimit) || nextLimit <= spent) {
-        throw new BatchAbortError(`新额度必须大于当前已使用的 ${spent.toLocaleString()} tokens`)
+      if (!Number.isSafeInteger(nextLimit) || nextLimit <= spent + reserved) {
+        throw new BatchAbortError(`新额度必须大于已使用及在途预留的 ${(spent + reserved).toLocaleString()} tokens`)
       }
       tokenLimit = Math.floor(nextLimit)
       setTokenLimitText(String(tokenLimit))
@@ -438,6 +384,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         throw new BatchAbortError(`模型没有返回${stage}用量，无法可靠执行 Token 上限，批量处理已停止`)
       }
       spent += jobTokens(job)
+      onUsage?.(spent)
       checkBudgetReminder()
     }
 
@@ -451,6 +398,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       if (state !== 'failed') return
       failedChapterIds.add(chapterId)
       updateChapterProgress(bookId, chapterId, { state: 'failed', error })
+      if (!taskId.startsWith('roster:')) return
       const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
       publishBatch(bookId, {
         tasks: current.tasks.map((task) => task.chapterId === chapterId && task.state === 'queued'
@@ -477,7 +425,6 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
               maxInputTokens: available,
               idempotencyKey: freshIdempotencyKey('batch-roster', `${bookId}:${chapter.id}:${profileId}`),
             }),
-            () => batchShouldStop(bookId, stopRef.current),
           )
           if (rosterJob.state !== 'COMPLETED') throw new Error(rosterJob.last_error || `${prefix}的人物识别未完成`)
           recordUsage(rosterJob, '人物识别')
@@ -553,7 +500,6 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
                   `${bookId}:${chapter.id}:${windowId}:${profileId}:${maxRechecks}`,
                 ),
               }),
-              () => batchShouldStop(bookId, stopRef.current),
             )
             if (dialogueJob.state !== 'COMPLETED') throw new Error(dialogueJob.last_error || `${prefix}的窗口 ${windowId} 未完成`)
             recordUsage(dialogueJob, '对白处理')
@@ -631,6 +577,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         }
       }
       const outcomes = await Promise.allSettled(pendingWork)
+      if (batchShouldStop(bookId, stopRef.current)) throw new BatchAbortError('批量处理已停止')
       const abortOutcome = outcomes.find((outcome) =>
         outcome.status === 'rejected' && isBatchAbortError(outcome.reason)
       )
@@ -668,11 +615,94 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         ])),
       })
     } finally {
-      setRunning(false)
       batchStopRequests.delete(bookId)
+    }
+}
+
+export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished, showConfiguration = true, initialChapterId }: BatchProcessorProps) {
+  const batchProgress = useBatchProgress(bookId)
+  const [startId, setStartId] = useState('')
+  const [endId, setEndId] = useState('')
+  const [preferences, setPreferences] = useProcessingPreferences()
+  const { profileId, maxRechecks, concurrency } = preferences
+  const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
+  const setMaxRechecks = (value: number) => setPreferences({ maxRechecks: value })
+  const setTokenLimitText = (value: string) => setPreferences({ tokenLimit: positiveIntegerOrNull(value) })
+  const setConcurrency = (value: number) => setPreferences({ concurrency: value })
+  const [forceReprocess, setForceReprocess] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [estimating, setEstimating] = useState(false)
+  const [estimatedTokens, setEstimatedTokens] = useState<number | null>(null)
+  const [plans, setPlans] = useState<ChapterPlan[]>([])
+  const [progress, setProgress] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (profiles.length > 0 && !profiles.some(profile => profile.id === profileId)) {
+      setPreferences({ profileId: profiles[0].id })
+    }
+  }, [profileId, profiles, setPreferences])
+
+  const firstId = startId || chapters.find((chapter) => chapter.id === initialChapterId)?.id || chapters[0]?.id || ''
+  const lastId = endId || chapters.at(-1)?.id || ''
+  const startIndex = chapters.findIndex((chapter) => chapter.id === firstId)
+  const endIndex = chapters.findIndex((chapter) => chapter.id === lastId)
+  const validRange = startIndex >= 0 && endIndex >= startIndex
+
+  const resetEstimate = () => {
+    setEstimatedTokens(null)
+    setPlans([])
+  }
+
+  // Shared settings can change from the single-chapter form or another tab.
+  // Do not run a saved estimate using a different model/recheck policy.
+  useEffect(() => {
+    if (!running) {
+      setEstimatedTokens(null)
+      setPlans([])
+    }
+  }, [profileId, maxRechecks, tokenLimitText, running])
+
+  const calculateEstimate = async () => {
+    if (!validRange) return
+    setEstimating(true)
+    setError(null)
+    setProgress('')
+    try {
+      const requested = chapters.slice(startIndex, endIndex + 1)
+      const selected = requested.filter((chapter) => forceReprocess || !chapter.dialogue_processed)
+      const estimates = await mapWithConcurrency(
+        selected, 4, (chapter) => estimateRange(bookId, {
+          bookVersionId,
+          range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
+          readingMode: 'reread',
+          visibleHorizonCp: null,
+          budget: { maxInputTokens: null, maxOutputTokens: null, maxRechecks },
+        }),
+      )
+      setPlans(selected.map((chapter, index) => ({ chapter, estimate: estimates[index] })))
+      const rosterReserve = selected.reduce(
+        (total, chapter) => total + Math.max(0, chapter.end_cp - chapter.start_cp) + 2_000,
+        0,
+      )
+      setEstimatedTokens(estimates.reduce((total, estimate) => total + estimate.total_tokens, 0) + rosterReserve)
+      if (selected.length < requested.length) setProgress(`已跳过 ${requested.length - selected.length} 个已处理章节。`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '批量 Token 估算失败')
+    } finally {
+      setEstimating(false)
     }
   }
 
+  const run = async () => {
+    if (!validRange || !profileId || !bookVersionId) return
+    setRunning(true)
+    try {
+      await runBatchProcessing({ bookId, bookVersionId,
+        requested: chapters.slice(startIndex, endIndex + 1), plans, preferences, forceReprocess,
+        onProgress: setProgress, onError: setError, onTokenLimit: setTokenLimitText, onFinished })
+    } finally { setRunning(false) }
+  }
   const taskList = (() => {
     if (!batchProgress.running && batchProgress.tasks.length === 0) return null
     const finishedTasks = batchProgress.tasks.filter((task) =>
