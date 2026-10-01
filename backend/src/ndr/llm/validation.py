@@ -333,7 +333,8 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
             issues.append(
                 ValidationIssue(
                     "unknown_quote_in_scene_update",
-                    f"场景起点引用了未发送的对白：{update.starts_at_quote_id}",
+                    f"场景起点不是本窗口目标对白（只读上下文不能作为起点）："
+                    f"{update.starts_at_quote_id}",
                     update.temp_ref,
                 )
             )

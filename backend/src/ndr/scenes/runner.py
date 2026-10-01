@@ -111,13 +111,14 @@ def _restore_output_references(raw: Any, window) -> Any:  # noqa: ANN001
     fragments = {str(item.fragment_id): item for item in window.fragments}
     targets = set(str(item) for item in window.target_quote_ids)
     reference_repairs: list[str] = []
+    deferred_gaps: set[str] = set()
     for update in payload.get("scene_updates", []) or []:
         if not isinstance(update, dict):
             continue
         gap_id = str(update.get("after_gap_id", ""))
         starts_at = str(update.get("starts_at_quote_id", ""))
         gap = fragments.get(gap_id)
-        if starts_at != gap_id or gap is None:
+        if gap is None or gap.kind.value not in {"inner_gap", "outer_gap"}:
             continue
         candidates = sorted(
             (
@@ -127,12 +128,51 @@ def _restore_output_references(raw: Any, window) -> Any:  # noqa: ANN001
             ),
             key=lambda item: item.start_cp,
         )
-        if candidates:
+        start_fragment = fragments.get(starts_at)
+        # A trailing context break has no target in this window. It belongs to
+        # the next window, not to a read-only overlap fragment. Only remove an
+        # unused declaration with a known context reference; never guess IDs or
+        # rewrite any target's scene/speaker assignment.
+        if (
+            not candidates and start_fragment is not None
+            and gap.kind.value == "outer_gap"
+            and starts_at not in targets
+            and (starts_at == gap_id or start_fragment.kind.value == "overlap")
+            and start_fragment.start_cp >= gap.start_cp
+            and sum(
+                item.get("after_gap_id") == gap_id
+                for item in payload["scene_updates"] if isinstance(item, dict)
+            ) == 1
+            and any(
+                decision.get("gap_id") == gap_id and decision.get("decision") == "BREAK"
+                for decision in payload["gap_decisions"] if isinstance(decision, dict)
+            )
+            and not any(
+                label.get("scene_ref") == update.get("temp_ref")
+                for label in payload.get("labels", []) if isinstance(label, dict)
+            )
+            and not any(
+                speaker.get("scene_ref") == update.get("temp_ref")
+                for speaker in payload.get("new_speakers", []) if isinstance(speaker, dict)
+            )
+        ):
+            deferred_gaps.add(gap_id)
+            reference_repairs.append(f"deferred_trailing_scene_break:{gap_id}")
+        elif candidates and starts_at == gap_id:
             quote_id = str(candidates[0].fragment_id)
             update["starts_at_quote_id"] = quote_id
             reference_repairs.append(
                 f"repaired_scene_start:{gap_id}->{quote_id}"
             )
+    if deferred_gaps:
+        payload["scene_updates"] = [update for update in payload["scene_updates"]
+                                   if not isinstance(update, dict)
+                                   or update.get("after_gap_id") not in deferred_gaps]
+        payload["gap_decisions"] = [
+            {**decision, "decision": "CONTINUE"}
+            if isinstance(decision, dict) and decision.get("gap_id") in deferred_gaps
+            else decision for decision in payload["gap_decisions"]
+        ]
     if reference_repairs:
         payload["_reference_repairs"] = reference_repairs
     return payload
@@ -151,6 +191,11 @@ def _messages_for(
     def alias(ref: str) -> str:
         return stable_to_alias.get(ref, ref)
 
+    targets = set(window.target_quote_ids)
+    target_fragments = sorted(
+        (fragment for fragment in window.fragments if fragment.fragment_id in targets),
+        key=lambda fragment: fragment.start_cp,
+    )
     context_records = [
         {
             "ref": alias(fragment.fragment_id),
@@ -158,6 +203,10 @@ def _messages_for(
             "start_cp": fragment.start_cp,
             "end_cp": fragment.end_cp,
             "text": fragment.text,
+            **({"next_target_quote_id": next(
+                (alias(target.fragment_id) for target in target_fragments
+                 if target.start_cp >= fragment.end_cp), None,
+            )} if fragment.kind.value in {"inner_gap", "outer_gap"} else {}),
         }
         for fragment in window.fragments
     ]

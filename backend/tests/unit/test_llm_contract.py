@@ -26,7 +26,8 @@ from ndr.llm.validation import (
     parse_and_validate,
     parse_output,
 )
-from ndr.scenes.runner import _restore_output_references
+from ndr.scenes.runner import _messages_for, _restore_output_references
+from ndr.scenes.state import SceneState
 
 TARGETS = LabelingTargets(
     quote_ids=("q1", "q2"),
@@ -282,6 +283,59 @@ def test_gap_id_used_as_scene_start_is_repaired_to_next_target() -> None:
     assert restored["scene_updates"][0]["after_gap_id"] == "gap-1"
     assert restored["scene_updates"][0]["starts_at_quote_id"] == "quote-2"
     assert restored["_reference_repairs"] == ["repaired_scene_start:gap-1->quote-2"]
+
+
+@pytest.mark.parametrize("unsafe", [None, "invented", "used_scene", "duplicate"])
+def test_trailing_overlap_scene_start_is_deferred_only_when_unambiguous(unsafe) -> None:
+    def fragment(ref, kind, start, end):
+        return SimpleNamespace(fragment_id=ref, kind=SimpleNamespace(value=kind),
+                               start_cp=start, end_cp=end)
+
+    window = SimpleNamespace(target_quote_ids=("q1",), fragments=(
+        fragment("q1", "target_quote", 10, 20),
+        fragment("tail", "outer_gap", 20, 30),
+        fragment("overlap:30-40", "overlap", 30, 40),
+    ))
+    raw = {"schema_version": "1.0", "scene_updates": [{
+        "temp_ref": "scene_2", "after_gap_id": "G1",
+        "starts_at_quote_id": "invented" if unsafe == "invented" else "E1",
+    }], "gap_decisions": [{"gap_id": "G1", "decision": "BREAK"}],
+        "labels": [{"quote_id": "Q1", "scene_ref": "scene_2" if unsafe == "used_scene" else "scene_current",
+                    "kind": "thought", "assignment": None, "speaker_ref": None,
+                    "basis": "INSUFFICIENT", "evidence_refs": []}]}
+    if unsafe == "duplicate":
+        raw["scene_updates"].append({**raw["scene_updates"][0], "temp_ref": "scene_3"})
+    restored = _restore_output_references(raw, window)
+    report = parse_and_validate({key: value for key, value in restored.items() if not key.startswith("_")},
+                                LabelingTargets(quote_ids=("q1",), gap_ids=("tail",),
+                                                evidence_ids=("q1", "tail", "overlap:30-40")))
+    if unsafe:
+        assert not report.ok
+        assert restored["scene_updates"]
+    else:
+        assert report.ok, report.messages
+        assert restored["scene_updates"] == []
+        assert restored["gap_decisions"][0]["decision"] == "CONTINUE"
+        assert restored["_reference_repairs"] == ["deferred_trailing_scene_break:tail"]
+    assert raw["scene_updates"][0]["starts_at_quote_id"] == ("invented" if unsafe == "invented" else "E1")
+
+
+def test_prompt_gives_exact_scene_start_targets_and_marks_trailing_gap_read_only() -> None:
+    def fragment(ref, kind, start, end):
+        return SimpleNamespace(fragment_id=ref, kind=SimpleNamespace(value=kind),
+                               start_cp=start, end_cp=end, text="测试上下文")
+
+    fragments = (fragment("q1", "target_quote", 10, 20),
+                 fragment("between", "inner_gap", 20, 30),
+                 fragment("q2", "target_quote", 30, 40),
+                 fragment("tail", "outer_gap", 40, 50))
+    window = SimpleNamespace(target_quote_ids=("q1", "q2"), fragments=fragments,
+                             fragment_ids=tuple(item.fragment_id for item in fragments))
+    messages = _messages_for(window=window, state=SceneState(), locked_summary=None)
+    content = messages[-1]["content"]
+    assert '"next_target_quote_id":"Q2"' in content
+    assert '"next_target_quote_id":null' in content
+    assert "不得输出 BREAK" in messages[0]["content"]
 
 
 def test_undeclared_new_speaker_is_repaired_with_warning() -> None:

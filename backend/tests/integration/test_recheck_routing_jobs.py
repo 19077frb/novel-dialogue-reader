@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -22,7 +23,7 @@ from ndr.jobs.scheduler import run_job
 from ndr.jobs.service import usage_summary
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.storage.engine import create_db_engine, create_session_factory
-from ndr.storage.models import InferenceRun, Job, JobWindow
+from ndr.storage.models import Annotation, AnnotationHistory, InferenceRun, Job, JobWindow
 from ndr.storage.transactions import transaction
 
 OPENING = "「雨停了。」"
@@ -78,6 +79,7 @@ def _create_job(
     profile_id: str,
     key: str,
     range_payload: dict | None = None,
+    max_rechecks: int | None = None,
 ) -> dict:
     payload = {
         "book_id": book_id,
@@ -88,6 +90,8 @@ def _create_job(
         "idempotency_key": key,
         "run_now": False,
     }
+    if max_rechecks is not None:
+        payload["budget"]["max_rechecks"] = max_rechecks
     response = client.post("/api/jobs", json=payload)
     assert response.status_code == 202, response.text
     return response.json()["data"]
@@ -171,6 +175,64 @@ def test_job_budget_enables_recheck_without_context_2(
     assert len(adapter.calls) == 2
 
 
+@pytest.mark.parametrize("limit", [0, 1])
+def test_explicit_recheck_limit_overrides_context_policy_default(
+    fake_provider_client: TestClient, migrated_settings: Settings, limit: int,
+) -> None:
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, book_id=data["book_id"],
+                      profile_id=_profile(fake_provider_client), key=f"limited-recheck-{limit}",
+                      range_payload={"start_cp": 0, "end_cp": len(SAMPLE), "context_policy": "context-2"})
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            row = session.get(Job, job["id"])
+            row.budget_json = json.dumps({"max_input_tokens": 200_000, "max_rechecks": limit})
+        adapter = FakeProviderAdapter()
+        outcome = run_job(factory, migrated_settings, job_id=job["id"],
+                          adapter_factory=lambda job, snapshot: adapter)
+        assert outcome.state is JobState.COMPLETED
+        assert outcome.recheck_targets == limit
+        assert len(adapter.calls) == (2 if limit else 1)
+    finally:
+        engine.dispose()
+
+
+def test_invalid_recheck_keeps_first_annotations_and_completed_window(
+    fake_provider_client: TestClient, migrated_settings: Settings,
+) -> None:
+    class InvalidRecheckAdapter(FakeProviderAdapter):
+        async def generate_labels(self, payload):
+            raw = await super().generate_labels(payload)
+            if len(self.calls) > 1:
+                raw["labels"][0]["quote_id"] = "not-a-sent-quote"
+            return raw
+
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, book_id=data["book_id"],
+                      profile_id=_profile(fake_provider_client), key="failed-recheck-keeps-first",
+                      max_rechecks=2,
+                      range_payload={"start_cp": 0, "end_cp": len(SAMPLE), "context_policy": "context-2"})
+    adapter = InvalidRecheckAdapter()
+    outcome = _run(migrated_settings, job["id"], lambda job, snapshot: adapter)
+    assert outcome.state is JobState.COMPLETED
+    assert outcome.recheck_calls == 1
+    assert outcome.recheck_windows == 0
+    runs, windows, _progress = _rows(migrated_settings, job["id"])
+    assert [run.state for run in runs] == [InferenceRunState.SUCCEEDED, InferenceRunState.FAILED]
+    assert windows[0].state is JobState.COMPLETED
+    engine, factory = _factory(migrated_settings)
+    try:
+        with factory() as session:
+            annotations = list(session.execute(select(Annotation)).scalars())
+            assert len(annotations) == 2
+            history = list(session.execute(select(AnnotationHistory)).scalars())
+            assert history == []  # Invalid recheck did not replace or revise either first result.
+            assert all(annotation.version == 1 for annotation in annotations)
+    finally:
+        engine.dispose()
+
+
 def test_context_2_rechecks_unresolved_targets_and_restores_evidence(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
@@ -181,6 +243,7 @@ def test_context_2_rechecks_unresolved_targets_and_restores_evidence(
         book_id=data["book_id"],
         profile_id=profile_id,
         key="k-recheck",
+        max_rechecks=2,
         range_payload={"start_cp": 0, "end_cp": len(SAMPLE), "context_policy": "context-2"},
     )
 

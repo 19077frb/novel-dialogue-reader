@@ -150,6 +150,7 @@ def test_window_short_refs_are_restored_to_stable_ids() -> None:
     prompt = messages[-1]["content"]
     assert '"ref":"Q1"' in prompt
     assert '"ref":"G1"' in prompt
+    assert '"next_target_quote_id":null' in prompt
     assert "quote-stable-id" not in prompt
     assert "gap-stable-id" not in prompt
 

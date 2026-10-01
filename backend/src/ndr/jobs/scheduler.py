@@ -420,7 +420,7 @@ def _apply_payload(
         run_id=run_id,
     )
     if not result.validation_ok:
-        return False, result.validation_codes
+        return False, result.validation_codes, result.warnings, list(report.warnings)
     ResultCacheStore(session).put(
         cache_key=cache_key,
         result_json=json.dumps(report.output.model_dump(mode="json"), ensure_ascii=False),
@@ -772,14 +772,11 @@ def run_job(
 
         policy = requested_policy or policy_for_job(job)
         if requested_policy is None:
-            configured_rechecks = int(_budget_of(job).get("max_rechecks", 0) or 0)
-            if configured_rechecks > 0:
+            budget = _budget_of(job)
+            if "max_rechecks" in budget:
                 policy = replace(
                     policy,
-                    recheck_max_targets=max(
-                        policy.recheck_max_targets,
-                        configured_rechecks,
-                    ),
+                    recheck_max_targets=int(budget["max_rechecks"] or 0),
                 )
         if job.kind in {JobKind.INFERENCE, JobKind.RECHECK, JobKind.RECOMPUTE}:
             state = _load_state(job)

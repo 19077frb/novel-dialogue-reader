@@ -52,6 +52,7 @@ export function BudgetForm({ value, onChange }: BudgetFormProps) {
           }
           data-testid="budget-max-rechecks"
         />
+        <span className="hint">只复核有效结果中的待定对白；0 关闭。不是校验失败的重试次数。</span>
       </label>
     </fieldset>
   )

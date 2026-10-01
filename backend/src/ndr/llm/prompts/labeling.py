@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from ..schemas import output_json_schema
 
-LABELING_PROMPT_VERSION = "labeling-12"
+LABELING_PROMPT_VERSION = "labeling-13"
 DATA_DELIMITER = "<<<NDR_DATA>>>"
 ESCAPED_DELIMITER = "<<<NDR_DATA_ESCAPED>>>"
 
@@ -55,6 +55,12 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
 16. 每个 BREAK 必须同时给出一个 scene_updates 项。BREAK 后所有对白改用该项的 temp_ref 作为
     scene_ref；旧场景的 S1/S2 等编号立即失效。新场景中某人的第一句必须用 NEW 并在
     new_speakers 声明，即使此人已在 confirmed_chapter_characters 中或刚在旧场景说过话。
+    starts_at_quote_id 必须是该 Gap 的 next_target_quote_id（Q 引用），不能是 G 或 E。
+    next_target_quote_id=null 表示 Gap 后没有本窗口的目标对白：即使后文换场景，也只作只读证据，
+    此 Gap 不得输出 BREAK 或 scene_updates；切场景留给实际处理后续对白的窗口。
+    新 temp_ref 不得复用当前或其他场景的引用。按目标对白原文顺序逐一核对 scene_ref：
+    起点之前用原场景，从起点开始沿用新场景，直到下一个有效 BREAK，不能中途退回旧场景。
+    needs_context 只能填写本窗口目标对白的 Q 引用；解释、缺失上下文描述、G/E 引用不得填入。
 17. locked_results 中“最近已确认轮次”是上一窗口已落库的可靠接力信息。长段心理描写或观察到
     旁人不会自动更换交谈人；只有原文明示旁人开口，才把发言切给该人物。
 18. 每个 new_speakers[].name 必须填写简短姓名或称呼（不超过32字）。有明确姓名时只写姓名；
