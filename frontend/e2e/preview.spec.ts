@@ -98,6 +98,8 @@ test.describe('预览与按章处理', () => {
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()
 
     // 正式处理：同范围同输入 → 命中缓存，不再发送任何调用
+    // 保存后默认排除已完成窗口；此处明确全选以验证缓存重用。
+    await page.getByTestId('windows-select-all').click()
     await page.getByTestId('preview-process').click()
     await expect(page.getByTestId('job-calls')).toHaveText('0', { timeout: 30_000 })
     await expect(page.getByTestId('job-state')).toHaveText('已完成')

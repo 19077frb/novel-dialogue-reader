@@ -43,7 +43,10 @@ export function ChapterNavigation({ chapters, activeChapterId, onSelect, process
           <ol>
           {chapters.map((chapter) => {
             const active = chapter.id === activeChapterId
-            const progress = processingStates[chapter.id] ?? {
+            const recorded = processingStates[chapter.id]
+            const progress = chapter.dialogue_processed && !['queued', 'roster', 'dialogue'].includes(recorded?.state ?? '')
+              ? { state: 'processed' as const, completedWindows: recorded?.totalWindows ?? 0, totalWindows: recorded?.totalWindows ?? 0, error: null }
+              : recorded ?? {
               state: chapter.dialogue_processed ? 'processed' as const : 'unprocessed' as const,
               completedWindows: 0,
               totalWindows: 0,

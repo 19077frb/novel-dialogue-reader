@@ -4,6 +4,8 @@
 
 ## 响应与错误
 
+本地窗口估算的 `windows` 含 `processing_status`（`completed` / `failed` / `unprocessed`）、`processed_target_count` 和 `last_error`。完成状态由当前已保存标注的覆盖率决定，不依赖浏览器任务列表；未完成窗口的失败状态来自该书籍版本中对应窗口的最近一次任务。查询不调用模型、不写数据库。补做窗口后，整章覆盖完整才写入 `dialogue_processed`；该状态优先于已结束批量任务的旧失败状态，正在重做时仍显示实时进度。
+
 成功响应使用统一数据包：
 
 ```json

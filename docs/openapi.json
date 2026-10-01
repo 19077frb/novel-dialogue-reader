@@ -5901,7 +5901,8 @@
               "type": "object"
             },
             "type": "array",
-            "title": "Windows"
+            "title": "Windows",
+            "description": "Local window plans include processing_status (completed/failed/unprocessed), processed_target_count and last_error; completion is derived from saved annotations."
           }
         },
         "additionalProperties": false,

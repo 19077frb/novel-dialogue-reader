@@ -31,6 +31,7 @@ from ..domain.jobs import JobDetailOut, JobWindowOut
 from ..ingest.query import load_canonical_text
 from ..storage.cache import fingerprint
 from ..storage.models import (
+    Annotation,
     Book,
     BookVersion,
     InferenceRun,
@@ -111,6 +112,25 @@ def estimate_inference(
         for row in session.execute(select(Quote).where(Quote.id.in_(target_ids or [""]))).scalars()
     }
     canonical = load_canonical_text(settings, version)
+    # One bounded result per planned window; never fetch the entire task history.
+    processed_ids = set(session.scalars(
+        select(Annotation.quote_id).where(Annotation.quote_id.in_(target_ids or [""]))
+    ))
+    latest_windows = select(
+        JobWindow.window_id, JobWindow.state, Job.last_error,
+        func.row_number().over(
+            partition_by=JobWindow.window_id,
+            order_by=(Job.created_at.desc(), Job.id.desc()),
+        ).label("rank"),
+    ).join(Job, Job.id == JobWindow.job_id).where(
+        Job.book_version_id == version.id,
+        JobWindow.window_id.in_([window.window_id for window in plan.windows] or [""]),
+    ).subquery()
+    last_attempts = {
+        row.window_id: row for row in session.execute(
+            select(latest_windows).where(latest_windows.c.rank == 1)
+        )
+    }
     windows: list[dict[str, Any]] = []
     for index, window in enumerate(plan.windows):
         positions = [
@@ -118,6 +138,10 @@ def estimate_inference(
         ]
         window_start = min((item[0] for item in positions), default=start_cp)
         window_end = max((item[1] for item in positions), default=window_start)
+        processed_count = sum(item in processed_ids for item in window.target_quote_ids)
+        last_attempt = last_attempts.get(window.window_id)
+        completed = processed_count == len(window.target_quote_ids)
+        failed = last_attempt is not None and last_attempt.state == JobState.FAILED
         windows.append(
             {
                 "window_id": window.window_id,
@@ -128,6 +152,11 @@ def estimate_inference(
                 "estimated_tokens": int(window.budget["total_tokens"])
                 + len(window.target_quote_ids) * output_tokens_per_target,
                 "preview": canonical[window_start : min(window_end, window_start + 160)].strip(),
+                "processing_status": (
+                    "completed" if completed else "failed" if failed else "unprocessed"
+                ),
+                "processed_target_count": processed_count,
+                "last_error": last_attempt.last_error if failed and not completed else None,
             }
         )
     return JobEstimate(

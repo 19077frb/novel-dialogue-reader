@@ -147,6 +147,15 @@ def test_failed_model_output_error_keeps_raw_snippet(
     outcome = _run_with_fake(migrated_settings, job["id"], adapter)
     assert outcome.state is JobState.FAILED
 
+    response = fake_provider_client.post(
+        f"/api/books/{data['book_id']}/estimates",
+        json={"range": {"start_cp": 0, "end_cp": len(SAMPLE)}},
+    )
+    window = response.json()["data"]["windows"][0]
+    assert window["processing_status"] == "failed"
+    assert window["processed_target_count"] == 0
+    assert "原始输出片段" in window["last_error"]
+
     engine, factory = _factory(migrated_settings)
     try:
         with transaction(factory) as session:
@@ -473,6 +482,8 @@ def test_estimate_endpoint_is_local_only(
     assert payload["windows"][0]["target_count"] > 0
     assert payload["windows"][0]["estimated_tokens"] > 0
     assert payload["windows"][0]["preview"]
+    assert payload["windows"][0]["processing_status"] == "unprocessed"
+    assert payload["windows"][0]["processed_target_count"] == 0
     assert payload["estimator"]["method"] == "heuristic-cjk"
     assert any("启发式" in note for note in payload["notes"])
     profile_id = _fake_profile(fake_provider_client, "窗口选择测试")
@@ -485,5 +496,11 @@ def test_estimate_endpoint_is_local_only(
     )
     outcome = _run_with_fake(migrated_settings, selected["id"], FakeProviderAdapter())
     assert outcome.windows_total == 1
+    restored = fake_provider_client.post(
+        f"/api/books/{data['book_id']}/estimates",
+        json={"range": {"start_cp": 0, "end_cp": len(SAMPLE)}},
+    ).json()["data"]
+    assert restored["windows"][0]["processing_status"] == "completed"
+    assert restored["windows"][0]["processed_target_count"] == restored["windows"][0]["target_count"]
     # 未知任务仍保持标准 404 契约。
     assert fake_provider_client.get("/api/jobs/does-not-exist").status_code == 404

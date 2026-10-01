@@ -57,7 +57,7 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
     session.message = `自动处理 ${selected.length} 章，预计约 ${estimated.toLocaleString()} Tokens。`
     await runBatchProcessing({ bookId, bookVersionId, requested, plans, preferences,
       initialSpent: session.spent, onUsage: spent => { session.spent = spent },
-      onError: message => { if (message) { session.message = message; session.blocked = true } },
+      onError: message => { session.blocked = Boolean(message); if (message) session.message = message },
       onProgress: message => { session.message = message }, onFinished })
   } catch (reason) {
     session.blocked = true

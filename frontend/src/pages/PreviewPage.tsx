@@ -23,7 +23,7 @@ import { fetchProfiles, profileKeys } from '../api/profiles'
 import type { AnnotationItemOut, JobDetailOut } from '../api/types'
 import { BudgetForm } from '../components/BudgetForm'
 import { OperationTimer, useRequestClock } from '../components/OperationTimer'
-import { BatchProcessor, useBatchProgress } from '../components/BatchProcessor'
+import { BatchProcessor, reconcileCompletedChapter, useBatchProgress } from '../components/BatchProcessor'
 import { CharacterRosterPanel } from '../components/CharacterRosterPanel'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
@@ -90,6 +90,7 @@ export default function PreviewPage() {
   const [viewMode, setViewMode] = useState<'annotated' | 'original'>('annotated')
   const [selectedWindowIds, setSelectedWindowIds] = useState<string[]>([])
   const selectionKeyRef = useRef('')
+  const selectionTouchedRef = useRef(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const manuallySelectedJobRef = useRef<string | null>(null)
   const taskDetailRef = useRef<HTMLElement | null>(null)
@@ -233,9 +234,10 @@ export default function PreviewPage() {
     if (!estimate) return
     const ids = (estimate.windows ?? []).map((window) => String(window.window_id))
     const key = JSON.stringify([bookId, estimate.book_version_id, range.chapterId, range.startCp, resolvedEnd, ids])
-    if (key === selectionKeyRef.current) return
+    if (key === selectionKeyRef.current && selectionTouchedRef.current) return
+    if (key !== selectionKeyRef.current) selectionTouchedRef.current = false
     selectionKeyRef.current = key
-    setSelectedWindowIds(ids)
+    setSelectedWindowIds((estimate.windows ?? []).filter(window => window.processing_status !== 'completed').map(window => String(window.window_id)))
   }, [estimate, bookId, range.chapterId, range.startCp, resolvedEnd])
 
   const jobMutation = useMutation({
@@ -288,6 +290,7 @@ export default function PreviewPage() {
         setCurrentJob(job)
         queryClient.setQueryData(queryKeys.job(job.id), job)
         if (TERMINAL_JOB_STATES.has(job.state)) {
+          void queryClient.invalidateQueries({ queryKey: ['window-preview', bookId] })
           void queryClient.invalidateQueries({ queryKey: ['annotations'] })
           void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId ?? '') })
         }
@@ -341,9 +344,10 @@ export default function PreviewPage() {
         mode === 'process' &&
         range.chapterId &&
         versionId &&
-        plannedWindows.length === (estimate?.windows?.length ?? 0)
+        (estimate?.windows ?? []).every(window => window.processing_status === 'completed' || selectedWindowIds.includes(String(window.window_id)))
       ) {
         await completeChapterProcessing(bookId as string, range.chapterId, versionId)
+        reconcileCompletedChapter(bookId as string, range.chapterId)
         void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId as string) })
       }
       return jobs.at(-1) as JobDetailOut
@@ -357,6 +361,17 @@ export default function PreviewPage() {
         : `任务结束于 ${SINGLE_TASK_LABELS[job.state] ?? job.state}，请在任务面板查看原因。`)
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : '创建任务失败'),
+  })
+
+  const syncCompletion = useMutation({
+    mutationFn: async () => {
+      if (!bookId || !range.chapterId || !book.data?.active_version_id) throw new Error('请先选择章节')
+      await completeChapterProcessing(bookId, range.chapterId, book.data.active_version_id)
+      reconcileCompletedChapter(bookId, range.chapterId)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })
+    },
+    onSuccess: () => { setError(null); setNotice('章节完成状态已同步，未调用模型。') },
+    onError: (reason: unknown) => setError(reason instanceof Error ? reason.message : '状态同步失败'),
   })
 
   const handleJobUpdate = useCallback(
@@ -510,8 +525,11 @@ export default function PreviewPage() {
           canonicalLengthCp={canonicalLengthCp}
           onChange={(next) => {
             setRange(next)
-            selectionKeyRef.current = ''
-            setSelectedWindowIds([])
+            if (next.chapterId !== range.chapterId || next.startCp !== range.startCp || next.endCp !== range.endCp) {
+              selectionKeyRef.current = ''
+              selectionTouchedRef.current = false
+              setSelectedWindowIds([])
+            }
             setNotice(null)
           }}
         />
@@ -522,8 +540,15 @@ export default function PreviewPage() {
               retrying={estimateQuery.isFetching} onRetry={() => void estimateQuery.refetch()} />}
             {estimate && (estimate.windows?.length ?? 0) > 0 && <WindowPicker
               windows={estimate.windows ?? []} selectedIds={selectedWindowIds}
-              onChange={setSelectedWindowIds} disabled={jobMutation.isPending || estimateQuery.isFetching}
+              onChange={ids => { selectionTouchedRef.current = true; setSelectedWindowIds(ids) }} disabled={jobMutation.isPending || estimateQuery.isFetching}
             />}
+            {estimate?.windows?.length && estimate.windows.every(window => window.processing_status === 'completed')
+              && chapters.data?.some(chapter => chapter.id === range.chapterId && !chapter.dialogue_processed
+                && chapter.start_cp === range.startCp && chapter.end_cp === resolvedEnd) ? <p className="hint">
+                全部窗口已有标注，可直接同步章节状态，无需再次调用模型。
+                <button type="button" disabled={jobMutation.isPending || syncCompletion.isPending || estimateQuery.isFetching}
+                  onClick={() => syncCompletion.mutate()}>同步章节完成状态（不调用模型）</button>
+              </p> : null}
             {estimate && !estimateQuery.isFetching && (estimate.windows?.length ?? 0) === 0 && (
               <p className="hint">本章没有可处理的对白窗口。</p>
             )}
@@ -672,6 +697,7 @@ export default function PreviewPage() {
           profiles={profiles.data ?? []}
           showConfiguration={processingMode === 'batch'}
           onFinished={() => {
+            void queryClient.invalidateQueries({ queryKey: ['window-preview', bookId] })
             void queryClient.invalidateQueries({ queryKey: ['annotations'] })
             void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })
             void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId) })

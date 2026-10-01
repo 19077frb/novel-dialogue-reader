@@ -11,6 +11,16 @@ const CHAPTERS = [
 ] as ChapterOut[]
 
 describe('ChapterNavigation', () => {
+  it('保存的完成状态覆盖旧失败，但正在重做时仍显示实时进度', () => {
+    render(<ChapterNavigation chapters={CHAPTERS.map(chapter => ({ ...chapter, dialogue_processed: true }))}
+      activeChapterId="c1" onSelect={vi.fn()} processingStates={{
+        c1: { state: 'failed', completedWindows: 1, totalWindows: 2, error: '旧失败' },
+        c2: { state: 'dialogue', completedWindows: 0, totalWindows: 2, error: null },
+      }} />)
+    expect(screen.getByRole('button', { name: /第一章/ })).toHaveAttribute('data-processing-state', 'processed')
+    expect(screen.getByRole('button', { name: /第一章/ })).not.toHaveAttribute('title')
+    expect(screen.getByRole('button', { name: /第二章/ })).toHaveAttribute('data-processing-state', 'dialogue')
+  })
   it('用不同状态和颜色类实时标记章节处理进度', () => {
     render(
       <ChapterNavigation

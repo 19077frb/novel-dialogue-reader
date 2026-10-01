@@ -591,6 +591,43 @@ describe('PreviewPage', () => {
     expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
   })
 
+  it('默认跳过已完成窗口，补做失败窗口后标记整章完成', async () => {
+    vi.mocked(jobsApi.estimateRange).mockResolvedValue({ ...ESTIMATE, windows: ESTIMATE.windows!.map(window => ({
+      ...window, processing_status: window.window_id === 'w1' ? 'completed' : 'failed',
+    })) })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('window-picker')
+    expect(screen.getByTestId('window-w1')).not.toBeChecked()
+    expect(screen.getByTestId('window-w2')).toBeChecked()
+    await userEvent.click(screen.getByTestId('preview-process'))
+    await waitFor(() => expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1'))
+    expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
+    expect(jobsApi.createJob).toHaveBeenCalledWith(expect.objectContaining({ selectedWindowIds: ['w2'] }))
+  })
+
+  it('刷新窗口状态后更新默认勾选，但保留用户明确选择的窗口', async () => {
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('window-picker')
+    vi.mocked(jobsApi.estimateRange).mockResolvedValue({ ...ESTIMATE, windows: ESTIMATE.windows!.map(window => ({ ...window, processing_status: 'completed' })) })
+    await userEvent.click(screen.getByTestId('preview-estimate'))
+    await waitFor(() => expect(screen.getByTestId('window-w1')).not.toBeChecked())
+    expect(screen.getByTestId('window-w2')).not.toBeChecked()
+    await userEvent.click(screen.getByTestId('windows-select-all'))
+    await userEvent.click(screen.getByTestId('preview-estimate'))
+    expect(screen.getByTestId('window-w1')).toBeChecked()
+    expect(screen.getByTestId('window-w2')).toBeChecked()
+  })
+
+  it('旧任务标注已完整保存时可以不调用模型同步章节完成状态', async () => {
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue(CHAPTERS.map(chapter => ({ ...chapter, dialogue_processed: false })))
+    vi.mocked(jobsApi.estimateRange).mockResolvedValue({ ...ESTIMATE, windows: ESTIMATE.windows!.map(window => ({ ...window, processing_status: 'completed' })) })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByRole('button', { name: '同步章节完成状态（不调用模型）' }))
+    await waitFor(() => expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1'))
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
+  })
+
   it('人物尚未确认时也提前显示窗口，清空选择后禁止启动', async () => {
     vi.mocked(charactersApi.fetchCharacterRoster).mockResolvedValue({
       ...ROSTER, status: 'DRAFT', confirmed_characters: [], pov_character_id: null,
@@ -633,6 +670,9 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('window-picker')
     await userEvent.click(screen.getByTestId('window-w2'))
+    fireEvent.change(screen.getByTestId('range-chapter'), { target: { value: 'c1' } })
+    expect(screen.getByTestId('window-w1')).toBeChecked()
+    expect(screen.getByTestId('window-w2')).not.toBeChecked()
     await userEvent.click(screen.getByTestId('preview-estimate'))
     await waitFor(() => expect(jobsApi.estimateRange).toHaveBeenCalledTimes(2))
     expect(screen.getByTestId('window-w2')).not.toBeChecked()

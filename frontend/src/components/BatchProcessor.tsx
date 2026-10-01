@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 
-import { completeChapterProcessing } from '../api/books'
+import { completeChapterProcessing, fetchBook, fetchChapters, fetchProcessingStatus } from '../api/books'
+import { ApiError } from '../api/client'
 import {
   analyzeCharacterRoster,
   confirmCharacterRoster,
@@ -53,6 +54,7 @@ export interface BatchTaskProgress {
   windowLabel: string
   state: BatchTaskState
   error: string | null
+  retryable?: boolean
 }
 
 export interface BatchProgressSnapshot {
@@ -83,6 +85,81 @@ const EMPTY_BATCH: BatchProgressSnapshot = {
 const batchSnapshots = new Map<string, BatchProgressSnapshot>()
 const batchListeners = new Set<() => void>()
 const batchStopRequests = new Set<string>()
+const retryPlanning = new Set<string>()
+const batchExecutions = new Map<string, { execution: BatchExecution; spent: number }>()
+
+/** Saved chapter completion supersedes obsolete failures, including manual repairs. */
+export function reconcileCompletedChapter(bookId: string, chapterId: string) {
+  const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
+  publishBatch(bookId, {
+    tasks: current.tasks.map(task => task.chapterId === chapterId ? { ...task, state: 'completed', error: null, retryable: false } : task),
+    chapterStates: { ...current.chapterStates, [chapterId]: {
+      state: 'processed', completedWindows: current.chapterStates[chapterId]?.totalWindows ?? 0,
+      totalWindows: current.chapterStates[chapterId]?.totalWindows ?? 0, error: null,
+    } },
+    catalogRevision: current.catalogRevision + 1,
+  })
+}
+
+export async function retryBatchTask(bookId: string, taskId: string) {
+  if (hasBatchWork()) throw new Error('请等待当前任务结束后再重试。')
+  const saved = batchExecutions.get(bookId)
+  const task = batchSnapshots.get(bookId)?.tasks.find(item => item.id === taskId)
+  if (!saved || !task || task.state !== 'failed' || !task.retryable) throw new Error('此任务不能直接重试，请先查看任务详情并确认后台请求已结束。')
+  retryPlanning.add(bookId)
+  publishBatch(bookId, { running: true, startedAt: Date.now(), finishedAt: null, stopRequested: false,
+    message: '正在检查失败任务与已保存的窗口（不调用模型）…' })
+  try {
+    const [book, chapters, status] = await Promise.all([fetchBook(bookId), fetchChapters(bookId), fetchProcessingStatus(bookId)])
+    if (status.active_jobs > 0) throw new Error('后台仍有任务运行，请等待结束后重试。')
+    if (book.active_version_id !== saved.execution.bookVersionId) throw new Error('书籍版本已改变，请重新进入预览与处理。')
+    const chapter = chapters.find(item => item.id === task.chapterId)
+    if (!chapter) throw new Error('章节已不存在，请重新读取目录。')
+    const estimate = await estimateRange(bookId, { bookVersionId: saved.execution.bookVersionId,
+      range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp }, readingMode: 'reread',
+      budget: { maxInputTokens: null, maxOutputTokens: null, maxRechecks: saved.execution.preferences.maxRechecks } })
+    const windows = estimate.windows ?? []
+    if (batchStopRequests.has(bookId)) throw new Error('已停止准备重试，未调用模型。')
+    const forceReprocess = saved.execution.forceReprocess ?? false
+    if (chapter.dialogue_processed && !forceReprocess) { reconcileCompletedChapter(bookId, chapter.id); saved.execution.onFinished?.(); return }
+    const selected = windows.filter(window => (forceReprocess
+      ? batchSnapshots.get(bookId)?.tasks.find(item => item.chapterId === chapter.id && item.windowId === String(window.window_id))?.state !== 'completed'
+      : window.processing_status !== 'completed')
+      && (task.type === 'roster' || String(window.window_id) === task.windowId))
+    if (task.type === 'dialogue' && !windows.some(window => String(window.window_id) === task.windowId)) {
+      throw new Error('窗口计划已变化，请进入单章处理选择未完成窗口。')
+    }
+    publishBatch(bookId, { running: false })
+    await runBatchProcessing({ ...saved.execution, requested: [chapter], plans: [{ chapter,
+      estimate: { ...estimate, windows: selected }, totalWindows: windows.length,
+      completedWindows: windows.filter(window => forceReprocess
+        ? batchSnapshots.get(bookId)?.tasks.find(item => item.chapterId === chapter.id && item.windowId === String(window.window_id))?.state === 'completed'
+        : window.processing_status === 'completed').length }],
+      forceReprocess, initialSpent: saved.spent, retryTaskId: taskId })
+  } finally {
+    retryPlanning.delete(bookId)
+    batchStopRequests.delete(bookId)
+    publishBatch(bookId, { running: false, stopRequested: false, finishedAt: Date.now() })
+  }
+}
+
+export function BatchRetryControls({ bookId, taskId }: { bookId: string; taskId?: string }) {
+  const progress = useBatchProgress(bookId)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const tasks = progress.tasks.filter(task => task.state === 'failed' && task.retryable && (!taskId || task.id === taskId))
+  if (!tasks.length) return null
+  return <div className="ndr-form-actions">
+    {tasks.map(task => <button key={task.id} type="button" disabled={busy || progress.running}
+      onClick={() => { setBusy(true); setError(null); void retryBatchTask(bookId, task.id)
+        .catch(reason => setError(reason instanceof Error ? reason.message : '重试失败'))
+        .finally(() => setBusy(false)) }}>
+      {busy ? '准备重试…' : `重试${task.type === 'roster' ? '人物识别' : task.windowLabel}`}{!taskId && `（${task.chapterTitle}）`}
+    </button>)}
+    {error && <p className="status-error" role="alert">{error}</p>}
+    {!taskId && <p className="hint">重试会使用原模型配置和剩余额度，不刷新已用额度。人物识别重试成功后继续本章未完成窗口；成功窗口不会重复处理。</p>}
+  </div>
+}
 
 function publishBatch(bookId: string, update: Partial<BatchProgressSnapshot>) {
   const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
@@ -150,12 +227,13 @@ export function isBatchRunning(bookId: string): boolean {
 }
 
 export function hasBatchWork(): boolean {
-  return [...batchSnapshots.values()].some(batch => batch.running)
+  return retryPlanning.size > 0 || [...batchSnapshots.values()].some(batch => batch.running)
 }
 
 export function clearBatchProgress(bookId: string) {
   batchSnapshots.delete(bookId)
   batchStopRequests.delete(bookId)
+  batchExecutions.delete(bookId)
   batchListeners.forEach((listener) => listener())
 }
 
@@ -242,6 +320,8 @@ async function waitForJob(job: JobDetailOut): Promise<JobDetailOut> {
 export interface ChapterPlan {
   chapter: ChapterOut
   estimate: EstimateOut
+  completedWindows?: number
+  totalWindows?: number
 }
 
 interface BatchProcessorProps {
@@ -267,16 +347,21 @@ export interface BatchExecution {
   onError?: (message: string | null) => void
   onTokenLimit?: (value: string) => void
   onFinished?: () => void
+  retryTaskId?: string
 }
 
 /** Shared sequenced roster/window pipeline for manual batches and reader look-ahead. */
 export async function runBatchProcessing({ bookId, bookVersionId, requested, plans, preferences,
   forceReprocess = false, initialSpent = 0, onUsage, onProgress = () => undefined,
-  onError = () => undefined, onTokenLimit = () => undefined, onFinished = () => undefined }: BatchExecution) {
+  onError = () => undefined, onTokenLimit = () => undefined, onFinished = () => undefined, retryTaskId }: BatchExecution) {
   if (isBatchRunning(bookId)) throw new Error('本书已有批量任务运行，请先等待或停止。')
   const { profileId, concurrency, maxRechecks } = preferences
   if (!profileId) throw new Error('请选择模型配置。')
   const options = inferenceOptions(preferences)
+  const execution: BatchExecution = { bookId, bookVersionId, requested, plans, preferences: { ...preferences },
+    forceReprocess, onUsage, onProgress, onError, onTokenLimit, onFinished }
+  const savedExecution = { execution, spent: initialSpent }
+  batchExecutions.set(bookId, savedExecution)
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
   const setProgress = onProgress
   const setError = onError
@@ -305,7 +390,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
           chapterTitle,
           windowId: null,
           windowLabel: '整章人物识别',
-          state: 'queued' as const,
+          state: retryTaskId?.startsWith('dialogue:') ? 'completed' as const : 'queued' as const,
           error: null,
         },
         ...(estimate.windows ?? []).map((window) => ({
@@ -326,16 +411,16 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
       finishedAt: null,
       stopRequested: false,
       message: '准备批量处理…',
-      tasks,
-      chapterStates: Object.fromEntries(requested.map((chapter) => {
+      tasks: retryTaskId ? [...(batchSnapshots.get(bookId)?.tasks ?? []).filter(old => !tasks.some(task => task.id === old.id)), ...tasks] : tasks,
+      chapterStates: { ...(retryTaskId ? batchSnapshots.get(bookId)?.chapterStates : {}), ...Object.fromEntries(requested.map((chapter) => {
         const plan = selectedPlans.find((item) => item.chapter.id === chapter.id)
         return [chapter.id, {
           state: plan ? 'queued' : chapter.dialogue_processed ? 'processed' : 'unprocessed',
-          completedWindows: 0,
-          totalWindows: plan?.estimate.windows?.length ?? 0,
+          completedWindows: plan?.completedWindows ?? 0,
+          totalWindows: plan?.totalWindows ?? plan?.estimate.windows?.length ?? 0,
           error: null,
         } satisfies ChapterProcessingProgress]
-      })),
+      })) },
     })
 
     const checkBudgetReminder = () => {
@@ -352,6 +437,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
       const nextLimit = Number(answer.trim())
       if (nextLimit === 0) {
         spent = 0
+        savedExecution.spent = 0
         onUsage?.(0)
         warnedAtEightyPercent = false
         publishBatch(bookId, { message: '额度已刷新，继续后台处理…' })
@@ -361,6 +447,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
         throw new BatchAbortError(`新额度必须大于已使用及在途预留的 ${(spent + reserved).toLocaleString()} tokens`)
       }
       tokenLimit = Math.floor(nextLimit)
+      execution.preferences.tokenLimit = tokenLimit
       setTokenLimitText(String(tokenLimit))
       warnedAtEightyPercent = spent >= Math.ceil(tokenLimit * 0.8)
       publishBatch(bookId, { message: `Token 上限已调整为 ${tokenLimit.toLocaleString()}，继续后台处理…` })
@@ -387,11 +474,12 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
       })
 
     const recordUsage = (job: JobDetailOut, stage: string) => {
+      spent += jobTokens(job)
+      savedExecution.spent = spent
+      onUsage?.(spent)
       if (tokenLimit !== null && job.unknown_usage_runs > 0) {
         throw new BatchAbortError(`模型没有返回${stage}用量，无法可靠执行 Token 上限，批量处理已停止`)
       }
-      spent += jobTokens(job)
-      onUsage?.(spent)
       checkBudgetReminder()
     }
 
@@ -417,12 +505,17 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
     const scheduleRoster = (plan: ChapterPlan, index: number) => {
       const { chapter } = plan
       const taskId = `roster:${chapter.id}`
+      if (retryTaskId?.startsWith('dialogue:')) return fetchCharacterRoster(bookId, chapter.id, bookVersionId).then(roster => {
+        if (roster.status !== 'CONFIRMED') throw new Error('请先确认本章人物，再重试对白窗口。')
+        updateChapterProgress(bookId, chapter.id, { state: 'dialogue', error: null })
+      })
       const prefix = `${index + 1}/${selectedPlans.length} ${chapter.title || `第 ${chapter.ordinal + 1} 章`}`
       return runMetered(Math.max(1, chapter.end_cp - chapter.start_cp) + 2_000, async (available) => {
         updateChapterProgress(bookId, chapter.id, { state: 'roster', error: null })
         publishBatch(bookId, { message: `${prefix}：正在识别人物…` })
         setProgress(`${prefix}：正在识别人物…`)
         updateBatchTask(bookId, taskId, 'running')
+        let retryable = false
         try {
           const rosterJob = await waitForJob(
             await analyzeCharacterRoster(bookId, chapter.id, {
@@ -433,8 +526,10 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
               idempotencyKey: freshIdempotencyKey('batch-roster', `${bookId}:${chapter.id}:${profileId}`),
             }),
           )
-          if (rosterJob.state !== 'COMPLETED') throw new Error(rosterJob.last_error || `${prefix}的人物识别未完成`)
+          retryable = (rosterJob.state === 'FAILED' || rosterJob.state === 'COMPLETED')
+            && !(tokenLimit !== null && rosterJob.unknown_usage_runs > 0)
           recordUsage(rosterJob, '人物识别')
+          if (rosterJob.state !== 'COMPLETED') throw new Error(rosterJob.last_error || `${prefix}的人物识别未完成`)
           const roster = await fetchCharacterRoster(bookId, chapter.id, bookVersionId)
           const accepted = (roster.candidates ?? []).filter((candidate) => Boolean(candidate.canonical_name))
           if (accepted.length === 0) {
@@ -473,6 +568,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
           const message = reason instanceof Error ? reason.message : '人物识别失败'
           const stopped = batchShouldStop(bookId, stopRef.current)
           markChapterTaskFailure(chapter.id, taskId, stopped ? 'cancelled' : 'failed', message)
+          publishBatch(bookId, { tasks: (batchSnapshots.get(bookId)?.tasks ?? []).map(task => task.id === taskId ? { ...task, retryable } : task) })
           if (stopped) throw new BatchAbortError('批量处理已停止')
           if (isBatchAbortError(reason)) throw reason
         }
@@ -488,6 +584,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
         const taskId = `dialogue:${chapter.id}:${windowId}`
         return runMetered(Number(window.estimated_tokens) || 1, async (available) => {
           updateBatchTask(bookId, taskId, 'running')
+          let retryable = false
           try {
             const dialogueJob = await waitForJob(
               await createJob({
@@ -508,14 +605,16 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
                 ),
               }),
             )
-            if (dialogueJob.state !== 'COMPLETED') throw new Error(dialogueJob.last_error || `${prefix}的窗口 ${windowId} 未完成`)
+            retryable = dialogueJob.state === 'FAILED' && !(tokenLimit !== null && dialogueJob.unknown_usage_runs > 0)
             recordUsage(dialogueJob, '对白处理')
+            if (dialogueJob.state !== 'COMPLETED') throw new Error(dialogueJob.last_error || `${prefix}的窗口 ${windowId} 未完成`)
             updateBatchTask(bookId, taskId, 'completed')
             recordCompletedWindow(bookId, chapter.id)
           } catch (reason) {
             const message = reason instanceof Error ? reason.message : '对白窗口处理失败'
             const stopped = batchShouldStop(bookId, stopRef.current)
             markChapterTaskFailure(chapter.id, taskId, stopped ? 'cancelled' : 'failed', message)
+            publishBatch(bookId, { tasks: (batchSnapshots.get(bookId)?.tasks ?? []).map(task => task.id === taskId ? { ...task, retryable } : task) })
             chapterFailed = true
             if (stopped) throw new BatchAbortError('批量处理已停止')
             if (isBatchAbortError(reason)) throw reason
@@ -527,12 +626,18 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
         try {
           await completeChapterProcessing(bookId, chapter.id, bookVersionId)
         } catch (reason) {
+          if (retryTaskId && reason instanceof ApiError && reason.status === 409 && reason.code === 'RESOURCE_CONFLICT') {
+            const remaining = (batchSnapshots.get(bookId)?.tasks ?? []).filter(task => task.chapterId === chapter.id && task.state !== 'completed')
+            updateChapterProgress(bookId, chapter.id, { state: remaining.some(task => task.state === 'failed') ? 'failed' : 'stopped', error: '本窗口已保存，其他窗口尚未完成。' })
+            return
+          }
           const message = reason instanceof Error ? reason.message : '章节完成状态更新失败'
           failedChapterIds.add(chapter.id)
           updateChapterProgress(bookId, chapter.id, { state: 'failed', error: message })
           return
         }
         const message = `${prefix}：已完成；本次累计 ${spent.toLocaleString()} tokens`
+        reconcileCompletedChapter(bookId, chapter.id)
         setProgress(message)
         const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
         publishBatch(bookId, {
@@ -599,7 +704,9 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
       if (failedChapterIds.size > 0) {
         setError(`批量处理结束：${succeededCount} 章成功，${failedChapterIds.size} 章失败；具体原因见任务列表。`)
       }
-      publishBatch(bookId, { running: false, stopRequested: false, message: summary })
+      publishBatch(bookId, { running: false, stopRequested: false, message: retryTaskId &&
+        batchSnapshots.get(bookId)?.chapterStates[requested[0]?.id]?.state !== 'processed' && !failedChapterIds.size
+        ? '所选失败窗口已恢复并保存；本章还有未完成窗口，请继续选择重试。' : summary })
       onFinished()
     } catch (reason) {
       stopRef.current = true
@@ -757,6 +864,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
                 <th>章节</th>
                 <th>窗口</th>
                 <th>原因 / 错误详情</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -772,6 +880,9 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
                     {task.error || (task.type === 'roster'
                       ? batchProgress.chapterStates[task.chapterId]?.error
                       : null) || '—'}
+                  </td>
+                  <td><BatchRetryControls bookId={bookId} taskId={task.id} />
+                    {task.state === 'failed' && !task.retryable && <span className="hint">请先查看任务详情，确认请求已结束后再处理。</span>}
                   </td>
                 </tr>
               ))}

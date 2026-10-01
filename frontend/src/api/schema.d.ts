@@ -2033,7 +2033,10 @@ export interface components {
             };
             /** Notes */
             notes?: string[];
-            /** Windows */
+            /**
+             * Windows
+             * @description Local window plans include processing_status (completed/failed/unprocessed), processed_target_count and last_error; completion is derived from saved annotations.
+             */
             windows?: {
                 [key: string]: unknown;
             }[];

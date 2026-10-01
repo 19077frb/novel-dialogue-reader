@@ -91,7 +91,11 @@ class EstimateOut(ApiModel):
     estimator: dict[str, Any] = Field(default_factory=dict)
     policy: dict[str, Any] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
-    windows: list[dict[str, Any]] = Field(default_factory=list)
+    windows: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Local window plans include processing_status (completed/failed/unprocessed), "
+        "processed_target_count and last_error; completion is derived from saved annotations.",
+    )
 
 
 class UsageOut(ApiModel):
