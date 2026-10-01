@@ -4,7 +4,7 @@ import * as books from '../src/api/books'
 import * as characters from '../src/api/characters'
 import * as jobs from '../src/api/jobs'
 import { ApiError } from '../src/api/client'
-import { BatchRetryControls, clearBatchProgress, hasBatchWork, retryBatchTask, runBatchProcessing, useBatchProgress } from '../src/components/BatchProcessor'
+import { appendAutomaticProcessing, BatchRetryControls, canAppendAutomaticProcessing, clearBatchProgress, hasBatchWork, requestBatchStop, retryBatchTask, runBatchProcessing, useBatchProgress } from '../src/components/BatchProcessor'
 import { getProcessingPreferences } from '../src/processing/preferences'
 import { waitForJobCompletion } from '../src/processing/jobCompletion'
 import type { ChapterOut, EstimateOut, JobDetailOut } from '../src/api/types'
@@ -94,4 +94,46 @@ it('locks retry planning and refuses overlapping or ambiguous paid requests', as
   vi.mocked(jobs.createJob).mockResolvedValue(job('NEEDS_RECONCILIATION'))
   await start()
   await expect(retryBatchTask('b1', 'dialogue:c1:w1')).rejects.toThrow('不能直接重试')
+})
+
+it('extends the same pool before old dialogue finishes, deduplicates and sequences appended people', async () => {
+  let finishFirstRoster!: (job: JobDetailOut) => void
+  let finishOldWindow!: (job: JobDetailOut) => void
+  vi.mocked(characters.analyzeCharacterRoster).mockImplementationOnce(() => new Promise(resolve => { finishFirstRoster = resolve }))
+  vi.mocked(jobs.createJob).mockImplementation(async input => {
+    if (input.selectedWindowIds?.[0] === 'w1') return new Promise(resolve => { finishOldWindow = resolve })
+    return job('COMPLETED')
+  })
+  const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 3, tokenLimit: null }, expandable: true })
+  await vi.waitFor(() => expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1))
+  const extra = [3, 2].map(ordinal => ({ chapter: { ...chapter, id: `c${ordinal}`, ordinal },
+    estimate: { ...estimate, windows: [{ ...estimate.windows![0], window_id: `w${ordinal + 1}` }] } }))
+  expect(appendAutomaticProcessing('b1', 'v1', extra)).toBe(2)
+  expect(appendAutomaticProcessing('b1', 'v1', extra)).toBe(0)
+  expect(appendAutomaticProcessing('b1', 'other-version', extra)).toBe(0)
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
+  finishFirstRoster(job('COMPLETED'))
+  await vi.waitFor(() => expect(jobs.createJob).toHaveBeenCalledWith(expect.objectContaining({ selectedWindowIds: ['w4'] })))
+  expect(vi.mocked(characters.analyzeCharacterRoster).mock.calls.map(call => call[1])).toEqual(['c1', 'c2', 'c3'])
+  expect(hasBatchWork()).toBe(true)
+  finishOldWindow(job('COMPLETED')); await run
+  expect(canAppendAutomaticProcessing('b1', 'v1')).toBe(false)
+  expect(books.completeChapterProcessing).toHaveBeenCalledTimes(3)
+})
+
+it('stops admission and dispatch of appended chapters when the user stops the queue', async () => {
+  let finishOldWindow!: (job: JobDetailOut) => void
+  vi.mocked(jobs.createJob).mockImplementationOnce(() => new Promise(resolve => { finishOldWindow = resolve }))
+  const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: null }, expandable: true })
+  await vi.waitFor(() => expect(jobs.createJob).toHaveBeenCalledTimes(1))
+  const extra = [{ chapter: { ...chapter, id: 'c2', ordinal: 1 }, estimate }]
+  expect(appendAutomaticProcessing('b1', 'v1', extra)).toBe(1)
+  requestBatchStop('b1')
+  expect(appendAutomaticProcessing('b1', 'v1', [{ ...extra[0], chapter: { ...chapter, id: 'c3' } }])).toBe(0)
+  finishOldWindow(job('COMPLETED')); await run
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
+  expect(jobs.createJob).toHaveBeenCalledTimes(1)
+  expect(hasBatchWork()).toBe(false)
 })

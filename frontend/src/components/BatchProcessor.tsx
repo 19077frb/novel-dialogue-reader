@@ -87,6 +87,17 @@ const batchListeners = new Set<() => void>()
 const batchStopRequests = new Set<string>()
 const retryPlanning = new Set<string>()
 const batchExecutions = new Map<string, { execution: BatchExecution; spent: number }>()
+const expandableBatches = new Map<string, { versionId: string; append: (plans: ChapterPlan[]) => number }>()
+
+export function canAppendAutomaticProcessing(bookId: string, versionId: string) {
+  return expandableBatches.get(bookId)?.versionId === versionId && !batchStopRequests.has(bookId)
+}
+
+/** Extend the existing pool, never start a second pool or reset its allowance. */
+export function appendAutomaticProcessing(bookId: string, versionId: string, plans: ChapterPlan[]): number {
+  if (!canAppendAutomaticProcessing(bookId, versionId)) return 0
+  return expandableBatches.get(bookId)!.append(plans)
+}
 
 /** Saved chapter completion supersedes obsolete failures, including manual repairs. */
 export function reconcileCompletedChapter(bookId: string, chapterId: string) {
@@ -348,16 +359,20 @@ export interface BatchExecution {
   onTokenLimit?: (value: string) => void
   onFinished?: () => void
   retryTaskId?: string
+  expandable?: boolean
 }
 
 /** Shared sequenced roster/window pipeline for manual batches and reader look-ahead. */
 export async function runBatchProcessing({ bookId, bookVersionId, requested, plans, preferences,
   forceReprocess = false, initialSpent = 0, onUsage, onProgress = () => undefined,
-  onError = () => undefined, onTokenLimit = () => undefined, onFinished = () => undefined, retryTaskId }: BatchExecution) {
+  onError = () => undefined, onTokenLimit = () => undefined, onFinished = () => undefined, retryTaskId,
+  expandable = false }: BatchExecution) {
   if (isBatchRunning(bookId)) throw new Error('本书已有批量任务运行，请先等待或停止。')
   const { profileId, concurrency, maxRechecks } = preferences
   if (!profileId) throw new Error('请选择模型配置。')
   const options = inferenceOptions(preferences)
+  requested = [...requested]
+  plans = [...plans]
   const execution: BatchExecution = { bookId, bookVersionId, requested, plans, preferences: { ...preferences },
     forceReprocess, onUsage, onProgress, onError, onTokenLimit, onFinished }
   const savedExecution = { execution, spent: initialSpent }
@@ -375,12 +390,16 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
     let warningOpen = false
     const limiter = createTaskLimiter(concurrency)
     const pendingWork: Promise<void>[] = []
+    const inFlight = new Set<Promise<void>>()
+    let wakeQueue: (() => void) | null = null
+    let abortReason: BatchAbortError | null = null
+    let nextRosterIndex = 0
     const failedChapterIds = new Set<string>()
     const skippedEmptyChapterIds = new Set<string>()
     stopRef.current = false
     batchStopRequests.delete(bookId)
     setError(null)
-    const tasks: BatchTaskProgress[] = selectedPlans.flatMap(({ chapter, estimate }) => {
+    const planTasks = ({ chapter, estimate }: ChapterPlan): BatchTaskProgress[] => {
       const chapterTitle = chapter.title || `第 ${chapter.ordinal + 1} 章`
       return [
         {
@@ -404,7 +423,8 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
           error: null,
         })),
       ]
-    })
+    }
+    const tasks = selectedPlans.flatMap(planTasks)
     publishBatch(bookId, {
       running: true,
       startedAt: Date.now(),
@@ -422,6 +442,36 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
         } satisfies ChapterProcessingProgress]
       })) },
     })
+
+    if (expandable && !retryTaskId) expandableBatches.set(bookId, { versionId: bookVersionId, append: additions => {
+      if (batchShouldStop(bookId, stopRef.current)) return 0
+      const seen = new Set(selectedPlans.map(plan => plan.chapter.id))
+      const fresh = additions.filter(plan => {
+        if (plan.chapter.dialogue_processed || seen.has(plan.chapter.id)) return false
+        seen.add(plan.chapter.id)
+        return true
+      })
+      if (!fresh.length) return 0
+      selectedPlans.push(...fresh)
+      // Never reorder a roster already dispatched; sort only the not-yet-started tail.
+      const tail = selectedPlans.splice(nextRosterIndex).sort((a, b) => a.chapter.ordinal - b.chapter.ordinal)
+      selectedPlans.push(...tail)
+      requested.push(...fresh.map(plan => plan.chapter))
+      plans.push(...fresh)
+      const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
+      const estimated = fresh.reduce((total, plan) => total + plan.estimate.total_tokens
+        + Math.max(1, plan.chapter.end_cp - plan.chapter.start_cp) + 2000, 0)
+      const message = `已加入 ${fresh.length} 章，预计约 ${estimated.toLocaleString()} Tokens；有空闲位置时继续处理。`
+      publishBatch(bookId, {
+        tasks: [...current.tasks, ...fresh.flatMap(planTasks)],
+        chapterStates: { ...current.chapterStates, ...Object.fromEntries(fresh.map(({ chapter, estimate }) => [chapter.id, {
+          state: 'queued' as const, completedWindows: 0, totalWindows: estimate.windows?.length ?? 0, error: null,
+        }])) }, message,
+      })
+      setProgress(message)
+      wakeQueue?.()
+      return fresh.length
+    } })
 
     const checkBudgetReminder = () => {
       if (tokenLimit === null || warnedAtEightyPercent || warningOpen || spent < Math.ceil(tokenLimit * 0.8)) return
@@ -478,9 +528,13 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
       savedExecution.spent = spent
       onUsage?.(spent)
       if (tokenLimit !== null && job.unknown_usage_runs > 0) {
+        stopRef.current = true
         throw new BatchAbortError(`模型没有返回${stage}用量，无法可靠执行 Token 上限，批量处理已停止`)
       }
-      checkBudgetReminder()
+      try { checkBudgetReminder() } catch (reason) {
+        if (isBatchAbortError(reason)) stopRef.current = true
+        throw reason
+      }
     }
 
     const markChapterTaskFailure = (
@@ -670,23 +724,50 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
 
       const trackWork = (promise: Promise<void>) => {
         pendingWork.push(promise)
+        inFlight.add(promise)
         // 后台对白与下一章人物同时运行，提前注册拒绝处理，最终统一收集结果。
-        void promise.catch(() => undefined)
+        void promise.then(() => {
+          inFlight.delete(promise); wakeQueue?.()
+        }, reason => {
+          inFlight.delete(promise)
+          if (isBatchAbortError(reason)) { stopRef.current = true; abortReason = reason }
+          wakeQueue?.()
+        })
         return promise
       }
-      let rosterPromise = trackWork(scheduleRoster(selectedPlans[0], 0))
-      for (let index = 0; index < selectedPlans.length; index += 1) {
+      nextRosterIndex = 1
+      let rosterPromise: Promise<void> | null = trackWork(scheduleRoster(selectedPlans[0], 0))
+      let index = 0
+      while (true) {
+        if (batchShouldStop(bookId, stopRef.current)) throw abortReason ?? new BatchAbortError('批量处理已停止')
+        if (index >= selectedPlans.length) {
+          if (!expandable || inFlight.size === 0) {
+            // Close admission synchronously with the empty-pool check, before yielding.
+            expandableBatches.delete(bookId)
+            break
+          }
+          await new Promise<void>(resolve => { wakeQueue = resolve })
+          wakeQueue = null
+          continue
+        }
         const plan = selectedPlans[index]
+        if (!rosterPromise) {
+          nextRosterIndex = index + 1
+          rosterPromise = trackWork(scheduleRoster(plan, index))
+        }
         await rosterPromise
+        rosterPromise = null
         if (batchShouldStop(bookId, stopRef.current)) throw new BatchAbortError('批量处理已停止')
         // 本章人物确认成功（或失败/空名单已记录）后，才启动下一章人物。
         // 下一章人物可与已确认章节的对白窗口并发，但人物任务之间绝不并发。
         if (index + 1 < selectedPlans.length) {
+          nextRosterIndex = index + 2
           rosterPromise = trackWork(scheduleRoster(selectedPlans[index + 1], index + 1))
         }
         if (!failedChapterIds.has(plan.chapter.id) && !skippedEmptyChapterIds.has(plan.chapter.id)) {
           trackWork(scheduleDialogue(plan, index))
         }
+        index += 1
       }
       const outcomes = await Promise.allSettled(pendingWork)
       if (batchShouldStop(bookId, stopRef.current)) throw new BatchAbortError('批量处理已停止')
@@ -729,6 +810,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
         ])),
       })
     } finally {
+      expandableBatches.delete(bookId)
       publishBatch(bookId, { finishedAt: Date.now() })
       batchStopRequests.delete(bookId)
     }

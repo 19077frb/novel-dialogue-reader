@@ -7,7 +7,7 @@ import { getProcessingPreferences } from '../src/processing/preferences'
 
 vi.mock('../src/api/books', () => ({ fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn() }))
 vi.mock('../src/api/jobs', () => ({ estimateRange: vi.fn() }))
-vi.mock('../src/components/BatchProcessor', () => ({ hasBatchWork: vi.fn(), isBatchRunning: vi.fn(), requestBatchStop: vi.fn(), runBatchProcessing: vi.fn() }))
+vi.mock('../src/components/BatchProcessor', () => ({ appendAutomaticProcessing: vi.fn(), canAppendAutomaticProcessing: vi.fn(), hasBatchWork: vi.fn(), isBatchRunning: vi.fn(), requestBatchStop: vi.fn(), runBatchProcessing: vi.fn() }))
 const chapters = [0, 1, 2, 3].map(index => ({ id: `c${index}`, ordinal: index, title: `第${index}章`, start_cp: index * 100, end_cp: index * 100 + 100, dialogue_processed: index === 0 }))
 const preferences = { ...getProcessingPreferences(), profileId: 'p1', concurrency: 2, tokenLimit: null }
 beforeEach(() => {
@@ -59,4 +59,21 @@ it('blocks at the cumulative limit and does not automatically retry paid failure
   await scheduleAutomaticProcessing('b3', 'v1', 'c2', 0, preferences)
   expect(batch.runBatchProcessing).toHaveBeenCalledTimes(2)
   expect(autoMessage('b3')).toBe('模拟模型失败')
+})
+
+it('appends newly visible chapters while the current pool is still busy without starting another batch', async () => {
+  let release!: () => void
+  vi.mocked(batch.runBatchProcessing).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  const first = scheduleAutomaticProcessing('b1', 'v1', 'c1', 0, preferences)
+  await vi.waitFor(() => expect(batch.runBatchProcessing).toHaveBeenCalledTimes(1))
+  vi.mocked(batch.canAppendAutomaticProcessing).mockReturnValue(true)
+  vi.mocked(batch.hasBatchWork).mockReturnValue(true)
+  vi.mocked(batch.appendAutomaticProcessing).mockReturnValue(1)
+  vi.mocked(books.fetchProcessingStatus).mockResolvedValue({ active_jobs: 2 })
+  await scheduleAutomaticProcessing('b1', 'v1', 'c2', 0, preferences)
+  expect(batch.appendAutomaticProcessing).toHaveBeenCalledWith('b1', 'v1', [expect.objectContaining({ chapter: chapters[2] })])
+  expect(batch.runBatchProcessing).toHaveBeenCalledTimes(1)
+  await scheduleAutomaticProcessing('b1', 'v1', 'c2', 0, preferences)
+  expect(batch.appendAutomaticProcessing).toHaveBeenCalledTimes(1)
+  release(); await first
 })
