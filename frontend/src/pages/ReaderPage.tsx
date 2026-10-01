@@ -333,6 +333,7 @@ export default function ReaderPage() {
           <div id="chapter-panel" role="tabpanel" aria-labelledby="chapter-tab" hidden={sidebarTab !== 'chapters'}>
           {chapters.isSuccess && (
             <ChapterNavigation
+              bookId={bookId}
               chapters={chapters.data}
               activeChapterId={chapterId}
               onSelect={handleChapterSelect}

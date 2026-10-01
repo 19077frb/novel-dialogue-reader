@@ -4,14 +4,14 @@ import * as books from '../src/api/books'
 import * as characters from '../src/api/characters'
 import * as jobs from '../src/api/jobs'
 import { ApiError } from '../src/api/client'
-import { appendAutomaticProcessing, BatchRetryControls, canAppendAutomaticProcessing, clearBatchProgress, hasBatchWork, requestBatchStop, retryBatchTask, runBatchProcessing, useBatchProgress } from '../src/components/BatchProcessor'
+import { appendAutomaticProcessing, BatchRetryControls, canAppendAutomaticProcessing, cancelChapterProcessing, clearBatchProgress, hasBatchWork, requestBatchStop, retryBatchTask, retryChapterProcessing, runBatchProcessing, useBatchProgress } from '../src/components/BatchProcessor'
 import { getProcessingPreferences } from '../src/processing/preferences'
 import { waitForJobCompletion } from '../src/processing/jobCompletion'
 import type { ChapterOut, EstimateOut, JobDetailOut } from '../src/api/types'
 
 vi.mock('../src/api/books', () => ({ completeChapterProcessing: vi.fn(), fetchBook: vi.fn(), fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn() }))
 vi.mock('../src/api/characters', () => ({ analyzeCharacterRoster: vi.fn(), confirmCharacterRoster: vi.fn(), fetchCharacterRoster: vi.fn() }))
-vi.mock('../src/api/jobs', () => ({ createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
+vi.mock('../src/api/jobs', () => ({ pauseJob: vi.fn(), createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
 vi.mock('../src/processing/jobCompletion', () => ({ waitForJobCompletion: vi.fn(async job => job) }))
 
 const chapter = { id: 'c1', title: '第一章', ordinal: 0, start_cp: 0, end_cp: 100, dialogue_processed: false } as ChapterOut
@@ -136,4 +136,84 @@ it('stops admission and dispatch of appended chapters when the user stops the qu
   expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
   expect(jobs.createJob).toHaveBeenCalledTimes(1)
   expect(hasBatchWork()).toBe(false)
+})
+
+it('retries all unfinished windows of a chapter while another chapter is still running', async () => {
+  const c2 = { ...chapter, id: 'c2', ordinal: 1 }
+  let finishOther!: (job: JobDetailOut) => void
+  vi.mocked(jobs.createJob).mockImplementation(async input => {
+    if (input.range.chapterId === 'c2') return new Promise(resolve => { finishOther = resolve })
+    return job('FAILED')
+  })
+  const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter, c2],
+    plans: [{ chapter, estimate }, { chapter: c2, estimate: { ...estimate, windows: [estimate.windows![0]] } }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 3, tokenLimit: null } })
+  await vi.waitFor(() => expect(jobs.createJob).toHaveBeenCalledTimes(3))
+  vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: estimate.windows!.map(window => ({ ...window, processing_status: 'failed' })) })
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  await retryChapterProcessing('b1', 'c1')
+  await vi.waitFor(() => expect(jobs.createJob).toHaveBeenCalledTimes(5))
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(2)
+  expect(hasBatchWork()).toBe(true)
+  finishOther(job('COMPLETED')); await run
+  render(<Snapshot />)
+  expect(readSnapshot().chapterStates.c1.state).toBe('processed')
+  expect(readSnapshot().chapterStates.c2.state).toBe('processed')
+})
+
+it('cancels every running window in one chapter, keeps other chapters running and retains usage', async () => {
+  const c2 = { ...chapter, id: 'c2', ordinal: 1 }
+  const finishers: Array<() => void> = []
+  vi.mocked(jobs.createJob).mockImplementation(async input => ({ ...job('COMPLETED'),
+    id: `${input.range.chapterId}:${input.selectedWindowIds![0]}`, state: input.range.chapterId === 'c1' ? 'RUNNING' : 'COMPLETED' }))
+  vi.mocked(waitForJobCompletion).mockImplementation(async current => current.state === 'RUNNING'
+    ? new Promise(resolve => { finishers.push(() => resolve({ ...current, state: 'COMPLETED' })) }) : current)
+  const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter, c2],
+    plans: [{ chapter, estimate }, { chapter: c2, estimate: { ...estimate, windows: [estimate.windows![0]] } }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 4, tokenLimit: null }, onUsage: usage })
+  await vi.waitFor(() => expect(finishers).toHaveLength(2))
+  await cancelChapterProcessing('b1', 'c1')
+  expect(jobs.pauseJob).toHaveBeenCalledTimes(2)
+  expect(jobs.pauseJob).toHaveBeenCalledWith('c1:w1')
+  expect(jobs.pauseJob).toHaveBeenCalledWith('c1:w2')
+  await expect(retryChapterProcessing('b1', 'c1')).rejects.toThrow('收尾')
+  finishers.forEach(finish => finish()); await run
+  expect(books.completeChapterProcessing).not.toHaveBeenCalledWith('b1', 'c1', 'v1')
+  expect(books.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c2', 'v1')
+  expect(usage).toHaveBeenLastCalledWith(50)
+  render(<Snapshot />)
+  expect(readSnapshot().chapterStates.c1.state).toBe('stopped')
+  expect(readSnapshot().chapterStates.c1.cancelRequested).toBe(false)
+  expect(readSnapshot().chapterStates.c2.state).toBe('processed')
+})
+
+it('cancels a queued chapter before people are dispatched, without stopping following chapters', async () => {
+  let finishFirst!: (job: JobDetailOut) => void
+  vi.mocked(characters.analyzeCharacterRoster).mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve }))
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  const extra = [2, 3].map(ordinal => ({ ...chapter, id: `c${ordinal}`, ordinal }))
+  const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter, ...extra],
+    plans: [chapter, ...extra].map(chapter => ({ chapter, estimate })),
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: null } })
+  await vi.waitFor(() => expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1))
+  await cancelChapterProcessing('b1', 'c2')
+  finishFirst(job('COMPLETED')); await run
+  expect(vi.mocked(characters.analyzeCharacterRoster).mock.calls.map(call => call[1])).toEqual(['c1', 'c3'])
+  expect(jobs.pauseJob).not.toHaveBeenCalled()
+  expect(jobs.createJob).toHaveBeenCalledTimes(4)
+})
+
+it('pauses a submission that returns after cancellation and refuses to replay an ambiguous result', async () => {
+  let finishSubmission!: (job: JobDetailOut) => void
+  vi.mocked(jobs.createJob).mockImplementationOnce(() => new Promise(resolve => { finishSubmission = resolve }))
+  const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: null } })
+  await vi.waitFor(() => expect(jobs.createJob).toHaveBeenCalledTimes(1))
+  await cancelChapterProcessing('b1', 'c1')
+  expect(jobs.pauseJob).not.toHaveBeenCalled()
+  const uncertain = job('NEEDS_RECONCILIATION')
+  finishSubmission(uncertain); await run
+  expect(jobs.pauseJob).toHaveBeenCalledWith(uncertain.id)
+  expect(jobs.createJob).toHaveBeenCalledTimes(1)
+  await expect(retryChapterProcessing('b1', 'c1')).rejects.toThrow('不明确')
 })

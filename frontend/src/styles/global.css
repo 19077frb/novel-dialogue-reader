@@ -555,6 +555,10 @@ textarea:focus-visible {
   border: 1px solid transparent;
 }
 
+.ndr-chapter-row { display: flex; align-items: center; gap: 4px; }
+.ndr-chapter-row > .ndr-chapter { flex: 1; min-width: 0; }
+.ndr-chapter-action { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; padding: 4px; }
+
 .ndr-chapter.active {
   border-color: var(--ndr-accent);
   color: var(--ndr-accent);

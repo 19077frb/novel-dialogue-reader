@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import * as batch from '../src/components/BatchProcessor'
 
 import { ChapterNavigation } from '../src/components/ChapterNavigation'
 import type { ChapterOut } from '../src/api/types'
@@ -11,6 +12,41 @@ const CHAPTERS = [
 ] as ChapterOut[]
 
 describe('ChapterNavigation', () => {
+  beforeEach(() => { vi.restoreAllMocks() })
+  it('章节旁显示重试图标，点击只重试本章而不跳转阅读', async () => {
+    const retry = vi.spyOn(batch, 'retryChapterProcessing').mockResolvedValue()
+    const select = vi.fn()
+    render(<ChapterNavigation bookId="b1" chapters={CHAPTERS} activeChapterId="c2" onSelect={select}
+      processingStates={{ c1: { state: 'failed', completedWindows: 1, totalWindows: 2, error: '失败', pendingTasks: 0 } }} />)
+    const icon = screen.getByRole('button', { name: '重试第一章的任务' })
+    expect(icon.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(icon.closest('li')).toHaveTextContent('第一章')
+    fireEvent.click(icon)
+    await waitFor(() => expect(retry).toHaveBeenCalledWith('b1', 'c1'))
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it('排队和执行的章节显示取消图标，即使某窗口已失败也优先取消剩余任务', async () => {
+    const cancel = vi.spyOn(batch, 'cancelChapterProcessing').mockResolvedValue()
+    render(<ChapterNavigation bookId="b1" chapters={CHAPTERS.map(chapter => ({ ...chapter, dialogue_processed: true }))} activeChapterId="c2" onSelect={vi.fn()}
+      processingStates={{ c1: { state: 'queued', completedWindows: 0, totalWindows: 2, error: null },
+        c2: { state: 'failed', completedWindows: 0, totalWindows: 2, error: '窗口失败', pendingTasks: 1 } }} />)
+    fireEvent.click(screen.getByRole('button', { name: '取消第二章的任务' }))
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith('b1', 'c2'))
+    expect(screen.getByRole('button', { name: '取消第一章的任务' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '重试第二章的任务' })).not.toBeInTheDocument()
+  })
+
+  it('取消收尾时禁用图标，操作失败时显示具体错误', async () => {
+    vi.spyOn(batch, 'retryChapterProcessing').mockRejectedValue(new Error('后台请求结果不明确'))
+    render(<ChapterNavigation bookId="b1" chapters={CHAPTERS} activeChapterId="c2" onSelect={vi.fn()}
+      processingStates={{ c1: { state: 'failed', completedWindows: 0, totalWindows: 2, error: '失败' },
+        c2: { state: 'dialogue', completedWindows: 0, totalWindows: 2, error: null, cancelRequested: true } }} />)
+    expect(screen.getByRole('button', { name: '取消第二章的任务' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /第二章.*正在取消/ })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '重试第一章的任务' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('后台请求结果不明确')
+  })
   it('保存的完成状态覆盖旧失败，但正在重做时仍显示实时进度', () => {
     render(<ChapterNavigation chapters={CHAPTERS.map(chapter => ({ ...chapter, dialogue_processed: true }))}
       activeChapterId="c1" onSelect={vi.fn()} processingStates={{
