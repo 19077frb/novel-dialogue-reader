@@ -69,6 +69,17 @@ test.describe('预览与按章处理', () => {
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     expect(Number(await page.getByTestId('job-calls').innerText())).toBeGreaterThan(0)
     await expect(page.getByTestId('preview-notice')).toContainText('阅读标注')
+    const firstTask = page.getByTestId('single-task-progress').locator('tbody tr').first()
+    const details = page.getByTestId('single-task-details')
+    const windowLabel = await firstTask.locator('td').first().innerText()
+    await firstTask.getByRole('button', { name: '查看任务' }).click()
+    await expect(details).toBeFocused()
+    await expect(details).toBeInViewport()
+    await expect(details.getByRole('heading')).toHaveText(`${windowLabel} 任务详情`)
+    const selectedJobId = await details.getAttribute('data-job-id')
+    await firstTask.getByRole('button', { name: '查看任务' }).click()
+    await expect(details).toBeFocused()
+    await expect(details).toHaveAttribute('data-job-id', selectedJobId!)
 
     // TXT 能着色，并且可读人物称呼是真实文本节点
     const span = page.getByTestId('annotation-span').first()

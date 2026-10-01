@@ -541,18 +541,37 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('processing-mode-batch')).toBeDisabled()
     expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
     expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
+    const details = screen.getByTestId('single-task-details')
+    const scroll = vi.fn()
+    details.scrollIntoView = scroll
+    const viewFirst = within(screen.getByTestId('single-task-w1')).getByRole('button', { name: '查看任务' })
+    await userEvent.click(viewFirst)
+    expect(details).toHaveFocus()
+    expect(scroll).toHaveBeenCalledTimes(1)
+    expect(details).toHaveAttribute('data-job-id', 'w1')
+    expect(details).toHaveTextContent('窗口 1 任务详情')
+    expect(viewFirst).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.click(viewFirst)
+    expect(scroll).toHaveBeenCalledTimes(2)
     states.w1 = 'RUNNING'
     await waitFor(() => expect(screen.getByTestId('single-task-w1')).toHaveTextContent('处理中'), { timeout: 3000 })
     expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
     states.w1 = 'COMPLETED'
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2), { timeout: 3000 })
     expect(screen.getByTestId('single-task-w2')).toHaveTextContent('排队中')
+    expect(details).toHaveAttribute('data-job-id', 'w1')
     expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
     states.w2 = 'COMPLETED'
     await waitFor(() => expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1'), { timeout: 3000 })
     expect(screen.getByTestId('single-task-w1')).toHaveTextContent('已完成')
     expect(screen.getByTestId('single-task-w2')).toHaveTextContent('已完成')
     expect(screen.queryByTestId('preview-error')).not.toBeInTheDocument()
+    expect(details).toHaveAttribute('data-job-id', 'w1')
+    await userEvent.click(within(screen.getByTestId('single-task-w2')).getByRole('button', { name: '查看任务' }))
+    expect(details).toHaveAttribute('data-job-id', 'w2')
+    expect(details).toHaveTextContent('窗口 2 任务详情')
+    expect(details).toHaveFocus()
+    expect(jobsApi.createJob).toHaveBeenCalledTimes(2)
   })
 
   it('失败任务仍保留执行面板及具体错误，不把其它后台任务遗留后立即解锁', async () => {

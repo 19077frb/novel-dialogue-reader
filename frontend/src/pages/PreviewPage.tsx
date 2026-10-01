@@ -91,6 +91,22 @@ export default function PreviewPage() {
   const [selectedWindowIds, setSelectedWindowIds] = useState<string[]>([])
   const selectionKeyRef = useRef('')
   const [jobId, setJobId] = useState<string | null>(null)
+  const manuallySelectedJobRef = useRef<string | null>(null)
+  const taskDetailRef = useRef<HTMLElement | null>(null)
+  const [detailRequest, setDetailRequest] = useState(0)
+  const selectAutomaticJob = (id: string) => {
+    if (!manuallySelectedJobRef.current) setJobId(id)
+  }
+  const showTaskDetails = (id: string) => {
+    manuallySelectedJobRef.current = id
+    setJobId(id)
+    setDetailRequest(current => current + 1)
+  }
+  useEffect(() => {
+    if (!detailRequest) return
+    taskDetailRef.current?.scrollIntoView?.({ block: 'start', behavior: 'auto' })
+    taskDetailRef.current?.focus({ preventScroll: true })
+  }, [detailRequest, jobId])
   const [currentJob, setCurrentJob] = useState<JobDetailOut | null>(null)
   const [singleTasks, setSingleTasks] = useState<SingleWindowTask[]>([])
   const [notice, setNotice] = useState<string | null>(null)
@@ -224,6 +240,8 @@ export default function PreviewPage() {
 
   const jobMutation = useMutation({
     mutationFn: async (mode: 'preview' | 'process') => {
+      manuallySelectedJobRef.current = null
+      setDetailRequest(0)
       const versionId = book.data?.active_version_id ?? null
       if (range.chapterId && (!estimate || estimateQuery.isFetching || estimateQuery.isError || selectedWindowIds.length === 0)) {
         throw new Error('请等待窗口预览完成并选择至少一个窗口')
@@ -249,7 +267,7 @@ export default function PreviewPage() {
           idempotencyKey: freshIdempotencyKey(`${mode}:${bookId}`, JSON.stringify({ versionId, range, profileId, budget })),
           runNow: true,
         })
-        setJobId(job.id)
+        selectAutomaticJob(job.id)
         return waitForJobCompletion(job, setCurrentJob)
       }
 
@@ -304,7 +322,7 @@ export default function PreviewPage() {
           ),
           runNow: true,
           })
-          setJobId(job.id)
+          selectAutomaticJob(job.id)
           return await waitForJobCompletion(job, (current) => updateTask(windowId, current))
         } catch (reason) {
           stopDispatch = true
@@ -331,7 +349,7 @@ export default function PreviewPage() {
       return jobs.at(-1) as JobDetailOut
     },
     onSuccess: (job) => {
-      setJobId(job.id)
+      selectAutomaticJob(job.id)
       setCurrentJob(job)
       setError(null)
       setNotice(job.state === 'COMPLETED'
@@ -390,6 +408,7 @@ export default function PreviewPage() {
     runBlockers.push('尚未选择要处理的窗口')
   }
   const runDisabled = runBlockers.length > 0 || jobMutation.isPending
+  const selectedTask = singleTasks.find(task => task.job?.id === jobId)
 
   if (!bookId) return <p className="status-error">缺少书籍 ID。</p>
 
@@ -610,7 +629,9 @@ export default function PreviewPage() {
                 <td>{task.job ? SINGLE_TASK_LABELS[task.job.state] ?? task.job.state : task.error ? '未派发' : '等待派发'}</td>
                 <td>
                   {task.error || task.job?.last_error}
-                  {task.job && <button type="button" onClick={() => setJobId(task.job!.id)}>查看任务</button>}
+                  {task.job && <button type="button" aria-pressed={jobId === task.job.id}
+                    className={jobId === task.job.id ? 'ndr-primary' : undefined}
+                    aria-controls="single-task-details" onClick={() => showTaskDetails(task.job!.id)}>查看任务</button>}
                 </td>
               </tr>
             ))}</tbody>
@@ -618,9 +639,11 @@ export default function PreviewPage() {
         </section>
       )}
       {jobId && (
-        <section className="card">
-          <h2>任务</h2>
-          <JobPanel jobId={jobId} onUpdate={handleJobUpdate} />
+        <section className="card" id="single-task-details" ref={taskDetailRef} tabIndex={-1}
+          aria-labelledby="single-task-details-heading" data-testid="single-task-details" data-job-id={jobId}>
+          <h2 id="single-task-details-heading">{selectedTask ? `窗口 ${selectedTask.ordinal} 任务详情` : '任务详情'}</h2>
+          <p className="hint">查看本窗口的状态、耗时、调用次数与失败原因，不会重新调用模型。手动选择后不会被新派发的窗口切换。</p>
+          <JobPanel key={jobId} jobId={jobId} onUpdate={handleJobUpdate} />
           <div className="ndr-recompute-entry" data-testid="recompute-entry">
             <p className="hint">
               任务**不会**自动重算：暂停/限流/预算到顶或失败后，都需要你显式重新发起。
