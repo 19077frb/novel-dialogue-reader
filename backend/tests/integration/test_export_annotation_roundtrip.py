@@ -170,6 +170,61 @@ def test_plain_epub_import_is_unaffected(migrated_client: TestClient) -> None:
     assert data["import_status"] == "COMPLETED"
 
 
+def test_css_normalized_epub_roundtrip_preserves_text_annotations_and_processed_state(
+    fake_provider_client: TestClient, migrated_settings,
+) -> None:
+    from xml.sax.saxutils import escape
+
+    from fixtures.corrections import SAMPLE
+    from fixtures.epub_factory import Document, EpubSpec, build_epub
+
+    body = (
+        '<div style="float:right"><p>原</p><p>创</p><p>者</p></div>'
+        + "".join(f"<p>{escape(line)}</p>" for line in SAMPLE.splitlines())
+    )
+    source = build_epub(EpubSpec(documents=[Document("one", "text/one.xhtml", body)]))
+    response = fake_provider_client.post(
+        "/api/books/import",
+        files={"file": ("decorative.epub", source, "application/epub+zip")},
+    )
+    assert response.status_code == 202, response.text
+    data = response.json()["data"]
+    book_id = data["book_id"]
+    content = fake_provider_client.get(f"/api/books/{book_id}/content").json()["data"]
+    assert content["nodes"][0]["text"] == "原创者"
+    profile_id = create_fake_profile(fake_provider_client, name="竖排回环提供方")
+    run_deterministic_job(
+        migrated_settings, fake_provider_client, book_id=book_id,
+        profile_id=profile_id, key="k-css-roundtrip",
+    )
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        chapter = session.scalars(select(Chapter).where(
+            Chapter.book_version_id == data["book_version_id"],
+        )).one()
+        chapter.dialogue_processed = True
+    original = annotations_of(fake_provider_client, book_id, reading_mode="reread")
+    epub_bytes = _export(fake_provider_client, book_id, _preview(
+        fake_provider_client, book_id,
+    )["snapshot_id"])
+    response = fake_provider_client.post(
+        "/api/books/import",
+        files={"file": ("roundtrip.epub", epub_bytes, "application/epub+zip")},
+    )
+    assert response.status_code == 202, response.text
+    restored_id = response.json()["data"]["book_id"]
+    restored_content = fake_provider_client.get(
+        f"/api/books/{restored_id}/content",
+    ).json()["data"]
+    assert [n["text"] for n in restored_content["nodes"]] == [n["text"] for n in content["nodes"]]
+    restored = annotations_of(fake_provider_client, restored_id, reading_mode="reread")
+    assert [(n["label"], n["color_index"]) for n in restored["items"]] == [
+        (n["label"], n["color_index"]) for n in original["items"]
+    ]
+    chapters = fake_provider_client.get(f"/api/books/{restored_id}/chapters").json()["data"]
+    assert len(chapters) == 1
+    assert chapters[0]["dialogue_processed"] is True
+
+
 def test_restore_keeps_same_named_identities_separate_and_skips_unmatched(
     fake_provider_client: TestClient, migrated_settings
 ) -> None:

@@ -37,9 +37,10 @@ from .document import (
     ParsedResource,
     collapse_whitespace,
 )
+from .layout import LayoutNormalizer
 
-EPUB_PARSER_VERSION = "epub-3"
-EPUB_NORMALIZATION_VERSION = "canonical-epub-blocks-1"
+EPUB_PARSER_VERSION = "epub-4"
+EPUB_NORMALIZATION_VERSION = "canonical-epub-blocks-2"
 
 CONTAINER_PATH = "META-INF/container.xml"
 BLOCKED_MEDIA_PREFIXES = ("text/javascript", "application/javascript", "application/ecmascript")
@@ -274,6 +275,7 @@ class _Document:
     blocks: list[_RawBlock] = field(default_factory=list)
     headings: list[str] = field(default_factory=list)
     repaired_entities: bool = False
+    normalized_layout_groups: int = 0
 
 
 def _group_illustration_pages(
@@ -490,6 +492,8 @@ def _parse_xhtml(  # noqa: ANN001
     resolve_image,
     *,
     strip_ndr_auxiliary: bool = False,
+    layout_normalizer: LayoutNormalizer | None = None,
+    load_css=None,
 ) -> _Document:
     document = _Document(path=path)
     try:
@@ -505,6 +509,9 @@ def _parse_xhtml(  # noqa: ANN001
                 details={"href": path, "reason": str(exc)},
             ) from exc
         document.repaired_entities = normalized != data
+
+    if layout_normalizer is not None and not strip_ndr_auxiliary:
+        document.normalized_layout_groups = layout_normalizer.normalize(root, load_css)
 
     builder = _BlockBuilder(resolve_image)
     _walk(root, builder, strip_ndr_auxiliary=strip_ndr_auxiliary)
@@ -809,6 +816,21 @@ def parse_epub(
     mappings: list[ParsedMapping] = []
     chapters: list[ParsedChapter] = []
     spine_documents: list[tuple[str, _Document]] = []
+    layout_normalizer = LayoutNormalizer()
+    stylesheet_cache: dict[str, bytes] = {}
+
+    def load_stylesheet(document_path: str, href: str) -> bytes | None:
+        try:
+            path, _fragment = _resolve_href(posixpath.dirname(document_path), href)
+        except EpubError:
+            return None
+        if path not in resources or resources[path].media_type != "text/css":
+            return None
+        if resources[path].byte_size > 128 * 1024:
+            return None
+        if path not in stylesheet_cache:
+            stylesheet_cache[path] = archive.read(path)
+        return stylesheet_cache[path]
 
     for item in spine_items:
         if not item.path or not archive.exists(item.path):
@@ -819,9 +841,13 @@ def parse_epub(
             item.path,
             make_image_resolver(item.path),
             strip_ndr_auxiliary=strip_ndr_auxiliary,
+            layout_normalizer=layout_normalizer,
+            load_css=lambda href, path=item.path: load_stylesheet(path, href),
         )
         if document.repaired_entities:
             warnings.append(f"已兼容正文中的标准 HTML 字符实体（如不换行空格）：{item.path}")
+        if document.normalized_layout_groups:
+            warnings.append(f"已将竖排或浮动标题的单字分段整理为连续文字：{item.path}")
         if not document.blocks:
             warnings.append(f"正文文档没有可渲染内容：{item.path}")
             continue
