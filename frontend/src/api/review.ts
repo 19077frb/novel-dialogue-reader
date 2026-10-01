@@ -185,6 +185,7 @@ export interface RecheckInput {
   profileId: string
   maxInputTokens?: number | null
   maxRechecks?: number
+  maxFormatRetries?: number
   readingMode?: ReadingMode
   idempotencyKey: string
   runNow?: boolean
@@ -206,6 +207,7 @@ export function recheckQuote(
         max_input_tokens: input.maxInputTokens ?? null,
         max_output_tokens: null,
         max_rechecks: input.maxRechecks ?? 0,
+        max_format_retries: input.maxFormatRetries ?? 1,
       },
       reading_mode: input.readingMode ?? 'initial',
       visible_horizon_cp: null,

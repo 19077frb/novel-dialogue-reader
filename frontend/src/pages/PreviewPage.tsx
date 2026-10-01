@@ -80,10 +80,12 @@ export default function PreviewPage() {
   const budget = useMemo<BudgetInput>(() => ({
     maxInputTokens: preferences.tokenLimit, maxOutputTokens: preferences.maxOutputTokens,
     maxRechecks: preferences.maxRechecks,
-  }), [preferences.tokenLimit, preferences.maxOutputTokens, preferences.maxRechecks])
+    maxFormatRetries: preferences.maxFormatRetries,
+  }), [preferences.tokenLimit, preferences.maxOutputTokens, preferences.maxRechecks, preferences.maxFormatRetries])
   const setBudget = (value: BudgetInput) => setPreferences({
     tokenLimit: value.maxInputTokens, maxOutputTokens: value.maxOutputTokens,
     maxRechecks: value.maxRechecks,
+    maxFormatRetries: value.maxFormatRetries ?? 1,
   })
   const setConcurrency = (value: number) => setPreferences({ concurrency: value })
   const setProfileId = useCallback((value: string) => setPreferences({ profileId: value }), [setPreferences])
@@ -318,6 +320,7 @@ export default function PreviewPage() {
             maxInputTokens: allocate(budget.maxInputTokens, estimated),
             maxOutputTokens: allocate(budget.maxOutputTokens, estimated),
             maxRechecks: budget.maxRechecks,
+            maxFormatRetries: budget.maxFormatRetries,
           },
           idempotencyKey: freshIdempotencyKey(
             `${mode}:${bookId}:window`,

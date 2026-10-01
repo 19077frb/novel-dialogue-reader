@@ -216,10 +216,11 @@ def test_invalid_recheck_keeps_first_annotations_and_completed_window(
     adapter = InvalidRecheckAdapter()
     outcome = _run(migrated_settings, job["id"], lambda job, snapshot: adapter)
     assert outcome.state is JobState.COMPLETED
-    assert outcome.recheck_calls == 1
+    assert outcome.recheck_calls == 2
     assert outcome.recheck_windows == 0
     runs, windows, _progress = _rows(migrated_settings, job["id"])
-    assert [run.state for run in runs] == [InferenceRunState.SUCCEEDED, InferenceRunState.FAILED]
+    assert [run.state for run in runs] == [InferenceRunState.SUCCEEDED, InferenceRunState.FAILED,
+                                        InferenceRunState.FAILED]
     assert windows[0].state is JobState.COMPLETED
     engine, factory = _factory(migrated_settings)
     try:

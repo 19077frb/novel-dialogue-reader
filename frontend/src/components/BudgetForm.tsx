@@ -1,4 +1,5 @@
 import type { BudgetInput } from '../api/jobs'
+import { FormatRetrySetting } from './FormatRetrySetting'
 
 /**
  * 预算表单：把上限直接交给后端；留空表示不设该上限。
@@ -54,6 +55,8 @@ export function BudgetForm({ value, onChange }: BudgetFormProps) {
         />
         <span className="hint">只复核有效结果中的待定对白；0 关闭。不是校验失败的重试次数。</span>
       </label>
+      <FormatRetrySetting value={value.maxFormatRetries ?? 1}
+        onChange={maxFormatRetries => onChange({ ...value, maxFormatRetries })} />
     </fieldset>
   )
 }

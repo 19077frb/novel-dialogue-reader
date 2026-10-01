@@ -19,12 +19,14 @@ test('批量失败窗口可以直接重试，成功后目录和单章窗口显�
   await page.getByRole('link', { name: '预览与处理' }).click()
   await page.getByTestId('preview-profile').selectOption({ label: '失败重试离线模型 · fake-provider · fake-model' })
   await page.getByTestId('processing-mode-batch').check()
+  await page.getByTestId('batch-format-retries').fill('3')
   let submissions = 0
   // Only the first dialogue submission is simulated as a definite failure.
   // Subsequent jobs exercise the real isolated backend and offline provider.
   await page.route('**/api/jobs', async route => {
     if (route.request().method() !== 'POST') { await route.continue(); return }
     submissions++
+    expect(route.request().postDataJSON().budget.max_format_retries).toBe(3)
     if (submissions !== 1) { await route.continue(); return }
     const body = route.request().postDataJSON()
     await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ data: {

@@ -20,6 +20,16 @@ from ndr.domain.enums import (
     SpeakerBasis,
     VisibilityPolicy,
 )
+from ndr.domain.jobs import BudgetIn
+
+
+def test_validation_retry_budget_defaults_and_bounds() -> None:
+    assert BudgetIn().max_format_retries == 1
+    assert BudgetIn(max_format_retries=0).max_format_retries == 0
+    assert BudgetIn(max_format_retries=5).max_format_retries == 5
+    for value in (-1, 6, 1.5):
+        with pytest.raises(ValidationError):
+            BudgetIn(max_format_retries=value)
 
 
 def test_enum_values_match_contract() -> None:

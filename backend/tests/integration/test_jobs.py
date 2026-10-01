@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -229,6 +230,59 @@ def test_invalid_output_triggers_one_repair_retry(
     assert outcome.calls == 2  # 首次 + 一次纠错重发
     assert len(adapter.calls) == 2
 
+
+@pytest.mark.parametrize("limit,bad_count,expected_calls,expected_state", [
+    (0, 1, 1, JobState.FAILED),
+    (2, 2, 3, JobState.COMPLETED),
+    (2, 10, 3, JobState.FAILED),
+    (5, 10, 6, JobState.FAILED),
+])
+@pytest.mark.parametrize("provider_error", [False, True])
+def test_configured_validation_retry_limit_counts_every_attempt(
+    fake_provider_client: TestClient, migrated_settings: Settings,
+    limit: int, bad_count: int, expected_calls: int, expected_state: JobState, provider_error: bool,
+) -> None:
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, data["book_id"], _fake_profile(fake_provider_client),
+                      key="configured-retries", budget={"max_format_retries": limit})
+    bad = (ProviderError(ProviderErrorKind.INVALID_OUTPUT, "坏 JSON") if provider_error
+           else {"schema_version": "1.0", "labels": []})
+    adapter = FakeProviderAdapter(script=[bad] * bad_count, labeling_mode="deterministic",
+                                  usage={"input_tokens": 10, "output_tokens": 20})
+    outcome = _run_with_fake(migrated_settings, job["id"], adapter)
+    assert outcome.state is expected_state
+    assert len(adapter.calls) == expected_calls
+    assert all("上一次输出无效" in call["payload"]["messages"][-1]["content"]
+               for call in adapter.calls[1:])
+    engine, factory = _factory(migrated_settings)
+    try:
+        with factory() as session:
+            runs = list(session.execute(select(InferenceRun).where(InferenceRun.job_id == job["id"])).scalars())
+            assert len(runs) == expected_calls
+            assert all(run.state in {InferenceRunState.FAILED, InferenceRunState.SUCCEEDED} for run in runs)
+    finally:
+        engine.dispose()
+
+
+def test_retry_respects_remaining_budget(fake_provider_client: TestClient, migrated_settings: Settings) -> None:
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, data["book_id"], _fake_profile(fake_provider_client),
+                      key="retry-budget", budget={"max_input_tokens": 200_000, "max_format_retries": 5})
+    adapter = FakeProviderAdapter(script=[{"schema_version": "1.0", "labels": []}],
+                                  usage={"input_tokens": 200_000, "output_tokens": 1})
+    outcome = _run_with_fake(migrated_settings, job["id"], adapter)
+    assert outcome.state is JobState.BUDGET_EXHAUSTED
+    assert len(adapter.calls) == 1
+
+
+def test_retry_count_does_not_retry_unknown_timeout(fake_provider_client: TestClient, migrated_settings: Settings) -> None:
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, data["book_id"], _fake_profile(fake_provider_client),
+                      key="no-timeout-retry", budget={"max_format_retries": 5})
+    adapter = FakeProviderAdapter(script=[ProviderError(ProviderErrorKind.TIMEOUT, "结果未知")])
+    assert _run_with_fake(migrated_settings, job["id"], adapter).state is JobState.NEEDS_RECONCILIATION
+    assert len(adapter.calls) == 1
+
     engine, factory = _factory(migrated_settings)
     try:
         with transaction(factory) as session:
@@ -240,8 +294,7 @@ def test_invalid_output_triggers_one_repair_retry(
                 ).scalars()
             )
             assert [run.state for run in runs] == [
-                InferenceRunState.FAILED,
-                InferenceRunState.SUCCEEDED,
+                InferenceRunState.UNKNOWN_OUTCOME,
             ]
     finally:
         engine.dispose()

@@ -11,6 +11,7 @@ import { recheckQuote } from '../api/review'
 import type { JobDetailOut } from '../api/types'
 import { JobPanel } from './JobPanel'
 import { ThinkingSettings } from './ThinkingSettings'
+import { FormatRetrySetting } from './FormatRetrySetting'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
 import { freshIdempotencyKey } from '../api/jobs'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
@@ -53,6 +54,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
         profileId: effectiveProfileId,
         inferenceOptions: inferenceOptions(preferences),
         maxInputTokens: limit,
+        maxFormatRetries: preferences.maxFormatRetries,
         idempotencyKey: freshIdempotencyKey('recheck', JSON.stringify({ quoteId, effectiveProfileId, limit, options: inferenceOptions(preferences) })),
         runNow: true,
       })
@@ -84,6 +86,8 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
           data-testid="recheck-max-input"
         />
       </label>
+      <FormatRetrySetting value={preferences.maxFormatRetries} disabled={running}
+        onChange={maxFormatRetries => updatePreferences({ maxFormatRetries })} testId="recheck-format-retries" />
       <button
         type="button"
         className="ndr-primary"

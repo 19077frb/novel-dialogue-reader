@@ -14,6 +14,7 @@ import { waitForJobCompletion } from '../processing/jobCompletion'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
 import { OperationTimer } from './OperationTimer'
+import { FormatRetrySetting } from './FormatRetrySetting'
 
 class BatchAbortError extends Error {}
 
@@ -175,7 +176,8 @@ export async function retryBatchTask(bookId: string, taskId: string, wholeChapte
     if (!chapter) throw new Error('章节已不存在，请重新读取目录。')
     const estimate = await estimateRange(bookId, { bookVersionId: saved.execution.bookVersionId,
       range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp }, readingMode: 'reread',
-      budget: { maxInputTokens: null, maxOutputTokens: null, maxRechecks: saved.execution.preferences.maxRechecks } })
+      budget: { maxInputTokens: null, maxOutputTokens: null, maxRechecks: saved.execution.preferences.maxRechecks,
+        maxFormatRetries: saved.execution.preferences.maxFormatRetries } })
     const windows = estimate.windows ?? []
     if (batchStopRequests.has(bookId)) throw new Error('已停止准备重试，未调用模型。')
     const forceReprocess = saved.execution.forceReprocess ?? false
@@ -449,7 +451,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
   onError = () => undefined, onTokenLimit = () => undefined, onFinished = () => undefined, retryTaskId,
   expandable = false }: BatchExecution) {
   if (isBatchRunning(bookId)) throw new Error('本书已有批量任务运行，请先等待或停止。')
-  const { profileId, concurrency, maxRechecks } = preferences
+  const { profileId, concurrency, maxRechecks, maxFormatRetries } = preferences
   if (!profileId) throw new Error('请选择模型配置。')
   const options = inferenceOptions(preferences)
   requested = [...requested]
@@ -780,7 +782,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
                 inferenceOptions: options,
                 readingMode: 'reread',
                 visibleHorizonCp: null,
-                budget: { maxInputTokens: available, maxOutputTokens: available, maxRechecks },
+                budget: { maxInputTokens: available, maxOutputTokens: available, maxRechecks, maxFormatRetries },
                 idempotencyKey: freshIdempotencyKey(
                   'batch-dialogue-window',
                   `${bookId}:${chapter.id}:${windowId}:${profileId}:${maxRechecks}`,
@@ -962,7 +964,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const [startId, setStartId] = useState('')
   const [endId, setEndId] = useState('')
   const [preferences, setPreferences] = useProcessingPreferences()
-  const { profileId, maxRechecks, concurrency } = preferences
+  const { profileId, maxRechecks, maxFormatRetries, concurrency } = preferences
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
   const setMaxRechecks = (value: number) => setPreferences({ maxRechecks: value })
   const setTokenLimitText = (value: string) => setPreferences({ tokenLimit: positiveIntegerOrNull(value) })
@@ -999,7 +1001,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       setEstimatedTokens(null)
       setPlans([])
     }
-  }, [profileId, maxRechecks, tokenLimitText, running])
+  }, [profileId, maxRechecks, maxFormatRetries, tokenLimitText, running])
 
   const calculateEstimate = async () => {
     if (!validRange) return
@@ -1015,7 +1017,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
           range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
           readingMode: 'reread',
           visibleHorizonCp: null,
-          budget: { maxInputTokens: null, maxOutputTokens: null, maxRechecks },
+          budget: { maxInputTokens: null, maxOutputTokens: null, maxRechecks, maxFormatRetries },
         }),
       )
       setPlans(selected.map((chapter, index) => ({ chapter, estimate: estimates[index] })))
@@ -1150,6 +1152,8 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
           <input type="number" min={0} value={maxRechecks} onChange={(event) => { setMaxRechecks(nonNegativeInteger(event.target.value)); resetEstimate() }} disabled={running} data-testid="batch-max-rechecks" />
           <span className="hint">只复核有效结果中的待定对白；0 关闭。不是校验失败的重试次数。</span>
         </label>
+        <FormatRetrySetting value={maxFormatRetries} disabled={running}
+          onChange={value => { setPreferences({ maxFormatRetries: value }); resetEstimate() }} testId="batch-format-retries" />
         <label>
           本次 Token 使用上限（留空＝不限制）
           <input type="number" min={1} value={tokenLimitText} onChange={(event) => { setTokenLimitText(event.target.value); resetEstimate() }} disabled={running} data-testid="batch-token-limit" />

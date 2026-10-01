@@ -1271,6 +1271,12 @@ export interface components {
              * @default 0
              */
             max_rechecks: number;
+            /**
+             * Max Format Retries
+             * @description 对白输出校验失败后的纠错重试次数，不含首次调用；0 关闭，最多 5 次
+             * @default 1
+             */
+            max_format_retries: number;
         };
         /** ChapterOut */
         ChapterOut: {

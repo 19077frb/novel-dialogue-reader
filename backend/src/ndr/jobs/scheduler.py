@@ -156,6 +156,10 @@ def _budget_of(job: Job) -> dict[str, Any]:
     return _json_of(job.budget_json)
 
 
+def _format_retry_limit(job: Job) -> int:
+    return min(5, max(0, int(_budget_of(job).get("max_format_retries", 1))))
+
+
 def _range_of(job: Job) -> dict[str, Any]:
     return _json_of(job.range_json)
 
@@ -495,75 +499,89 @@ def _run_recheck(
                 else ResultCacheStore(session).get(cache_key)
             )
 
-        raw: Any = None
-        run_id: str | None = None
-        elapsed_ms = 0
-        if cached_result is None:
-            raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
-                session_factory,
-                adapter,
-                job_id=job_id,
-                window=recheck_window,
-                state=state,
-                snapshot=snapshot,
-                settings=settings,
-            )
-            stats["calls"] += 1
-            if error is not None:
-                timeout = error.kind is ProviderErrorKind.TIMEOUT
-                with session_factory() as session:
-                    run = session.get(InferenceRun, run_id) if run_id else None
-                    if run is not None:
+        retry_limit = _format_retry_limit(job)
+        correction = None
+        max_tokens_override = None
+        for attempt in range(1 + retry_limit):
+            raw: Any = None
+            run_id: str | None = None
+            elapsed_ms = 0
+            with session_factory() as session:
+                job = session.get(Job, job_id)
+                assert job is not None
+                if job.state in STOP_STATES:
+                    return stats
+                max_input = _budget_of(job).get("max_input_tokens")
+                spent = spent_tokens(session, job_id)
+                reserve = sum(estimate_tokens(message["content"]) for message in _messages_for(
+                    window=recheck_window, state=state, locked_summary=None, correction=correction,
+                )) + max(_output_token_reserve(snapshot, len(recheck_window.target_quote_ids)),
+                         max_tokens_override or 0)
+                if cached_result is None and max_input is not None and (
+                    spent["input_tokens"] + (spent["unknown_runs"] + 1) * reserve > int(max_input)
+                ):
+                    # Optional recheck must not discard the already accepted first result.
+                    return stats
+            if cached_result is None:
+                raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
+                    session_factory, adapter, job_id=job_id, window=recheck_window,
+                    state=state, snapshot=snapshot, settings=settings, correction=correction,
+                    max_tokens_override=max_tokens_override,
+                )
+                stats["calls"] += 1
+                if error is not None:
+                    timeout = error.kind is ProviderErrorKind.TIMEOUT
+                    with session_factory() as session:
+                        run = session.get(InferenceRun, run_id)
+                        assert run is not None
                         run.elapsed_ms = elapsed_ms
                         run.error_code = error.code.value
-                        run.state = (
-                            InferenceRunState.UNKNOWN_OUTCOME
-                            if timeout
-                            else InferenceRunState.FAILED
-                        )
+                        run.state = (InferenceRunState.UNKNOWN_OUTCOME if timeout
+                                     else InferenceRunState.FAILED)
                         run.usage_json = _usage_json_from_error(error)
-                    if timeout:
-                        failed_job = session.get(Job, job_id)
-                        if failed_job is not None:
+                        if timeout:
+                            failed_job = session.get(Job, job_id)
+                            assert failed_job is not None
                             failed_job.state = JobState.NEEDS_RECONCILIATION
                             failed_job.last_error = f"复核超时，结果未知：{error.message}"
-                    session.commit()
-                if timeout:
-                    stats["unknown_outcome"] = 1
-                    return stats
-                continue
-        else:
-            raw = cached_result.payload()
+                        session.commit()
+                    if timeout:
+                        stats["unknown_outcome"] = 1
+                        return stats
+                    if error.kind is ProviderErrorKind.INVALID_OUTPUT and attempt < retry_limit:
+                        correction = error.message
+                        max_tokens_override = _escalated_max_tokens(snapshot, error)
+                        continue
+                    break
+            else:
+                raw = cached_result.payload()
 
-        with session_factory() as session:
-            job = session.get(Job, job_id)
-            assert job is not None
-            state = _load_state(job)
-            ok, _codes, _messages, _repair_warnings = _apply_payload(
-                session,
-                window=recheck_window,
-                inputs=inputs,
-                state=state,
-                raw=raw,
-                run_id=run_id,
-                cache_key=cache_key,
-            )
-            if run_id:
-                run = session.get(InferenceRun, run_id)
-                if run is not None:
+            with session_factory() as session:
+                job = session.get(Job, job_id)
+                assert job is not None
+                state = _load_state(job)
+                ok, codes, messages, _repair_warnings = _apply_payload(
+                    session, window=recheck_window, inputs=inputs, state=state,
+                    raw=raw, run_id=run_id, cache_key=cache_key,
+                )
+                if run_id:
+                    run = session.get(InferenceRun, run_id)
+                    assert run is not None
                     run.elapsed_ms = elapsed_ms
                     usage = raw.get("_usage") if isinstance(raw, dict) else None
                     known_usage = bool(usage) and not usage.get("unknown")
                     run.usage_json = json.dumps(usage, ensure_ascii=False) if known_usage else None
-                    if ok:
-                        run.state = InferenceRunState.SUCCEEDED
-                    else:
-                        run.state = InferenceRunState.FAILED
+                    run.state = InferenceRunState.SUCCEEDED if ok else InferenceRunState.FAILED
+                    if not ok:
                         run.error_code = "INVALID_MODEL_OUTPUT"
+                if ok:
+                    stats["windows"] += 1
+                    stats["targets"] += len(recheck_window.target_quote_ids)
+                session.commit()
             if ok:
-                stats["windows"] += 1
-                stats["targets"] += len(recheck_window.target_quote_ids)
-            session.commit()
+                break
+            correction = "；".join(messages)[:800] or "；".join(codes)
+            cached_result = None
     return stats
 
 
@@ -1071,15 +1089,44 @@ def run_job(
             strong_used += 1
             outcome.strong_windows += 1
 
-        # 每个窗口最多两次调用：首次 + 一次「纠错重发」
-        # 。
+        # 每个窗口首次调用 + 用户设置的有限纠错重发。
         # 每次调用都单独写 inference_runs 并各自结算用量，不是只记最后一次。
         correction: str | None = None
         retry_correction: str | None = None
         retry_max_tokens: int | None = None
         attempt_max_tokens: int | None = None
         window_failed = False
-        for attempt in range(2):
+        format_retry_limit = _format_retry_limit(job_snapshot)
+        for attempt in range(1 + format_retry_limit):
+            if attempt:
+                with session_factory() as session:
+                    job = session.get(Job, job_id)
+                    assert job is not None
+                    if job.state in STOP_STATES:
+                        outcome.state = job.state
+                        return outcome
+                    spent = spent_tokens(session, job_id)
+                    max_input = _budget_of(job).get("max_input_tokens")
+                    retry_reserve = sum(
+                        estimate_tokens(message["content"]) for message in
+                        _messages_for(window=window, state=state,
+                                      locked_summary=None, correction=correction)
+                    ) + max(output_reserve, attempt_max_tokens or 0)
+                    if max_input is not None and (
+                        spent["input_tokens"] + spent["unknown_runs"] * reserve
+                        + retry_reserve > int(max_input)
+                    ):
+                        job.state = JobState.BUDGET_EXHAUSTED
+                        job.last_error = "剩余额度不足以纠错重试，已停止调用"
+                        session.commit()
+                        outcome.state = JobState.BUDGET_EXHAUSTED
+                        outcome.budget_exhausted = True
+                        return outcome
+                    job.progress_json = json.dumps({
+                        "stage": "validation_retry", "retry_attempt": attempt,
+                        "retry_limit": format_retry_limit, "windows_done": done,
+                    }, ensure_ascii=False)
+                    session.commit()
             raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
                 session_factory,
                 window_adapter,
@@ -1121,8 +1168,11 @@ def run_job(
                         outcome.unknown_runs += 1
                         return outcome
 
-                    # 格式/契约类错误（坏 JSON、空内容、字段不合法）允许一次纠错重发
-                    if error.kind is ProviderErrorKind.INVALID_OUTPUT and attempt == 0:
+                    # 格式/契约类错误按用户配置有限纠错重发。
+                    if (
+                        error.kind is ProviderErrorKind.INVALID_OUTPUT
+                        and attempt < format_retry_limit
+                    ):
                         run.state = InferenceRunState.FAILED
                         run.error_code = error.code.value
                         session.commit()
@@ -1165,7 +1215,7 @@ def run_job(
                     if not ok:
                         run.state = InferenceRunState.FAILED
                         run.error_code = "INVALID_MODEL_OUTPUT"
-                        if attempt == 0:
+                        if attempt < format_retry_limit:
                             # 记下失败尝试，带着具体问题重发一次（不把窗口标记为终态失败）
                             session.commit()
                             hint = "；".join(messages)[:800] or "；".join(codes)

@@ -6,13 +6,14 @@ export interface ProcessingPreferences {
   profileId: string
   concurrency: number
   maxRechecks: number
+  maxFormatRetries: number
   tokenLimit: number | null
   maxOutputTokens: number | null
   thinkingMode: NonNullable<InferenceOptions['thinking_mode']>
   thinkingEffort: NonNullable<InferenceOptions['reasoning_effort']>
 }
 const defaults: ProcessingPreferences = {
-  profileId: '', concurrency: 2, maxRechecks: 0, tokenLimit: null, maxOutputTokens: null,
+  profileId: '', concurrency: 2, maxRechecks: 0, maxFormatRetries: 1, tokenLimit: null, maxOutputTokens: null,
   thinkingMode: 'default', thinkingEffort: 'default',
 }
 let cachedRaw: string | null | undefined
@@ -30,6 +31,8 @@ function normalize(value: Partial<ProcessingPreferences>): ProcessingPreferences
     concurrency: Math.min(16, positive(value.concurrency) ?? 2),
     maxRechecks: typeof value.maxRechecks === 'number' && Number.isSafeInteger(value.maxRechecks)
       && value.maxRechecks >= 0 ? value.maxRechecks : 0,
+    maxFormatRetries: typeof value.maxFormatRetries === 'number' && Number.isSafeInteger(value.maxFormatRetries)
+      && value.maxFormatRetries >= 0 ? Math.min(5, value.maxFormatRetries) : 1,
     tokenLimit: positive(value.tokenLimit),
     maxOutputTokens: positive(value.maxOutputTokens),
     thinkingMode: ['default', 'disabled', 'enabled', 'adaptive'].includes(value.thinkingMode ?? '') ? value.thinkingMode! : 'default',

@@ -28,6 +28,7 @@ export interface BudgetInput {
   maxInputTokens: number | null
   maxOutputTokens: number | null
   maxRechecks: number
+  maxFormatRetries?: number
 }
 
 export function budgetPayload(budget: BudgetInput) {
@@ -35,6 +36,7 @@ export function budgetPayload(budget: BudgetInput) {
     max_input_tokens: budget.maxInputTokens,
     max_output_tokens: budget.maxOutputTokens,
     max_rechecks: budget.maxRechecks,
+    max_format_retries: budget.maxFormatRetries ?? 1,
   }
 }
 

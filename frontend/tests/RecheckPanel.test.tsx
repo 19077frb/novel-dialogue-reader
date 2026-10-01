@@ -26,7 +26,7 @@ beforeEach(() => {
 })
 
 it('inherits shared thinking preferences, sends overrides and locks the running task', async () => {
-  updateProcessingPreferences({ profileId: 'p1', thinkingMode: 'enabled', thinkingEffort: 'low' })
+  updateProcessingPreferences({ profileId: 'p1', thinkingMode: 'enabled', thinkingEffort: 'low', maxFormatRetries: 3 })
   const mounted = renderWithProviders(<RecheckPanel quoteId="q1" />)
   expect(await screen.findByTestId('profile-thinking-defaults')).toHaveTextContent('模式 自适应；强度 高')
   const settings = screen.getByTestId('model-thinking-settings')
@@ -37,10 +37,11 @@ it('inherits shared thinking preferences, sends overrides and locks the running 
   await userEvent.click(screen.getByTestId('recheck-start'))
   await waitFor(() => expect(reviewApi.recheckQuote).toHaveBeenCalled())
   expect(reviewApi.recheckQuote).toHaveBeenCalledWith('q1', expect.objectContaining({
-    profileId: 'p1', inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' }, maxInputTokens: 20000,
+    profileId: 'p1', inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' }, maxInputTokens: 20000, maxFormatRetries: 3,
   }))
   expect(screen.getByTestId('processing-thinking-mode')).toBeDisabled()
   expect(screen.getByTestId('recheck-start')).toBeDisabled()
+  expect(screen.getByTestId('recheck-format-retries')).toBeDisabled()
   await userEvent.click(screen.getByText('模拟任务完成'))
   await userEvent.selectOptions(screen.getByTestId('processing-thinking-effort'), 'high')
   await userEvent.click(screen.getByTestId('recheck-start'))
