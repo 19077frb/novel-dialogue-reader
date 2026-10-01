@@ -81,7 +81,7 @@ def _epub_limits(settings: Settings) -> EpubLimits:
             settings, "max_epub_total_uncompressed_bytes", 200 * 1024 * 1024
         ),
         max_entry_uncompressed_bytes=getattr(settings, "max_epub_entry_bytes", 32 * 1024 * 1024),
-        max_spine_items=getattr(settings, "max_epub_spine_items", 500),
+        max_spine_items=getattr(settings, "max_epub_spine_items", 1000),
     )
 
 

@@ -16,7 +16,7 @@ from fixtures.epub_factory import (
     ruby_and_image_spec,
 )
 from ndr.domain.enums import ContentNodeType
-from ndr.ingest.epub import EPUB_PARSER_VERSION, EpubError, EpubLimits, parse_epub
+from ndr.ingest.epub import EPUB_PARSER_VERSION, EpubError, EpubLimits, _parse_xhtml, parse_epub
 
 IMAGE_BYTES = b"\x89PNG\r\n\x1a\noriginal-fixture-bytes"
 
@@ -248,3 +248,62 @@ def test_pretty_printed_whitespace_is_collapsed() -> None:
     assert parsed.canonical_text == "第一段 跨行书写。\n第二段 带制表符。"
     assert "\t" not in parsed.canonical_text
     assert "  " not in parsed.canonical_text
+
+
+def test_standard_html_entities_are_normalized_without_changing_literal_sections() -> None:
+    body = (
+        '<p title="&copy;">甲&nbsp;乙 &copy; &NotEqualTilde; '
+        '&amp;nbsp; <![CDATA[&nbsp;]]></p><!-- &copy; -->'
+        '<script>evil(&nbsp;)</script><style>evil</style>'
+    )
+    parsed = _parse(EpubSpec(documents=[Document("ch1", "text/one.xhtml", body)]))
+    assert parsed.canonical_text == "甲 乙 © ≂̸ &nbsp; &nbsp;"
+    assert sum("标准 HTML 字符实体" in warning for warning in parsed.warnings) == 1
+    assert "evil" not in parsed.canonical_text
+
+
+@pytest.mark.parametrize("body", [
+    "<p>甲&nbsp;乙</div>", "<p>&notARealEntity;</p>", "<p>甲 & 乙</p>",
+    "<p>甲&nbsp 乙</p>",
+])
+def test_entity_compatibility_does_not_recover_invalid_xml(body: str) -> None:
+    with pytest.raises(EpubError) as excinfo:
+        _parse(EpubSpec(documents=[Document("ch1", "text/one.xhtml", body)]))
+    assert excinfo.value.code == "EPUB_INVALID_XHTML"
+    assert excinfo.value.details["href"] == "OEBPS/text/one.xhtml"
+    assert excinfo.value.details["reason"]
+
+
+def test_standard_xml_needs_no_entity_compatibility_warning() -> None:
+    parsed = _parse(minimal_spec())
+    assert not any("标准 HTML 字符实体" in warning for warning in parsed.warnings)
+
+
+def test_entity_repair_preserves_declared_encoding_and_does_not_fetch_dtd() -> None:
+    raw = (
+        '<?xml version="1.0" encoding="iso-8859-1"?>'
+        '<!DOCTYPE html SYSTEM "https://invalid.example/never-fetch.dtd">'
+        '<html><body><p>café&nbsp;&copy;</p></body></html>'
+    ).encode("iso-8859-1")
+    doc = _parse_xhtml(raw, "chapter.xhtml", lambda _: None)
+    assert doc.blocks[0].text == "café ©"
+    assert doc.repaired_entities
+
+
+def test_custom_dtd_entities_are_not_rewritten_by_compatibility() -> None:
+    raw = (
+        '<!DOCTYPE html [<!ENTITY nbsp "custom">]>'
+        '<html><p>&nbsp; &copy;</p></html>'
+    ).encode()
+    with pytest.raises(EpubError) as excinfo:
+        _parse_xhtml(raw, "chapter.xhtml", lambda _: None)
+    assert excinfo.value.code == "EPUB_INVALID_XHTML"
+
+
+def test_long_collection_default_and_explicit_spine_limit() -> None:
+    documents = [Document(f"ch{i}", f"text/{i}.xhtml", "<p>正文。</p>") for i in range(544)]
+    spec = EpubSpec(documents=documents)
+    assert len(_parse(spec).chapters) == 544
+    with pytest.raises(EpubError) as excinfo:
+        _parse(spec, limits=EpubLimits(max_spine_items=500))
+    assert excinfo.value.code == "EPUB_SPINE_LIMIT"

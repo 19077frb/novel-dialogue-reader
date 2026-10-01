@@ -19,9 +19,11 @@ import io
 import json
 import mimetypes
 import posixpath
+import re
 import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from html.entities import html5
 from typing import Any
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
@@ -36,7 +38,7 @@ from .document import (
     collapse_whitespace,
 )
 
-EPUB_PARSER_VERSION = "epub-1"
+EPUB_PARSER_VERSION = "epub-2"
 EPUB_NORMALIZATION_VERSION = "canonical-epub-blocks-1"
 
 CONTAINER_PATH = "META-INF/container.xml"
@@ -99,7 +101,7 @@ class EpubLimits:
     max_entries: int = 2000
     max_total_uncompressed_bytes: int = 200 * 1024 * 1024
     max_entry_uncompressed_bytes: int = 32 * 1024 * 1024
-    max_spine_items: int = 500
+    max_spine_items: int = 1000
 
 
 def _local(tag: str) -> str:
@@ -270,6 +272,31 @@ class _Document:
     path: str
     blocks: list[_RawBlock] = field(default_factory=list)
     headings: list[str] = field(default_factory=list)
+    repaired_entities: bool = False
+
+
+def _normalize_html_entities(data: bytes) -> bytes:
+    """Only normalize standard, semicolon-terminated entities; never recover HTML tags.
+
+    ASCII numeric references preserve the document's declared encoding. Leave literal
+    CDATA/comments/processing instructions and custom DTD entity definitions untouched.
+    """
+    if re.search(rb"<!ENTITY\s", data, re.IGNORECASE):
+        return data
+
+    def replace(match: re.Match[bytes]) -> bytes:
+        name = match.group(1)
+        if name is None or name in {b"amp", b"lt", b"gt", b"quot", b"apos"}:
+            return match.group(0)
+        value = html5.get(name.decode("ascii") + ";")
+        if value is None:
+            return match.group(0)
+        return "".join(f"&#{ord(char)};" for char in value).encode("ascii")
+
+    return re.sub(
+        rb"<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>|&([A-Za-z][A-Za-z0-9]*);",
+        replace, data, flags=re.DOTALL,
+    )
 
 
 class _BlockBuilder:
@@ -414,12 +441,17 @@ def _parse_xhtml(  # noqa: ANN001
     document = _Document(path=path)
     try:
         root = ET.fromstring(data)
-    except ET.ParseError as exc:
-        raise EpubError(
-            "EPUB 正文文档不是合法 XML/XHTML，已拒绝导入（不做脚本或容错执行）",
-            code="EPUB_INVALID_XHTML",
-            details={"href": path, "reason": str(exc)},
-        ) from exc
+    except ET.ParseError:
+        normalized = _normalize_html_entities(data)
+        try:
+            root = ET.fromstring(normalized)
+        except ET.ParseError as exc:
+            raise EpubError(
+                "EPUB 正文文档不是合法 XML/XHTML，标准字符实体兼容后仍无法解析",
+                code="EPUB_INVALID_XHTML",
+                details={"href": path, "reason": str(exc)},
+            ) from exc
+        document.repaired_entities = normalized != data
 
     builder = _BlockBuilder(resolve_image)
     _walk(root, builder, strip_ndr_auxiliary=strip_ndr_auxiliary)
@@ -735,6 +767,8 @@ def parse_epub(
             make_image_resolver(item.path),
             strip_ndr_auxiliary=strip_ndr_auxiliary,
         )
+        if document.repaired_entities:
+            warnings.append(f"已兼容正文中的标准 HTML 字符实体（如不换行空格）：{item.path}")
         if not document.blocks:
             warnings.append(f"正文文档没有可渲染内容：{item.path}")
             continue

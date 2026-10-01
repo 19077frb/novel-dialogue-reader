@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     max_epub_entries: int = 2000
     max_epub_total_uncompressed_bytes: int = 200 * 1024 * 1024
     max_epub_entry_bytes: int = 32 * 1024 * 1024
-    max_epub_spine_items: int = 500
+    max_epub_spine_items: int = 1000
 
     @field_validator("data_dir")
     @classmethod
