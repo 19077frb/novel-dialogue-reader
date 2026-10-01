@@ -69,6 +69,19 @@ it('retries failed people first and continues only remaining windows', async () 
   expect(jobs.createJob).toHaveBeenCalledWith(expect.objectContaining({ selectedWindowIds: ['w1'] }))
 })
 
+it('chapter retry fills failed tasks without repeating successful windows or adding unselected windows', async () => {
+  await start()
+  vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: [
+    ...estimate.windows!.map(window => ({ ...window, processing_status: 'failed' })),
+    { ...estimate.windows![0], window_id: 'w3', ordinal: 3, processing_status: 'unprocessed' },
+  ] } as EstimateOut)
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  await retryChapterProcessing('b1', 'c1')
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
+  expect(jobs.createJob).toHaveBeenCalledTimes(3)
+  expect(jobs.createJob).toHaveBeenLastCalledWith(expect.objectContaining({ selectedWindowIds: ['w1'] }))
+})
+
 it('preserves other failed tasks when retrying one window and does not claim whole-chapter completion', async () => {
   vi.mocked(jobs.createJob).mockResolvedValue(job('FAILED'))
   await start()

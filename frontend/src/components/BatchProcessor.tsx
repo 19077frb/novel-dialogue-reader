@@ -180,10 +180,14 @@ export async function retryBatchTask(bookId: string, taskId: string, wholeChapte
     if (batchStopRequests.has(bookId)) throw new Error('已停止准备重试，未调用模型。')
     const forceReprocess = saved.execution.forceReprocess ?? false
     if (chapter.dialogue_processed && !forceReprocess) { reconcileCompletedChapter(bookId, chapter.id); saved.execution.onFinished?.(); return }
+    const chapterTasks = batchSnapshots.get(bookId)?.tasks.filter(item => item.chapterId === chapter.id) ?? []
+    // Chapter retry repairs the previous task set, not every newly estimated window.
+    const repairWindowIds = new Set(chapterTasks.filter(item => item.type === 'dialogue'
+      && ['failed', 'cancelled'].includes(item.state)).map(item => item.windowId))
     const selected = windows.filter(window => (forceReprocess
       ? batchSnapshots.get(bookId)?.tasks.find(item => item.chapterId === chapter.id && item.windowId === String(window.window_id))?.state !== 'completed'
       : window.processing_status !== 'completed')
-      && (wholeChapter || task.type === 'roster' || String(window.window_id) === task.windowId))
+      && (wholeChapter ? repairWindowIds.has(String(window.window_id)) : task.type === 'roster' || String(window.window_id) === task.windowId))
     if (!wholeChapter && task.type === 'dialogue' && !windows.some(window => String(window.window_id) === task.windowId)) {
       throw new Error('窗口计划已变化，请进入单章处理选择未完成窗口。')
     }
