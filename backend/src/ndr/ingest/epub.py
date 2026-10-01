@@ -38,7 +38,7 @@ from .document import (
     collapse_whitespace,
 )
 
-EPUB_PARSER_VERSION = "epub-2"
+EPUB_PARSER_VERSION = "epub-3"
 EPUB_NORMALIZATION_VERSION = "canonical-epub-blocks-1"
 
 CONTAINER_PATH = "META-INF/container.xml"
@@ -261,6 +261,7 @@ class _RawBlock:
     image_alt: str | None = None
     missing_src: str | None = None
     ruby: list[dict[str, Any]] = field(default_factory=list)
+    source_href: str | None = None
 
     @property
     def is_image(self) -> bool:
@@ -273,6 +274,58 @@ class _Document:
     blocks: list[_RawBlock] = field(default_factory=list)
     headings: list[str] = field(default_factory=list)
     repaired_entities: bool = False
+
+
+def _group_illustration_pages(
+    documents: list[tuple[str, _Document]], toc_titles: dict[str, str],
+) -> list[tuple[str, _Document]]:
+    """Group image-only spine pages without moving blocks or losing source paths.
+
+    A TOC-linked image page introduces the next text chapter (often a title plate).
+    Unlisted illustrations follow the preceding chapter; leading pages and pages
+    from a new package directory precede the next chapter. Image-only books remain
+    readable as one chapter.
+    """
+    groups: list[list[tuple[str, _Document]]] = []
+    pending: list[tuple[str, _Document]] = []
+    for path, doc in documents:
+        image_only = any(block.is_image for block in doc.blocks) and not any(
+            block.text for block in doc.blocks
+        )
+        if image_only:
+            same_directory = bool(groups) and (
+                posixpath.dirname(groups[-1][-1][0]) == posixpath.dirname(path)
+            )
+            if groups and not pending and path not in toc_titles and same_directory:
+                groups[-1].append((path, doc))
+            else:
+                pending.append((path, doc))
+            continue
+        groups.append([*pending, (path, doc)])
+        pending = []
+    if pending:
+        if groups:
+            groups[-1].extend(pending)
+        else:
+            groups.append(pending)
+
+    result: list[tuple[str, _Document]] = []
+    for group in groups:
+        # Prefer a text document as the chapter's source/title. The leading title
+        # plate provides a fallback only when the text document has no TOC title.
+        primary = next((pair for pair in group if any(b.text for b in pair[1].blocks)), group[0])
+        path, doc = primary
+        merged = _Document(path=path, headings=list(doc.headings))
+        for source_path, source_doc in group:
+            for block in source_doc.blocks:
+                block.source_href = source_path
+                merged.blocks.append(block)
+        if path not in toc_titles:
+            fallback = next((toc_titles[p] for p, _ in group if p in toc_titles), None)
+            if fallback:
+                merged.headings.insert(0, fallback)
+        result.append((path, merged))
+    return result
 
 
 def _normalize_html_entities(data: bytes) -> bytes:
@@ -774,6 +827,13 @@ def parse_epub(
             continue
         spine_documents.append((item.path, document))
 
+    if not strip_ndr_auxiliary:
+        grouped = _group_illustration_pages(spine_documents, toc_titles)
+        merged_count = len(spine_documents) - len(grouped)
+        if merged_count:
+            warnings.append(f"已将 {merged_count} 个独立插画页并入相邻章节，图片顺序保持不变。")
+        spine_documents = grouped
+
     # 先收集所有文本块，便于计算段间分隔符覆盖范围
     text_records: list[dict[str, Any]] = []
     for path, document in spine_documents:
@@ -782,7 +842,12 @@ def parse_epub(
         chapter_nodes: list[ParsedNode] = []
         counter = 0
         doc_source_cursor = 0
+        previous_source_href = None
         for block in document.blocks:
+            source_href = block.source_href or path
+            if source_href != previous_source_href:
+                doc_source_cursor = 0
+                previous_source_href = source_href
             if block.node_type is ContentNodeType.SEPARATOR:
                 chapter_nodes.append(
                     ParsedNode(
@@ -863,7 +928,7 @@ def parse_epub(
                 {
                     "node": node,
                     "chapter_ordinal": chapter_ordinal,
-                    "source_href": path,
+                    "source_href": source_href,
                     "source_start_cp": doc_source_cursor,
                     "source_end_cp": doc_source_cursor + len(text),
                 }

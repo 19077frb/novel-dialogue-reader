@@ -307,3 +307,87 @@ def test_long_collection_default_and_explicit_spine_limit() -> None:
     with pytest.raises(EpubError) as excinfo:
         _parse(spec, limits=EpubLimits(max_spine_items=500))
     assert excinfo.value.code == "EPUB_SPINE_LIMIT"
+
+
+def _illustration_spec() -> EpubSpec:
+    def image(alt: str) -> str:
+        return f'<p><img src="../images/a.png" alt="{alt}"/></p>'
+
+    return EpubSpec(
+        documents=[
+            Document("cover", "text/cover.xhtml", image("封面")),
+            Document("one", "text/one.xhtml", "<p>第一章正文。</p>"),
+            Document("inside", "text/inside.xhtml", image("章内插画")),
+            Document("plate", "text/plate.xhtml", image("第二章扉页")),
+            Document("plate2", "text/plate2.xhtml", image("连续扉页")),
+            Document("two", "text/two.xhtml", "<p>第二章正文。</p>"),
+            Document("end", "text/end.xhtml", image("末尾插画")),
+        ],
+        nav=[("text/one.xhtml", "第一章"), ("text/plate.xhtml", "第二章")],
+        resources={"images/a.png": IMAGE_BYTES},
+    )
+
+
+def test_illustration_pages_join_chapters_without_losing_order_or_source_maps() -> None:
+    parsed = _parse(_illustration_spec())
+    assert [c.title for c in parsed.chapters] == ["第一章", "第二章"]
+    assert [c.source_href for c in parsed.chapters] == [
+        "OEBPS/text/one.xhtml", "OEBPS/text/two.xhtml",
+    ]
+    assert parsed.canonical_text == "第一章正文。\n第二章正文。"
+    images = [n for n in parsed.nodes if n.node_type is ContentNodeType.IMAGE]
+    assert [json.loads(n.tree_json)["alt"] for n in images] == [
+        "封面", "章内插画", "第二章扉页", "连续扉页", "末尾插画",
+    ]
+    assert [n.chapter_ordinal for n in images] == [0, 0, 1, 1, 1]
+    assert all(n.start_cp == n.end_cp for n in images)
+    assert [m.source_href for m in parsed.mappings] == [
+        "OEBPS/text/one.xhtml", "OEBPS/text/two.xhtml",
+    ]
+    assert parsed.mappings[0].canonical_start_cp == 0
+    assert parsed.mappings[0].canonical_end_cp == parsed.mappings[1].canonical_start_cp
+    assert parsed.mappings[-1].canonical_end_cp == parsed.canonical_length_cp
+    for chapter in parsed.chapters:
+        ns = [n for n in parsed.nodes if n.chapter_ordinal == chapter.ordinal]
+        assert len({n.node_id for n in ns}) == len(ns)
+        assert all(chapter.start_cp <= n.start_cp <= n.end_cp <= chapter.end_cp for n in ns)
+    assert any("独立插画页" in w for w in parsed.warnings)
+
+
+def test_image_only_book_keeps_all_images_as_one_readable_chapter() -> None:
+    spec = _illustration_spec()
+    spec.documents = [d for d in spec.documents if d.doc_id not in {"one", "two"}]
+    spec.nav = None
+    parsed = _parse(spec)
+    assert len(parsed.chapters) == 1
+    assert parsed.canonical_text == ""
+    assert len(parsed.nodes) == 5
+
+
+def test_image_with_caption_remains_an_independent_text_document() -> None:
+    spec = _illustration_spec()
+    spec.documents[2].body += "<p>原书的说明文字。</p>"
+    parsed = _parse(spec)
+    assert len(parsed.chapters) == 3
+    assert "原书的说明文字。" in parsed.canonical_text
+
+
+def test_annotation_roundtrip_preserves_original_image_chapter_boundaries() -> None:
+    spec = _illustration_spec()
+    spec.extras["OEBPS/annotations.json"] = b"{}"
+    parsed = _parse(spec)
+    assert len(parsed.chapters) == len(spec.documents)
+    assert not any("独立插画页" in w for w in parsed.warnings)
+
+
+def test_unlisted_cover_in_new_volume_precedes_next_volume_text() -> None:
+    spec = EpubSpec(
+        documents=[
+            Document("one", "vol1/text.xhtml", "<p>卷一。</p>"),
+            Document("cover", "vol2/cover.xhtml", '<img src="../images/a.png"/>'),
+            Document("two", "vol2/text.xhtml", "<p>卷二。</p>"),
+        ], resources={"images/a.png": IMAGE_BYTES},
+    )
+    parsed = _parse(spec)
+    assert len(parsed.chapters) == 2
+    assert next(n for n in parsed.nodes if n.node_type is ContentNodeType.IMAGE).chapter_ordinal == 1
