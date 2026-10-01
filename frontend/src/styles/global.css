@@ -502,18 +502,18 @@ textarea:focus-visible {
 .ndr-bookmark-edit { margin-top: 12px; }
 .ndr-bookmark-edit summary { cursor: pointer; color: var(--ndr-muted); font-size: 0.85rem; }
 .ndr-bookmark-edit .ndr-field { margin: 12px 0; }
-.ndr-sentence-bookmark {
+.ndr-paragraph-bookmark {
   padding: 0 4px;
   margin-left: 3px;
   font-size: 0.8em;
   vertical-align: baseline;
   opacity: 0;
 }
-.ndr-sentence-bookmark::before { content: '☆'; }
-.ndr-sentence:hover .ndr-sentence-bookmark,
-.ndr-sentence:focus-within .ndr-sentence-bookmark { opacity: 1; }
-@media (hover: none) { .ndr-sentence-bookmark { opacity: 1; } }
-@media (prefers-reduced-motion: no-preference) { .ndr-sentence-bookmark { transition: opacity 120ms; } }
+.ndr-paragraph-bookmark::before { content: '☆'; }
+.ndr-paragraph:hover .ndr-paragraph-bookmark,
+.ndr-paragraph:focus-within .ndr-paragraph-bookmark { opacity: 1; }
+@media (hover: none) { .ndr-paragraph-bookmark { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) { .ndr-paragraph-bookmark { transition: opacity 120ms; } }
 
 .ndr-chapter-nav ol {
   list-style: none;

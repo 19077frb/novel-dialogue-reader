@@ -20,17 +20,30 @@ function node(
 }
 
 describe('DocumentRenderer', () => {
-  it('每句话提供独立书签位置，emoji 按码点计数且按钮不触发正文点击', () => {
+  it('多句段落只提供一个书签，保存段首且不触发正文点击', () => {
     const save = vi.fn()
     const click = vi.fn()
     render(<DocumentRenderer bookId="b1" nodes={[node({ node_id: 'sentence', node_type: 'paragraph', start_cp: 10, end_cp: 24, text: '「😀你好。第二句！」尾句' })]} onBookmark={save} onNodeClick={click} />)
     const buttons = screen.getAllByRole('button', { name: /保存书签/ })
-    expect(buttons).toHaveLength(3)
-    fireEvent.click(buttons[1])
-    expect(save).toHaveBeenCalledWith(15, '第二句！」')
+    expect(buttons).toHaveLength(1)
+    fireEvent.click(buttons[0])
+    expect(save).toHaveBeenCalledWith(10, '「😀你好。第二句！」尾句')
     expect(click).not.toHaveBeenCalled()
     expect(screen.getByTestId('document-renderer')).toHaveTextContent('「😀你好。')
     expect(screen.getByTestId('document-renderer').textContent).toBe('「😀你好。第二句！」尾句')
+  })
+  it('每个非空段落提供一个入口，不给标题、空段落或图片提供入口', () => {
+    const save = vi.fn()
+    render(<DocumentRenderer bookId="b1" bookmarkPending onBookmark={save} nodes={[
+      node({ node_id: 'title', node_type: 'heading', text: '标题' }),
+      node({ node_id: 'p1', node_type: 'paragraph', start_cp: 3, end_cp: 10, text: '第一句。第二句。' }),
+      node({ node_id: 'p2', node_type: 'paragraph', start_cp: 11, end_cp: 14, text: '无标点段落' }),
+      node({ node_id: 'empty', node_type: 'paragraph', text: '  ' }),
+      node({ node_id: 'image', node_type: 'image', payload: { resource_id: 'img' } }),
+    ]} />)
+    const buttons = screen.getAllByRole('button', { name: /保存书签/ })
+    expect(buttons).toHaveLength(2)
+    buttons.forEach(button => expect(button).toBeDisabled())
   })
   it('按节点类型渲染标题、段落、分隔符，并带上定位属性', () => {
     render(

@@ -159,9 +159,9 @@ export default function ReaderPage() {
   useEffect(() => {
     const key = `${chapterId}:${resumeCp}`
     if (resumeCp === null || !nodes.length || restoredRef.current === key) return
-    const sentence = Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-sentence-start]') ?? [])
-      .find(item => Number(item.dataset.sentenceStart) <= resumeCp && Number(item.dataset.sentenceEnd) > resumeCp)
-    const target = sentence ?? Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [])
+    const paragraph = Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-paragraph-start]') ?? [])
+      .find(item => Number(item.dataset.paragraphStart) <= resumeCp && Number(item.dataset.paragraphEnd) > resumeCp)
+    const target = paragraph ?? Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [])
       .find(node => Number(node.dataset.endCp) > resumeCp && Number(node.dataset.startCp) <= resumeCp)
     if (target) { restoredRef.current = key; target.scrollIntoView?.({ block: 'start' }) }
     else if (content.data?.chapter_id === chapterId && content.data.next_cursor && !content.isFetching) {
@@ -352,7 +352,7 @@ export default function ReaderPage() {
           {chapters.isPending && <p className="hint">正在读取目录…</p>}
           </div>
           {sidebarTab === 'bookmarks' && <div id="bookmark-panel" role="tabpanel" aria-labelledby="bookmark-tab">
-            <p className="hint">点击正文句旁的 ☆ 保存书签。</p>
+            <p className="hint">点击正文段落旁的 ☆ 保存书签。</p>
             <BookmarkList bookId={bookId} activeVersionId={book.data?.active_version_id} />
             <Link className="ndr-button" to={`/books/${bookId}/bookmarks`}>打开独立书签页</Link>
           </div>}
@@ -437,7 +437,7 @@ export default function ReaderPage() {
                 bookmarkPending={bookmark.isPending}
                 onBookmark={(cp, text) => {
                   if (!activeChapter || !book.data?.active_version_id || bookmark.isPending) return
-                  const note = window.prompt(`保存这句话为书签：${text.trim().slice(0, 80)}\n备注（可留空，最多 512 字）`, '')
+                  const note = window.prompt(`保存这段话为书签：${text.trim().slice(0, 80)}\n备注（可留空，最多 512 字）`, '')
                   if (note !== null) bookmark.mutate({ cp, note: note.slice(0, 512) })
                 }}
               />

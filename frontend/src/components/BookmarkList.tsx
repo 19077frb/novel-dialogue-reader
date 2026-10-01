@@ -5,7 +5,6 @@ import { Link } from 'react-router-dom'
 import { bookmarkKey, deleteBookmark, editBookmark, fetchBookmarks } from '../api/bookmarks'
 import type { BookmarkOut } from '../api/types'
 import { ReadErrorNotice } from './ReadErrorNotice'
-import { sentenceRanges } from '../text/sentences'
 
 function BookmarkCard({ item, activeVersionId, saved }: { item: BookmarkOut; activeVersionId?: string | null; saved: () => Promise<void> }) {
   const [note, setNote] = useState(item.note)
@@ -15,7 +14,7 @@ function BookmarkCard({ item, activeVersionId, saved }: { item: BookmarkOut; act
   })
   return <article className="ndr-bookmark-card" data-testid="bookmark-card">
     <h3>{item.chapter_title}</h3>
-    <blockquote>{sentenceRanges(item.excerpt)[0]?.text.trim() ?? item.excerpt}</blockquote>
+    <blockquote>{item.excerpt.split(/\r?\n/u)[0].trim()}</blockquote>
     {item.note && <p className="ndr-bookmark-note">{item.note}</p>}
     <time className="hint" dateTime={item.created_at}>{new Date(item.created_at).toLocaleString('zh-CN')}</time>
     <div className="ndr-form-actions">
@@ -42,7 +41,7 @@ export function BookmarkList({ bookId, activeVersionId }: { bookId: string; acti
     <button onClick={() => void list.refetch()} disabled={list.isFetching}>重新读取书签</button>
     {list.isPending && <p>正在读取书签…</p>}
     {list.isError && <ReadErrorNotice label="书签读取失败" error={list.error} retrying={list.isFetching} onRetry={() => void list.refetch()} />}
-    {!list.isPending && !list.isError && !items.length && <p className="hint">还没有书签。阅读时点击句旁的 ☆，收藏想再看的句子。</p>}
+    {!list.isPending && !list.isError && !items.length && <p className="hint">还没有书签。阅读时点击段落旁的 ☆，收藏想再看的段落。</p>}
     <div className="ndr-bookmark-list">{items.map(item => <BookmarkCard key={`${item.id}:${item.version}`} item={item} activeVersionId={activeVersionId} saved={() => client.invalidateQueries({ queryKey: bookmarkKey(bookId) })} />)}</div>
     {list.hasNextPage && <button disabled={list.isFetching} onClick={() => void list.fetchNextPage()}>加载更多书签</button>}
   </div>

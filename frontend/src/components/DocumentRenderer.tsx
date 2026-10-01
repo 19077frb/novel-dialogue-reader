@@ -5,7 +5,6 @@ import type { AnnotationItemOut, ContentNodeOut, RubyAnnotation } from '../api/t
 import { nodePayload } from '../api/types'
 import { cpLength, sliceByCodepoints, utf16IndexForCp } from '../text/codepoints'
 import { SpanIndex } from '../text/intervals'
-import { sentenceRanges } from '../text/sentences'
 import { annotationColor, AnnotationLayer, labelText } from './AnnotationLayer'
 
 /** 候选引语范围（来自扫描器，只表示“这里有一段引号内容”，不含说话人）。 */
@@ -347,13 +346,12 @@ function NodeView({
           onQuoteClick,
         )
   const text = onBookmark && node.node_type === 'paragraph'
-    ? sentenceRanges(node.text, node.start_cp).map(sentence => <span key={sentence.startCp} className="ndr-sentence"
-        data-sentence-start={sentence.startCp} data-sentence-end={sentence.endCp}>
-        {renderRange(sentence.startCp, sentence.endCp)}
-        {sentence.text.trim() && <button type="button" className="ndr-sentence-bookmark" disabled={bookmarkPending}
-          aria-label={`保存书签：${sentence.text.trim().slice(0, 40)}`} title="保存这句话为书签"
-          onClick={event => { event.stopPropagation(); onBookmark(sentence.startCp, sentence.text) }} />}
-      </span>)
+    ? <span className="ndr-paragraph" data-paragraph-start={node.start_cp} data-paragraph-end={nodeEnd}>
+        {renderRange(node.start_cp, nodeEnd)}
+        {node.text.trim() && <button type="button" className="ndr-paragraph-bookmark" disabled={bookmarkPending}
+          aria-label={`保存书签：${node.text.trim().slice(0, 40)}`} title="保存这段话为书签"
+          onClick={event => { event.stopPropagation(); onBookmark(node.start_cp, node.text) }} />}
+      </span>
     : renderRange(node.start_cp, nodeEnd)
 
   if (node.node_type === 'heading') {
