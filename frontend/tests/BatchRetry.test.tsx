@@ -42,6 +42,24 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); clearBatchProgress('b1') })
 
+it('records a textless chapter as completed and refreshes its persistent catalog status without dialogue calls', async () => {
+  vi.mocked(characters.analyzeCharacterRoster).mockResolvedValue({
+    ...job('COMPLETED'), usage: { total_tokens: 0 },
+    progress: { skipped_reason: 'no_text', calls: 0 },
+  } as JobDetailOut)
+  vi.mocked(characters.fetchCharacterRoster).mockResolvedValue({
+    status: 'CONFIRMED', version: 1, candidates: [], confirmed_characters: [], pov_character_id: null,
+  } as never)
+  await start()
+  render(<Snapshot />)
+  expect(readSnapshot().chapterStates.c1.state).toBe('processed')
+  expect(readSnapshot().chapterStates.c1.error).toBeNull()
+  expect(readSnapshot().catalogRevision).toBeGreaterThan(0)
+  expect(jobs.createJob).not.toHaveBeenCalled()
+  expect(characters.confirmCharacterRoster).not.toHaveBeenCalled()
+  expect(usage).toHaveBeenLastCalledWith(0)
+})
+
 it('retries only the failed window, reuses confirmed people and cumulative allowance, and clears obsolete failures', async () => {
   await start()
   render(<><Snapshot /><BatchRetryControls bookId="b1" /></>)

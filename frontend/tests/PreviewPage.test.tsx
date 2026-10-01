@@ -930,6 +930,17 @@ describe('PreviewPage', () => {
     expect(screen.queryByTestId('batch-processor')).not.toBeInTheDocument()
   })
 
+  it('已完成的无文字章节显示说明并禁止重复人物分析', async () => {
+    vi.mocked(charactersApi.fetchCharacterRoster).mockResolvedValue({
+      ...ROSTER, status: 'CONFIRMED', candidates: [], confirmed_characters: [], pov_character_id: null,
+    })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    expect(await screen.findByText(/本章没有正文文字，已完成/)).toBeInTheDocument()
+    expect(screen.getByTestId('roster-analyze')).toBeDisabled()
+    expect(screen.queryByText('已确认本章主人公；如需修改，请重新确认。')).not.toBeInTheDocument()
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
+  })
+
   it('无人物的插图章跳过对白，后续章节仍按顺序处理', async () => {
     vi.mocked(booksApi.fetchChapters).mockResolvedValue([
       { ...CHAPTERS[0], title: '插图', dialogue_processed: false },

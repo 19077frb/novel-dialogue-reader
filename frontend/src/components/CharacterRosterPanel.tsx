@@ -82,7 +82,10 @@ export function CharacterRosterPanel({
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const rosterKey = characterKeys.roster(bookId, bookVersionId, chapterId)
+  const rosterKey = useMemo(
+    () => characterKeys.roster(bookId, bookVersionId, chapterId),
+    [bookId, bookVersionId, chapterId],
+  )
   const roster = useQuery({
     queryKey: rosterKey,
     queryFn: ({ signal }) =>
@@ -121,7 +124,10 @@ export function CharacterRosterPanel({
   useEffect(() => {
     if (!rosterJobId || !job.data || !TERMINAL_JOB_STATES.has(job.data.state)) return
     void queryClient.invalidateQueries({ queryKey: rosterKey })
-  }, [job.data, queryClient, rosterJobId, rosterKey])
+    if (job.data.progress?.skipped_reason === 'no_text') {
+      void queryClient.invalidateQueries({ queryKey: ['chapters', bookId] })
+    }
+  }, [bookId, job.data, queryClient, rosterJobId, rosterKey])
 
   const analyze = useMutation({
     mutationFn: (input: AnalyzeRosterInput) =>
@@ -171,6 +177,9 @@ export function CharacterRosterPanel({
     () => drafts.filter((item) => item.accepted).length,
     [drafts],
   )
+  const textlessCompleted = roster.data?.status === 'CONFIRMED'
+    && !roster.data.pov_character_id && (roster.data.confirmed_characters ?? []).length === 0
+    && (roster.data.candidates ?? []).length === 0
   const canConfirm =
     acceptedCount > 0 &&
     Boolean(povTempRef) &&
@@ -254,7 +263,7 @@ export function CharacterRosterPanel({
                 ),
               })
             }}
-            disabled={disabled || profileId === '' || analyze.isPending}
+            disabled={disabled || profileId === '' || analyze.isPending || textlessCompleted}
             data-testid="roster-analyze"
           >
             分析本章人物
@@ -265,6 +274,7 @@ export function CharacterRosterPanel({
         </div>
       </div>
 
+      {textlessCompleted && <p className="hint">本章没有正文文字，已完成，无需人物识别或对白处理，不消耗模型 Token。</p>}
       {roster.isPending && (
         <p className="hint" data-testid="roster-loading">
           正在读取人物名单…
@@ -291,7 +301,7 @@ export function CharacterRosterPanel({
         <p className="status-error">人物分析失败：{job.data.last_error ?? '未知错误'}</p>
       )}
 
-      {roster.data?.status === 'CONFIRMED' && (
+      {roster.data?.status === 'CONFIRMED' && !textlessCompleted && (
         <p className="hint" data-testid="roster-confirmed">
           已确认本章主人公；如需修改，请重新确认。
         </p>
@@ -380,7 +390,7 @@ export function CharacterRosterPanel({
           ))}
         </div>
       ) : (
-        <p className="hint">还没有人物候选。可以先分析，也可以直接手动添加。</p>
+        !textlessCompleted && <p className="hint">还没有人物候选。可以先分析，也可以直接手动添加。</p>
       )}
 
       <div className="ndr-form-actions">

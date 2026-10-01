@@ -711,12 +711,15 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
           if (accepted.length === 0) {
             skippedEmptyChapterIds.add(chapter.id)
             updateBatchTask(bookId, taskId, 'completed')
+            const noText = rosterJob.progress?.skipped_reason === 'no_text'
             updateChapterProgress(bookId, chapter.id, {
-              state: 'stopped', error: '未识别到人物，已跳过本章对白处理', pendingTasks: 0,
+              state: noText ? 'processed' : 'stopped',
+              error: noText ? null : '未识别到人物，已跳过本章对白处理', pendingTasks: 0,
             })
             const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
             publishBatch(bookId, {
-              message: `${prefix}：未识别到人物，跳过本章并继续下一章`,
+              message: `${prefix}：${noText ? '没有正文文字，已完成（未调用模型）' : '未识别到人物，跳过本章'}，继续下一章`,
+              catalogRevision: current.catalogRevision + (noText ? 1 : 0),
               tasks: current.tasks.map((task) => task.chapterId === chapter.id && task.state === 'queued'
                 ? { ...task, state: 'cancelled' as const, error: null }
                 : task),

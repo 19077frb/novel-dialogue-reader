@@ -138,6 +138,25 @@ def get_roster(session: Session, version: BookVersion, chapter: Chapter) -> Chap
     return _roster_out(session, row)
 
 
+def complete_textless_chapter(session: Session, chapter: Chapter) -> ChapterCharacterRoster:
+    """Persist a confirmed empty roster only after the caller checks actual text."""
+    roster = _roster_for_chapter(session, chapter.id)
+    if roster is None:
+        roster = ChapterCharacterRoster(
+            chapter_id=chapter.id, book_version_id=chapter.book_version_id,
+        )
+        session.add(roster)
+    else:
+        roster.version += 1
+    roster.status = CharacterRosterStatus.CONFIRMED
+    roster.candidates_json = "[]"
+    roster.confirmed_character_ids_json = "[]"
+    roster.pov_character_id = None
+    chapter.dialogue_processed = True
+    session.flush()
+    return roster
+
+
 def _match_existing(
     session: Session,
     version_id: str,

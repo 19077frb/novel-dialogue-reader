@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from fixtures.epub_factory import Document, EpubSpec, build_epub
 from ndr.characters.service import store_roster_candidates
 from ndr.config import Settings
 from ndr.domain.enums import CharacterSource, JobState
@@ -12,8 +14,98 @@ from ndr.jobs.scheduler import run_job
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.llm.schemas import RosterOutput
 from ndr.storage.engine import create_db_engine, create_session_factory
-from ndr.storage.models import BookCharacter, BookVersion, Chapter
+from ndr.storage.models import BookCharacter, BookVersion, Chapter, InferenceRun
 from ndr.storage.transactions import transaction
+
+
+@pytest.mark.parametrize("body", ["", "<p>   </p>", '<img src="plate.png" alt="插图"/>'])
+def test_textless_chapter_completes_without_model_and_persists(
+    migrated_client: TestClient, migrated_settings: Settings, body: str,
+) -> None:
+    raw = build_epub(EpubSpec(
+        documents=[Document("empty", "empty.xhtml", body)],
+        resources={"plate.png": b"\x89PNG\r\n\x1a\nfixture"},
+        nav=[("empty.xhtml", "插图")],
+    ))
+    response = migrated_client.post("/api/books/import", files={
+        "file": ("empty.epub", raw, "application/epub+zip"),
+    })
+    assert response.status_code == 202, response.text
+    data = response.json()["data"]
+    base = f"/api/books/{data['book_id']}"
+    engine = create_db_engine(migrated_settings)
+    factory = create_session_factory(engine)
+    try:
+        chapters = migrated_client.get(f"{base}/chapters").json()["data"]
+        if not chapters:
+            # Current EPUB parser omits entirely empty files. Older imports may
+            # still contain them; retain an empty chapter to exercise that path.
+            with transaction(factory) as session:
+                session.add(Chapter(
+                    book_version_id=data["book_version_id"], ordinal=0, title="空白章",
+                    start_cp=0, end_cp=0,
+                ))
+            chapters = migrated_client.get(f"{base}/chapters").json()["data"]
+        else:
+            assert chapters[0]["dialogue_processed"] is True
+            initial_roster = migrated_client.get(
+                f"{base}/chapters/{chapters[0]['id']}/character-roster",
+            ).json()["data"]
+            assert initial_roster["status"] == "CONFIRMED"
+            assert initial_roster["candidates"] == []
+        chapter = chapters[0]
+        endpoint = f"{base}/chapters/{chapter['id']}/character-roster"
+        # Emulate an obsolete failed/not-complete state.
+        with transaction(factory) as session:
+            session.get(Chapter, chapter["id"]).dialogue_processed = False
+        profile = migrated_client.post("/api/model-profiles", json={
+            "name": "不可调用的配置", "protocol": "fake-provider",
+            "base_url": "http://127.0.0.1:1", "model": "fake-model",
+            "credential_mode": "none",
+        }).json()["data"]
+        for attempt in range(2):
+            created = migrated_client.post(f"{endpoint}/analyze", json={
+                "book_version_id": data["book_version_id"], "profile_id": profile["id"],
+                "idempotency_key": f"empty-roster-{attempt}", "run_now": False,
+                "max_input_tokens": 1,
+            })
+            assert created.status_code == 202, created.text
+            job_id = created.json()["data"]["id"]
+            # Fake provider is disabled: constructing/calling it would fail.
+            outcome = run_job(factory, migrated_settings, job_id=job_id)
+            assert outcome.state is JobState.COMPLETED
+            assert outcome.calls == 0
+            detail = migrated_client.get(f"/api/jobs/{job_id}").json()["data"]
+            assert detail["progress"]["skipped_reason"] == "no_text"
+            assert detail["last_error"] is None
+            assert detail["unknown_usage_runs"] == 0
+            with factory() as session:
+                assert list(session.scalars(select(InferenceRun).where(
+                    InferenceRun.job_id == job_id,
+                ))) == []
+        assert migrated_client.get(f"{base}/chapters").json()["data"][0]["dialogue_processed"]
+        roster = migrated_client.get(endpoint).json()["data"]
+        assert roster["status"] == "CONFIRMED"
+        assert roster["pov_character_id"] is None
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(("text", "completed"), [(" \n\t\n", True), ("本章是没有对白的叙述。\n", False)])
+def test_completion_requires_absent_text_not_absent_quotes(
+    migrated_client: TestClient, text: str, completed: bool,
+) -> None:
+    response = migrated_client.post("/api/books/import", files={
+        "file": ("chapter.txt", text.encode(), "text/plain"),
+    })
+    assert response.status_code == 202, response.text
+    book_id = response.json()["data"]["book_id"]
+    chapter = migrated_client.get(f"/api/books/{book_id}/chapters").json()["data"][0]
+    assert chapter["dialogue_processed"] is completed
+    roster = migrated_client.get(
+        f"/api/books/{book_id}/chapters/{chapter['id']}/character-roster",
+    ).json()["data"]
+    assert roster["status"] == ("CONFIRMED" if completed else "DRAFT")
 
 
 def test_roster_analysis_cannot_overwrite_user_confirmed_identity(
