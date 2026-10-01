@@ -50,7 +50,9 @@ def suggestions(session: Session, book_id: str) -> list[ChapterRepairSuggestion]
     for index, chapter in enumerate(chapters):
         title = chapter.title or ""
         repeated = index > 0 and duplicate_heading(chapters[index - 1].title or "", title)
-        if repeated or suspicious_heading(title):
+        # EPUB titles are supplied by the publication, not inferred from prose.
+        # Punctuation and long chapter names are normal in light novels.
+        if repeated or (book.format.value == "TXT" and suspicious_heading(title)):
             result.append(
                 ChapterRepairSuggestion(
                     chapter_id=chapter.id,

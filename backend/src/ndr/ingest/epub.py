@@ -22,7 +22,7 @@ import posixpath
 import re
 import zipfile
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from html.entities import html5
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -39,7 +39,7 @@ from .document import (
 )
 from .layout import LayoutNormalizer
 
-EPUB_PARSER_VERSION = "epub-4"
+EPUB_PARSER_VERSION = "epub-5"
 EPUB_NORMALIZATION_VERSION = "canonical-epub-blocks-2"
 
 CONTAINER_PATH = "META-INF/container.xml"
@@ -263,6 +263,8 @@ class _RawBlock:
     missing_src: str | None = None
     ruby: list[dict[str, Any]] = field(default_factory=list)
     source_href: str | None = None
+    source_start_cp: int | None = None
+    continuation: bool = False
 
     @property
     def is_image(self) -> bool:
@@ -276,6 +278,8 @@ class _Document:
     headings: list[str] = field(default_factory=list)
     repaired_entities: bool = False
     normalized_layout_groups: int = 0
+    anchors: dict[str, tuple[int, int]] = field(default_factory=dict)
+    chapter_title: str | None = None
 
 
 def _group_illustration_pages(
@@ -318,15 +322,113 @@ def _group_illustration_pages(
         primary = next((pair for pair in group if any(b.text for b in pair[1].blocks)), group[0])
         path, doc = primary
         merged = _Document(path=path, headings=list(doc.headings))
+        merged.chapter_title = doc.chapter_title
         for source_path, source_doc in group:
             for block in source_doc.blocks:
-                block.source_href = source_path
+                if block.source_href is None:
+                    block.source_href = source_path
                 merged.blocks.append(block)
         if path not in toc_titles:
             fallback = next((toc_titles[p] for p, _ in group if p in toc_titles), None)
             if fallback:
                 merged.headings.insert(0, fallback)
+        if merged.chapter_title is None:
+            merged.chapter_title = next(
+                (d.chapter_title for _, d in group if d.chapter_title), None,
+            )
         result.append((path, merged))
+    return result
+
+
+def _group_by_toc(
+    documents: list[tuple[str, _Document]], entries: list[dict[str, str]], warnings: list[str],
+) -> list[tuple[str, _Document]] | None:
+    """Use TOC boundaries in spine order, including in-document anchors.
+
+    Preserve every block exactly once. Volume/leaf links sharing a boundary are
+    deduplicated; unlisted resources continue the current chapter, not a new one.
+    """
+    flat: list[_RawBlock] = []
+    starts: dict[str, int] = {}
+    docs = dict(documents)
+    text_seen = False
+    for path, doc in documents:
+        starts[path] = len(flat)
+        source_cursor = 0
+        for block in doc.blocks:
+            block.source_href = path
+            if block.text:
+                if text_seen:
+                    source_cursor += 1
+                block.source_start_cp = source_cursor
+                source_cursor += len(block.text)
+                text_seen = True
+            flat.append(block)
+    boundaries: dict[tuple[int, int], dict[str, str]] = {}
+    ordered_points = []
+    for entry in entries:
+        path = entry["href"]
+        doc = docs.get(path)
+        if doc is None:
+            warnings.append(f"目录项未指向可读正文，已忽略该边界：{path}")
+            continue
+        fragment = entry.get("fragment", "")
+        if fragment:
+            if fragment not in doc.anchors:
+                warnings.append(f"目录锚点不存在，已忽略该边界：{path}#{fragment}")
+                continue
+            index, offset = doc.anchors[fragment]
+        else:
+            index, offset = 0, 0
+        index += starts[path]
+        if index < len(flat) and flat[index].text and offset == len(flat[index].text):
+            index, offset = index + 1, 0
+        if index >= len(flat):
+            continue
+        point = (index, offset)
+        ordered_points.append(point)
+        previous = boundaries.get(point)
+        if previous is None or previous.get("parent") == "true":
+            boundaries[point] = entry
+    if not boundaries:
+        return None
+    if ordered_points != sorted(ordered_points):
+        warnings.append("原目录顺序与正文不一致，已按正文顺序整理章节。")
+    points = sorted(boundaries)
+    if points[0] != (0, 0):
+        first_index, first_offset = points[0]
+        if not first_offset and not any(block.text for block in flat[:first_index]):
+            boundaries[(0, 0)] = boundaries.pop(points[0])
+            points[0] = (0, 0)
+        else:
+            boundaries[(0, 0)] = {"href": documents[0][0], "title": "卷首"}
+            points.insert(0, (0, 0))
+    result = []
+    for number, start in enumerate(points):
+        end = points[number + 1] if number + 1 < len(points) else (len(flat), 0)
+        entry = boundaries[start]
+        chapter_title = entry.get("title") or "正文"
+        if volume := entry.get("volume"):
+            chapter_title = f"{volume} · {chapter_title}"
+        document = _Document(path=entry["href"], chapter_title=chapter_title)
+        for index in range(start[0], min(len(flat), end[0] + bool(end[1]))):
+            block = flat[index]
+            left = start[1] if index == start[0] else 0
+            right = end[1] if index == end[0] else len(block.text)
+            if block.text and (left or right < len(block.text)):
+                if right <= left:
+                    continue
+                ruby = [{**r, "start": r["start"] - left, "end": r["end"] - left}
+                        for r in block.ruby if left <= r["start"] and r["end"] <= right]
+                block = replace(
+                    block, text=block.text[left:right], ruby=ruby,
+                    continuation=left > 0,
+                    source_start_cp=(block.source_start_cp or 0) + left,
+                )
+            document.blocks.append(block)
+        if document.blocks:
+            result.append((entry["href"], document))
+    warnings.append("EPUB 章节按原目录及锚点划分，未列入目录的正文文件并入所属章节。")
     return result
 
 
@@ -361,6 +463,18 @@ class _BlockBuilder:
         self.blocks: list[_RawBlock] = []
         self._current: _RawBlock | None = None
         self._resolve_image = resolve_image
+        self._anchors: dict[str, tuple[_RawBlock | None, int, int]] = {}
+
+    def mark_anchor(self, anchor: str) -> None:
+        if anchor not in self._anchors:
+            self._anchors[anchor] = (
+                self._current, len(self.blocks), len(self._current.text) if self._current else 0,
+            )
+
+    def anchors(self) -> dict[str, tuple[int, int]]:
+        indexes = {id(block): index for index, block in enumerate(self.blocks)}
+        return {name: (indexes.get(id(block), fallback), offset if id(block) in indexes else 0)
+                for name, (block, fallback, offset) in self._anchors.items()}
 
     def _flush(self) -> None:
         if self._current is None:
@@ -449,9 +563,15 @@ def _walk(
         builder.add_text(" ")
         return
     if tag in ("img", "image"):
+        builder._flush()
+        if anchor := element.get("id") or element.get("{http://www.w3.org/XML/1998/namespace}id"):
+            builder.mark_anchor(anchor)
         src = element.get("src") or element.get("{http://www.w3.org/1999/xlink}href")
         builder.add_image(src, element.get("alt"))
         return
+    if anchor := (element.get("id") or element.get("{http://www.w3.org/XML/1998/namespace}id")
+                  or (element.get("name") if tag == "a" else None)):
+        builder.mark_anchor(anchor)
     if tag == "ruby":
         _walk_ruby(element, builder)
         return
@@ -516,6 +636,7 @@ def _parse_xhtml(  # noqa: ANN001
     builder = _BlockBuilder(resolve_image)
     _walk(root, builder, strip_ndr_auxiliary=strip_ndr_auxiliary)
     document.blocks = builder.finish()
+    document.anchors = builder.anchors()
     for block in document.blocks:
         if block.node_type is ContentNodeType.HEADING and block.text:
             document.headings.append(block.text)
@@ -597,13 +718,20 @@ def _parse_toc_nav(data: bytes) -> list[dict[str, str]]:
         nav_type = nav.get("{http://www.idpf.org/2007/ops}type") or nav.get("type") or ""
         if nav_type and "toc" not in nav_type:
             continue
-        for anchor in nav.iter():
-            if _local(anchor.tag) != "a":
-                continue
-            href = anchor.get("href")
-            if not href:
-                continue
-            entries.append({"href": href, "title": collapse_whitespace(_iter_text(anchor))})
+        def visit(element: ET.Element, volume: str = "") -> None:
+            if _local(element.tag) == "li":
+                anchor = next((c for c in element if _local(c.tag) in {"a", "span"}), None)
+                children = [c for c in element if _local(c.tag) in {"ol", "ul"}]
+                label = collapse_whitespace(_iter_text(anchor)) if anchor is not None else ""
+                if anchor is not None and anchor.get("href"):
+                    entries.append({"href": anchor.get("href", ""), "title": label,
+                                    "volume": volume, "parent": "true" if children else "false"})
+                for child in children:
+                    visit(child, label if children and label else volume)
+            else:
+                for child in element:
+                    visit(child, volume)
+        visit(nav)
     return entries
 
 
@@ -613,19 +741,21 @@ def _parse_toc_ncx(data: bytes) -> list[dict[str, str]]:
         root = ET.fromstring(data)
     except ET.ParseError:
         return entries
-    for point in root.iter():
-        if _local(point.tag) != "navPoint":
-            continue
-        label = ""
-        content = ""
-        for child in point.iter():
-            tag = _local(child.tag)
-            if tag == "text" and not label:
-                label = collapse_whitespace(child.text or "")
-            elif tag == "content" and not content:
-                content = child.get("src") or ""
-        if content:
-            entries.append({"href": content, "title": label})
+    def visit(element: ET.Element, volume: str = "") -> None:
+        if _local(element.tag) == "navPoint":
+            label_node = next((c for c in element if _local(c.tag) == "navLabel"), None)
+            content_node = next((c for c in element if _local(c.tag) == "content"), None)
+            label = collapse_whitespace(_iter_text(label_node)) if label_node is not None else ""
+            children = [c for c in element if _local(c.tag) == "navPoint"]
+            if content_node is not None and content_node.get("src"):
+                entries.append({"href": content_node.get("src", ""), "title": label,
+                                "volume": volume, "parent": "true" if children else "false"})
+            for child in children:
+                visit(child, label if label and children else volume)
+        else:
+            for child in element:
+                visit(child, volume)
+    visit(root)
     return entries
 
 
@@ -728,7 +858,7 @@ def parse_epub(
                 if resolved is None:
                     continue
                 toc_entries.append(
-                    {"href": resolved[0], "fragment": resolved[1] or "", "title": entry["title"]}
+                    {**entry, "href": resolved[0], "fragment": unquote(resolved[1] or "")}
                 )
     if not toc_entries:
         for item in manifest:
@@ -740,8 +870,9 @@ def parse_epub(
                         continue
                     toc_entries.append(
                         {
+                            **entry,
                             "href": resolved[0],
-                            "fragment": resolved[1] or "",
+                            "fragment": unquote(resolved[1] or ""),
                             "title": entry["title"],
                         }
                     )
@@ -854,6 +985,8 @@ def parse_epub(
         spine_documents.append((item.path, document))
 
     if not strip_ndr_auxiliary:
+        if grouped_by_toc := _group_by_toc(spine_documents, toc_entries, warnings):
+            spine_documents = grouped_by_toc
         grouped = _group_illustration_pages(spine_documents, toc_titles)
         merged_count = len(spine_documents) - len(grouped)
         if merged_count:
@@ -917,7 +1050,7 @@ def parse_epub(
             text = block.text
             if not text:
                 continue
-            if canonical_cursor > 0:
+            if canonical_cursor > 0 and not block.continuation:
                 canonical_parts.append("\n")
                 canonical_cursor += 1
                 doc_source_cursor += 1
@@ -955,14 +1088,17 @@ def parse_epub(
                     "node": node,
                     "chapter_ordinal": chapter_ordinal,
                     "source_href": source_href,
-                    "source_start_cp": doc_source_cursor,
-                    "source_end_cp": doc_source_cursor + len(text),
+                    "source_start_cp": block.source_start_cp
+                    if block.source_start_cp is not None else doc_source_cursor,
+                    "source_end_cp": (block.source_start_cp
+                                      if block.source_start_cp is not None else doc_source_cursor)
+                    + len(text),
                 }
             )
             doc_source_cursor += len(text)
 
         chapter_end = canonical_cursor
-        chapter_title = toc_titles.get(path) or (
+        chapter_title = document.chapter_title or toc_titles.get(path) or (
             document.headings[0] if document.headings else None
         )
         chapters.append(
@@ -992,7 +1128,7 @@ def parse_epub(
         node: ParsedNode = record["node"]
         if index + 1 < len(text_records):
             canonical_end = text_records[index + 1]["node"].start_cp
-            synthetic = True
+            synthetic = canonical_end > node.end_cp
         else:
             canonical_end = node.end_cp
             synthetic = False

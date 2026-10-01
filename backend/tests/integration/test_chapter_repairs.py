@@ -4,6 +4,64 @@ from ndr.ingest.txt import parse_txt
 from ndr.storage.models import Chapter
 
 
+def test_epub_toc_titles_with_punctuation_are_not_merged_after_import(
+    migrated_client: TestClient,
+) -> None:
+    from fixtures.epub_factory import Document, EpubSpec, build_epub
+
+    names = ["序章", "第一章 与自称女神转生到异世界！", "第二章，开始、冒险！",
+             "第三章 " + "这是出版社正式的很长的章节标题" * 4 + "！"]
+    spec = EpubSpec(documents=[
+        Document(f"ch{i}", f"text/{i}.xhtml", f'<h1>{name}</h1><p>「对白{i}。」</p>')
+        for i, name in enumerate(names)
+    ], nav=[(f"text/{i}.xhtml", name) for i, name in enumerate(names)])
+    response = migrated_client.post("/api/books/import", files={
+        "file": ("chapters.epub", build_epub(spec), "application/epub+zip"),
+    })
+    assert response.status_code == 202, response.text
+    imported = response.json()["data"]
+    assert imported["chapter_count"] == 4
+    assert imported["chapter_repairs_applied"] == 0
+    url = f"/api/books/{imported['book_id']}"
+    chapters = migrated_client.get(f"{url}/chapters").json()["data"]
+    assert [c["title"] for c in chapters] == names
+    assert migrated_client.get(f"{url}/chapter-repairs").json()["data"] == []
+    for i, chapter in enumerate(chapters):
+        content = migrated_client.get(f"{url}/content", params={
+            "chapter_id": chapter["id"],
+        }).json()["data"]["nodes"]
+        lines = [node["text"] for node in content if node["text"]]
+        assert lines == [names[i], f"「对白{i}。」"]
+
+
+def test_epub_unlisted_logo_and_anchor_chapters_survive_full_import(
+    migrated_client: TestClient,
+) -> None:
+    from fixtures.epub_factory import Document, EpubSpec, build_epub
+
+    spec = EpubSpec(documents=[
+        Document("front", "text/front.xhtml", "<p>制作信息。</p>"),
+        Document("logo", "text/logo.xhtml", "<p>出版社标志。</p>"),
+        Document("multi", "text/multi.xhtml", '<h1 id="one">序章</h1><p>「甲。」</p>'
+                 '<h1 id="two">第二章！</h1><p>「乙。」</p>'),
+    ], nav=[("text/front.xhtml", "制作信息"), ("text/multi.xhtml#one", "序章"),
+            ("text/multi.xhtml#two", "第二章！")])
+    response = migrated_client.post("/api/books/import", files={
+        "file": ("anchors.epub", build_epub(spec), "application/epub+zip"),
+    })
+    assert response.status_code == 202, response.text
+    imported = response.json()["data"]
+    url = f"/api/books/{imported['book_id']}"
+    chapters = migrated_client.get(f"{url}/chapters").json()["data"]
+    assert [c["title"] for c in chapters] == ["制作信息", "序章", "第二章！"]
+    nodes = migrated_client.get(f"{url}/content", params={
+        "chapter_id": chapters[0]["id"],
+    }).json()["data"]["nodes"]
+    assert [n["text"] for n in nodes] == ["制作信息。", "出版社标志。"]
+    quotes = migrated_client.get(f"{url}/quotes").json()["data"]["items"]
+    assert len(quotes) == 2
+
+
 def test_txt_avoids_narrative_and_adjacent_duplicate_headings() -> None:
     novel = "第十卷 序章\n\n序章\n「你好。」\n第三节的体育课运气不好的午休时间、然後还有刚刚的大失败……\n正文\n第一章 开始\n「再见。」\n"
     parsed = parse_txt(novel.encode())

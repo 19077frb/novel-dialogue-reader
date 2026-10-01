@@ -224,7 +224,9 @@ def persist_parsed(
                         ].strip()
                         == (chapters[index - 1].title or "").strip()
                     )
-                    if (suggestion.title or "").startswith("第") or previous_is_heading_only:
+                    if (
+                        parsed.format == "TXT" and (suggestion.title or "").startswith("第")
+                    ) or previous_is_heading_only:
                         repairs.append(
                             ChapterRepairIn(
                                 chapter_id=suggestion.chapter_id,

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import zipfile
 
 import pytest
 
@@ -332,7 +334,7 @@ def test_illustration_pages_join_chapters_without_losing_order_or_source_maps() 
     parsed = _parse(_illustration_spec())
     assert [c.title for c in parsed.chapters] == ["第一章", "第二章"]
     assert [c.source_href for c in parsed.chapters] == [
-        "OEBPS/text/one.xhtml", "OEBPS/text/two.xhtml",
+        "OEBPS/text/one.xhtml", "OEBPS/text/plate.xhtml",
     ]
     assert parsed.canonical_text == "第一章正文。\n第二章正文。"
     images = [n for n in parsed.nodes if n.node_type is ContentNodeType.IMAGE]
@@ -351,7 +353,7 @@ def test_illustration_pages_join_chapters_without_losing_order_or_source_maps() 
         ns = [n for n in parsed.nodes if n.chapter_ordinal == chapter.ordinal]
         assert len({n.node_id for n in ns}) == len(ns)
         assert all(chapter.start_cp <= n.start_cp <= n.end_cp <= chapter.end_cp for n in ns)
-    assert any("独立插画页" in w for w in parsed.warnings)
+    assert any("原目录及锚点" in w for w in parsed.warnings)
 
 
 def test_image_only_book_keeps_all_images_as_one_readable_chapter() -> None:
@@ -364,12 +366,75 @@ def test_image_only_book_keeps_all_images_as_one_readable_chapter() -> None:
     assert len(parsed.nodes) == 5
 
 
-def test_image_with_caption_remains_an_independent_text_document() -> None:
+def test_unlisted_image_caption_remains_in_its_toc_chapter() -> None:
     spec = _illustration_spec()
     spec.documents[2].body += "<p>原书的说明文字。</p>"
     parsed = _parse(spec)
-    assert len(parsed.chapters) == 3
+    assert len(parsed.chapters) == 2
     assert "原书的说明文字。" in parsed.canonical_text
+
+
+def test_toc_groups_unlisted_files_and_splits_shared_document_anchors() -> None:
+    spec = EpubSpec(documents=[
+        Document("meta", "text/meta.xhtml", "<p>卷首文字。</p>"),
+        Document("one", "text/one.xhtml", '<h1 id="start">第一章！</h1><p>甲。</p>'),
+        Document("extra", "text/logo.xhtml", "<p>附属文字。</p>"),
+        Document("multi", "text/multi.xhtml", '<div id="two"><h1>第二章，开始！</h1>'
+                 '<p>乙。</p></div><h1 id="three">第三章！</h1><p>丙。</p>'),
+    ], nav=[("text/one.xhtml#start", "第一章！"), ("text/multi.xhtml#two", "第二章，开始！"),
+            ("text/multi.xhtml#three", "第三章！")])
+    parsed = _parse(spec)
+    assert [c.title for c in parsed.chapters] == ["卷首", "第一章！", "第二章，开始！", "第三章！"]
+    texts = [parsed.canonical_text[c.start_cp:c.end_cp] for c in parsed.chapters]
+    assert "附属文字。" in texts[1] and "乙。" not in texts[1]
+    assert "乙。" in texts[2] and "丙。" not in texts[2]
+    assert "丙。" in texts[3] and "乙。" not in texts[3]
+    assert any(m.source_href == "OEBPS/text/logo.xhtml" for m in parsed.mappings)
+
+
+def test_inline_anchor_split_preserves_text_and_local_source_positions() -> None:
+    spec = EpubSpec(documents=[Document("one", "text/one.xhtml", '<p id="a">甲甲'
+                    '<span id="b">乙乙</span>丙丙</p>')],
+                    nav=[("text/one.xhtml#a", "甲章"), ("text/one.xhtml#b", "乙章")])
+    parsed = _parse(spec)
+    assert parsed.canonical_text == "甲甲乙乙丙丙"
+    assert [(c.start_cp, c.end_cp) for c in parsed.chapters] == [(0, 2), (2, 6)]
+    assert [(m.source_text_start_cp, m.source_text_end_cp) for m in parsed.mappings] == [(0, 2), (2, 6)]
+    assert not any(m.synthetic for m in parsed.mappings)
+
+
+def test_missing_toc_anchor_falls_back_without_dropping_text() -> None:
+    spec = minimal_spec()
+    spec.nav = [("text/b-first.xhtml#missing", "不存在")]
+    parsed = _parse(spec)
+    assert len(parsed.chapters) == 2
+    assert any("目录锚点不存在" in w for w in parsed.warnings)
+    assert "第一章 雨夜" in parsed.canonical_text and "第二章 名字" in parsed.canonical_text
+
+
+@pytest.mark.parametrize("ncx", [False, True])
+def test_nested_toc_volume_and_leaf_sharing_href_are_deduplicated(ncx: bool) -> None:
+    spec = EpubSpec(documents=[Document("one", "text/one.xhtml", "<p>甲。</p>"),
+                              Document("two", "text/two.xhtml", "<p>乙。</p>")])
+    if ncx:
+        toc = ('<ncx><navMap><navPoint><navLabel><text>第一卷</text></navLabel>'
+               '<content src="text/one.xhtml"/><navPoint><navLabel><text>第一章！</text></navLabel>'
+               '<content src="text/one.xhtml"/></navPoint><navPoint><navLabel><text>第二章！</text>'
+               '</navLabel><content src="text/two.xhtml"/></navPoint></navPoint></navMap></ncx>')
+        spec.ncx = [("text/one.xhtml", "placeholder")]
+        toc_path = "OEBPS/toc.ncx"
+    else:
+        toc = ('<html xmlns:epub="http://www.idpf.org/2007/ops"><nav epub:type="toc"><ol><li>'
+               '<a href="text/one.xhtml">第一卷</a><ol><li><a href="text/one.xhtml">第一章！</a></li>'
+               '<li><a href="text/two.xhtml">第二章！</a></li></ol></li></ol></nav></html>')
+        spec.nav = [("text/one.xhtml", "placeholder")]
+        toc_path = "OEBPS/nav.xhtml"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(build_epub(spec))) as source, zipfile.ZipFile(buffer, "w") as out:
+        for info in source.infolist():
+            out.writestr(info, toc.encode() if info.filename == toc_path else source.read(info.filename))
+    parsed = parse_epub(buffer.getvalue())
+    assert [c.title for c in parsed.chapters] == ["第一卷 · 第一章！", "第一卷 · 第二章！"]
 
 
 def test_annotation_roundtrip_preserves_original_image_chapter_boundaries() -> None:
