@@ -25,7 +25,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     queryFn: ({ signal }) => fetchLatestCharacterAutoMerge(bookId, versionId!, signal), enabled: Boolean(versionId),
     refetchInterval: query => query.state.data && !query.state.error && !TERMINAL_JOB_STATES.has(query.state.data.state) ? 2000 : false })
   const jobId = result.data?.job_id
-  useEffect(() => { if (jobId) setOpen(true); setSelected([]) }, [jobId])
+  useEffect(() => { if (jobId) setOpen(true); setSelected([]); setConfirmed(false) }, [jobId])
   const start = useMutation({ mutationFn: () => startCharacterAutoMerge(bookId, {
     book_version_id: versionId!, profile_id: preferences.profileId,
     inference_options: inferenceOptions(preferences), max_total_tokens: preferences.tokenLimit,
@@ -36,17 +36,30 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     ? confirmCharacterAutoMerge(bookId, jobId!, ids)
     : confirmCharacterAutoMerge(bookId, jobId!, ids, visibleFromCp),
     onSuccess: async () => { await result.refetch() } })
-  const awaiting = result.data?.phase === 'awaiting_confirmation'
+  const noSuggestions = result.data?.state === 'COMPLETED' && (
+    result.data.phase === 'no_suggestions' || result.data.phase === 'awaiting_confirmation'
+      && Array.isArray(result.data.proposals) && result.data.proposals.length === 0
+  )
+  const awaiting = result.data?.phase === 'awaiting_confirmation' && !noSuggestions
   const busy = start.isPending || accept.isPending || Boolean(versionId && result.isPending) || Boolean(result.data && !TERMINAL_JOB_STATES.has(result.data.state))
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false) }, [busy, onBusyChange])
   useEffect(() => {
-    if (result.data?.state === 'COMPLETED' && result.data.phase !== 'awaiting_confirmation' && result.data.phase !== 'discarded' && refreshed.current !== result.data.job_id) {
+    if (result.data?.state === 'COMPLETED' && !noSuggestions && result.data.phase !== 'awaiting_confirmation' && result.data.phase !== 'discarded' && refreshed.current !== result.data.job_id) {
       refreshed.current = result.data.job_id
       void onSaved()
     }
-  }, [result.data, onSaved])
+  }, [result.data, onSaved, noSuggestions])
   const profileReady = profiles.data?.some(profile => profile.id === preferences.profileId)
   const blocked = disabled || busy || result.isError || awaiting
+  const blockedReason = result.isError ? '任务状态读取失败，重新读取成功后才能开始新的分析。'
+    : disabled ? '本书处理任务正在运行，请先停止处理再自动合并。'
+    : start.isPending ? '正在提交自动合并任务，请勿重复启动。'
+    : accept.isPending ? '正在保存本次合并决定，请稍候。'
+    : versionId && result.isPending ? '正在读取已有任务，确认状态后才能开始新的分析。'
+    : result.data && !TERMINAL_JOB_STATES.has(result.data.state)
+      ? result.data.state === 'PAUSING' ? '自动合并正在停止收尾，结束后才能重新配置。'
+        : '自动合并任务正在排队或运行，结束后才能重新配置。'
+    : awaiting ? '已有合并建议等待确认，请先确认或放弃当前建议，再开始新的分析。' : null
   const proposals = result.data?.proposals ?? []
   const duplicateCount = proposals.reduce((sum, group) => sum + group.sources.length, 0)
   const missingDescription = proposals.some(group => selected.includes(group.target.character_id) && !group.merged_description?.trim())
@@ -58,6 +71,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     {open && <>
       <h3 className="ndr-step-heading"><span className="ndr-step-badge">1</span>分析重复人物与姓名</h3>
       <p className="hint">仅分析已保存的人物姓名、别名和说明，请先保存编辑。也会检查代称是否已有明确姓名，生成更名建议。分析会消耗 Tokens，但不会修改人物。模型可能误判，完成后由你选择接受哪些建议；确认后更新已有对白与导出，不改正文或章节完成状态。</p>
+      {blockedReason && <p className="hint" role="status">{blockedReason}</p>}
       <ThinkingSettings disabled={blocked} profiles={profiles.data ?? []} profileId={preferences.profileId}
         onProfileChange={profileId => update({ profileId })} profileTestId="character-merge-profile" />
       {profiles.isError && <p role="alert" className="status-error">模型配置读取失败：{profiles.error.message}</p>}
@@ -78,9 +92,10 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
       {(start.error || stop.error || accept.error) && <p className="status-error" role="alert">{(start.error ?? stop.error ?? accept.error)?.message}</p>}
       {jobId && <div>
         {result.data && <>
-          <p role="status">自动合并：{awaiting ? '建议已生成，等待确认' : result.data.phase === 'discarded' ? '本次建议已放弃' : JOB_STATE_LABELS[result.data.state]}</p>
+          <p role="status">自动合并：{noSuggestions ? '分析完成，没有可接受的合并或更名建议' : awaiting ? '建议已生成，等待确认' : result.data.phase === 'discarded' ? '本次建议已放弃' : JOB_STATE_LABELS[result.data.state]}</p>
           <OperationTimer startedAt={Date.parse(result.data.created_at)} finishedAt={busy ? null : Date.parse(result.data.updated_at)} />
           <p>已知消耗 {result.data.usage?.total_tokens ?? 0} Tokens{result.data.unknown_usage_runs > 0 ? `；另有 ${result.data.unknown_usage_runs} 次调用用量未知` : ''}</p>
+          {noSuggestions && <p className="hint">本次未修改人物，无需确认或放弃。{result.data.skipped_groups > 0 ? `有 ${result.data.skipped_groups} 组建议未达到接受条件，未纳入结果。` : '模型未提供合并或更名建议。'}你可以调整配置，重新勾选同意后再次分析；不会自动调用模型。</p>}
           {result.data.last_error && <p className="status-error" role="alert">{result.data.last_error}</p>}
           {Boolean(result.data.validation_issues?.length) && <details>
             <summary>查看校验详情（{result.data.validation_issues?.length} 处）</summary>
@@ -122,7 +137,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
             </div>
             {selected.length === 0 && <p className="hint">请至少选择一组建议后确认合并，也可以放弃本次结果。</p>}
           </section>}
-          {result.data.state === 'COMPLETED' && !awaiting && result.data.phase !== 'discarded' && <>
+          {result.data.state === 'COMPLETED' && !noSuggestions && !awaiting && result.data.phase !== 'discarded' && <>
             <p role="status">合并了 {result.data.merged_count} 个重复人物{result.data.merges?.some(group => group.previous_name) ? `；更新了 ${result.data.merges.filter(group => group.previous_name).length} 个正式名称` : ''}{result.data.skipped_groups ? `；保留 ${result.data.skipped_groups} 组未合并` : ''}。</p>
             <CollapsibleBlock title="合并结果明细" summary={`共 ${result.data.merges?.length ?? 0} 项`}>
             <ul className="ndr-merge-text">{(result.data.merges ?? []).map(group => <li key={group.target_character_id}>

@@ -92,7 +92,7 @@ class CharacterAutoMergeResultOut(ApiModel):
     merged_count: int = 0
     skipped_groups: int = 0
     merges: list[AppliedCharacterMergeOut] = Field(default_factory=list)
-    phase: Literal["awaiting_confirmation", "applied", "discarded"] | None = None
+    phase: Literal["awaiting_confirmation", "no_suggestions", "applied", "discarded"] | None = None
     proposals: list[CharacterMergeProposalOut] = Field(default_factory=list)
     usage: dict[str, int] = Field(default_factory=dict)
     unknown_usage_runs: int = 0

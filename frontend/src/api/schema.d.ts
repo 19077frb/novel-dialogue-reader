@@ -1534,7 +1534,7 @@ export interface components {
             /** Merges */
             merges?: components["schemas"]["AppliedCharacterMergeOut"][];
             /** Phase */
-            phase?: ("awaiting_confirmation" | "applied" | "discarded") | null;
+            phase?: ("awaiting_confirmation" | "no_suggestions" | "applied" | "discarded") | null;
             /** Proposals */
             proposals?: components["schemas"]["CharacterMergeProposalOut"][];
             /** Usage */

@@ -4952,6 +4952,7 @@
                 "type": "string",
                 "enum": [
                   "awaiting_confirmation",
+                  "no_suggestions",
                   "applied",
                   "discarded"
                 ]

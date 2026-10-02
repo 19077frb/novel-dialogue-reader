@@ -187,6 +187,11 @@ def auto_merge_result(session, job) -> CharacterAutoMergeResultOut:
     checkpoint = detail.checkpoint or {}
     result = checkpoint.get("merge_result", {})
     proposal = checkpoint.get("merge_proposal", {})
+    phase = checkpoint.get("phase", "applied" if "merge_result" in checkpoint else None)
+    # Read-only compatibility for old successful analyses with an explicit empty plan.
+    if (job.state is JobState.COMPLETED and phase == "awaiting_confirmation"
+            and proposal.get("groups") == []):
+        phase = "no_suggestions"
     entries = {row["character_id"]: row for row in json.loads(job.range_json).get("entries", [])}
     return CharacterAutoMergeResultOut(
         job_id=job.id,
@@ -194,7 +199,7 @@ def auto_merge_result(session, job) -> CharacterAutoMergeResultOut:
         merged_count=result.get("merged_count", 0),
         skipped_groups=result.get("skipped_groups", proposal.get("skipped_groups", 0)),
         merges=result.get("merges", []),
-        phase=checkpoint.get("phase", "applied" if "merge_result" in checkpoint else None),
+        phase=phase,
         proposals=[
             {
                 "target": entries[group["target_id"]],
@@ -599,14 +604,15 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
             accepted = [group.model_dump() for group in output.groups if group.confidence >= 0.95]
             skipped = unnamed_groups + len(output.groups) - len(accepted)
             checkpoint = json.loads(job.checkpoint_json or "{}")
+            phase = "awaiting_confirmation" if accepted else "no_suggestions"
             checkpoint.update(
-                phase="awaiting_confirmation",
+                phase=phase,
                 merge_proposal={"groups": accepted, "skipped_groups": skipped},
                 analysis_groups=analysis_groups,
             )
             job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
             job.progress_json = json.dumps(
-                {"stage": "awaiting_confirmation", "proposed_groups": len(accepted)}
+                {"stage": phase, "proposed_groups": len(accepted)}
             )
             job.state = JobState.COMPLETED
             job.last_error = None

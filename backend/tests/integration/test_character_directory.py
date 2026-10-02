@@ -527,6 +527,72 @@ def _run_merge(client, job, groups, adapter=None, accept=True):
     return outcome, adapter
 
 
+@pytest.mark.parametrize("mode", ["empty", "low_confidence", "unnamed"])
+def test_empty_auto_merge_finishes_without_confirmation_or_person_changes(
+    migrated_client, populated, mode,
+):
+    client, ids = migrated_client, populated
+    if mode == "unnamed":
+        with transaction(client.app.state.session_factory) as session:
+            for character_id in (ids["target"], ids["source"]):
+                session.get(BookCharacter, character_id).canonical_name = ""
+    before = client.get(f"/api/books/{ids['book']}/character-directory").json()["data"]
+    job, payload = _auto_job(client, ids)
+    groups = [] if mode == "empty" else [_merge_group(
+        ids, confidence=0.9 if mode == "low_confidence" else 0.99,
+    )]
+    outcome, adapter = _run_merge(client, job, groups)
+    assert outcome.state is JobState.COMPLETED and len(adapter.calls) == 1
+    result = client.get(
+        f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}",
+    ).json()["data"]
+    assert result["phase"] == "no_suggestions" and result["proposals"] == []
+    assert result["merged_count"] == 0 and result["usage"]["total_tokens"] == 40
+    assert result["skipped_groups"] == (0 if mode == "empty" else 1)
+    assert client.get(f"/api/books/{ids['book']}/character-directory").json()["data"] == before
+    with transaction(client.app.state.session_factory) as session:
+        row = session.get(Job, job["id"])
+        assert json.loads(row.checkpoint_json)["phase"] == "no_suggestions"
+        assert json.loads(row.progress_json)["stage"] == "no_suggestions"
+    # A new explicitly requested analysis can be queued without discarding the empty one.
+    response = client.post(f"/api/books/{ids['book']}/character-directory/auto-merge", json={
+        **payload, "idempotency_key": f"{payload['idempotency_key']}-again",
+    })
+    assert response.status_code == 202, response.text
+    assert response.json()["data"]["id"] != job["id"]
+
+
+@pytest.mark.parametrize("state,phase,explicit_empty,expected", [
+    (JobState.COMPLETED, "awaiting_confirmation", True, "no_suggestions"),
+    (JobState.COMPLETED, "awaiting_confirmation", False, "awaiting_confirmation"),
+    (JobState.RUNNING, "awaiting_confirmation", True, "awaiting_confirmation"),
+    (JobState.FAILED, "awaiting_confirmation", True, "awaiting_confirmation"),
+    (JobState.BUDGET_EXHAUSTED, "awaiting_confirmation", True, "awaiting_confirmation"),
+    (JobState.COMPLETED, "applied", True, "applied"),
+    (JobState.COMPLETED, "discarded", True, "discarded"),
+])
+def test_legacy_empty_plan_compatibility_is_read_only(
+    migrated_client, populated, state, phase, explicit_empty, expected,
+):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids)
+    with transaction(client.app.state.session_factory) as session:
+        row = session.get(Job, job["id"])
+        row.state = state
+        row.checkpoint_json = json.dumps({"phase": phase, "merge_proposal":
+                                         {"groups": []} if explicit_empty else {}})
+        session.flush()
+        before = row.checkpoint_json, row.updated_at
+    result = client.get(
+        f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}",
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["data"]["phase"] == expected
+    with transaction(client.app.state.session_factory) as session:
+        row = session.get(Job, job["id"])
+        assert (row.checkpoint_json, row.updated_at) == before
+
+
 @pytest.mark.parametrize("decision", ["accept", "discard", "changed", "unknown"])
 def test_auto_merge_preview_requires_explicit_confirmation(migrated_client, populated, decision):
     client, ids = migrated_client, populated
