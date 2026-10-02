@@ -18,10 +18,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
+from ..characters.visibility import position
 from ..domain.corrections import SpeakerRevisionIn, SpeakerRevisionOut
 from ..domain.enums import CorrectionAction, CorrectionTargetType, IdentityOperation
 from ..storage.models import (
     Annotation,
+    BookVersion,
     Correction,
     IdentityRevision,
     Quote,
@@ -71,6 +73,9 @@ def apply_speaker_revision(
 
     if payload.expected_scene_version is not None:
         check_version(scene, payload.expected_scene_version)
+    visible_from_cp = position(
+        session.get(BookVersion, scene.book_version_id), payload.visible_from_cp,
+    )
     groups = _scene_groups(session, scene.id)
     annotations = _scene_annotations(session, scene.id)
     by_quote = {row.quote_id: row for row in annotations}
@@ -132,7 +137,7 @@ def apply_speaker_revision(
             "input_group_ids": list(payload.source_group_ids),
             "survivor_group_id": survivor_id,
             "absorbed_group_ids": absorbed,
-            # 人工合并是用户当下的决定：可见时点为空 → 始终生效（不参与初读还原）
+            # Before the chosen reveal position, the reader restores the previous groups.
             "revert": {"quotes": before_map, "groups": {}},
         }
     else:
@@ -206,7 +211,7 @@ def apply_speaker_revision(
         output_ids_json=json.dumps(outcome.group_ids, ensure_ascii=False),
         snapshot_json=json.dumps(snapshot, ensure_ascii=False),
         evidence_refs_json="[]",
-        visible_from_cp=None,
+        visible_from_cp=visible_from_cp,
         version=1,
     )
     session.add(revision)

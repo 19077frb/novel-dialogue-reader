@@ -28,6 +28,8 @@ from ..storage.transactions import transaction
 from .directory import _guard, _sync, directory, edit, merge
 from .merge_diagnostics import MergePlanError, character_refs, saved_model_groups
 from .names import GENERIC_NAMES, is_role_name, name_key, revealed_name, undecorated_name
+from .visibility import baseline
+from .visibility import position as visibility_position
 
 MAX_OUTPUT_TOKENS = 4096
 MAX_INPUT_TOKENS = 64000
@@ -353,8 +355,9 @@ def _confirmation_source(entry):
     return "model"
 
 
-def _apply(session, job, output, entries):
+def _apply(session, job, output, entries, visible_from_cp=None):
     version = _check_current(session, job, entries)
+    cp = visibility_position(version, visible_from_cp)
     by_id = _validate_plan(output, entries)
     applied = []
     skipped = merged_count = 0
@@ -370,6 +373,7 @@ def _apply(session, job, output, entries):
                 version,
                 target_id,
                 CharacterEditIn(
+                    visible_from_cp=cp,
                     name=by_id[target_id]["name"],
                     aliases=by_id[target_id]["aliases"],
                     description=description,
@@ -378,6 +382,7 @@ def _apply(session, job, output, entries):
                 active_job_id=job.id,
             ).character_id
         target = session.get(BookCharacter, target_id)
+        baseline(target)
         target.user_confirmed = by_id[group.target_id]["user_confirmed"]
         target.name_locked = by_id[group.target_id].get("name_locked", False)
         target.confirmation_source = _confirmation_source(by_id[group.target_id])
@@ -392,13 +397,14 @@ def _apply(session, job, output, entries):
                  if name and name != target.canonical_name], ensure_ascii=False,
             )
             target.version += 1
-            _sync(session, version, target)
+        _sync(session, version, target, visible_from_cp=cp)
         for source_id in group.source_ids:
             merge(
                 session,
                 version,
                 source_id,
                 CharacterMergeIn(
+                    visible_from_cp=cp,
                     target_character_id=target_id,
                     expected_version=by_id[source_id]["version"],
                     expected_target_version=target.version,
@@ -419,13 +425,14 @@ def _apply(session, job, output, entries):
     return {"merged_count": merged_count, "skipped_groups": skipped, "merges": applied}
 
 
-def confirm_auto_merge(session, job, selected_ids):
+def confirm_auto_merge(session, job, selected_ids, visible_from_cp=None):
     checkpoint = json.loads(job.checkpoint_json or "{}")
     selected = sorted(selected_ids)
     if len(selected) != len(set(selected)):
         raise ApiError.validation("不能重复选择同一合并建议")
     if checkpoint.get("phase") in {"applied", "discarded"}:
-        if checkpoint.get("selected_target_ids") == selected:
+        if (checkpoint.get("selected_target_ids") == selected
+                and checkpoint.get("selected_visible_from_cp") == visible_from_cp):
             return auto_merge_result(session, job)
         raise ApiError(ErrorCode.RESOURCE_CONFLICT, "本次合并建议已经确认或放弃，不能改变决定")
     if job.state is not JobState.COMPLETED or checkpoint.get("phase") != "awaiting_confirmation":
@@ -446,15 +453,18 @@ def confirm_auto_merge(session, job, selected_ids):
     )
     if claimed.rowcount != 1:
         session.refresh(job)
-        return confirm_auto_merge(session, job, selected)
+        return confirm_auto_merge(session, job, selected, visible_from_cp)
     result = {"merged_count": 0, "merges": [], "skipped_groups": proposal.get("skipped_groups", 0)}
     if selected:
         output = MergeOutput.model_validate({"groups": [groups[key] for key in selected]})
-        result = _apply(session, job, output, json.loads(job.range_json)["entries"])
+        result = _apply(
+            session, job, output, json.loads(job.range_json)["entries"], visible_from_cp,
+        )
         result["skipped_groups"] += proposal.get("skipped_groups", 0)
     checkpoint.update(
         phase="applied" if selected else "discarded",
         selected_target_ids=selected,
+        selected_visible_from_cp=visible_from_cp,
         merge_result=result,
     )
     job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)

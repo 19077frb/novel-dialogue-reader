@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from ..characters.visibility import visible_value
 from ..domain.annotations import (
     AnnotationCountsOut,
     AnnotationItemOut,
@@ -59,7 +60,7 @@ def horizon_identity_reverts(
                 IdentityRevision.visible_from_cp.is_not(None),
                 IdentityRevision.visible_from_cp > horizon,
             )
-            .order_by(IdentityRevision.visible_from_cp.desc())
+            .order_by(IdentityRevision.created_at.desc(), IdentityRevision.id.desc())
         ).scalars()
     )
     quotes: dict[str, str] = {}
@@ -76,11 +77,17 @@ def horizon_identity_reverts(
         touched = False
         for quote_id, old_group in (revert.get("quotes") or {}).items():
             if old_group:
-                quotes.setdefault(str(quote_id), str(old_group))
+                quotes[str(quote_id)] = str(old_group)
                 touched = True
         for new_group, old_group in (revert.get("groups") or {}).items():
             if old_group and str(new_group) != str(old_group):
-                groups.setdefault(str(new_group), str(old_group))
+                old_group = str(old_group)
+                new_group = str(new_group)
+                groups = {key: old_group if value == new_group else value
+                          for key, value in groups.items()}
+                quotes = {key: old_group if value == new_group else value
+                          for key, value in quotes.items()}
+                groups[new_group] = old_group
                 touched = True
         if touched:
             applied += 1
@@ -160,6 +167,7 @@ def build_projection(
                 SpeakerGroup.character_id,
                 SpeakerGroup.canonical_name,
                 SpeakerGroup.description,
+                SpeakerGroup.presentation_history_json,
                 Quote.start_cp.label("first_start_cp"),
                 BookCharacter.preferred_color_index,
             )
@@ -193,13 +201,15 @@ def build_projection(
     used_colors: set[int] = set()
     next_free_color = 0
     for group in groups:
-        name = (group.canonical_name or "").strip()
-        if group.character_id:
-            identity = f"character:{group.character_id}"
-        elif name:
-            identity = f"name:{name.casefold()}"
-        else:
-            identity = f"group:{group.id}"
+        presentation = visible_value(group.presentation_history_json, horizon, fallback={
+            "identity": (f"character:{group.character_id}" if group.character_id else
+                         f"name:{group.canonical_name.casefold()}" if group.canonical_name else
+                         f"group:{group.id}"),
+            "private_identity": f"group:{group.id}",
+            "name": group.canonical_name or "", "description": group.description or "",
+        })
+        name = presentation["name"].strip()
+        identity = presentation["identity"]
         if identity not in color_by_identity:
             preferred = group.preferred_color_index
             if preferred is not None and preferred >= 0 and preferred not in used_colors:
@@ -214,7 +224,7 @@ def build_projection(
             ordered_identities.append(identity)
         identity_by_group[group.id] = identity
         color_by_group[group.id] = color_by_identity[identity]
-        description = (group.description or "").strip()
+        description = presentation["description"].strip()
         label_by_group[group.id] = name or description or "未确认说话人"
         description_by_group[group.id] = description
 
@@ -318,9 +328,7 @@ def build_projection(
         legend.append(
             SpeakerLegendItemOut(
                 group_id=group.id,
-                label=(group.canonical_name or "").strip()
-                or (group.description or "").strip()
-                or "未确认说话人",
+                label=label_by_group[group.id],
                 scene_id=group.scene_id,
                 color_index=color_by_identity[identity],
                 first_quote_id=group.first_quote_id,

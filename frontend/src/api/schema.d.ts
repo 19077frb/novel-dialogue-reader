@@ -1494,6 +1494,8 @@ export interface components {
         };
         /** CharacterAutoMergeConfirmIn */
         CharacterAutoMergeConfirmIn: {
+            /** Visible From Cp */
+            visible_from_cp?: number | null;
             /** Selected Target Ids */
             selected_target_ids: string[];
         };
@@ -1599,6 +1601,8 @@ export interface components {
         };
         /** CharacterEditIn */
         CharacterEditIn: {
+            /** Visible From Cp */
+            visible_from_cp?: number | null;
             /** Book Version Id */
             book_version_id?: string | null;
             /** Name */
@@ -1615,6 +1619,8 @@ export interface components {
         };
         /** CharacterMergeIn */
         CharacterMergeIn: {
+            /** Visible From Cp */
+            visible_from_cp?: number | null;
             /** Book Version Id */
             book_version_id?: string | null;
             /** Target Character Id */
@@ -3528,6 +3534,8 @@ export interface components {
          */
         SpeakerRevisionIn: {
             operation: components["schemas"]["IdentityOperation"];
+            /** Visible From Cp */
+            visible_from_cp?: number | null;
             /**
              * Source Group Ids
              * @description merge：至少两个分组

@@ -29,6 +29,7 @@ from ..storage.models import (
 )
 from ..storage.transactions import check_version
 from .service import _character_out, _json_list, list_book_characters
+from .visibility import baseline, capture, position
 
 
 def _groups(session: Session, version: BookVersion, *filters) -> list[SpeakerGroup]:  # noqa: ANN002
@@ -149,8 +150,12 @@ def _sync(
     target: BookCharacter,
     source_id: str | None = None,
     source_group_id: str | None = None,
+    visible_from_cp: int | None = None,
+    force_history: bool = False,
 ) -> None:
     """Update live references, roster snapshots and resumable checkpoints atomically."""
+    cp = position(version, visible_from_cp)
+    capture(target, cp, force=force_history)
     for group in _groups(
         session,
         version,
@@ -162,10 +167,12 @@ def _sync(
         if (group.character_id and group.character_id in {target.id, source_id}) or (
             group.id == source_group_id
         ):
+            baseline(group)
             group.character_id = target.id
             group.canonical_name = target.canonical_name
             group.description = target.description
             group.version += 1
+            capture(group, cp, force=force_history)
     for roster in session.scalars(
         select(ChapterCharacterRoster).where(
             ChapterCharacterRoster.book_version_id == version.id,
@@ -260,6 +267,7 @@ def edit(
     active_job_id: str | None = None,
 ) -> CharacterDirectoryOut:
     _guard(session, version, active_job_id)
+    cp = position(version, payload.visible_from_cp)
     row = _resolve(session, version, entry_id)
     check_version(row, payload.expected_version)
     name = payload.name.strip()
@@ -275,6 +283,7 @@ def edit(
         )
         session.add(row)
         session.flush()
+    baseline(row)
     row.canonical_name = name
     row.aliases_json = json.dumps(aliases, ensure_ascii=False)
     row.description = payload.description.strip()
@@ -283,7 +292,8 @@ def edit(
     row.confirmation_source = "manual"
     row.source = CharacterSource.USER
     row.version += 1
-    _sync(session, version, row, source_group_id=group_id)
+    _sync(session, version, row, source_group_id=group_id, visible_from_cp=cp,
+          force_history=payload.visible_from_cp is not None)
     return CharacterDirectoryOut(**_character_out(row).model_dump(), version=row.version)
 
 
@@ -297,6 +307,7 @@ def merge(
     model_decision: bool = False,
 ) -> CharacterDirectoryOut:
     _guard(session, version, active_job_id)
+    cp = position(version, payload.visible_from_cp)
     source = _resolve(session, version, entry_id)
     target = _resolve(session, version, payload.target_character_id)
     if (
@@ -307,6 +318,7 @@ def merge(
         raise ApiError.validation("请选择另一个已有的全书人物作为合并目标")
     check_version(source, payload.expected_version)
     check_version(target, payload.expected_target_version)
+    baseline(target)
     aliases = [*_json_list(target.aliases_json), source.canonical_name or ""]
     if isinstance(source, BookCharacter):
         aliases += _json_list(source.aliases_json)
@@ -332,6 +344,7 @@ def merge(
         target,
         source_id=source.id if isinstance(source, BookCharacter) else None,
         source_group_id=source.id if isinstance(source, SpeakerGroup) else None,
+        visible_from_cp=cp,
     )
     if isinstance(source, BookCharacter):
         session.delete(source)

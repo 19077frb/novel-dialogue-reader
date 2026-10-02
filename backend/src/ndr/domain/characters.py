@@ -29,6 +29,7 @@ class CharacterDirectoryOut(BookCharacterOut):
 
 
 class CharacterEditIn(ApiModel):
+    visible_from_cp: int | None = Field(default=None, ge=0)
     book_version_id: str | None = None
     name: str = Field(min_length=1, max_length=128)
     aliases: list[str] = Field(default_factory=list, max_length=64)
@@ -37,6 +38,7 @@ class CharacterEditIn(ApiModel):
 
 
 class CharacterMergeIn(ApiModel):
+    visible_from_cp: int | None = Field(default=None, ge=0)
     book_version_id: str | None = None
     target_character_id: str
     expected_version: int = Field(ge=1)
@@ -71,6 +73,7 @@ class CharacterMergeProposalOut(ApiModel):
 
 
 class CharacterAutoMergeConfirmIn(ApiModel):
+    visible_from_cp: int | None = Field(default=None, ge=0)
     selected_target_ids: list[str] = Field(max_length=500)
 
 

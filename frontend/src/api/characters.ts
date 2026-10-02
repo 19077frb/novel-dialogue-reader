@@ -20,9 +20,10 @@ export function fetchCharacterDirectory(bookId: string, signal?: AbortSignal) {
   return apiData<CharacterDirectoryOut[]>(`/api/books/${bookId}/character-directory`, { signal })
 }
 
-export function confirmCharacterAutoMerge(bookId: string, jobId: string, selectedTargetIds: string[]) {
+export function confirmCharacterAutoMerge(bookId: string, jobId: string, selectedTargetIds: string[], visibleFromCp?: number) {
   return apiData<CharacterAutoMergeResultOut>(`/api/books/${bookId}/character-directory/auto-merge/${jobId}/confirm`,
-    { method: 'POST', body: { selected_target_ids: selectedTargetIds } })
+    { method: 'POST', body: { selected_target_ids: selectedTargetIds,
+      ...(visibleFromCp === undefined ? {} : { visible_from_cp: visibleFromCp }) } })
 }
 
 export function editBookCharacter(bookId: string, entryId: string, body: CharacterEditIn) {

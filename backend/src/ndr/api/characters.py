@@ -137,7 +137,9 @@ def confirm_auto_merge_route(
         job = session.get(Job, job_id)
         if not job or job.book_id != book_id or job.kind is not JobKind.CHARACTER_MERGE:
             raise ApiError.not_found("自动合并任务不存在")
-        result = confirm_auto_merge(session, job, payload.selected_target_ids)
+        result = confirm_auto_merge(
+            session, job, payload.selected_target_ids, payload.visible_from_cp,
+        )
     return DataEnvelope(data=result, request_id=current_request_id(request))
 
 

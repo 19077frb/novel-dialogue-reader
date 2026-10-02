@@ -38,6 +38,7 @@ class BookCharacter(IdMixin, TimestampMixin, VersionMixin, Base):
     confirmation_source: Mapped[str] = mapped_column(String(16), nullable=False, default="model")
     first_seen_cp: Mapped[int | None] = mapped_column(Integer, nullable=True)
     preferred_color_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    presentation_history_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
 
 class ChapterCharacterRoster(IdMixin, TimestampMixin, VersionMixin, Base):

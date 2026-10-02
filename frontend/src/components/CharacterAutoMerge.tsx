@@ -10,9 +10,10 @@ import { JOB_STATE_LABELS } from './JobPanel'
 import { OperationTimer } from './OperationTimer'
 import { CollapsibleBlock } from './CollapsibleBlock'
 
-export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyChange, onSaved }: {
+export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyChange, onSaved, visibleFromCp }: {
   bookId: string; versionId?: string | null; count: number; disabled: boolean
   onBusyChange: (value: boolean) => void; onSaved: () => Promise<void>
+  visibleFromCp?: number | null
 }) {
   const [open, setOpen] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
@@ -31,7 +32,9 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     idempotency_key: freshIdempotencyKey('character-auto-merge', `${bookId}:${versionId}`), run_now: true,
   }), onSuccess: () => { setConfirmed(false) }, onSettled: async () => { await result.refetch() } })
   const stop = useMutation({ mutationFn: () => pauseJob(jobId!), onSuccess: () => { void result.refetch() } })
-  const accept = useMutation({ mutationFn: (ids: string[]) => confirmCharacterAutoMerge(bookId, jobId!, ids),
+  const accept = useMutation({ mutationFn: (ids: string[]) => visibleFromCp == null
+    ? confirmCharacterAutoMerge(bookId, jobId!, ids)
+    : confirmCharacterAutoMerge(bookId, jobId!, ids, visibleFromCp),
     onSuccess: async () => { await result.refetch() } })
   const awaiting = result.data?.phase === 'awaiting_confirmation'
   const busy = start.isPending || accept.isPending || Boolean(versionId && result.isPending) || Boolean(result.data && !TERMINAL_JOB_STATES.has(result.data.state))

@@ -152,6 +152,7 @@ class SpeakerRevisionIn(ApiModel):
     """`POST /api/scenes/{id}/speaker-revisions`：merge / split。"""
 
     operation: IdentityOperation
+    visible_from_cp: int | None = Field(default=None, ge=0)
     source_group_ids: list[str] = Field(default_factory=list, description="merge：至少两个分组")
     buckets: list[list[str]] = Field(
         default_factory=list, description="split：至少两个桶，每桶是若干 quote_id"

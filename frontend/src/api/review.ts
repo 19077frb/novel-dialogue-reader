@@ -151,6 +151,7 @@ export function submitGapCorrection(
 }
 
 export interface SpeakerRevisionInput {
+  visibleFromCp?: number | null
   operation: 'MERGE' | 'SPLIT'
   sourceGroupIds?: string[]
   buckets?: string[][]
@@ -168,6 +169,7 @@ export function submitSpeakerRevision(
     signal,
     body: {
       operation: input.operation,
+      visible_from_cp: input.visibleFromCp ?? null,
       source_group_ids: input.sourceGroupIds ?? [],
       buckets: input.buckets ?? [],
       expected_scene_version: input.expectedSceneVersion ?? null,

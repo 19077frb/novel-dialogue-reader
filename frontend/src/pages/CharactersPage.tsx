@@ -3,18 +3,19 @@ import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { editBookCharacter, fetchCharacterDirectory, mergeBookCharacter } from '../api/characters'
-import { fetchBook, queryKeys } from '../api/books'
+import { fetchBook, fetchChapters, queryKeys } from '../api/books'
 import type { CharacterDirectoryOut } from '../api/types'
 import { useBatchProgress } from '../components/BatchProcessor'
 import { CharacterAutoMerge } from '../components/CharacterAutoMerge'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
 
-function CharacterEditor({ item, targets, bookId, onSaved, disabled }: {
+function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFromCp }: {
   item: CharacterDirectoryOut
   targets: CharacterDirectoryOut[]
   bookId: string
   onSaved: () => Promise<void>
   disabled: boolean
+  visibleFromCp: number | null
 }) {
   const [name, setName] = useState(item.name)
   const [aliases, setAliases] = useState((item.aliases ?? []).join('、'))
@@ -27,6 +28,7 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled }: {
     mutationFn: () => editBookCharacter(bookId, item.character_id, {
       name: name.trim(), aliases: aliases.split(/[、，,\n]/).map((value) => value.trim()).filter(Boolean),
       description, expected_version: item.version ?? 1,
+      ...(visibleFromCp == null ? {} : { visible_from_cp: visibleFromCp }),
     }),
     onSuccess: async () => { await onSaved(); setMessage('人物资料已保存。') },
   })
@@ -34,6 +36,7 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled }: {
     mutationFn: () => mergeBookCharacter(bookId, item.character_id, {
       target_character_id: targetId, expected_version: item.version ?? 1,
       expected_target_version: target?.version ?? 1,
+      ...(visibleFromCp == null ? {} : { visible_from_cp: visibleFromCp }),
     }),
     onSuccess: onSaved,
   })
@@ -77,6 +80,7 @@ export default function CharactersPage() {
   const chapterQuery = chapterId ? `?chapterId=${encodeURIComponent(chapterId)}` : ''
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
+  const [visibleFromCp, setVisibleFromCp] = useState<number | null>(null)
   const [message, setMessage] = useState('')
   const batchProgress = useBatchProgress(bookId)
   const [autoMergeBusy, setAutoMergeBusy] = useState(false)
@@ -90,6 +94,8 @@ export default function CharactersPage() {
     queryFn: ({ signal }) => fetchCharacterDirectory(bookId, signal),
     enabled: Boolean(bookId),
   })
+  const chapters = useQuery({ queryKey: queryKeys.chapters(bookId),
+    queryFn: ({ signal }) => fetchChapters(bookId, signal), enabled: Boolean(bookId) })
   const saved = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['character-directory', bookId] }),
@@ -119,7 +125,20 @@ export default function CharactersPage() {
         <Link to="/library">返回书架</Link>
       </nav>
     </header>
-    <CharacterAutoMerge key={bookId} bookId={bookId} versionId={book.data?.active_version_id} count={entries.length}
+    <section className="card">
+      <label className="ndr-field">本次人物修改从哪一章起可见（初读）
+        <select value={visibleFromCp ?? ''} disabled={batchProgress.running || autoMergeBusy}
+          onChange={event => setVisibleFromCp(event.target.value === '' ? null : Number(event.target.value))}>
+          <option value="">全书末尾（默认，避免提前透露身份）</option>
+          {(chapters.data ?? []).map(chapter => <option key={chapter.id} value={chapter.end_cp}>
+            {chapter.title || `第 ${chapter.ordinal + 1} 章`}结束后
+          </option>)}
+        </select>
+      </label>
+      <p className="hint">适用于本次保存资料、手动合并及接受自动合并建议。更早章节保留当时的姓名、说明与不同身份；重读立即显示最终结果。请选择原文已经揭示该信息的章节，不确定时保留默认。</p>
+      {chapters.isError && <p role="alert" className="status-error">可见章节读取失败：{chapters.error.message}，可使用全书末尾或重新读取页面。</p>}
+    </section>
+    <CharacterAutoMerge key={bookId} bookId={bookId} versionId={book.data?.active_version_id} count={entries.length} visibleFromCp={visibleFromCp}
       disabled={batchProgress.running} onBusyChange={setAutoMergeBusy} onSaved={saved} />
     <section className="card">
       <p className="hint">汇总当前书籍版本已识别的人物（包括未发言人物），可能包含后文剧透。修改会影响已有对白、后续人物识别和导出，不改原文或章节完成状态。请先停止本书处理任务再编辑。</p>
@@ -137,6 +156,7 @@ export default function CharactersPage() {
       <CollapsibleBlock title="人物资料列表" summary={`当前显示 ${filtered.length} 个人物`}>
       <div className="ndr-character-list">
         {filtered.map((item) => <CharacterEditor key={`${item.character_id}:${item.version}`} item={item} bookId={bookId}
+          visibleFromCp={visibleFromCp}
           disabled={batchProgress.running || autoMergeBusy}
           targets={entries.filter((row) => row.kind !== 'speaker' && row.character_id !== item.character_id)} onSaved={saved} />)}
       </div>

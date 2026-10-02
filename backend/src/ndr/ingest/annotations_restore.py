@@ -156,6 +156,7 @@ def restore_annotations_from_manifest(
                 chapter=chapter,
                 quote=quote,
                 speaker=speaker,
+                binding=binding,
             )
         annotation = _annotation_for(
             entry, quote=quote, group=group, scene=scenes.get(chapter.id)
@@ -231,6 +232,7 @@ def _group_for(  # noqa: PLR0913 - 建组需要的上下文就是这些
     chapter,
     quote: Quote,
     speaker: dict,
+    binding: dict,
 ) -> SpeakerGroup:
     scene = _scene_for(session, scenes, chapter)
     key = str(speaker.get("key"))
@@ -263,6 +265,27 @@ def _group_for(  # noqa: PLR0913 - 建组需要的上下文就是这些
     )
     session.add(group)
     session.flush()
+    history = []
+    records = speaker.get("history")
+    for record in (records if isinstance(records, list) else [])[:1000]:
+        if not isinstance(record, dict):
+            continue
+        index = record.get("after_chapter")
+        bound = (binding.get(index)
+                 if isinstance(index, int) and not isinstance(index, bool) else None)
+        if not all(isinstance(record.get(key), str) for key in ("identity", "name", "description")):
+            continue
+        history.append({"cp": 0 if index == -1 else
+                        bound.end_cp if bound else version.canonical_length_cp + 1,
+                        "identity": record["identity"][:160], "name": record["name"][:128],
+                        "description": record["description"][:512]})
+    if history:
+        group.presentation_history_json = json.dumps(history, ensure_ascii=False)
+        character.presentation_history_json = group.presentation_history_json
+    else:
+        from ..characters.visibility import capture
+        capture(group, version.canonical_length_cp)
+        capture(character, version.canonical_length_cp)
     groups[(chapter.id, key)] = group
     return group
 
@@ -277,7 +300,7 @@ def _character_for(
 ) -> BookCharacter:
     """为清单身份建立书籍级人物，避免同名的不同色号在回导后被合并。"""
 
-    key = str(speaker.get("key") or "")
+    key = str(speaker.get("identity") or speaker.get("key") or "")
     existing = characters.get(key)
     if existing is not None:
         return existing

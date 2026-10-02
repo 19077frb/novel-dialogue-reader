@@ -152,9 +152,19 @@ def _ensure_group(
     state: SceneState,
     slot,  # noqa: ANN001 - SpeakerSlot
     scene_id: str,
+    visible_from_cp: int | None = None,
 ) -> str:
+    from ..characters.visibility import baseline, capture, history, initialize
+    from ..storage.models import BookVersion
+    cp = visible_from_cp
+    if cp is None:
+        version_id = session.get(Scene, scene_id).book_version_id
+        cp = session.get(BookVersion, version_id).canonical_length_cp
     # Confirmed book identities remain authoritative, regardless of who accepted the roster.
     character = session.get(BookCharacter, slot.character_id) if slot.character_id else None
+    character_history = history(character) if character else []
+    if character_history:
+        cp = max(cp, max(item["cp"] for item in character_history))
     if character is not None and (
         character.user_confirmed or character.confirmation_source == "automatic"
     ):
@@ -163,9 +173,11 @@ def _ensure_group(
     if slot.group_id:
         row = session.get(SpeakerGroup, slot.group_id)
         if row is not None:
+            baseline(row)
             row.canonical_name = slot.canonical_name or None
             row.description = slot.description or None
             row.character_id = slot.character_id
+            capture(row, cp)
         return slot.group_id
     row = SpeakerGroup(
         scene_id=scene_id,
@@ -178,6 +190,8 @@ def _ensure_group(
     )
     session.add(row)
     session.flush()
+    initialize(row, cp, character)
+    capture(row, cp)
     slot.group_id = row.id
     return row.id
 
@@ -214,6 +228,12 @@ def _discover_character(
         if not matches:
             session.add(character)
             session.flush()
+            from ..characters.visibility import capture, chapter_end_for_quote
+            from ..storage.models import BookVersion
+            capture(character, chapter_end_for_quote(
+                session, declaration.first_quote_id,
+                session.get(BookVersion, version_id).canonical_length_cp,
+            ))
     if character is None:
         return None
     promoted = revealed_name(character.canonical_name, declaration.real_name,
@@ -226,6 +246,8 @@ def _discover_character(
             promoted, [row.canonical_name or "", *json.loads(row.aliases_json or "[]")],
         ) for row in others):
             old_name = character.canonical_name
+            from ..characters.visibility import baseline, chapter_end_for_quote
+            baseline(character)
             character.canonical_name = promoted
             character.aliases_json = json.dumps(
                 list(dict.fromkeys(
@@ -236,7 +258,11 @@ def _discover_character(
             character.version += 1
             from ..characters.directory import _sync
             from ..storage.models import BookVersion
-            _sync(session, session.get(BookVersion, version_id), character)
+            _sync(session, session.get(BookVersion, version_id), character,
+                  visible_from_cp=chapter_end_for_quote(
+                      session, declaration.first_quote_id,
+                      session.get(BookVersion, version_id).canonical_length_cp,
+                  ))
     if declaration.character_id and declaration.evidence_refs:
         supplement_aliases(session, character, [declaration.name or "", *declaration.aliases])
     elif (not character.user_confirmed and character.confirmation_source != "automatic"
@@ -516,7 +542,8 @@ def apply_window(
                     ),
                 )
                 speaker_id = _ensure_group(
-                    session, state=state, slot=slot, scene_id=scene_id
+                    session, state=state, slot=slot, scene_id=scene_id,
+                    visible_from_cp=visible_from_cp,
                 )
                 if speaker_id not in application.created_group_ids:
                     application.created_group_ids.append(speaker_id)
@@ -566,7 +593,8 @@ def apply_window(
                     if not slot.first_quote_id:
                         slot.first_quote_id = label.quote_id
                     state.remember_character(slot.canonical_name, slot.description)
-                    _ensure_group(session, state=state, slot=slot, scene_id=scene_id)
+                    _ensure_group(session, state=state, slot=slot, scene_id=scene_id,
+                                  visible_from_cp=visible_from_cp)
                 speaker_id, warning = _resolve_speaker(
                     registry, label=label, visible_from_cp=visible_from_cp
                 )

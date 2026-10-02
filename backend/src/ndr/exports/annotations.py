@@ -64,7 +64,10 @@ def build_annotations_manifest(
                 if not label or color_index is None:
                     continue
                 seen_quotes.add(run.quote_id)
-                key = f"c{int(color_index)}"
+                history = projection_payload.get("speaker_histories", {}).get(
+                    item.get("speaker_group_id"), [],
+                )
+                key = (f"g:{item['speaker_group_id']}" if history else f"c{int(color_index)}")
                 speakers.setdefault(
                     key,
                     {
@@ -74,6 +77,24 @@ def build_annotations_manifest(
                         "description": str(item.get("speaker_description") or ""),
                     },
                 )
+                if history:
+                    bounds = projection_payload.get("chapter_bounds", {})
+                    converted = []
+                    for record in history:
+                        source_id = next((key for key, (start, end) in bounds.items()
+                                          if start < record["cp"] <= end), None)
+                        index = (-1 if record["cp"] == 0 else next((
+                            i for i, section in enumerate(rendered.chapters)
+                            if section.chapter_id == source_id
+                        ), None))
+                        converted.append(
+                            {key: value for key, value in record.items() if key != "cp"}
+                            | {"after_chapter": index},
+                        )
+                    speakers[key]["history"] = converted
+                    speakers[key]["identity"] = projection_payload.get(
+                        "speaker_identities", {},
+                    ).get(item.get("speaker_group_id"), history[-1]["identity"])
                 start = int(item["start_cp"])
                 end = int(item["end_cp"])
                 quote_text = (

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..characters.visibility import visible_value
 from ..domain.enums import ExportStylePreset, ReadingMode, VisibilityPolicy
 from ..scenes.projection import build_projection
 from ..storage.cache import fingerprint
@@ -23,6 +24,7 @@ from ..storage.models import (
     ExportSnapshot,
     IdentityRevision,
     Scene,
+    SpeakerGroup,
 )
 
 EXPORT_SNAPSHOT_VERSION = "export-snapshot-2"
@@ -77,7 +79,7 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
     )
     horizon = None
     if visibility_policy is VisibilityPolicy.POSITION_SAFE:
-        horizon = min(max(book.read_position_cp, 0), version.canonical_length_cp) or None
+        horizon = min(max(book.read_position_cp, 0), version.canonical_length_cp)
     projection = build_projection(
         session,
         book_id=book.id,
@@ -112,6 +114,30 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
         ).scalars()
     ]
     payload = projection.model_dump(mode="json")
+    # Internal snapshot metadata is never sent by the reader API. Position-safe
+    # exports must not bundle hidden future names even in the machine manifest.
+    import json
+    payload["speaker_histories"] = {}
+    payload["speaker_identities"] = {}
+    for group in session.scalars(select(SpeakerGroup).join(Scene).where(
+        Scene.book_version_id == version.id,
+    )):
+        history = json.loads(group.presentation_history_json or "[]")
+        presentation = visible_value(group.presentation_history_json, horizon, fallback={
+            "identity": (f"character:{group.character_id}" if group.character_id else
+                         f"name:{group.canonical_name.casefold()}" if group.canonical_name else
+                         f"group:{group.id}"),
+            "private_identity": f"group:{group.id}",
+            "name": group.canonical_name or "", "description": group.description or "",
+        })
+        payload["speaker_identities"][group.id] = presentation["identity"]
+        if reading_mode is ReadingMode.INITIAL and horizon is not None:
+            history = [entry for entry in history if entry["cp"] <= horizon]
+        if history:
+            payload["speaker_histories"][group.id] = history
+    payload["chapter_bounds"] = {chapter.id: [chapter.start_cp, chapter.end_cp]
+                                for chapter in session.scalars(select(Chapter).where(
+                                    Chapter.book_version_id == version.id))}
     payload["warnings"] = warnings
     payload["snapshot_version"] = EXPORT_SNAPSHOT_VERSION
     payload["chapter_processing"] = {

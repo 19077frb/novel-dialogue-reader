@@ -93,11 +93,55 @@ def test_merge_groups_rewrites_projection_and_is_undoable(
     assert count_rows(migrated_settings, AnnotationHistory) > history_before
     assert count_rows(migrated_settings, IdentityRevision) == revisions_before + 1
 
+    # 初读不能提前把两个声音合成一个；重读仍显示最终合并结果。
+    initial = fake_provider_client.get(
+        f"/api/books/{book_id}/annotations",
+        params={"reading_mode": "initial", "visible_horizon_cp": 0},
+    )
+    assert initial.status_code == 200, initial.text
+    assert next(item for item in initial.json()["data"]["items"]
+                if item["quote_id"] == target)["speaker_group_id"] == second_group
+    reread = annotations_of(fake_provider_client, book_id, reading_mode="reread")
+    assert next(item for item in reread["items"]
+                if item["quote_id"] == target)["speaker_group_id"] == first_group
+
     # 撤销：按 quote_id 精确还原
     undo = fake_provider_client.post(f"/api/corrections/{payload['correction_id']}/undo")
     assert undo.status_code == 201, undo.text
     assert annotation_state(migrated_settings, target)["speaker_id"] == second_group
     assert scene_state(migrated_settings, scene_id)["version"] == scene_after["version"] + 1
+
+
+def test_initial_rewinds_multiple_successive_manual_merges(
+    fake_provider_client: TestClient, migrated_settings: Settings,
+) -> None:
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings, key="k-merge-chain")
+    ids = quote_ids(client, data["book_id"])
+    scene_id = annotation_state(migrated_settings, ids[0])["scene_id"]
+    first = annotation_state(migrated_settings, ids[0])["speaker_id"]
+    extra = []
+    for quote_id in ids[-2:]:
+        response = client.post(f"/api/quotes/{quote_id}/corrections", json={
+            "action": "create_speaker", "description": "独立声音",
+            "expected_version": annotation_state(migrated_settings, quote_id)["version"],
+        })
+        assert response.status_code == 201, response.text
+        extra.append(annotation_state(migrated_settings, quote_id)["speaker_id"])
+    for sources in ([first, extra[0]], [extra[1], first]):
+        response = client.post(f"/api/scenes/{scene_id}/speaker-revisions", json={
+            "operation": "MERGE", "source_group_ids": sources,
+        })
+        assert response.status_code == 201, response.text
+    response = client.get(f"/api/books/{data['book_id']}/annotations", params={
+        "reading_mode": "initial", "visible_horizon_cp": 0,
+    })
+    assert response.status_code == 200, response.text
+    groups = {item["quote_id"]: item["speaker_group_id"]
+              for item in response.json()["data"]["items"]}
+    assert groups[ids[0]] == first
+    assert groups[ids[-2]] == extra[0]
+    assert groups[ids[-1]] == extra[1]
 
 
 def test_split_creates_new_groups_and_is_undoable(

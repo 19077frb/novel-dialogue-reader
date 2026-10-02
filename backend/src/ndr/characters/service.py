@@ -298,6 +298,9 @@ def store_roster_candidates(
         # output may link to that person, but must never rewrite the accepted
         # identity. Automatic acceptance is not a claim of human review.
         if not character.user_confirmed and character.confirmation_source != "automatic":
+            from .visibility import capture
+            if character.canonical_name:
+                capture(character, chapter.end_cp)
             character.canonical_name = (
                 matched.canonical_name if matched else undecorated_name(candidate.name) or None
             )
@@ -358,6 +361,10 @@ def store_roster_candidates(
             }
         )
 
+    from .visibility import capture
+    for character in existing:
+        if character.canonical_name:
+            capture(character, chapter.end_cp)
     roster.candidates_json = json.dumps(records, ensure_ascii=False)
     roster.status = CharacterRosterStatus.DRAFT
     roster.confirmed_character_ids_json = "[]"
@@ -401,7 +408,13 @@ def _upsert_confirmed_character(
     name = (item.canonical_name or (source or {}).get("canonical_name") or "").strip()
     if not name:
         raise ApiError.validation("已确认人物必须有名称", temp_ref=item.temp_ref)
+    from .visibility import baseline, capture
+    if character.canonical_name:
+        baseline(character)
+    else:
+        capture(character, chapter.end_cp)
     old_name = character.canonical_name
+    old_description = character.description
     if not automatic and (source is None or name != (source or {}).get("canonical_name")):
         character.name_locked = True
     character.canonical_name = name
@@ -426,9 +439,10 @@ def _upsert_confirmed_character(
         character.confirmation_source = "automatic"
     character.version = (character.version or 0) + 1
     session.flush()
-    if old_name and old_name != name:
+    capture(character, chapter.end_cp)
+    if old_name and (old_name != name or old_description != character.description):
         from .directory import _sync
-        _sync(session, version, character)
+        _sync(session, version, character, visible_from_cp=chapter.end_cp)
     return character
 
 

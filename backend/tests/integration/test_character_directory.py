@@ -197,6 +197,104 @@ def test_directory_merge_deduplicates_shared_chapters(migrated_client, populated
     assert (listed[0]["chapter_count"], listed[0]["dialogue_count"]) == (1, 1)
 
 
+@pytest.mark.parametrize("automatic", [False, True])
+def test_merge_and_edit_preserve_initial_names_descriptions_and_separate_colors(
+    migrated_client, populated, automatic,
+):
+    from ndr.characters.visibility import capture
+
+    client, ids = migrated_client, populated
+    base = f"/api/books/{ids['book']}/character-directory"
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, ids["version"])
+        boundary = version.canonical_length_cp - 1
+        source = session.get(BookCharacter, ids["source"])
+        source.canonical_name = "女神"
+        source.description = "早期身份"
+        target = session.get(BookCharacter, ids["target"])
+        target.canonical_name = "阿库娅"
+        target.description = "最终身份"
+        first = session.get(SpeakerGroup, ids["linked"])
+        first.canonical_name = source.canonical_name
+        first.description = source.description
+        second = session.get(SpeakerGroup, ids["unlinked"])
+        second.character_id = target.id
+        second.canonical_name = target.canonical_name
+        second.description = target.description
+        chapter_id = session.get(ChapterCharacterRoster, ids["roster"]).chapter_id
+        quote = Quote(book_version_id=version.id, chapter_id=chapter_id, start_cp=0,
+                      end_cp=1, delimiter="「」", scanner_version="visibility-test")
+        session.add(quote)
+        session.flush()
+        session.add(Annotation(quote_id=quote.id, scene_id=second.scene_id, speaker_id=second.id,
+                               kind=QuoteKind.SPEECH, status=AnnotationStatus.ACCEPTED,
+                               source=AnnotationSource.MODEL, visible_from_cp=0))
+        for row in (source, target, first, second):
+            capture(row, 0)
+    if automatic:
+        job, _ = _auto_job(client, ids)
+        outcome, _ = _run_merge(client, job, [_merge_group(ids)], accept=False)
+        assert outcome.state is JobState.COMPLETED
+        response = client.post(f"{base}/auto-merge/{job['id']}/confirm", json={
+            "selected_target_ids": [ids["target"]], "visible_from_cp": boundary,
+        })
+    else:
+        response = client.post(f"{base}/{ids['source']}/merge", json={
+            "target_character_id": ids["target"], "expected_version": 1,
+            "expected_target_version": 1, "visible_from_cp": boundary,
+        })
+    assert response.status_code == 200, response.text
+    url = f"/api/books/{ids['book']}/annotations"
+    early = client.get(url, params={"reading_mode": "initial",
+                                   "visible_horizon_cp": boundary - 1}).json()["data"]
+    assert {item["label"] for item in early["items"]} == {"女神", "阿库娅"}
+    assert len({item["color_index"] for item in early["items"]}) == 2
+    goddess = next(item for item in early["items"] if item["label"] == "女神")
+    assert goddess["speaker_description"] == "早期身份"
+    late = client.get(url, params={"reading_mode": "initial",
+                                  "visible_horizon_cp": boundary}).json()["data"]
+    assert {item["label"] for item in late["items"]} == {"阿库娅"}
+    assert len({item["color_index"] for item in late["items"]}) == 1
+    target = next(row for row in client.get(base).json()["data"]
+                  if row["character_id"] == ids["target"])
+    response = client.put(f"{base}/{ids['target']}", json={
+        "name": "后来的名称", "description": "后来的说明", "expected_version": target["version"],
+    })
+    assert response.status_code == 200, response.text
+    assert {item["label"] for item in client.get(url, params={
+        "reading_mode": "initial", "visible_horizon_cp": boundary,
+    }).json()["data"]["items"]} == {"阿库娅"}
+    final = client.get(url, params={"reading_mode": "reread"}).json()["data"]
+    assert {item["label"] for item in final["items"]} == {"后来的名称"}
+    assert all(item["speaker_description"] == "后来的说明" for item in final["items"])
+    assert "presentation_history" not in json.dumps(early)
+
+
+def test_legacy_visibility_migration_is_conservative_and_preserves_reread(
+    migrated_client, populated,
+):
+    from alembic import command
+
+    from ndr.storage.migrate import build_alembic_config, run_migrations
+
+    client, ids = migrated_client, populated
+    command.downgrade(build_alembic_config(client.app.state.settings), "0017")
+    run_migrations(client.app.state.settings)
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, ids["version"])
+        group = session.get(SpeakerGroup, ids["linked"])
+        history = json.loads(group.presentation_history_json)
+        assert history[0]["cp"] == version.canonical_length_cp
+        assert group.canonical_name == "浅村悠太"
+        horizon = version.canonical_length_cp - 1
+    url = f"/api/books/{ids['book']}/annotations"
+    early = client.get(url, params={"visible_horizon_cp": horizon}).json()["data"]
+    assert all(item["label"] == "未确认说话人" for item in early["items"])
+    assert all(item["speaker_description"] == "" for item in early["items"])
+    reread = client.get(url, params={"reading_mode": "reread"}).json()["data"]
+    assert all(item["label"] == "浅村悠太" for item in reread["items"])
+
+
 def test_edit_directory_promotes_speaker_and_updates_existing_groups(migrated_client, populated):
     client, ids = migrated_client, populated
     base = f"/api/books/{ids['book']}/character-directory"

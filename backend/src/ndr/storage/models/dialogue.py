@@ -128,6 +128,7 @@ class SpeakerGroup(IdMixin, TimestampMixin, VersionMixin, Base):
         ForeignKey("book_characters.id", ondelete="SET NULL"), nullable=True, index=True
     )
     evidence_refs_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    presentation_history_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
 
 class Participant(IdMixin, TimestampMixin, Base):

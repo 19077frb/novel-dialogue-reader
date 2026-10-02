@@ -17,7 +17,7 @@ vi.mock('../src/api/characters', () => ({
 }))
 vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['profiles'] } }))
 vi.mock('../src/api/books', () => ({
-  fetchBook: vi.fn(), queryKeys: { book: (id: string) => ['book', id] },
+  fetchBook: vi.fn(), fetchChapters: vi.fn(), queryKeys: { book: (id: string) => ['book', id], chapters: (id: string) => ['chapters', id] },
 }))
 
 const entries: CharacterDirectoryOut[] = [
@@ -38,6 +38,7 @@ beforeEach(() => {
   sessionStorage.clear()
   updateProcessingPreferences({ profileId: 'p1', tokenLimit: null, thinkingMode: 'default', thinkingEffort: 'default' })
   vi.mocked(booksApi.fetchBook).mockResolvedValue({ id: 'b1', title: '测试小说', active_version_id: 'v1' } as never)
+  vi.mocked(booksApi.fetchChapters).mockResolvedValue([])
   vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([{ id: 'p1', name: '合并模型', protocol: 'fake', model: 'test', params: {} }] as never)
   vi.mocked(api.startCharacterAutoMerge).mockResolvedValue({ id: 'merge-1', state: 'QUEUED' } as never)
   vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(null)
@@ -51,6 +52,22 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('按用户选择的揭示章节提交人物修改，默认不推断提前可见', async () => {
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue([
+      { id: 'c1', ordinal: 0, title: '第一章', start_cp: 0, end_cp: 100 },
+      { id: 'c2', ordinal: 1, title: '第二章', start_cp: 100, end_cp: 200 },
+    ] as never)
+    renderPage()
+    const select = await screen.findByLabelText('本次人物修改从哪一章起可见（初读）')
+    expect(select).toHaveValue('')
+    await screen.findByRole('option', { name: '第二章结束后' })
+    await waitFor(() => expect(select).toBeEnabled())
+    await userEvent.selectOptions(select, '200')
+    const card = await screen.findByRole('article', { name: '人物 悠太' })
+    await userEvent.click(within(card).getByRole('button', { name: '保存人物资料' }))
+    await waitFor(() => expect(api.editBookCharacter).toHaveBeenCalledWith('b1', 'u1',
+      expect.objectContaining({ visible_from_cp: 200 })))
+  })
   it('折叠人物资料不丢失未保存编辑，也不发起修改或模型请求', async () => {
     renderPage()
     const card = await screen.findByRole('article', { name: '人物 悠太' })

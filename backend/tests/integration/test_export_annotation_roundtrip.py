@@ -24,7 +24,7 @@ from fixtures.corrections import (
     run_deterministic_job,
     session_scope,
 )
-from ndr.storage.models import Chapter
+from ndr.storage.models import Annotation, BookCharacter, Chapter, Scene, SpeakerGroup
 from ndr.storage.transactions import transaction
 
 
@@ -67,6 +67,68 @@ def _rewrite_manifest(epub_bytes: bytes, mutate) -> bytes:  # noqa: ANN001 - 测
                 payload = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
             target.writestr(info, payload)
     return output.getvalue()
+
+
+def test_revealed_names_and_merge_visibility_survive_epub_roundtrip(
+    fake_provider_client, migrated_settings,
+):
+    client = fake_provider_client
+    data = import_sample(client)
+    profile = create_fake_profile(client)
+    run_deterministic_job(migrated_settings, client, book_id=data["book_id"],
+                          profile_id=profile, key="visibility-roundtrip")
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        chapters = list(session.scalars(select(Chapter).where(
+            Chapter.book_version_id == data["book_version_id"],
+        ).order_by(Chapter.ordinal)))
+        target = BookCharacter(book_version_id=data["book_version_id"], canonical_name="阿库娅",
+                               description="最终身份")
+        session.add(target)
+        session.flush()
+        groups = list(session.scalars(select(SpeakerGroup).join(Scene).where(
+            Scene.book_version_id == data["book_version_id"],
+        )))
+        assert groups
+        extra = SpeakerGroup(scene_id=groups[0].scene_id, display_label="S-extra")
+        session.add(extra)
+        session.flush()
+        annotations = list(session.scalars(select(Annotation).where(
+            Annotation.speaker_id == groups[0].id,
+        )))
+        assert len(annotations) >= 2
+        annotations[1].speaker_id = extra.id
+        extra.first_quote_id = annotations[1].quote_id
+        groups.append(extra)
+        for index, group in enumerate(groups):
+            group.character_id = target.id
+            group.canonical_name = target.canonical_name
+            group.description = target.description
+            group.presentation_history_json = json.dumps([
+                {"cp": 0, "identity": f"early:{index}", "name": f"早期人物{index}",
+                 "description": f"早期说明{index}"},
+                {"cp": chapters[-1].end_cp, "identity": f"character:{target.id}",
+                 "name": "阿库娅", "description": "最终身份"},
+            ], ensure_ascii=False)
+        for annotation in session.scalars(select(Annotation).where(
+            Annotation.speaker_id.in_([group.id for group in groups]),
+        )):
+            annotation.visible_from_cp = 0
+    raw = _export(client, data["book_id"], _preview(client, data["book_id"])["snapshot_id"])
+    imported = client.post("/api/books/import", files={
+        "file": ("history.epub", raw, "application/epub+zip"),
+    })
+    assert imported.status_code == 202, imported.text
+    book_id = imported.json()["data"]["book_id"]
+    chapters = client.get(f"/api/books/{book_id}/chapters").json()["data"]
+    early = client.get(f"/api/books/{book_id}/annotations", params={
+        "reading_mode": "initial", "visible_horizon_cp": chapters[0]["end_cp"],
+    }).json()["data"]
+    assert all(item["label"].startswith("早期人物") for item in early["items"])
+    assert len({item["color_index"] for item in early["items"]}) >= 2
+    assert all(item["speaker_description"].startswith("早期说明") for item in early["items"])
+    final = annotations_of(client, book_id, reading_mode="reread")
+    assert {item["label"] for item in final["items"]} == {"阿库娅"}
+    assert len({item["color_index"] for item in final["items"]}) == 1
 
 
 def test_manual_chapter_status_survives_epub_roundtrip(fake_provider_client: TestClient) -> None:

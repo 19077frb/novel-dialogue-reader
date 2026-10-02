@@ -4839,6 +4839,18 @@
       },
       "CharacterAutoMergeConfirmIn": {
         "properties": {
+          "visible_from_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible From Cp"
+          },
           "selected_target_ids": {
             "items": {
               "type": "string"
@@ -5095,6 +5107,18 @@
       },
       "CharacterEditIn": {
         "properties": {
+          "visible_from_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible From Cp"
+          },
           "book_version_id": {
             "anyOf": [
               {
@@ -5142,6 +5166,18 @@
       },
       "CharacterMergeIn": {
         "properties": {
+          "visible_from_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible From Cp"
+          },
           "book_version_id": {
             "anyOf": [
               {
@@ -9879,6 +9915,18 @@
         "properties": {
           "operation": {
             "$ref": "#/components/schemas/IdentityOperation"
+          },
+          "visible_from_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible From Cp"
           },
           "source_group_ids": {
             "items": {
