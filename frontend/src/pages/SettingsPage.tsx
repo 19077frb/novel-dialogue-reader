@@ -45,7 +45,7 @@ export default function SettingsPage() {
         <label className="ndr-field">提前处理后续章节数<input type="number" min={0} max={100} value={settings.lookAheadChapters} onChange={event => update({ lookAheadChapters: Number(event.target.value) })} /></label>
         <label className="ndr-field">最大并发任务数<input type="number" min={1} max={16} value={preferences.concurrency} onChange={event => updatePreferences({ concurrency: Number(event.target.value) })} /></label>
         <label className="ndr-field">自动处理 Token 上限（留空＝不限）<input type="number" min={1} value={preferences.tokenLimit ?? ''} onChange={event => updatePreferences({ tokenLimit: event.target.value ? Number(event.target.value) : null })} /></label>
-        <label className="ndr-field">每个窗口最多复核数<input type="number" min={0} value={preferences.maxRechecks} onChange={event => updatePreferences({ maxRechecks: Number(event.target.value) })} /></label>
+        <label className="ndr-field">每个窗口最多复核次数（0 关闭，每轮全部对白）<input type="number" min={0} value={preferences.maxRecheckRounds} onChange={event => updatePreferences({ maxRecheckRounds: Number(event.target.value) })} /></label>
       </div>
       <ThinkingSettings disabled={false} profiles={profiles.data ?? []} profileId={preferences.profileId}
         onProfileChange={profileId => updatePreferences({ profileId })} profileTestId="automatic-profile" />

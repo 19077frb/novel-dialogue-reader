@@ -5,11 +5,11 @@ describe('shared processing preferences', () => {
 
   it('persists one configuration across module reloads without credentials', async () => {
     const first = await import('../src/processing/preferences')
-    first.updateProcessingPreferences({ profileId: 'chosen', concurrency: 5, maxRechecks: 8, maxFormatRetries: 3, tokenLimit: 12345, maxOutputTokens: 200 })
+    first.updateProcessingPreferences({ profileId: 'chosen', concurrency: 5, maxRecheckRounds: 8, maxFormatRetries: 3, tokenLimit: 12345, maxOutputTokens: 200 })
     vi.resetModules()
     const rebooted = await import('../src/processing/preferences')
     expect(rebooted.getProcessingPreferences()).toEqual({
-      profileId: 'chosen', concurrency: 5, maxRechecks: 8, maxFormatRetries: 3, tokenLimit: 12345, maxOutputTokens: 200,
+      profileId: 'chosen', concurrency: 5, maxRecheckRounds: 8, maxFormatRetries: 3, tokenLimit: 12345, maxOutputTokens: 200,
       thinkingMode: 'default', thinkingEffort: 'default',
     })
     rebooted.updateProcessingPreferences({ tokenLimit: null })
@@ -22,17 +22,27 @@ describe('shared processing preferences', () => {
     const module = await import('../src/processing/preferences')
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, '{bad')
     expect(module.getProcessingPreferences().concurrency).toBe(2)
-    localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, JSON.stringify({ concurrency: 100, tokenLimit: -4, maxRechecks: 1.5, profileId: 42 }))
-    expect(module.getProcessingPreferences()).toEqual({ profileId: '', concurrency: 16, tokenLimit: null, maxOutputTokens: null, maxRechecks: 0, maxFormatRetries: 1, thinkingMode: 'default', thinkingEffort: 'default' })
+    localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, JSON.stringify({ concurrency: 100, tokenLimit: -4, maxRecheckRounds: 1.5, profileId: 42 }))
+    expect(module.getProcessingPreferences()).toEqual({ profileId: '', concurrency: 16, tokenLimit: null, maxOutputTokens: null, maxRecheckRounds: 0, maxFormatRetries: 1, thinkingMode: 'default', thinkingEffort: 'default' })
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, 'null')
     expect(module.getProcessingPreferences().tokenLimit).toBeNull()
+  })
+
+  it('does not turn legacy quote counts into paid full-window rounds', async () => {
+    const module = await import('../src/processing/preferences')
+    localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, JSON.stringify({
+      profileId: 'chosen', concurrency: 5, maxRechecks: 20, tokenLimit: 12000,
+    }))
+    expect(module.getProcessingPreferences()).toMatchObject({
+      profileId: 'chosen', concurrency: 5, maxRecheckRounds: 0, tokenLimit: 12000,
+    })
   })
 
   it('keeps controls usable in memory when browser storage is unavailable', async () => {
     const module = await import('../src/processing/preferences')
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
-    module.updateProcessingPreferences({ concurrency: 4, maxRechecks: 3 })
+    module.updateProcessingPreferences({ concurrency: 4, maxRecheckRounds: 3 })
     expect(module.getProcessingPreferences().concurrency).toBe(4)
-    expect(module.getProcessingPreferences().maxRechecks).toBe(3)
+    expect(module.getProcessingPreferences().maxRecheckRounds).toBe(3)
   })
 })

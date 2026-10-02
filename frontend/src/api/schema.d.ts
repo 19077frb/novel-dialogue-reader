@@ -1395,9 +1395,16 @@ export interface components {
             max_output_tokens?: number | null;
             /**
              * Max Rechecks
+             * @deprecated
+             * @description 旧版每窗口待定对白复核条数，仅用于兼容历史任务
              * @default 0
              */
             max_rechecks: number;
+            /**
+             * Max Recheck Rounds
+             * @description 每个窗口最多复核轮次；每轮覆盖全部对白，0关闭，优先于旧条数配置
+             */
+            max_recheck_rounds?: number | null;
             /**
              * Max Format Retries
              * @description 对白输出校验失败后的纠错重试次数，不含首次调用；0 关闭，最多 5 次

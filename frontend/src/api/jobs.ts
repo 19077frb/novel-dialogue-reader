@@ -36,7 +36,8 @@ export interface RangeInput {
 export interface BudgetInput {
   maxInputTokens: number | null
   maxOutputTokens: number | null
-  maxRechecks: number
+  maxRecheckRounds: number
+  maxRechecks?: number // Restored batches created before full-window review rounds.
   maxFormatRetries?: number
 }
 
@@ -44,7 +45,9 @@ export function budgetPayload(budget: BudgetInput) {
   return {
     max_input_tokens: budget.maxInputTokens,
     max_output_tokens: budget.maxOutputTokens,
-    max_rechecks: budget.maxRechecks,
+    ...(typeof budget.maxRecheckRounds === 'number'
+      ? { max_recheck_rounds: budget.maxRecheckRounds }
+      : { max_rechecks: (budget as BudgetInput & { maxRechecks?: number }).maxRechecks ?? 0 }),
     max_format_retries: budget.maxFormatRetries ?? 1,
   }
 }

@@ -30,7 +30,7 @@ beforeEach(() => {
 })
 function single(): SingleWorkflow {
   const input = { bookId: 'b1', bookVersionId: 'v1', mode: 'process' as const, range: { chapterId: 'c1', startCp: 0, endCp: 100 },
-    profileId: 'p1', readingMode: 'reread' as const, visibleHorizonCp: null, budget: { maxInputTokens: 100, maxOutputTokens: 100, maxRechecks: 0 }, runNow: true }
+    profileId: 'p1', readingMode: 'reread' as const, visibleHorizonCp: null, budget: { maxInputTokens: 100, maxOutputTokens: 100, maxRecheckRounds: 0 }, runNow: true }
   return { bookId: 'b1', versionId: 'v1', chapterId: 'c1', startCp: 0, endCp: 100, mode: 'process', concurrency: 1,
     running: true, error: null, completeChapter: true,
     tasks: [

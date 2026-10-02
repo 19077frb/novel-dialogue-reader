@@ -95,6 +95,7 @@ class BudgetPolicy:
     gap_compression_max_ratio: float = 0.6  # 压缩后仍超过该比例就放弃压缩（省不下来就别动）
     # 有限局部复核（默认 0 = 不复核）
     recheck_max_targets: int = 0
+    recheck_max_rounds: int = 0
     # 可选强模型路由（默认关闭；>0 时才允许把困难窗口交给强模型）
     strong_model_share: float = 0.0
 

@@ -51,6 +51,7 @@ def estimate_route(
         end_cp=payload.range.get("end_cp"),
         reading_mode=payload.reading_mode,
         visible_horizon_cp=payload.visible_horizon_cp,
+        max_recheck_rounds=payload.budget.max_recheck_rounds or 0,
     )
     return DataEnvelope(
         data=EstimateOut(book_id=book.id, book_version_id=version.id, **estimate.as_dict()),

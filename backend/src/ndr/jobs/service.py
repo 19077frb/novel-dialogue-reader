@@ -83,6 +83,7 @@ def estimate_inference(
     visible_horizon_cp: int | None = None,
     policy: BudgetPolicy | None = None,
     output_tokens_per_target: int = 20,
+    max_recheck_rounds: int = 0,
 ) -> JobEstimate:
     """纯本地估算：不调用模型、不写数据库。"""
 
@@ -100,10 +101,16 @@ def estimate_inference(
     targets = sum(len(window.target_quote_ids) for window in plan.windows)
     input_tokens = sum(window.budget["total_tokens"] for window in plan.windows)
     output_tokens = targets * output_tokens_per_target
+    multiplier = 1 + max_recheck_rounds
+    input_tokens *= multiplier
+    output_tokens *= multiplier
     notes = [
         "估算来自本地启发式 token 口径，不是真实计费依据；实际用量以提供方 usage 为准。",
         "输出预留按每条目标对白 20 token 粗估（可在预算里调整）。",
     ]
+    if max_recheck_rounds:
+        notes.append(f"已计入最多 {max_recheck_rounds} 轮全窗口复核；"
+                     "上下文补全、拆窗及输出重试可增加消耗，实际以调用用量为准。")
     if plan.stats.get("oversized_targets"):
         notes.append(f"其中 {plan.stats['oversized_targets']} 条目标超长，会单独成窗口或保留待定。")
     target_ids = [quote_id for window in plan.windows for quote_id in window.target_quote_ids]
@@ -149,8 +156,8 @@ def estimate_inference(
                 "start_cp": window_start,
                 "end_cp": window_end,
                 "target_count": len(window.target_quote_ids),
-                "estimated_tokens": int(window.budget["total_tokens"])
-                + len(window.target_quote_ids) * output_tokens_per_target,
+                "estimated_tokens": (int(window.budget["total_tokens"])
+                + len(window.target_quote_ids) * output_tokens_per_target) * multiplier,
                 "preview": canonical[window_start : min(window_end, window_start + 160)].strip(),
                 "processing_status": (
                     "completed" if completed else "failed" if failed else "unprocessed"
@@ -219,6 +226,8 @@ def create_inference_job(
 ) -> tuple[Job, bool]:
     """幂等创建任务；返回 ``(job, created)``。"""
 
+    if budget.get("max_recheck_rounds") is None:
+        budget = {key: value for key, value in budget.items() if key != "max_recheck_rounds"}
     snapshot = profile_snapshot(profile, inference_options)
     request_payload = {
         "kind": kind.value,

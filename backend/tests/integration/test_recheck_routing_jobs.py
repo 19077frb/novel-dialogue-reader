@@ -20,10 +20,18 @@ from ndr.config import Settings
 from ndr.context.budget import BudgetPolicy
 from ndr.domain.enums import InferenceRunState, JobState
 from ndr.jobs.scheduler import run_job
-from ndr.jobs.service import usage_summary
+from ndr.jobs.service import digest_request, usage_summary
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.storage.engine import create_db_engine, create_session_factory
-from ndr.storage.models import Annotation, AnnotationHistory, InferenceRun, Job, JobWindow
+from ndr.storage.models import (
+    Annotation,
+    AnnotationHistory,
+    InferenceRun,
+    Job,
+    JobWindow,
+    Quote,
+    Scene,
+)
 from ndr.storage.transactions import transaction
 
 OPENING = "「雨停了。」"
@@ -80,6 +88,7 @@ def _create_job(
     key: str,
     range_payload: dict | None = None,
     max_rechecks: int | None = None,
+    max_recheck_rounds: int | None = None,
 ) -> dict:
     payload = {
         "book_id": book_id,
@@ -92,6 +101,8 @@ def _create_job(
     }
     if max_rechecks is not None:
         payload["budget"]["max_rechecks"] = max_rechecks
+    if max_recheck_rounds is not None:
+        payload["budget"]["max_recheck_rounds"] = max_recheck_rounds
     response = client.post("/api/jobs", json=payload)
     assert response.status_code == 202, response.text
     return response.json()["data"]
@@ -100,6 +111,235 @@ def _create_job(
 def _factory(settings: Settings):  # noqa: ANN202
     engine = create_db_engine(settings)
     return engine, create_session_factory(engine)
+
+
+@pytest.mark.parametrize("rounds", [0, 1, 3])
+def test_full_window_review_rounds_cover_all_quotes_and_resume_without_first_call(
+    fake_provider_client: TestClient, migrated_settings: Settings, rounds: int,
+) -> None:
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, book_id=data["book_id"],
+                      profile_id=_profile(fake_provider_client), key=f"full-review-{rounds}",
+                      max_recheck_rounds=rounds, max_rechecks=20)
+    adapter = FakeProviderAdapter()
+    outcome = _run(migrated_settings, job["id"], lambda job, snapshot: adapter)
+    assert outcome.state is JobState.COMPLETED
+    assert outcome.recheck_calls == rounds
+    assert outcome.recheck_targets == 2 * rounds
+    assert len(adapter.calls) == 1 + rounds
+    assert all(len(call["payload"]["target_quote_ids"]) == 2 for call in adapter.calls)
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            row = session.get(Job, job["id"])
+            checkpoint = json.loads(row.checkpoint_json)
+            if rounds:
+                assert list(checkpoint["review_rounds"].values()) == [rounds]
+            row.state = JobState.QUEUED
+            if rounds:
+                checkpoint["review_rounds"] = {
+                    key: rounds - 1 for key in checkpoint["review_rounds"]}
+                row.checkpoint_json = json.dumps(checkpoint)
+        resumed = run_job(factory, migrated_settings, job_id=job["id"],
+                          adapter_factory=lambda job, snapshot: adapter)
+        assert resumed.state is JobState.COMPLETED
+        assert len(adapter.calls) == 1 + rounds  # completed round reused from matching cache
+    finally:
+        engine.dispose()
+
+
+def test_full_review_checks_accepted_quotes_without_downgrading_them(
+    fake_provider_client: TestClient, migrated_settings: Settings,
+) -> None:
+    class WeakerReviewAdapter(FakeProviderAdapter):
+        async def generate_labels(self, payload):
+            self.labeling_mode = "deterministic" if not self.calls else "unknown"
+            return await super().generate_labels(payload)
+
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, book_id=data["book_id"],
+                      profile_id=_profile(fake_provider_client), key="accepted-full-review",
+                      max_recheck_rounds=2)
+    adapter = WeakerReviewAdapter()
+    outcome = _run(migrated_settings, job["id"], lambda job, snapshot: adapter)
+    assert outcome.state is JobState.COMPLETED
+    assert outcome.recheck_calls == 2
+    assert len(adapter.calls) == 3
+    engine, factory = _factory(migrated_settings)
+    try:
+        with factory() as session:
+            annotations = list(session.scalars(select(Annotation)))
+            assert len(annotations) == 2
+            assert all(a.status.value == "ACCEPTED" for a in annotations)
+            assert all(a.version == 1 for a in annotations)
+    finally:
+        engine.dispose()
+
+
+def test_full_review_is_not_capped_by_quote_count_and_preserves_manual_locks(
+    fake_provider_client: TestClient, migrated_settings: Settings,
+) -> None:
+    sample = "第一章\n「一句。」\n他停了一会。\n「二句。」\n「三句。」\n「四句。」\n「五句。」\n"
+    data = _import(fake_provider_client, sample)
+    job = _create_job(fake_provider_client, book_id=data["book_id"],
+                      profile_id=_profile(fake_provider_client), key="five-quote-review",
+                      range_payload={"start_cp": 0, "end_cp": len(sample)},
+                      max_recheck_rounds=1)
+    engine, factory = _factory(migrated_settings)
+
+    class LockAdapter(FakeProviderAdapter):
+        async def generate_labels(self, payload):
+            if self.calls:
+                with transaction(factory) as session:
+                    first = session.scalar(select(Annotation).where(
+                        Annotation.quote_id == payload["target_quote_ids"][0]))
+                    first.user_locked = True
+                self.labeling_mode = "deterministic"
+            return await super().generate_labels(payload)
+
+    adapter = LockAdapter()
+    try:
+        outcome = run_job(factory, migrated_settings, job_id=job["id"],
+                          adapter_factory=lambda job, snapshot: adapter)
+        assert outcome.state is JobState.COMPLETED
+        assert outcome.recheck_targets == 5
+        assert len(adapter.calls) == 2
+        assert all(len(call["payload"]["target_quote_ids"]) == 5 for call in adapter.calls)
+        with factory() as session:
+            locked = session.scalar(select(Annotation).where(Annotation.user_locked.is_(True)))
+            assert locked.status.value == "UNKNOWN"
+            assert locked.version == 1
+    finally:
+        engine.dispose()
+
+
+def test_estimate_includes_all_review_rounds(fake_provider_client: TestClient) -> None:
+    data = _import(fake_provider_client)
+    payload = {"range": {"start_cp": 0, "end_cp": len(SAMPLE)},
+               "budget": {"max_recheck_rounds": 0}}
+    route = f"/api/books/{data['book_id']}/estimates"
+    base = fake_provider_client.post(route, json=payload).json()["data"]
+    payload["budget"]["max_recheck_rounds"] = 2
+    revised = fake_provider_client.post(route, json=payload).json()["data"]
+    assert revised["total_tokens"] == 3 * base["total_tokens"]
+    assert revised["windows"][0]["estimated_tokens"] == 3 * base["windows"][0]["estimated_tokens"]
+    assert revised["windows"][0]["window_id"] == base["windows"][0]["window_id"]
+
+
+def test_legacy_job_request_digest_survives_nullable_rounds_field(
+    fake_provider_client: TestClient, migrated_settings: Settings,
+) -> None:
+    data = _import(fake_provider_client)
+    profile_id = _profile(fake_provider_client)
+    job = _create_job(fake_provider_client, book_id=data["book_id"],
+                      profile_id=profile_id, key="legacy-review-digest", max_rechecks=2)
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            row = session.get(Job, job["id"])
+            assert "max_recheck_rounds" not in json.loads(row.budget_json)
+            row.request_digest = digest_request({
+                "kind": "INFERENCE", "book_id": data["book_id"],
+                "book_version_id": row.book_version_id, "profile_id": profile_id,
+                "range": {"start_cp": 0, "end_cp": len(SAMPLE),
+                          "selected_window_ids": None, "force_reprocess": False},
+                "budget": {"max_input_tokens": 200_000, "max_output_tokens": None,
+                           "max_rechecks": 2, "max_format_retries": 1},
+                "reading_mode": "initial", "visible_horizon_cp": None,
+                "inference_options": {},
+            })
+        restored = _create_job(fake_provider_client, book_id=data["book_id"],
+                               profile_id=profile_id, key="legacy-review-digest", max_rechecks=2)
+        assert restored["id"] == job["id"]
+    finally:
+        engine.dispose()
+
+
+def test_full_review_keeps_existing_scenes_and_covers_each_scene(
+    fake_provider_client: TestClient, migrated_settings: Settings,
+) -> None:
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, book_id=data["book_id"],
+                      profile_id=_profile(fake_provider_client), key="scene-frozen-review",
+                      max_recheck_rounds=0)
+    adapter = FakeProviderAdapter()
+    _run(migrated_settings, job["id"], lambda job, snapshot: adapter)
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            quotes = list(session.scalars(select(Quote).order_by(Quote.start_cp)))
+            second = session.scalar(select(Annotation).where(Annotation.quote_id == quotes[1].id))
+            scene = Scene(book_version_id=quotes[1].book_version_id, start_cp=quotes[1].start_cp)
+            session.add(scene)
+            session.flush()
+            second.scene_id = scene.id
+            scene_ids = {a.quote_id: a.scene_id for a in session.scalars(select(Annotation))}
+            row = session.get(Job, job["id"])
+            budget = json.loads(row.budget_json)
+            budget["max_recheck_rounds"] = 1
+            row.budget_json = json.dumps(budget)
+            row.state = JobState.QUEUED
+        resumed = run_job(factory, migrated_settings, job_id=job["id"],
+                          adapter_factory=lambda job, snapshot: adapter)
+        assert resumed.state is JobState.COMPLETED
+        assert resumed.recheck_targets == 2
+        assert resumed.recheck_calls == 2
+        assert len(adapter.calls) == 3
+        with factory() as session:
+            assert len(list(session.scalars(select(Scene)))) == 2
+            assert {a.quote_id: a.scene_id for a in session.scalars(select(Annotation))} == scene_ids
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("pause", [False, True])
+def test_full_review_budget_and_pause_keep_results_and_resume_remaining_rounds(
+    fake_provider_client: TestClient, migrated_settings: Settings, pause: bool,
+) -> None:
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, book_id=data["book_id"],
+                      profile_id=_profile(fake_provider_client), key=f"review-stop-{pause}",
+                      max_recheck_rounds=2)
+    engine, factory = _factory(migrated_settings)
+
+    class StopAdapter(FakeProviderAdapter):
+        async def generate_labels(self, payload):
+            raw = await super().generate_labels(payload)
+            if len(self.calls) == (2 if pause else 1):
+                with transaction(factory) as session:
+                    row = session.get(Job, job["id"])
+                    if pause:
+                        row.state = JobState.PAUSING
+                    else:
+                        budget = json.loads(row.budget_json)
+                        budget["max_input_tokens"] = 1
+                        row.budget_json = json.dumps(budget)
+            return raw
+
+    adapter = StopAdapter(usage={"input_tokens": 10, "output_tokens": 10,
+                                "total_tokens": 20, "unknown": False})
+    try:
+        outcome = run_job(factory, migrated_settings, job_id=job["id"],
+                          adapter_factory=lambda job, snapshot: adapter)
+        assert outcome.state is (JobState.PAUSED if pause else JobState.COMPLETED)
+        assert len(adapter.calls) == (2 if pause else 1)
+        with factory() as session:
+            assert len(list(session.scalars(select(Annotation)))) == 2
+            if not pause:
+                checkpoint = json.loads(session.get(Job, job["id"]).checkpoint_json)
+                assert list(checkpoint["review_rounds"].values()) == [0]
+                assert "额度不足" in next(iter(checkpoint["review_stopped"].values()))
+        if pause:
+            with transaction(factory) as session:
+                row = session.get(Job, job["id"])
+                assert list(json.loads(row.checkpoint_json)["review_rounds"].values()) == [1]
+                row.state = JobState.QUEUED
+            resumed = run_job(factory, migrated_settings, job_id=job["id"],
+                              adapter_factory=lambda job, snapshot: adapter)
+            assert resumed.state is JobState.COMPLETED
+            assert len(adapter.calls) == 3
+    finally:
+        engine.dispose()
 
 
 def _run(settings: Settings, job_id: str, factory_fn, policy=None) -> object:  # noqa: ANN001, ANN202

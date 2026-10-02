@@ -186,7 +186,7 @@ export interface RecheckInput {
   inferenceOptions?: InferenceOptions
   profileId: string
   maxInputTokens?: number | null
-  maxRechecks?: number
+  maxRecheckRounds?: number
   maxFormatRetries?: number
   readingMode?: ReadingMode
   idempotencyKey: string
@@ -208,7 +208,7 @@ export function recheckQuote(
       budget: {
         max_input_tokens: input.maxInputTokens ?? null,
         max_output_tokens: null,
-        max_rechecks: input.maxRechecks ?? 0,
+        max_recheck_rounds: input.maxRecheckRounds ?? 0,
         max_format_retries: input.maxFormatRetries ?? 1,
       },
       reading_mode: input.readingMode ?? 'initial',

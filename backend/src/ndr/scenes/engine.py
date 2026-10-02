@@ -633,13 +633,14 @@ def apply_window(
                 }
             )
         decision_out = decide_acceptance(stored_label, cold_start=cold_start)
-        if preserve_existing_candidates and decision_out.status is AnnotationStatus.UNKNOWN:
+        if preserve_existing_candidates and decision_out.status is not AnnotationStatus.ACCEPTED:
             previous = session.scalar(select(Annotation).where(
                 Annotation.quote_id == label.quote_id))
             if (previous is not None and not previous.stale and previous.speaker_id
                     and previous.scene_id == scene_id
-                    and previous.status in {
-                        AnnotationStatus.PROVISIONAL, AnnotationStatus.ACCEPTED}):
+                    and (previous.status is AnnotationStatus.ACCEPTED or (
+                        previous.status is AnnotationStatus.PROVISIONAL
+                        and decision_out.status is AnnotationStatus.UNKNOWN))):
                 application.warnings.append(f"recheck_candidate_kept:{label.quote_id}")
                 continue
 

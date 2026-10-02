@@ -4,9 +4,9 @@ import { budgetPayload, freshIdempotencyKey } from '../src/api/jobs'
 
 describe('freshIdempotencyKey', () => {
   it('sends validation retries independently from unresolved quote rechecks', () => {
-    expect(budgetPayload({ maxInputTokens: null, maxOutputTokens: null, maxRechecks: 2, maxFormatRetries: 4 }))
-      .toEqual({ max_input_tokens: null, max_output_tokens: null, max_rechecks: 2, max_format_retries: 4 })
-    expect(budgetPayload({ maxInputTokens: null, maxOutputTokens: null, maxRechecks: 0 }).max_format_retries).toBe(1)
+    expect(budgetPayload({ maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: 2, maxFormatRetries: 4 }))
+      .toEqual({ max_input_tokens: null, max_output_tokens: null, max_recheck_rounds: 2, max_format_retries: 4 })
+    expect(budgetPayload({ maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: 0 }).max_format_retries).toBe(1)
   })
   it('creates a new bounded key for each intentional execution', () => {
     const payload = JSON.stringify({ chapterId: 'c1', profileId: 'p1' })
@@ -18,6 +18,13 @@ describe('freshIdempotencyKey', () => {
     expect(second.startsWith('roster:b1:c1:')).toBe(true)
     expect(first.length).toBeLessThanOrEqual(128)
     expect(second.length).toBeLessThanOrEqual(128)
+  })
+
+  it('preserves old restored budgets but gives explicit rounds precedence', () => {
+    const legacy = { maxInputTokens: null, maxOutputTokens: null, maxRechecks: 2 } as Parameters<typeof budgetPayload>[0]
+    expect(budgetPayload(legacy)).toMatchObject({ max_rechecks: 2 })
+    expect(budgetPayload({ ...legacy, maxRecheckRounds: 0 })).toMatchObject({ max_recheck_rounds: 0 })
+    expect(budgetPayload({ ...legacy, maxRecheckRounds: 0 })).not.toHaveProperty('max_rechecks')
   })
 
   it('keeps long scopes within the backend limit', () => {

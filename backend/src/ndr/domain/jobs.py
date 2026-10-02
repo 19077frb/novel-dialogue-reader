@@ -14,7 +14,10 @@ from .inference_options import InferenceOptions
 class BudgetIn(ApiModel):
     max_input_tokens: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
-    max_rechecks: int = Field(default=0, ge=0)
+    max_rechecks: int = Field(default=0, ge=0, deprecated=True,
+        description="旧版每窗口待定对白复核条数，仅用于兼容历史任务")
+    max_recheck_rounds: int | None = Field(default=None, ge=0,
+        description="每个窗口最多复核轮次；每轮覆盖全部对白，0关闭，优先于旧条数配置")
     max_format_retries: int = Field(
         default=1, ge=0, le=5,
         description="对白输出校验失败后的纠错重试次数，不含首次调用；0 关闭，最多 5 次",

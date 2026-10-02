@@ -82,12 +82,12 @@ export default function PreviewPage() {
   const options = inferenceOptions(preferences)
   const budget = useMemo<BudgetInput>(() => ({
     maxInputTokens: preferences.tokenLimit, maxOutputTokens: preferences.maxOutputTokens,
-    maxRechecks: preferences.maxRechecks,
+    maxRecheckRounds: preferences.maxRecheckRounds,
     maxFormatRetries: preferences.maxFormatRetries,
-  }), [preferences.tokenLimit, preferences.maxOutputTokens, preferences.maxRechecks, preferences.maxFormatRetries])
+  }), [preferences.tokenLimit, preferences.maxOutputTokens, preferences.maxRecheckRounds, preferences.maxFormatRetries])
   const setBudget = (value: BudgetInput) => setPreferences({
     tokenLimit: value.maxInputTokens, maxOutputTokens: value.maxOutputTokens,
-    maxRechecks: value.maxRechecks,
+    maxRecheckRounds: value.maxRecheckRounds,
     maxFormatRetries: value.maxFormatRetries ?? 1,
   })
   const setConcurrency = (value: number) => setPreferences({ concurrency: value })

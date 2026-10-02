@@ -76,7 +76,7 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
     const plans = await mapWithConcurrency(selected, 4, async chapter => ({ chapter,
       estimate: await estimateRange(bookId, { bookVersionId,
         range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
-        readingMode: 'reread', budget: { maxInputTokens: null, maxOutputTokens: null, maxRechecks: preferences.maxRechecks } }) }))
+        readingMode: 'reread', budget: { maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: preferences.maxRecheckRounds } }) }))
     if (session.blocked || revision !== session.revision) return
     if (canAppendAutomaticProcessing(bookId, bookVersionId)) {
       let added = 0

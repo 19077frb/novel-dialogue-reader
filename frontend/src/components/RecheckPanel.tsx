@@ -61,6 +61,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
         profileId: effectiveProfileId,
         inferenceOptions: inferenceOptions(preferences),
         maxInputTokens: limit,
+        maxRecheckRounds: preferences.maxRecheckRounds,
         maxFormatRetries: preferences.maxFormatRetries,
         idempotencyKey: freshIdempotencyKey('recheck', JSON.stringify({ quoteId, effectiveProfileId, limit, options: inferenceOptions(preferences) })),
         runNow: true,
@@ -98,6 +99,13 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
       </label>
       <FormatRetrySetting value={preferences.maxFormatRetries} disabled={running}
         onChange={maxFormatRetries => updatePreferences({ maxFormatRetries })} testId="recheck-format-retries" />
+      <label className="ndr-field">
+        每个窗口最多复核次数
+        <input type="number" min={0} disabled={running} value={preferences.maxRecheckRounds}
+          onChange={event => updatePreferences({ maxRecheckRounds: Math.max(0, Math.trunc(Number(event.target.value) || 0)) })}
+          title={running ? '请等待现有任务读取或完成后再调整复核次数。' : undefined} />
+        <span className="hint">首次处理后最多进行这些轮复核；0 关闭，每轮检查本次范围全部对白，并额外消耗 Tokens。</span>
+      </label>
       <button
         type="button"
         className="ndr-primary"

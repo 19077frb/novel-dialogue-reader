@@ -4586,7 +4586,22 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Max Rechecks",
-            "default": 0
+            "description": "旧版每窗口待定对白复核条数，仅用于兼容历史任务",
+            "default": 0,
+            "deprecated": true
+          },
+          "max_recheck_rounds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Recheck Rounds",
+            "description": "每个窗口最多复核轮次；每轮覆盖全部对白，0关闭，优先于旧条数配置"
           },
           "max_format_retries": {
             "type": "integer",

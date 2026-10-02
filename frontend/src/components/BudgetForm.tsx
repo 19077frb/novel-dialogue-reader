@@ -43,17 +43,17 @@ export function BudgetForm({ value, onChange }: BudgetFormProps) {
         />
       </label>
       <label>
-        每个窗口最多复核的待定对白数
+        每个窗口最多复核次数
         <input
           type="number"
           min={0}
-          value={value.maxRechecks}
+          value={value.maxRecheckRounds}
           onChange={(event) =>
-            onChange({ ...value, maxRechecks: Math.max(0, Number(event.target.value) || 0) })
+            onChange({ ...value, maxRecheckRounds: Math.max(0, Math.trunc(Number(event.target.value) || 0)) })
           }
           data-testid="budget-max-rechecks"
         />
-        <span className="hint">只复核有效结果中的待定对白；0 关闭。优先补齐缺失证据，纯省略号优先级较低；不超过此数量。不是校验失败的重试次数。</span>
+        <span className="hint">0 关闭；每轮检查原窗口全部对白（含已自动接受项），人工锁定结果不覆盖。每轮可能拆为多个模型调用并消耗 Tokens；校验失败重试另行设置。</span>
       </label>
       <FormatRetrySetting value={value.maxFormatRetries ?? 1}
         onChange={maxFormatRetries => onChange({ ...value, maxFormatRetries })} />

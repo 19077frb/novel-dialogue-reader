@@ -430,7 +430,7 @@ describe('PreviewPage', () => {
   })
 
   it('删除记忆中的模型后自动选择仍存在的模型', async () => {
-    localStorage.setItem('ndr:processing-preferences:v1', JSON.stringify({ profileId: 'deleted', maxRechecks: 5 }))
+    localStorage.setItem('ndr:processing-preferences:v1', JSON.stringify({ profileId: 'deleted', maxRecheckRounds: 5 }))
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await waitFor(() => expect(screen.getByTestId('preview-profile')).toHaveValue('p1'))
     expect(screen.getByTestId('budget-max-rechecks')).toHaveValue(5)
@@ -779,7 +779,7 @@ describe('PreviewPage', () => {
     expect(await screen.findByTestId('batch-estimate')).toHaveTextContent('3,280')
     expect(jobsApi.estimateRange).toHaveBeenCalledWith(
       'b1',
-      expect.objectContaining({ budget: expect.objectContaining({ maxRechecks: 2 }) }),
+      expect.objectContaining({ budget: expect.objectContaining({ maxRecheckRounds: 2 }) }),
     )
     await userEvent.click(screen.getByTestId('batch-run'))
 
@@ -798,7 +798,7 @@ describe('PreviewPage', () => {
         range: { chapterId: 'c1', startCp: 0, endCp: 20 },
         selectedWindowIds: ['w1'],
         inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' },
-        budget: expect.objectContaining({ maxRechecks: 2 }),
+        budget: expect.objectContaining({ maxRecheckRounds: 2 }),
       }),
     )
     expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1')

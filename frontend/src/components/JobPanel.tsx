@@ -96,6 +96,14 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
         {job.data.purpose === 'preview' ? ' · 试运行' : ''} ·{' '}
         <strong data-testid="job-state" title={state}>{JOB_STATE_LABELS[state ?? ''] ?? state}</strong>
       </p>
+      {job.data.progress?.stage === 'rechecking' && (
+        <p className="hint">正在复核本窗口全部对白：第 {String(job.data.progress.review_round)} / {String(job.data.progress.review_rounds)} 轮</p>
+      )}
+      {!!job.data.progress?.review_stopped && typeof job.data.progress.review_stopped === 'object' && (
+        <div className="hint">{Object.values(job.data.progress.review_stopped).map((reason, index) => (
+          <p key={index}>{String(reason)}</p>
+        ))}</div>
+      )}
       <OperationTimer startedAt={Date.parse(job.data.created_at)}
         finishedAt={state && isTerminalJob(state) ? Date.parse(job.data.updated_at) : null}
         completed={job.data.windows_total - job.data.remaining_windows} total={job.data.windows_total} />
