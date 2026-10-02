@@ -41,7 +41,9 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled }: {
   return <article className="ndr-character-card" aria-label={`人物 ${item.name}`}>
     <h3>{item.name}</h3>
     <p className="hint">{item.kind === 'speaker' ? '尚未关联全书人物；保存后纳入全书人物表。' :
-      item.user_confirmed ? '已人工确认' : '模型识别人物'}</p>
+      ({ manual: '已人工确认', automatic: '批量自动确认（未经人工复核）',
+        legacy: '已确认（旧记录未区分来源）', imported: '导入恢复的人物',
+        model: '模型识别人物' }[item.confirmation_source ?? (item.user_confirmed ? 'legacy' : 'model')])}</p>
     <label>姓名<input value={name} maxLength={128} onChange={(e) => setName(e.target.value)} disabled={busy} /></label>
     <label>别名（用、分隔）<input value={aliases} onChange={(e) => setAliases(e.target.value)} disabled={busy} /></label>
     <label>说明<textarea value={description} maxLength={512} rows={3} onChange={(e) => setDescription(e.target.value)} disabled={busy} /></label>

@@ -153,9 +153,11 @@ def _ensure_group(
     slot,  # noqa: ANN001 - SpeakerSlot
     scene_id: str,
 ) -> str:
-    # Book-wide manual edits remain authoritative even for a resumed window.
+    # Confirmed book identities remain authoritative, regardless of who accepted the roster.
     character = session.get(BookCharacter, slot.character_id) if slot.character_id else None
-    if character is not None and character.user_confirmed:
+    if character is not None and (
+        character.user_confirmed or character.confirmation_source == "automatic"
+    ):
         slot.canonical_name = character.canonical_name or ""
         slot.description = character.description or ""
     if slot.group_id:
@@ -237,7 +239,8 @@ def _discover_character(
             _sync(session, session.get(BookVersion, version_id), character)
     if declaration.character_id and declaration.evidence_refs:
         supplement_aliases(session, character, [declaration.name or "", *declaration.aliases])
-    elif not character.user_confirmed and declaration.evidence_refs:
+    elif (not character.user_confirmed and character.confirmation_source != "automatic"
+          and declaration.evidence_refs):
         supplement_aliases(session, character, declaration.aliases)
     refreshed = ConfirmedCharacter(
         character.id, character.canonical_name or "",

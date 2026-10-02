@@ -4,12 +4,24 @@ import pytest
 
 from ndr.characters.auto_merge import (
     MergeOutput,
+    _confirmation_source,
     _messages,
     _name_candidates,
     _restore_plan_references,
     _validate_plan,
 )
 from ndr.characters.merge_diagnostics import MergePlanError, saved_model_groups
+
+
+@pytest.mark.parametrize("entry,expected", [
+    ({"user_confirmed": False}, "model"),
+    ({"user_confirmed": True}, "legacy"),
+    ({"user_confirmed": True, "name_locked": True}, "manual"),
+    ({"confirmation_source": "automatic"}, "automatic"),
+    ({"confirmation_source": "imported", "user_confirmed": True}, "imported"),
+])
+def test_old_merge_snapshots_do_not_invent_human_confirmation(entry, expected):
+    assert _confirmation_source(entry) == expected
 
 
 def test_merge_hints_cover_multiple_identities_without_auto_acceptance():

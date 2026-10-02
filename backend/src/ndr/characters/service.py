@@ -1,7 +1,7 @@
 """Chapter roster storage and confirmation.
 
-The model proposes candidates, but stable book-level people are only used by
-attribution after the user confirms the chapter roster and POV character.
+The model proposes candidates. Attribution requires an accepted chapter roster
+and POV; human and automatic acceptance are recorded separately.
 """
 
 from __future__ import annotations
@@ -70,6 +70,7 @@ def _character_out(row: BookCharacter) -> BookCharacterOut:
         description=row.description or "",
         user_confirmed=row.user_confirmed,
         name_locked=row.name_locked,
+        confirmation_source=row.confirmation_source,
     )
 
 
@@ -294,9 +295,9 @@ def store_roster_candidates(
                                characters=existing)
         # Model analysis may rediscover an already confirmed person under a
         # different name. Confirmation is the authority boundary: later model
-        # output may link to that person, but must never rewrite the identity
-        # the user approved.
-        if not character.user_confirmed:
+        # output may link to that person, but must never rewrite the accepted
+        # identity. Automatic acceptance is not a claim of human review.
+        if not character.user_confirmed and character.confirmation_source != "automatic":
             character.canonical_name = (
                 matched.canonical_name if matched else undecorated_name(candidate.name) or None
             )
@@ -373,6 +374,7 @@ def _upsert_confirmed_character(
     chapter: Chapter,
     item: Any,
     source: dict[str, Any] | None,
+    automatic: bool = False,
 ) -> BookCharacter:
     character_id = item.character_id or (source or {}).get("character_id")
     character = session.get(BookCharacter, character_id) if character_id else None
@@ -400,7 +402,7 @@ def _upsert_confirmed_character(
     if not name:
         raise ApiError.validation("已确认人物必须有名称", temp_ref=item.temp_ref)
     old_name = character.canonical_name
-    if source is None or name != (source or {}).get("canonical_name"):
+    if not automatic and (source is None or name != (source or {}).get("canonical_name")):
         character.name_locked = True
     character.canonical_name = name
     # A roster may have been previewed before a parallel dialogue window
@@ -412,8 +414,16 @@ def _upsert_confirmed_character(
         ensure_ascii=False,
     )
     character.description = item.description or (source or {}).get("description") or ""
-    character.source = CharacterSource.USER
-    character.user_confirmed = True
+    if not automatic:
+        character.source = CharacterSource.USER
+        character.user_confirmed = True
+        character.confirmation_source = "manual"
+    elif character.confirmation_source not in {"manual", "legacy", "imported"} and not (
+        character.name_locked
+    ):
+        character.source = CharacterSource.MODEL
+        character.user_confirmed = False
+        character.confirmation_source = "automatic"
     character.version = (character.version or 0) + 1
     session.flush()
     if old_name and old_name != name:
@@ -452,12 +462,21 @@ def confirm_roster(
             raise ApiError.validation("人物候选不存在，且未提供新人物名称", temp_ref=item.temp_ref)
         if not item.accepted:
             continue
+        if payload.confirmation_mode == "automatic" and (
+            source is None
+            or (item.character_id and item.character_id != source.get("character_id"))
+            or (item.canonical_name and item.canonical_name.strip() != source.get("canonical_name"))
+            or item.aliases != source.get("aliases", [])
+            or (item.description and item.description != source.get("description", ""))
+        ):
+            raise ApiError.validation("自动确认只能接受已保存的模型候选，编辑人物请使用人工确认")
         character = _upsert_confirmed_character(
             session,
             version=version,
             chapter=chapter,
             item=item,
             source=source,
+            automatic=payload.confirmation_mode == "automatic",
         )
         confirmed_ids.append(character.id)
         character_by_ref[item.temp_ref] = character

@@ -322,12 +322,23 @@ def _check_current(session, job, entries):
     if not version or not book or book.active_version_id != version.id:
         raise ApiError(ErrorCode.RESOURCE_CONFLICT, "书籍版本已变化，未执行自动合并")
     _guard(session, version, job.id)
-    normalized_entries = [{**row, "name_locked": row.get("name_locked", False)} for row in entries]
+    normalized_entries = [{
+        **row, "name_locked": row.get("name_locked", False),
+        "confirmation_source": _confirmation_source(row),
+    } for row in entries]
     if _snapshot(session, version) != normalized_entries:
         raise ApiError(
             ErrorCode.RESOURCE_CONFLICT, "人物资料在分析期间发生变化，未执行任何合并，请重新分析"
         )
     return version
+
+
+def _confirmation_source(entry):
+    if "confirmation_source" in entry:
+        return entry["confirmation_source"]
+    if entry.get("user_confirmed"):
+        return "manual" if entry.get("name_locked") else "legacy"
+    return "model"
 
 
 def _apply(session, job, output, entries):
@@ -357,6 +368,7 @@ def _apply(session, job, output, entries):
         target = session.get(BookCharacter, target_id)
         target.user_confirmed = by_id[group.target_id]["user_confirmed"]
         target.name_locked = by_id[group.target_id].get("name_locked", False)
+        target.confirmation_source = _confirmation_source(by_id[group.target_id])
         target.description = description
         if group.preferred_name:
             target.aliases_json = json.dumps(list(dict.fromkeys([

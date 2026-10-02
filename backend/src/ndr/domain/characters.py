@@ -18,6 +18,7 @@ class BookCharacterOut(ApiModel):
     description: str = ""
     user_confirmed: bool = False
     name_locked: bool = False
+    confirmation_source: Literal["model", "automatic", "manual", "legacy", "imported"] = "model"
 
 
 class CharacterDirectoryOut(BookCharacterOut):
@@ -139,6 +140,7 @@ class RosterConfirmIn(ApiModel):
     candidates: list[RosterConfirmCandidateIn] = Field(min_length=1)
     pov_temp_ref: str | None = None
     expected_version: int = Field(ge=1)
+    confirmation_mode: Literal["manual", "automatic"] = "manual"
 
     @model_validator(mode="after")
     def _check_unique_refs(self) -> RosterConfirmIn:

@@ -107,6 +107,7 @@ export interface ConfirmRosterInput {
   candidates: RosterConfirmCandidateIn[]
   povTempRef: string | null
   expectedVersion: number
+  confirmationMode?: 'manual' | 'automatic'
 }
 
 export function confirmCharacterRoster(
@@ -120,6 +121,7 @@ export function confirmCharacterRoster(
     candidates: input.candidates,
     pov_temp_ref: input.povTempRef,
     expected_version: input.expectedVersion,
+    confirmation_mode: input.confirmationMode ?? 'manual',
   }
   return apiData<ChapterRosterOut>(
     `/api/books/${bookId}/chapters/${chapterId}/character-roster`,

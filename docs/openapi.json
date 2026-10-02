@@ -4191,6 +4191,18 @@
             "type": "boolean",
             "title": "Name Locked",
             "default": false
+          },
+          "confirmation_source": {
+            "type": "string",
+            "enum": [
+              "model",
+              "automatic",
+              "manual",
+              "legacy",
+              "imported"
+            ],
+            "title": "Confirmation Source",
+            "default": "model"
           }
         },
         "additionalProperties": false,
@@ -5025,6 +5037,18 @@
             "type": "boolean",
             "title": "Name Locked",
             "default": false
+          },
+          "confirmation_source": {
+            "type": "string",
+            "enum": [
+              "model",
+              "automatic",
+              "manual",
+              "legacy",
+              "imported"
+            ],
+            "title": "Confirmation Source",
+            "default": "model"
           },
           "kind": {
             "type": "string",
@@ -9565,6 +9589,15 @@
             "type": "integer",
             "minimum": 1.0,
             "title": "Expected Version"
+          },
+          "confirmation_mode": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "automatic"
+            ],
+            "title": "Confirmation Mode",
+            "default": "manual"
           }
         },
         "additionalProperties": false,

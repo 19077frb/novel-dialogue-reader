@@ -95,6 +95,52 @@ def test_dialogue_explicit_name_reveal_upgrades_same_identity(migrated_client, m
         engine.dispose()
 
 
+@pytest.mark.parametrize("mode", ["automatic", "manual"])
+@pytest.mark.parametrize("prior", ["model", "automatic", "manual", "legacy", "imported"])
+def test_roster_confirmation_tracks_origin_and_preserves_prior_human_approval(
+    migrated_client, migrated_settings, mode, prior,
+):
+    imported = migrated_client.post("/api/books/import", files={
+        "file": ("confirmation.txt", "第一章\n「你好。」".encode(), "text/plain"),
+    }).json()["data"]
+    engine = create_db_engine(migrated_settings)
+    try:
+        with transaction(create_session_factory(engine)) as session:
+            version = session.get(BookVersion, imported["book_version_id"])
+            chapter = session.scalar(select(Chapter).where(Chapter.book_version_id == version.id))
+            character = BookCharacter(
+                book_version_id=version.id, canonical_name="阿库娅",
+                user_confirmed=prior not in {"model", "automatic"}, confirmation_source=prior,
+                source=CharacterSource.MODEL if prior in {"model", "automatic"} else CharacterSource.USER,
+            )
+            session.add(character)
+            session.flush()
+            roster = store_roster_candidates(
+                session, version=version, chapter=chapter, job_id=None,
+                output=RosterOutput.model_validate({"characters": [{
+                    "temp_ref": "c1", "character_id": character.id, "name": "阿库娅",
+                    "description": "人物说明", "evidence_refs": ["L1"],
+                }]}),
+            )
+            record = json.loads(roster.candidates_json)[0]
+            result = confirm_roster(session, version=version, chapter=chapter, payload=RosterConfirmIn(
+                expected_version=roster.version, pov_temp_ref="c1", confirmation_mode=mode,
+                candidates=[{key: record[key] for key in (
+                    "temp_ref", "character_id", "canonical_name", "aliases", "description",
+                )}],
+            ))
+            expected = "manual" if mode == "manual" else "automatic" if prior == "model" else prior
+            assert result.status.value == "CONFIRMED"
+            assert character.confirmation_source == expected
+            assert character.user_confirmed is (expected != "automatic")
+            if expected == "automatic":
+                assert character.source is CharacterSource.MODEL
+                assert character.name_locked is False
+            assert result.confirmed_characters[0].confirmation_source == expected
+    finally:
+        engine.dispose()
+
+
 def test_late_name_reuses_stable_identity(migrated_client, migrated_settings):
     imported = migrated_client.post("/api/books/import", files={
         "file": ("identity.txt", "第一章\n「我是藤波夏帆。」".encode(), "text/plain"),

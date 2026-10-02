@@ -998,6 +998,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
           const pov = accepted.find((candidate) => candidate.pov_candidate) ?? accepted[0]
           if (!restoring || roster.status !== 'CONFIRMED') await confirmCharacterRoster(bookId, chapter.id, {
             bookVersionId,
+            confirmationMode: 'automatic',
             candidates: accepted.map((candidate) => ({
               temp_ref: candidate.temp_ref,
               accepted: true,

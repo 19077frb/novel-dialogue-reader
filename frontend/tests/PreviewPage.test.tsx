@@ -209,6 +209,7 @@ const ROSTER = {
       character_id: 'char1',
       name: 'Speaker',
       name_locked: false,
+      confirmation_source: 'manual',
       aliases: [],
       description: '',
       user_confirmed: true,
@@ -781,6 +782,8 @@ describe('PreviewPage', () => {
     await userEvent.click(screen.getByTestId('batch-run'))
 
     await waitFor(() => expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledTimes(1))
+    expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledWith('b1', 'c1',
+      expect.objectContaining({ confirmationMode: 'automatic' }))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
     expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledWith(
       'b1',

@@ -224,6 +224,7 @@ def edit(
     row.description = payload.description.strip()
     row.user_confirmed = True
     row.name_locked = True
+    row.confirmation_source = "manual"
     row.source = CharacterSource.USER
     row.version += 1
     _sync(session, version, row, source_group_id=group_id)
@@ -265,6 +266,8 @@ def merge(
             source.first_seen_cp,
         )
     target.user_confirmed = target.user_confirmed if model_decision else True
+    if not model_decision:
+        target.confirmation_source = "manual"
     target.source = CharacterSource.MODEL if model_decision else CharacterSource.USER
     target.version += 1
     _sync(

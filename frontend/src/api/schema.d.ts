@@ -1250,6 +1250,12 @@ export interface components {
              * @default false
              */
             name_locked: boolean;
+            /**
+             * Confirmation Source
+             * @default model
+             * @enum {string}
+             */
+            confirmation_source: "model" | "automatic" | "manual" | "legacy" | "imported";
         };
         /**
          * BookFormat
@@ -1570,6 +1576,12 @@ export interface components {
              * @default false
              */
             name_locked: boolean;
+            /**
+             * Confirmation Source
+             * @default model
+             * @enum {string}
+             */
+            confirmation_source: "model" | "automatic" | "manual" | "legacy" | "imported";
             /**
              * Kind
              * @default book
@@ -3398,6 +3410,12 @@ export interface components {
             pov_temp_ref?: string | null;
             /** Expected Version */
             expected_version: number;
+            /**
+             * Confirmation Mode
+             * @default manual
+             * @enum {string}
+             */
+            confirmation_mode: "manual" | "automatic";
         };
         /** ScanResultOut */
         ScanResultOut: {

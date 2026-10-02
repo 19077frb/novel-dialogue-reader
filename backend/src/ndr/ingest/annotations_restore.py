@@ -300,6 +300,7 @@ def _character_for(
             ),
             source=CharacterSource.USER,
             user_confirmed=True,
+            confirmation_source="imported",
             first_seen_cp=first_seen_cp,
             preferred_color_index=(
                 int(speaker["color_index"])

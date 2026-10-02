@@ -21,9 +21,9 @@ vi.mock('../src/api/books', () => ({
 }))
 
 const entries: CharacterDirectoryOut[] = [
-  { character_id: 'u1', name: '悠太', aliases: ['哥哥'], description: '男主角', kind: 'book', version: 2, user_confirmed: true, name_locked: false },
-  { character_id: 'u2', name: '浅村悠太', aliases: [], description: '书店店员', kind: 'book', version: 1, user_confirmed: false, name_locked: false },
-  { character_id: 'speaker:s1', name: '女店员', aliases: [], description: '打工前辈', kind: 'speaker', version: 1, user_confirmed: false, name_locked: false },
+  { character_id: 'u1', name: '悠太', aliases: ['哥哥'], description: '男主角', kind: 'book', version: 2, user_confirmed: true, name_locked: false, confirmation_source: 'manual' },
+  { character_id: 'u2', name: '浅村悠太', aliases: [], description: '书店店员', kind: 'book', version: 1, user_confirmed: false, name_locked: false, confirmation_source: 'model' },
+  { character_id: 'speaker:s1', name: '女店员', aliases: [], description: '打工前辈', kind: 'speaker', version: 1, user_confirmed: false, name_locked: false, confirmation_source: 'model' },
 ]
 
 const mergeResult = {
@@ -51,6 +51,22 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('区分批量自动确认、人工确认、旧记录与导入人物，不靠旧布尔值声称人工确认', async () => {
+    const records: CharacterDirectoryOut[] = [
+      { ...entries[0], character_id: 'auto', name: '自动人物', confirmation_source: 'automatic', user_confirmed: false },
+      { ...entries[0], character_id: 'old', name: '历史人物', confirmation_source: 'legacy', user_confirmed: true },
+      { ...entries[0], character_id: 'import', name: '导入人物', confirmation_source: 'imported', user_confirmed: true },
+      entries[0],
+    ]
+    vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(records)
+    renderPage()
+    const automatic = within(await screen.findByRole('article', { name: '人物 自动人物' }))
+    expect(automatic.getByText('批量自动确认（未经人工复核）')).toBeInTheDocument()
+    expect(automatic.queryByText('已人工确认')).not.toBeInTheDocument()
+    expect(screen.getByText('已确认（旧记录未区分来源）')).toBeInTheDocument()
+    expect(screen.getByText('导入恢复的人物')).toBeInTheDocument()
+    expect(screen.getAllByText('已人工确认')).toHaveLength(1)
+  })
   it('没有重复记录也能预览代称升级为真实姓名，确认前不修改人物', async () => {
     const target = { ...entries[0], name: '女神', aliases: ['阿库娅', '水之女神'] }
     vi.mocked(api.fetchCharacterDirectory).mockResolvedValue([target])

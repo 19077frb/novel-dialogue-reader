@@ -1,7 +1,7 @@
 """Book-level characters and per-chapter confirmed rosters.
 
-The model may propose a chapter roster, but a chapter is only usable by the
-attribution pipeline after the user confirms the people and POV character.
+The model may propose a chapter roster; attribution requires accepted people
+and POV. Acceptance can be manual or automatic, without conflating their origin.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ class BookCharacter(IdMixin, TimestampMixin, VersionMixin, Base):
     )
     user_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     name_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confirmation_source: Mapped[str] = mapped_column(String(16), nullable=False, default="model")
     first_seen_cp: Mapped[int | None] = mapped_column(Integer, nullable=True)
     preferred_color_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

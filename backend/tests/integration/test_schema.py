@@ -42,6 +42,7 @@ from ndr.storage.migrate import run_migrations
 from ndr.storage.models import (
     Annotation,
     Book,
+    BookCharacter,
     BookVersion,
     Chapter,
     Job,
@@ -61,6 +62,44 @@ def test_empty_database_migrates_to_head(tmp_settings: Settings) -> None:
         assert status.state is DatabaseState.READY
         assert status.revision == head_revision()
         assert "review_items" in set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
+def test_confirmation_origin_migration_does_not_guess_old_human_confirmation(tmp_settings):
+    run_migrations(tmp_settings, revision="0016")
+    engine = create_db_engine(tmp_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            book = Book(title="迁移测试", format=BookFormat.TXT, source_sha256="a" * 64)
+            session.add(book)
+            session.flush()
+            version = BookVersion(
+                book_id=book.id, encoding="utf-8", parser_version="test",
+                normalization_version="test", canonical_sha256="b" * 64, canonical_length_cp=0,
+            )
+            session.add(version)
+            session.flush()
+            for key, confirmed, locked, temp_key in [
+                ("legacy", True, False, None), ("manual", True, True, None),
+                ("model", False, False, None),
+                ("imported", True, False, "imported-annotation:sample"),
+            ]:
+                session.execute(text(
+                    "INSERT INTO book_characters (id, book_version_id, canonical_name, aliases_json,"
+                    " source, user_confirmed, name_locked, temp_key, created_at, updated_at, version)"
+                    " VALUES (:id, :version_id, :name, '[]', 'USER', :confirmed, :locked,"
+                    " :temp_key, :now, :now, 1)"
+                ), {"id": key, "version_id": version.id, "name": key, "confirmed": confirmed,
+                    "locked": locked, "temp_key": temp_key, "now": utcnow()})
+        run_migrations(tmp_settings)
+        with transaction(factory) as session:
+            for key in ("legacy", "manual", "model", "imported"):
+                character = session.get(BookCharacter, key)
+                assert character.confirmation_source == key
+                assert character.user_confirmed is (key != "model")
+                assert character.canonical_name == key and character.version == 1
     finally:
         engine.dispose()
 
