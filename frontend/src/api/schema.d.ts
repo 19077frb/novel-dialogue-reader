@@ -262,7 +262,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** 找回当前版本最近的自动合并任务 */
+        get: operations["latest_auto_merge_route_api_books__book_id__character_directory_auto_merge_get"];
         put?: never;
         /** 模型判断并自动合并重复人物 */
         post: operations["auto_merge_characters_route_api_books__book_id__character_directory_auto_merge_post"];
@@ -2029,6 +2030,15 @@ export interface components {
         /** DataEnvelope[UndoOut] */
         DataEnvelope_UndoOut_: {
             data: components["schemas"]["UndoOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[Union[CharacterAutoMergeResultOut, NoneType]] */
+        DataEnvelope_Union_CharacterAutoMergeResultOut__NoneType__: {
+            data: components["schemas"]["CharacterAutoMergeResultOut"] | null;
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -4131,6 +4141,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_BookmarkOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_auto_merge_route_api_books__book_id__character_directory_auto_merge_get: {
+        parameters: {
+            query?: {
+                book_version_id?: string | null;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_Union_CharacterAutoMergeResultOut__NoneType__"];
                 };
             };
             /** @description Validation Error */

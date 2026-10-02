@@ -356,6 +356,7 @@ def test_auto_merge_applies_and_preserves_names_descriptions_references_usage(
     assert result["merged_count"] == 1
     assert result["merges"][0]["source_names"] == ["浅村悠太"]
     assert result["usage"]["total_tokens"] == 40
+    assert client.get(f"{base}/auto-merge").json()["data"] == result
     rows = client.get(base).json()["data"]
     target = next(row for row in rows if row["character_id"] == ids["target"])
     assert target["description"] == "目标说明；书店店员"
@@ -537,3 +538,20 @@ def test_auto_merge_retains_group_if_combined_description_would_lose_data(
     assert result["skipped_groups"] == 1 and result["merged_count"] == 0
     recovery = client.get(f"/api/jobs/{job['id']}/recovery").json()["data"]
     assert recovery["actions"] == []
+
+
+@pytest.mark.parametrize("state", [JobState.QUEUED, JobState.RUNNING, JobState.PARTIAL, JobState.COMPLETED])
+def test_find_latest_auto_merge_without_client_storage(migrated_client, populated, state):
+    client, ids = migrated_client, populated
+    url = f"/api/books/{ids['book']}/character-directory/auto-merge"
+    empty = client.get(url)
+    assert empty.status_code == 200 and empty.json()["data"] is None
+    job, _ = _auto_job(client, ids)
+    with transaction(client.app.state.session_factory) as session:
+        session.get(Job, job["id"]).state = state
+        session.add(Job(kind=JobKind.EXPORT, book_id=ids["book"], book_version_id=ids["version"]))
+    found = client.get(url).json()["data"]
+    assert found["job_id"] == job["id"] and found["state"] == state.value
+    assert client.get(url, params={"book_version_id": "not-this-book"}).status_code == 422
+    with transaction(client.app.state.session_factory) as session:
+        assert session.scalar(select(Job).where(Job.id == job["id"])).state is state

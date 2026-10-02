@@ -133,3 +133,7 @@ export function startCharacterAutoMerge(bookId: string, input: CharacterAutoMerg
 export function fetchCharacterAutoMergeResult(bookId: string, jobId: string, signal?: AbortSignal): Promise<CharacterAutoMergeResultOut> {
   return apiData<CharacterAutoMergeResultOut>(`/api/books/${bookId}/character-directory/auto-merge/${jobId}`, { signal })
 }
+
+export function fetchLatestCharacterAutoMerge(bookId: string, versionId: string, signal?: AbortSignal): Promise<CharacterAutoMergeResultOut | null> {
+  return apiData<CharacterAutoMergeResultOut | null>(`/api/books/${bookId}/character-directory/auto-merge?book_version_id=${encodeURIComponent(versionId)}`, { signal })
+}

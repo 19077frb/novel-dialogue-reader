@@ -12,7 +12,7 @@ import { renderRoute } from './helpers'
 
 vi.mock('../src/api/characters', () => ({
   fetchCharacterDirectory: vi.fn(), editBookCharacter: vi.fn(), mergeBookCharacter: vi.fn(),
-  startCharacterAutoMerge: vi.fn(), fetchCharacterAutoMergeResult: vi.fn(),
+  startCharacterAutoMerge: vi.fn(), fetchLatestCharacterAutoMerge: vi.fn(),
 }))
 vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['profiles'] } }))
 vi.mock('../src/api/books', () => ({
@@ -25,6 +25,13 @@ const entries: CharacterDirectoryOut[] = [
   { character_id: 'speaker:s1', name: '女店员', aliases: [], description: '打工前辈', kind: 'speaker', version: 1, user_confirmed: false },
 ]
 
+const mergeResult = {
+  job_id: 'merge-1', state: 'COMPLETED' as const, merged_count: 1, skipped_groups: 0,
+  merges: [{ target_character_id: 'u2', target_name: '浅村悠太', source_names: ['悠太'], reason: '别名和说明指向同一人' }],
+  usage: { total_tokens: 40 }, unknown_usage_runs: 0, last_error: null,
+  created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:01Z',
+}
+
 beforeEach(() => {
   vi.resetAllMocks()
   sessionStorage.clear()
@@ -32,12 +39,7 @@ beforeEach(() => {
   vi.mocked(booksApi.fetchBook).mockResolvedValue({ id: 'b1', title: '测试小说', active_version_id: 'v1' } as never)
   vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([{ id: 'p1', name: '合并模型', protocol: 'fake', model: 'test', params: {} }] as never)
   vi.mocked(api.startCharacterAutoMerge).mockResolvedValue({ id: 'merge-1', state: 'QUEUED' } as never)
-  vi.mocked(api.fetchCharacterAutoMergeResult).mockResolvedValue({
-    job_id: 'merge-1', state: 'COMPLETED', merged_count: 1, skipped_groups: 0,
-    merges: [{ target_character_id: 'u2', target_name: '浅村悠太', source_names: ['悠太'], reason: '别名和说明指向同一人' }],
-    usage: { total_tokens: 40 }, unknown_usage_runs: 0, last_error: null,
-    created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:01Z',
-  })
+  vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(null)
   vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(entries)
   vi.mocked(api.editBookCharacter).mockResolvedValue(entries[0])
   vi.mocked(api.mergeBookCharacter).mockResolvedValue(entries[0])
@@ -57,6 +59,7 @@ describe('CharactersPage', () => {
     expect(start).toBeDisabled()
     await userEvent.selectOptions(await screen.findByTestId('character-merge-profile'), 'p1')
     await userEvent.click(screen.getByLabelText('我同意按模型判断直接合并，已知此操作无法自动撤销'))
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
     await userEvent.click(start)
     expect(api.startCharacterAutoMerge).toHaveBeenCalledWith('b1', expect.objectContaining({
       book_version_id: 'v1', profile_id: 'p1', max_total_tokens: null, run_now: true,
@@ -68,16 +71,42 @@ describe('CharactersPage', () => {
   })
 
   it('自动合并进行中禁止新任务与人物编辑，重新进入页面继续跟踪任务', async () => {
-    sessionStorage.setItem('ndr-character-auto-merge:b1', 'merge-1')
-    vi.mocked(api.fetchCharacterAutoMergeResult).mockResolvedValue({
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue({
       job_id: 'merge-1', state: 'RUNNING', usage: {}, merged_count: 0, unknown_usage_runs: 0,
       created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:01Z',
     } as never)
-    renderPage()
+    const page = renderPage()
     await screen.findByText('自动合并：处理中')
     expect(screen.getByRole('button', { name: '开始自动合并' })).toBeDisabled()
     expect(screen.getAllByRole('button', { name: '保存人物资料' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true)
     expect(screen.getByRole('button', { name: '停止自动合并' })).toBeEnabled()
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+    page.unmount()
+    localStorage.clear()
+    sessionStorage.clear()
+    renderPage()
+    await screen.findByText('自动合并：处理中')
+    expect(api.fetchLatestCharacterAutoMerge).toHaveBeenCalledWith('b1', 'v1', expect.any(AbortSignal))
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+  })
+
+  it('没有浏览器记录也能找回完成结果与用量，不重新调用模型', async () => {
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
+    renderPage()
+    await screen.findByText('合并了 1 个重复人物。')
+    expect(screen.getByText('已知消耗 40 Tokens')).toBeInTheDocument()
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+  })
+
+  it('任务状态读取失败时提供重读按钮且不允许重复创建任务', async () => {
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockRejectedValue(new Error('服务器暂时不可用'))
+    renderPage()
+    expect(await screen.findByRole('alert')).toHaveTextContent('服务器暂时不可用')
+    await userEvent.click(screen.getByLabelText('自动合并人物（由模型判断并执行）'))
+    expect(screen.getByRole('button', { name: '开始自动合并' })).toBeDisabled()
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
+    await userEvent.click(screen.getByRole('button', { name: '重新读取进度' }))
+    await screen.findByText('合并了 1 个重复人物。')
     expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
   })
 

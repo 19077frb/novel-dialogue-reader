@@ -969,6 +969,62 @@
       }
     },
     "/api/books/{book_id}/character-directory/auto-merge": {
+      "get": {
+        "tags": [
+          "characters"
+        ],
+        "summary": "找回当前版本最近的自动合并任务",
+        "operationId": "latest_auto_merge_route_api_books__book_id__character_directory_auto_merge_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "book_version_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Book Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_Union_CharacterAutoMergeResultOut__NoneType__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "characters"
@@ -5976,6 +6032,32 @@
           "request_id"
         ],
         "title": "DataEnvelope[UndoOut]"
+      },
+      "DataEnvelope_Union_CharacterAutoMergeResultOut__NoneType__": {
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CharacterAutoMergeResultOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[Union[CharacterAutoMergeResultOut, NoneType]]"
       },
       "DataEnvelope_UsageOut_": {
         "properties": {

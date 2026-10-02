@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..characters.auto_merge import auto_merge_result, create_auto_merge_job
@@ -38,6 +39,34 @@ from .deps import get_session
 from .errors import ApiError, current_request_id
 
 router = APIRouter(tags=["characters"])
+
+
+@router.get(
+    "/books/{book_id}/character-directory/auto-merge",
+    response_model=DataEnvelope[CharacterAutoMergeResultOut | None],
+    summary="找回当前版本最近的自动合并任务",
+)
+def latest_auto_merge_route(
+    request: Request,
+    book_id: str,
+    book_version_id: str | None = None,
+    session: Session = Depends(get_session),
+) -> DataEnvelope[CharacterAutoMergeResultOut | None]:
+    version = _version_or_400(session, _book_or_404(session, book_id), book_version_id)
+    job = session.scalar(
+        select(Job)
+        .where(
+            Job.book_id == book_id,
+            Job.book_version_id == version.id,
+            Job.kind == JobKind.CHARACTER_MERGE,
+        )
+        .order_by(Job.created_at.desc(), Job.id.desc())
+        .limit(1)
+    )
+    return DataEnvelope(
+        data=auto_merge_result(session, job) if job else None,
+        request_id=current_request_id(request),
+    )
 
 
 @router.post(

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { fetchCharacterAutoMergeResult, startCharacterAutoMerge } from '../api/characters'
+import { fetchLatestCharacterAutoMerge, startCharacterAutoMerge } from '../api/characters'
 import { freshIdempotencyKey, pauseJob } from '../api/jobs'
 import { fetchProfiles, profileKeys } from '../api/profiles'
 import { useProcessingPreferences, inferenceOptions } from '../processing/preferences'
@@ -13,23 +13,23 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
   bookId: string; versionId?: string | null; count: number; disabled: boolean
   onBusyChange: (value: boolean) => void; onSaved: () => Promise<void>
 }) {
-  const storageKey = `ndr-character-auto-merge:${bookId}`
-  const [jobId, setJobId] = useState(() => sessionStorage.getItem(storageKey) ?? '')
-  const [open, setOpen] = useState(Boolean(jobId))
+  const [open, setOpen] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
   const [preferences, update] = useProcessingPreferences()
   const refreshed = useRef('')
   const profiles = useQuery({ queryKey: profileKeys.profiles(), queryFn: ({ signal }) => fetchProfiles(signal), enabled: open })
-  const result = useQuery({ queryKey: ['character-auto-merge', bookId, jobId],
-    queryFn: ({ signal }) => fetchCharacterAutoMergeResult(bookId, jobId, signal), enabled: Boolean(jobId),
-    refetchInterval: query => !query.state.data || !TERMINAL_JOB_STATES.has(query.state.data.state) ? 2000 : false })
+  const result = useQuery({ queryKey: ['character-auto-merge', bookId, versionId],
+    queryFn: ({ signal }) => fetchLatestCharacterAutoMerge(bookId, versionId!, signal), enabled: Boolean(versionId),
+    refetchInterval: query => query.state.data && !query.state.error && !TERMINAL_JOB_STATES.has(query.state.data.state) ? 2000 : false })
+  const jobId = result.data?.job_id
+  useEffect(() => { if (jobId) setOpen(true) }, [jobId])
   const start = useMutation({ mutationFn: () => startCharacterAutoMerge(bookId, {
     book_version_id: versionId!, profile_id: preferences.profileId,
     inference_options: inferenceOptions(preferences), max_total_tokens: preferences.tokenLimit,
     idempotency_key: freshIdempotencyKey('character-auto-merge', `${bookId}:${versionId}`), run_now: true,
-  }), onSuccess: job => { setJobId(job.id); sessionStorage.setItem(storageKey, job.id); setConfirmed(false) } })
-  const stop = useMutation({ mutationFn: () => pauseJob(jobId), onSuccess: () => { void result.refetch() } })
-  const busy = start.isPending || Boolean(jobId && (!result.data || !TERMINAL_JOB_STATES.has(result.data.state)))
+  }), onSuccess: () => { setConfirmed(false) }, onSettled: async () => { await result.refetch() } })
+  const stop = useMutation({ mutationFn: () => pauseJob(jobId!), onSuccess: () => { void result.refetch() } })
+  const busy = start.isPending || Boolean(versionId && result.isPending) || Boolean(result.data && !TERMINAL_JOB_STATES.has(result.data.state))
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false) }, [busy, onBusyChange])
   useEffect(() => {
     if (result.data?.state === 'COMPLETED' && refreshed.current !== result.data.job_id) {
@@ -38,10 +38,12 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     }
   }, [result.data, onSaved])
   const profileReady = profiles.data?.some(profile => profile.id === preferences.profileId)
-  const blocked = disabled || busy
+  const blocked = disabled || busy || result.isError
   return <section className="card" aria-label="自动合并人物">
     <label className="ndr-field"><span><input type="checkbox" checked={open} disabled={busy}
       onChange={event => setOpen(event.target.checked)} /> 自动合并人物（由模型判断并执行）</span></label>
+    {versionId && result.isPending && <p role="status">正在读取已有任务…</p>}
+    {result.isError && <p className="status-error" role="alert">任务状态读取失败：{result.error.message} <button onClick={() => void result.refetch()}>重新读取进度</button>。确认已有任务状态前不能启动新任务。</p>}
     {open && <>
       <p className="hint">仅分析已保存的全书人物姓名、别名和说明，请先保存编辑。同名、同职务或泛称不单独作为合并依据。会调用模型并消耗 Tokens，模型仍可能误判；合并影响全部已有对白与导出，不改正文或章节完成状态。</p>
       <ThinkingSettings disabled={blocked} profiles={profiles.data ?? []} profileId={preferences.profileId}
@@ -62,7 +64,6 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
       {!confirmed && <p className="hint">开始前请勾选确认执行合并。</p>}
       {(start.error || stop.error) && <p className="status-error" role="alert">{(start.error ?? stop.error)?.message}</p>}
       {jobId && <div>
-        {result.isError && <p className="status-error" role="alert">进度读取失败：{result.error.message} <button onClick={() => void result.refetch()}>重新读取进度</button></p>}
         {result.data && <>
           <p role="status">自动合并：{JOB_STATE_LABELS[result.data.state]}</p>
           <OperationTimer startedAt={Date.parse(result.data.created_at)} finishedAt={busy ? null : Date.parse(result.data.updated_at)} />
