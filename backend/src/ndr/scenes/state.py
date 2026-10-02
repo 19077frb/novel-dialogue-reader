@@ -96,6 +96,8 @@ class SceneState:
     recent_turns: list[dict[str, str]] = field(default_factory=list)
     participants: list[SpeakerSlot] = field(default_factory=list)
     confirmed_characters: list[ConfirmedCharacter] = field(default_factory=list)
+    # Refreshed from storage before a call; not duplicated in every checkpoint.
+    book_characters: list[ConfirmedCharacter] = field(default_factory=list)
     pov_character_id: str | None = None
     known_characters: dict[str, str] = field(default_factory=dict)
     unresolved: list[str] = field(default_factory=list)
@@ -145,10 +147,15 @@ class SceneState:
             return None
         if undecorated_name(value) in GENERIC_NAMES:
             return None
-        matches = [character for character in self.confirmed_characters if matches_name(
+        matches = [character for character in self.identity_characters if matches_name(
             value, (character.canonical_name, *character.aliases),
         )]
         return matches[0] if len(matches) == 1 else None
+
+    @property
+    def identity_characters(self) -> list[ConfirmedCharacter]:
+        return list({item.character_id: item for item in
+                     [*self.book_characters, *self.confirmed_characters]}.values())
 
     def find_by_name(self, canonical_name: str | None) -> SpeakerSlot | None:
         key = (canonical_name or "").strip().casefold()

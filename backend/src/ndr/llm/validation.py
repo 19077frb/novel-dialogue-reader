@@ -35,6 +35,7 @@ class LabelingTargets:
     speaker_refs: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
     confirmed_names: tuple[str, ...] = ()
+    character_ids: tuple[str, ...] = ()
     require_display_names: bool = False
 
 
@@ -360,6 +361,16 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
     # 2) 新人物
     new_speakers: dict[str, str] = {}
     for speaker in output.new_speakers:
+        if speaker.character_id and speaker.character_id not in targets.character_ids:
+            issues.append(ValidationIssue(
+                "unknown_character_in_speaker", "人物引用了未提供的全书人物 ID",
+                speaker.temp_ref,
+            ))
+        if speaker.character_id and not speaker.evidence_refs:
+            issues.append(ValidationIssue(
+                "missing_character_evidence", "关联已有全书人物必须提供原文证据",
+                speaker.temp_ref,
+            ))
         if targets.require_display_names and not valid_display_name(speaker.name):
             issues.append(ValidationIssue(
                 "missing_speaker_name", "新人物必须在 name 填写简短姓名或称呼，详细描述另填",

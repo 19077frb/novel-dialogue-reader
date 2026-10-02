@@ -37,15 +37,29 @@ class SpeakerRegistry:
         description: str = "",
         canonical_name: str = "",
         evidence_refs: tuple[str, ...] = (),
+        character_id: str | None = None,
     ) -> SpeakerSlot:
         """把模型声明的临时人物（new1…）落成场景内的新分组。"""
 
         existing = self.state.find(temp_ref)
+        if existing is not None and character_id and existing.character_id != character_id:
+            # temp_ref belongs to this response, not the lifetime of the scene.
+            # A later window may reuse new1 for a different stable person.
+            existing.temp_ref = None
+            existing = None
         if existing is not None:
             return existing
-        named = (
+        if character_id:
+            character = next((item for item in self.state.identity_characters
+                              if item.character_id == character_id), None)
+            if character is not None:
+                canonical_name = character.canonical_name
+        named = self.state.find_by_character(character_id)
+        named = named or (
             self.state.find_by_name(canonical_name) if canonical_name not in GENERIC_NAMES else None
         )
+        if named is not None and character_id and named.character_id not in (None, character_id):
+            named = None
         if named is None:
             confirmed = self.state._confirmed_by_name(canonical_name)
             if confirmed is not None:
@@ -58,6 +72,8 @@ class SpeakerRegistry:
             if confirmed is not None:
                 named.character_id = confirmed.character_id
                 named.canonical_name = confirmed.canonical_name
+            if character_id:
+                named.character_id = character_id
             self.state.remember_character(named.canonical_name, named.description)
             return named
         return self.state.add_speaker(
@@ -66,6 +82,7 @@ class SpeakerRegistry:
             canonical_name=canonical_name,
             evidence_refs=evidence_refs,
             temp_ref=temp_ref,
+            character_id=character_id,
         )
 
     def ensure_local_anchor(

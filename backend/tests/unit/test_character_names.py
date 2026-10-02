@@ -78,3 +78,34 @@ def test_prompt_schema_requires_name():
     assert "name" in speaker_schema["required"]
     assert speaker_schema["properties"]["name"]["type"] == "string"
     assert valid_display_name("轻浮男客")
+
+
+def test_explicit_character_reference_is_scoped_to_sent_catalog():
+    targets = LabelingTargets(quote_ids=("q1",), character_ids=("girl",))
+    output = {
+        "new_speakers": [{"temp_ref": "new1", "scene_ref": "scene_current",
+                          "first_quote_id": "q1", "name": "藤波夏帆",
+                          "character_id": "girl", "description": "前文的高个子女生",
+                          "evidence_refs": ["q1"]}],
+        "labels": [{"quote_id": "q1", "scene_ref": "scene_current", "kind": "speech",
+                    "assignment": "NEW", "speaker_ref": "new1", "basis": "DIRECT"}],
+    }
+    assert parse_and_validate(output, targets).ok
+    output["new_speakers"][0]["character_id"] = "another-book"
+    assert "unknown_character_in_speaker" in parse_and_validate(output, targets).error_codes
+    output["new_speakers"][0]["character_id"] = "girl"
+    output["new_speakers"][0]["evidence_refs"] = []
+    assert "missing_character_evidence" in parse_and_validate(output, targets).error_codes
+
+
+def test_later_window_temp_ref_does_not_override_stable_identity():
+    state = SceneState(book_characters=[ConfirmedCharacter("a", "甲"),
+                                       ConfirmedCharacter("b", "乙")])
+    registry = SpeakerRegistry(state)
+    first = registry.register_temp_speaker(temp_ref="new1", first_quote_id="q1",
+                                           canonical_name="甲", character_id="a")
+    second = registry.register_temp_speaker(temp_ref="new1", first_quote_id="q2",
+                                            canonical_name="乙", character_id="b")
+    assert second is not first
+    assert first.character_id == "a"
+    assert registry.resolve("new1") is second

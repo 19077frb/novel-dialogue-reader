@@ -22,10 +22,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..characters.identity import supplement_aliases
+from ..characters.names import GENERIC_NAMES, matches_name, valid_display_name
 from ..domain.enums import (
     AnnotationSource,
     AnnotationStatus,
     Assignment,
+    CharacterSource,
     GapDecision,
     IdentityOperation,
     QuoteKind,
@@ -35,7 +38,7 @@ from ..domain.enums import (
     SceneStatus,
     SpeakerBasis,
 )
-from ..llm.schemas import IdentityProposal, LlmOutput
+from ..llm.schemas import IdentityProposal, LlmOutput, NewSpeaker
 from ..llm.validation import LabelingTargets, parse_and_validate
 from ..speakers.groups import SpeakerRegistry
 from ..speakers.revisions import IdentityProposalView, evaluate_identity_proposal
@@ -50,7 +53,7 @@ from ..storage.models import (
     SpeakerGroup,
 )
 from .acceptance import compute_visible_from_cp, decide_acceptance
-from .state import SCENE_STATE_VERSION, SceneState
+from .state import SCENE_STATE_VERSION, ConfirmedCharacter, SceneState
 
 ENGINE_VERSION = "attribution-engine-1"
 
@@ -175,6 +178,55 @@ def _ensure_group(
     session.flush()
     slot.group_id = row.id
     return row.id
+
+
+def _discover_character(
+    session: Session, state: SceneState, version_id: str, declaration: NewSpeaker | None,
+    first_seen_cp: int,
+) -> str | None:
+    """Carry newly revealed identities forward without rewriting manual names."""
+    if declaration is None:
+        return None
+    matched = state._confirmed_by_name(declaration.name)
+    character_id = declaration.character_id or (matched.character_id if matched else None)
+    character = session.get(BookCharacter, character_id) if character_id else None
+    if character is not None and character.book_version_id != version_id:
+        raise ValueError("人物 ID 不属于当前书籍版本")
+    # With a confirmed chapter roster, a genuinely new named person discovered
+    # during attribution must also be available to subsequent chapter analysis.
+    if (character is None and state.confirmed_characters and declaration.evidence_refs
+            and valid_display_name(declaration.name) and declaration.name not in GENERIC_NAMES):
+        rows = list(session.scalars(select(BookCharacter).where(
+            BookCharacter.book_version_id == version_id,
+        )))
+        matches = [row for row in rows if matches_name(
+            declaration.name, [row.canonical_name or "", *json.loads(row.aliases_json or "[]")],
+        )]
+        if len(matches) > 1:
+            return None
+        character = matches[0] if matches else BookCharacter(
+            book_version_id=version_id, canonical_name=declaration.name,
+            description=declaration.description, aliases_json="[]",
+            source=CharacterSource.MODEL, user_confirmed=False, first_seen_cp=first_seen_cp,
+        )
+        if not matches:
+            session.add(character)
+            session.flush()
+    if character is None:
+        return None
+    if declaration.character_id and declaration.evidence_refs:
+        supplement_aliases(session, character, [declaration.name or "", *declaration.aliases])
+    elif not character.user_confirmed and declaration.evidence_refs:
+        supplement_aliases(session, character, declaration.aliases)
+    refreshed = ConfirmedCharacter(
+        character.id, character.canonical_name or "",
+        tuple(json.loads(character.aliases_json or "[]")), character.description or "",
+    )
+    state.book_characters = [item for item in state.book_characters
+                             if item.character_id != character.id] + [refreshed]
+    state.confirmed_characters = [refreshed if item.character_id == character.id else item
+                                  for item in state.confirmed_characters]
+    return character.id
 
 
 def _record_annotation(
@@ -325,6 +377,7 @@ def apply_window(
     locked_quote_ids = set(locked_quote_ids or ())
 
     targets = LabelingTargets(
+        character_ids=tuple(item.character_id for item in state.identity_characters),
         quote_ids=tuple(window.target_quote_ids),
         gap_ids=tuple(
             fragment.fragment_id
@@ -433,6 +486,10 @@ def apply_window(
                     canonical_name=(declaration.name if declaration else None)
                     or label.speaker_name or "",
                     evidence_refs=tuple(evidence_ids),
+                    character_id=_discover_character(
+                        session, state, book_version_id, declaration,
+                        quote_positions.get(label.quote_id, (state.start_cp, 0))[0],
+                    ),
                 )
                 speaker_id = _ensure_group(
                     session, state=state, slot=slot, scene_id=scene_id
@@ -442,6 +499,13 @@ def apply_window(
             elif label.assignment is Assignment.EXISTING:
                 slot = registry.resolve(label.speaker_ref)
                 if slot is not None:
+                    for declaration in parsed.new_speakers:
+                        if (slot.character_id and declaration.character_id == slot.character_id
+                                and declaration.first_quote_id == label.quote_id):
+                            _discover_character(
+                                session, state, book_version_id, declaration,
+                                quote_positions.get(label.quote_id, (state.start_cp, 0))[0],
+                            )
                     authoritative = next(
                         (
                             character

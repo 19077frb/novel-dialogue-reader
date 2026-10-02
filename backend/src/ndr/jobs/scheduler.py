@@ -22,7 +22,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..characters.service import confirmed_roster_context
+from ..characters.service import confirmed_roster_context, list_book_characters
 from ..config import Settings
 from ..context.budget import DEFAULT_POLICY, BudgetPolicy, estimate_tokens, policy_for_version
 from ..context.recheck import plan_recheck, route_window
@@ -202,6 +202,15 @@ def _apply_confirmed_roster(
             description=character.description or "",
         )
         for character in characters
+    ]
+    state.book_characters = [
+        ConfirmedCharacter(
+            character_id=character.id,
+            canonical_name=character.canonical_name or "",
+            aliases=tuple(_json_list(character.aliases_json)),
+            description=character.description or "",
+        )
+        for character in list_book_characters(session, version)
     ]
     state.pov_character_id = roster.pov_character_id
     state.sync_confirmed_participants()

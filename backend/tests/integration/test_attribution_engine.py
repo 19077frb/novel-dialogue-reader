@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -320,6 +321,52 @@ def test_confirmed_identity_wins_when_model_name_conflicts(
     assert group.canonical_name == "浅村悠太"
     assert group.description == "用户确认的主人公"
     assert any(item.startswith("confirmed_identity_conflict:S1:奈良坂真绫") for item in result.warnings)
+
+
+def test_revealed_name_links_group_and_survives_scene_change(migrated_client, migrated_settings):
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        person = BookCharacter(
+            id="girl", book_version_id=version.id, canonical_name="高个子女生",
+            aliases_json="[]", description="已确认的补习班同学", source="USER",
+            user_confirmed=True,
+        )
+        session.add(person)
+        session.flush()
+        identities = [ConfirmedCharacter("girl", "高个子女生", description=person.description)]
+        for index, name in enumerate(["藤波夏帆", "藤波同学"]):
+            target = _targets(inputs)[index]
+            state = SceneState(book_characters=identities)
+            window = _window(inputs, [target])
+            output = {
+                "new_speakers": [{"temp_ref": "new1", "scene_ref": "scene_current",
+                                  "first_quote_id": target, "character_id": "girl",
+                                  "name": name, "description": "即前文高个子女生",
+                                  "evidence_refs": [target]}],
+                "labels": [_speech(target, assignment="NEW", speaker_ref="new1")],
+            }
+            result = _run(session, script=[output], window=window, state=state, inputs=inputs)
+            assert result.application.validation_ok, result.application.validation_codes
+            identities = state.book_characters
+        target = _targets(inputs)[2]
+        result = _run(session, script=[{
+            "new_speakers": [{"temp_ref": "name_update", "scene_ref": "scene_current",
+                              "first_quote_id": target, "character_id": "girl",
+                              "name": "夏帆同学", "description": "同一人在此处被称作夏帆",
+                              "evidence_refs": [target]}],
+            "labels": [_speech(target, assignment="EXISTING", speaker_ref="S1",
+                               speaker_name="夏帆同学")],
+        }], window=_window(inputs, [target]), state=state, inputs=inputs)
+        assert result.application.validation_ok
+        groups = list(session.scalars(select(SpeakerGroup)))
+        assert len(groups) == 2
+        assert {group.character_id for group in groups} == {"girl"}
+        assert {group.canonical_name for group in groups} == {"高个子女生"}
+        assert set(json.loads(person.aliases_json)) == {"藤波夏帆", "藤波同学", "夏帆同学"}
+        assert person.description == "已确认的补习班同学"
+
+    _with_session(migrated_settings, body)
 
 
 def test_update_keeps_scene_and_break_opens_new_scene(

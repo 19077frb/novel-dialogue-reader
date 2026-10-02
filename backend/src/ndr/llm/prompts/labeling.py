@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from ..schemas import output_json_schema
 
-LABELING_PROMPT_VERSION = "labeling-13"
+LABELING_PROMPT_VERSION = "labeling-14"
 DATA_DELIMITER = "<<<NDR_DATA>>>"
 ESCAPED_DELIMITER = "<<<NDR_DATA_ESCAPED>>>"
 
@@ -45,7 +45,8 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
     只有叙述结构、称呼、应答关系或上下文支持时才归给 POV。证据冲突或不足时仍必须 UNKNOWN。
 12. 真实姓名规则：只有原文明示姓名，或能由明确称呼与本章已知人物唯一确认时，才填写
     labels[].speaker_name；不确定时省略该字段或填 null，不要在每条对白重复已确认姓名。
-    若任务参数 known_chapter_characters 已有同一人物，必须复用其中完全相同的 name。
+    若已知人物后来揭示真实姓名，在 new_speakers 中通过 character_id 关联旧身份，
+    name 可写新姓名，aliases 补充旧称呼；不要因姓名变化另建全书人物。
     `description` 可写身份特征，但不能用推测姓名冒充已确认姓名。
 13. `RESPONSE_LINK` 的 evidence_refs 应包含与本句形成问答/承接关系的另一条 ref；
     `COREFERENCE` 应引用揭示同一人的称呼、动作或发言 ref。不要只引用目标自身。
@@ -70,9 +71,17 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
     name="浅村悠太"，而不是“浅村悠太（本章第一人称叙述者，书店店员）”；
     name="轻浮男客"，而不是“在书店向女店员搭讪的轻浮男客”。称呼不等于真实身份已确认。
 19. 在声明新人物前，必须先逐一核对 existing_speakers、confirmed_chapter_characters 和
-    known_chapter_characters 的姓名、别名与描述。证据能唯一确认同一人时复用其姓名，不另造
-    “姓名+身份描述”的人物；本场景已出现则用 EXISTING，跨场景首次出现仍用 NEW 但复用 name。
+    known_book_characters、known_chapter_characters 的姓名、别名与描述。
+    证据能唯一确认同一人时，new_speakers[].character_id 必须填写目录中对应的 character_id；
+    新人物填 null。不得编造 ID，不得仅凭同姓关联；必须给出支持身份对应的 evidence_refs。
+    即使本章名单遗漏，也可引用 known_book_characters 中的人物。不另造
+    “姓名+身份描述”的人物；本场景已出现则用 EXISTING，跨场景首次出现仍用 NEW，
+    复用 character_id；姓名可沿用已知称呼或填写原文揭示的新姓名。
     不得仅因同叫“男同学”就合并；关系描述如“悠太的父亲”不代表该人就是悠太。
+20. 当前场景已有人物后来揭示姓名时，labels 仍用 EXISTING 和原 speaker_ref；
+    另在 new_speakers 提供该人物的姓名补充声明，character_id 必须与该 speaker_ref 的
+    character_id 相同，first_quote_id 为揭示姓名的目标对白，aliases 补充新称呼并给出证据。
+    该声明只补充别名，不代表出现另一个人。
 """.strip()
 
 
@@ -134,6 +143,7 @@ def build_labeling_messages(
     speaker_records: Sequence[Mapping[str, object]] | None = None,
     known_characters: Sequence[Mapping[str, object]] | None = None,
     confirmed_characters: Sequence[Mapping[str, object]] | None = None,
+    book_characters: Sequence[Mapping[str, object]] | None = None,
     pov_character: Mapping[str, object] | None = None,
 ) -> list[dict[str, str]]:
     """构造一次标注调用的消息列表（小说作为数据传入）。"""
@@ -147,6 +157,7 @@ def build_labeling_messages(
         "existing_speakers": list(speaker_records or ()),
         "known_chapter_characters": list(known_characters or ()),
         "confirmed_chapter_characters": list(confirmed_characters or ()),
+        "known_book_characters": list(book_characters or ()),
         "pov_character": dict(pov_character or {}),
         "locked_results": locked_summary or "",
     }

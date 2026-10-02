@@ -44,6 +44,7 @@ from ..storage.models import (
     Job,
     ModelProfile,
 )
+from .identity import supplement_aliases
 from .names import GENERIC_NAMES, matches_name, undecorated_name
 
 
@@ -253,12 +254,16 @@ def store_roster_candidates(
 
     records: list[dict[str, Any]] = []
     existing = list_book_characters(session, version)
+    by_id = {row.id: row for row in existing}
+    if any(candidate.character_id and candidate.character_id not in by_id
+           for candidate in output.characters):
+        raise ValueError("人物引用了未提供的全书人物 ID")
     seen_refs: set[str] = set()
     for candidate in output.characters:
         if not candidate.temp_ref or candidate.temp_ref in seen_refs:
             continue
         seen_refs.add(candidate.temp_ref)
-        matched = _match_existing(
+        matched = by_id.get(candidate.character_id) if candidate.character_id else _match_existing(
             session,
             version.id,
             name=candidate.name,
@@ -283,6 +288,9 @@ def store_roster_candidates(
                 )
                 session.add(character)
                 existing.append(character)
+        if candidate.character_id and candidate.evidence_refs:
+            supplement_aliases(session, character, [candidate.name or "", *candidate.aliases],
+                               characters=existing)
         # Model analysis may rediscover an already confirmed person under a
         # different name. Confirmation is the authority boundary: later model
         # output may link to that person, but must never rewrite the identity
@@ -375,7 +383,13 @@ def _upsert_confirmed_character(
     if not name:
         raise ApiError.validation("已确认人物必须有名称", temp_ref=item.temp_ref)
     character.canonical_name = name
-    character.aliases_json = json.dumps(item.aliases, ensure_ascii=False)
+    # A roster may have been previewed before a parallel dialogue window
+    # discovered a new alias. Confirming that snapshot must not erase it;
+    # deliberate alias removal remains available in the book directory.
+    character.aliases_json = json.dumps(
+        list(dict.fromkeys([*_json_list(character.aliases_json), *item.aliases])),
+        ensure_ascii=False,
+    )
     character.description = item.description or (source or {}).get("description") or ""
     character.source = CharacterSource.USER
     character.user_confirmed = True

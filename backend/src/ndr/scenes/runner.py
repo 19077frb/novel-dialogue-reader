@@ -262,6 +262,11 @@ def _messages_for(
             for name, description in state.known_characters.items()
         ],
         confirmed_characters=confirmed_records,
+        book_characters=[
+            {"character_id": item.character_id, "name": item.canonical_name,
+             "aliases": list(item.aliases), "description": item.description}
+            for item in state.book_characters
+        ],
         pov_character=pov_character,
         evidence_ids=[alias(ref) for ref in window.fragment_ids],
         locked_summary=locked_summary or state.prompt_state(max_chars=600),
@@ -381,6 +386,7 @@ def _targets_for(window, state: SceneState):  # noqa: ANN001, ANN202
 
     return LabelingTargets(
         require_display_names=True,
+        character_ids=tuple(item.character_id for item in state.identity_characters),
         quote_ids=tuple(window.target_quote_ids),
         gap_ids=tuple(
             fragment.fragment_id

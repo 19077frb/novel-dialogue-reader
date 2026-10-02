@@ -15,6 +15,7 @@ from ..characters.names import valid_display_name
 from ..characters.service import (
     chapter_has_body_text,
     complete_textless_chapter,
+    list_book_characters,
     roster_messages,
     store_roster_candidates,
 )
@@ -140,6 +141,9 @@ def run_character_roster_job(
         session.commit()
 
         messages = roster_messages(session, settings, job, version, chapter)
+        # IDs must have been present in this exact request, not merely exist
+        # by the time a concurrent model call finishes.
+        allowed_character_ids = {item.id for item in list_book_characters(session, version)}
         budget = json.loads(job.budget_json or "{}")
         max_input_tokens = budget.get("max_input_tokens")
         estimated_tokens = sum(estimate_tokens(message["content"]) for message in messages)
@@ -186,6 +190,11 @@ def run_character_roster_job(
             if not str(key).startswith("_")
         }
         output = RosterOutput.model_validate(payload)
+        if any(person.character_id and person.character_id not in allowed_character_ids
+               for person in output.characters):
+            raise ValueError("人物引用了未提供的全书人物 ID")
+        if any(person.character_id and not person.evidence_refs for person in output.characters):
+            raise ValueError("关联已有全书人物必须提供原文证据")
         if any(not valid_display_name(person.name) for person in output.characters):
             raise ValueError("每个新人物必须填写简短 name（姓名或称呼），不能用描述或编号替代")
     except Exception as exc:  # noqa: BLE001

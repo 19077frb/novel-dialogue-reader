@@ -41,6 +41,8 @@ class GapDecisionOut(ApiModel):
 
 
 class NewSpeaker(ApiModel):
+    character_id: str | None = Field(default=None, min_length=1)
+    aliases: list[str] = Field(default_factory=list, max_length=64)
     # Nullable only for parsing historical cached outputs. Live calls require a name.
     name: str | None = Field(default=None, min_length=1, max_length=32,
                              description="必填简短姓名或称呼，如浅村悠太、轻浮男客；描述另填")
@@ -145,6 +147,7 @@ class RosterCharacter(ApiModel):
     """A candidate character proposed for one chapter."""
 
     temp_ref: str = Field(min_length=1, max_length=64)
+    character_id: str | None = Field(default=None, min_length=1)
     name: str | None = Field(default=None, max_length=128)
     aliases: list[str] = Field(default_factory=list)
     description: str = Field(default="", max_length=512)
