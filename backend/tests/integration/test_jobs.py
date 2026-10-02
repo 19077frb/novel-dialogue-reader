@@ -397,6 +397,10 @@ def test_usage_is_recorded_and_unknown_is_not_zeroed(
     adapter = FakeProviderAdapter(usage={"input_tokens": 30, "output_tokens": 10, "total_tokens": 40})
     outcome = _run_with_fake(migrated_settings, known_job["id"], adapter)
     assert outcome.state is JobState.COMPLETED
+    detail = fake_provider_client.get(f"/api/jobs/{known_job['id']}").json()["data"]
+    assert detail["usage"]["total_tokens"] == 40
+    assert detail["usage"]["input_tokens"] == 30
+    assert detail["usage"]["output_tokens"] == 10
     engine, factory = _factory(migrated_settings)
     try:
         with transaction(factory) as session:
@@ -410,6 +414,20 @@ def test_usage_is_recorded_and_unknown_is_not_zeroed(
 
     usage2 = fake_provider_client.get(f"/api/books/{book_id}/usage").json()["data"]
     assert usage2["total_tokens"] >= 40
+
+    fallback_job = _create_job(
+        fake_provider_client, book_id, profile_id, key="k-usage-fallback",
+        range={"start_cp": 0, "end_cp": 12}, force_reprocess=True,
+    )
+    fallback = _run_with_fake(
+        migrated_settings, fallback_job["id"],
+        FakeProviderAdapter(usage={"input_tokens": 30, "output_tokens": 10}),
+    )
+    assert fallback.state is JobState.COMPLETED
+    fallback_detail = fake_provider_client.get(f"/api/jobs/{fallback_job['id']}").json()["data"]
+    assert fallback_detail["usage"]["total_tokens"] == 40
+    usage3 = fake_provider_client.get(f"/api/books/{book_id}/usage").json()["data"]
+    assert usage3["total_tokens"] == usage2["total_tokens"] + 40
 
 
 def test_budget_exhaustion_stops_before_next_call(

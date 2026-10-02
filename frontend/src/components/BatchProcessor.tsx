@@ -90,7 +90,7 @@ const batchSnapshots = new Map<string, BatchProgressSnapshot>()
 const batchListeners = new Set<() => void>()
 const batchStopRequests = new Set<string>()
 const retryPlanning = new Set<string>()
-const batchExecutions = new Map<string, { execution: BatchExecution; spent: number }>()
+const batchExecutions = new Map<string, { execution: BatchExecution; spent: number; totalSpent: number; unknownRuns: number }>()
 const chapterStopRequests = new Map<string, Set<string>>()
 const expandableBatches = new Map<string, {
   versionId: string; automatic: boolean; append: (plans: ChapterPlan[]) => number
@@ -206,7 +206,8 @@ export async function retryBatchTask(bookId: string, taskId: string, wholeChapte
       chapterStopRequests.get(bookId)?.delete(chapter.id)
       publishBatch(bookId, { running: false })
       await runBatchProcessing({ ...saved.execution, requested: [chapter], plans: [plan],
-        forceReprocess, initialSpent: saved.spent, retryTaskId: wholeChapter ? `roster:${chapter.id}` : taskId })
+        forceReprocess, initialSpent: saved.spent, initialTotalSpent: saved.totalSpent,
+        initialUnknownRuns: saved.unknownRuns, retryTaskId: wholeChapter ? `roster:${chapter.id}` : taskId })
     }
   } finally {
     retryPlanning.delete(bookId)
@@ -390,7 +391,11 @@ function nonNegativeInteger(value: string): number {
 
 function jobTokens(job: JobDetailOut): number {
   const value = job.usage?.total_tokens
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
+  const input = job.usage?.input_tokens
+  const output = job.usage?.output_tokens
+  return [input, output].reduce<number>((sum, tokens) =>
+    sum + (typeof tokens === 'number' && Number.isFinite(tokens) && tokens >= 0 ? tokens : 0), 0)
 }
 
 async function waitForJob(job: JobDetailOut): Promise<JobDetailOut> {
@@ -436,6 +441,8 @@ export interface BatchExecution {
   preferences: ProcessingPreferences
   forceReprocess?: boolean
   initialSpent?: number
+  initialTotalSpent?: number
+  initialUnknownRuns?: number
   onUsage?: (spent: number) => void
   onProgress?: (message: string) => void
   onError?: (message: string | null) => void
@@ -447,7 +454,8 @@ export interface BatchExecution {
 
 /** Shared sequenced roster/window pipeline for manual batches and reader look-ahead. */
 export async function runBatchProcessing({ bookId, bookVersionId, requested, plans, preferences,
-  forceReprocess = false, initialSpent = 0, onUsage, onProgress = () => undefined,
+  forceReprocess = false, initialSpent = 0, initialTotalSpent = initialSpent, initialUnknownRuns = 0,
+  onUsage, onProgress = () => undefined,
   onError = () => undefined, onTokenLimit = () => undefined, onFinished = () => undefined, retryTaskId,
   expandable = false }: BatchExecution) {
   if (isBatchRunning(bookId)) throw new Error('本书已有批量任务运行，请先等待或停止。')
@@ -458,7 +466,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
   plans = [...plans]
   const execution: BatchExecution = { bookId, bookVersionId, requested, plans, preferences: { ...preferences },
     forceReprocess, onUsage, onProgress, onError, onTokenLimit, onFinished }
-  const savedExecution = { execution, spent: initialSpent }
+  const savedExecution = { execution, spent: initialSpent, totalSpent: initialTotalSpent, unknownRuns: initialUnknownRuns }
   batchExecutions.set(bookId, savedExecution)
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
   const setProgress = onProgress
@@ -469,6 +477,11 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
     selectedPlans.forEach(plan => chapterStopRequests.get(bookId)?.delete(plan.chapter.id))
     let tokenLimit = positiveIntegerOrNull(tokenLimitText)
     let spent = initialSpent
+    let totalSpent = initialTotalSpent
+    let unknownRuns = initialUnknownRuns
+    const usageLabel = () => unknownRuns > 0
+      ? `本次已知累计 ${totalSpent.toLocaleString()} tokens（另有 ${unknownRuns} 次调用用量未知，未计入）`
+      : `本次累计 ${totalSpent.toLocaleString()} tokens`
     let reserved = 0
     let warnedAtEightyPercent = false
     let warningOpen = false
@@ -636,10 +649,18 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
       })
 
     const recordUsage = (job: JobDetailOut, stage: string) => {
-      spent += jobTokens(job)
+      const tokens = jobTokens(job)
+      const reportedUnknown = job.usage?.unknown_runs
+      const jobUnknown = Math.max(job.unknown_usage_runs ?? 0,
+        typeof reportedUnknown === 'number' && Number.isFinite(reportedUnknown) ? reportedUnknown : 0)
+      spent += tokens
+      totalSpent += tokens
+      unknownRuns += jobUnknown
       savedExecution.spent = spent
+      savedExecution.totalSpent = totalSpent
+      savedExecution.unknownRuns = unknownRuns
       onUsage?.(spent)
-      if (tokenLimit !== null && job.unknown_usage_runs > 0) {
+      if (tokenLimit !== null && jobUnknown > 0) {
         stopRef.current = true
         throw new BatchAbortError(`模型没有返回${stage}用量，无法可靠执行 Token 上限，批量处理已停止`)
       }
@@ -840,7 +861,7 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
           updateChapterProgress(bookId, chapter.id, { state: 'failed', error: message })
           return
         }
-        const message = `${prefix}：已完成；本次累计 ${spent.toLocaleString()} tokens`
+        const message = `${prefix}：已完成；${usageLabel()}`
         reconcileCompletedChapter(bookId, chapter.id)
         setProgress(message)
         const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
@@ -931,8 +952,8 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
       const emptySummary = (skippedEmptyChapterIds.size ? `，跳过无人物章节 ${skippedEmptyChapterIds.size} 章` : '')
         + (cancelledChapterIds.size ? `，已取消 ${cancelledChapterIds.size} 章` : '')
       const summary = failedChapterIds.size > 0
-        ? `批量处理结束：成功 ${succeededCount} 章，失败 ${failedChapterIds.size} 章${emptySummary}${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
-        : `批量处理完成：${forceReprocess ? '重做' : '新处理'} ${succeededCount} 章${emptySummary}${skipped ? `，跳过已处理 ${skipped} 章` : ''}，本次累计 ${spent.toLocaleString()} tokens。`
+        ? `批量处理结束：成功 ${succeededCount} 章，失败 ${failedChapterIds.size} 章${emptySummary}${skipped ? `，跳过已处理 ${skipped} 章` : ''}，${usageLabel()}。`
+        : `批量处理完成：${forceReprocess ? '重做' : '新处理'} ${succeededCount} 章${emptySummary}${skipped ? `，跳过已处理 ${skipped} 章` : ''}，${usageLabel()}。`
       setProgress(summary)
       if (failedChapterIds.size > 0) {
         setError(`批量处理结束：${succeededCount} 章成功，${failedChapterIds.size} 章失败；具体原因见任务列表。`)

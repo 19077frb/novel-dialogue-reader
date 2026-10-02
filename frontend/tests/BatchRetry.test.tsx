@@ -19,7 +19,7 @@ const estimate = { book_version_id: 'v1', windows: [
   { window_id: 'w1', ordinal: 1, target_count: 1, estimated_tokens: 10 },
   { window_id: 'w2', ordinal: 2, target_count: 1, estimated_tokens: 10 },
 ] } as unknown as EstimateOut
-const job = (state: 'COMPLETED' | 'FAILED' | 'NEEDS_RECONCILIATION') => ({ id: crypto.randomUUID(), state, usage: { total_tokens: 10 }, unknown_usage_runs: 0, last_error: state === 'FAILED' ? '模拟失败' : null }) as unknown as JobDetailOut
+const job = (state: 'COMPLETED' | 'FAILED' | 'NEEDS_RECONCILIATION') => ({ id: crypto.randomUUID(), state, usage: { input_tokens: 7, output_tokens: 3 }, unknown_usage_runs: 0, last_error: state === 'FAILED' ? '模拟失败' : null }) as unknown as JobDetailOut
 const roster = { status: 'CONFIRMED', version: 1, candidates: [{ canonical_name: '女生', temp_ref: 'p1', aliases: [] }] }
 const usage = vi.fn()
 function Snapshot() { return <pre data-testid="snapshot">{JSON.stringify(useBatchProgress('b1'))}</pre> }
@@ -41,6 +41,47 @@ beforeEach(() => {
   vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: estimate.windows!.map(window => ({ ...window, processing_status: window.window_id === 'w2' ? 'completed' : 'failed' })) })
 })
 afterEach(() => { cleanup(); clearBatchProgress('b1') })
+
+it('sums people, failed and successful dialogue attempts with input/output-only usage', async () => {
+  await start()
+  render(<Snapshot />)
+  expect(usage).toHaveBeenLastCalledWith(30)
+  expect(readSnapshot().message).toContain('本次累计 30 tokens')
+})
+
+it('uses the reported total rather than double-counting input and output', async () => {
+  vi.mocked(characters.analyzeCharacterRoster).mockResolvedValue({ ...job('COMPLETED'),
+    usage: { input_tokens: 7, output_tokens: 3, total_tokens: 12 } })
+  await start()
+  expect(usage).toHaveBeenLastCalledWith(32)
+})
+
+it('refreshes allowance without erasing cumulative usage and preserves it for retries', async () => {
+  const prompt = vi.spyOn(window, 'prompt').mockReturnValue('0')
+  try {
+    vi.mocked(characters.analyzeCharacterRoster).mockResolvedValue({ ...job('COMPLETED'), usage: { total_tokens: 8000 } })
+    await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+      preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: 10000 }, onUsage: usage })
+    render(<Snapshot />)
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(usage).toHaveBeenLastCalledWith(20)
+    expect(readSnapshot().message).toContain(`本次累计 ${(8020).toLocaleString()} tokens`)
+    vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+    await act(() => retryBatchTask('b1', 'dialogue:c1:w1'))
+    expect(usage).toHaveBeenLastCalledWith(30)
+    expect(readSnapshot().message).toContain(`本次累计 ${(8030).toLocaleString()} tokens`)
+  } finally { prompt.mockRestore() }
+})
+
+it('reports unknown usage separately instead of claiming a complete zero-cost total', async () => {
+  vi.mocked(characters.analyzeCharacterRoster).mockResolvedValue({ ...job('COMPLETED'),
+    usage: { input_tokens: 0, output_tokens: 0, unknown_runs: 1 }, unknown_usage_runs: 1 })
+  await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: null } })
+  render(<Snapshot />)
+  expect(readSnapshot().message).toContain('本次已知累计 20 tokens')
+  expect(readSnapshot().message).toContain('另有 1 次调用用量未知，未计入')
+})
 
 it('解除手动未处理保护后才启动新的批次，恢复正常完成状态', async () => {
   const manual = { ...chapter, processing_status_override: false }

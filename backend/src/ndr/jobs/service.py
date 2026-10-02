@@ -415,7 +415,11 @@ def usage_summary(session: Session, book_id: str) -> dict[str, Any]:
             continue
         input_tokens += int(usage.get("input_tokens") or 0)
         output_tokens += int(usage.get("output_tokens") or 0)
-        total_tokens += int(usage.get("total_tokens") or 0)
+        total_tokens += int(
+            usage.get("total_tokens")
+            if usage.get("total_tokens") is not None
+            else (usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0)
+        )
     return {
         "book_id": book_id,
         "runs": len(rows),
@@ -442,7 +446,7 @@ def spent_tokens(session: Session, job_id: str) -> dict[str, int]:
 
 
 def _spent_tokens(rows) -> dict[str, int]:  # noqa: ANN001
-    input_tokens = output_tokens = 0
+    input_tokens = output_tokens = total_tokens = 0
     unknown_runs = 0
     for run in rows:
         if not run.usage_json:
@@ -457,14 +461,22 @@ def _spent_tokens(rows) -> dict[str, int]:  # noqa: ANN001
         except json.JSONDecodeError:
             unknown_runs += 1
             continue
-        if usage.get("unknown"):
+        if usage.get("unknown") or all(
+            usage.get(key) is None for key in ("input_tokens", "output_tokens", "total_tokens")
+        ):
             unknown_runs += 1
             continue
         input_tokens += int(usage.get("input_tokens") or 0)
         output_tokens += int(usage.get("output_tokens") or 0)
+        total_tokens += int(
+            usage.get("total_tokens")
+            if usage.get("total_tokens") is not None
+            else (usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0)
+        )
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
         "unknown_runs": unknown_runs,
     }
 
