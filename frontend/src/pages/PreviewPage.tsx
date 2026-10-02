@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { CollapsibleBlock } from '../components/CollapsibleBlock'
 
 import { annotationKeys, fetchAnnotations } from '../api/annotations'
 import {
@@ -626,7 +627,8 @@ export default function PreviewPage() {
         <section className="card" data-testid="single-task-progress">
           <h2>单章窗口任务进度</h2>
           <p className="hint">提交后会先排队，再由后台执行。任务全部结束前不能新建任务；读取进度不会重新调用模型。</p>
-          <table>
+          <CollapsibleBlock title="单章任务明细" summary={`共 ${singleTasks.length} 个窗口；失败 ${singleTasks.filter(task => task.error || task.job?.state === 'FAILED').length} 个`}>
+          <div className="ndr-table-wrap"><table>
             <thead><tr><th>窗口</th><th>状态</th><th>详情</th></tr></thead>
             <tbody>{singleTasks.map((task) => (
               <tr key={task.windowId} data-testid={`single-task-${task.windowId}`}>
@@ -640,7 +642,8 @@ export default function PreviewPage() {
                 </td>
               </tr>
             ))}</tbody>
-          </table>
+          </table></div>
+          </CollapsibleBlock>
         </section>
       )}
       {jobId && (

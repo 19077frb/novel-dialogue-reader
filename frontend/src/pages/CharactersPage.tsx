@@ -7,6 +7,7 @@ import { fetchBook, queryKeys } from '../api/books'
 import type { CharacterDirectoryOut } from '../api/types'
 import { useBatchProgress } from '../components/BatchProcessor'
 import { CharacterAutoMerge } from '../components/CharacterAutoMerge'
+import { CollapsibleBlock } from '../components/CollapsibleBlock'
 
 function CharacterEditor({ item, targets, bookId, onSaved, disabled }: {
   item: CharacterDirectoryOut
@@ -133,11 +134,13 @@ export default function CharactersPage() {
       {directory.isError && <p role="alert" className="status-error">人物读取失败：{directory.error.message}</p>}
       {directory.data && <p>共 {entries.length} 个人物{term ? `，匹配 ${filtered.length} 个` : ''}</p>}
       {!directory.isPending && !directory.isError && !entries.length && <p>尚未识别人物，请先在预览与处理中分析人物。</p>}
+      <CollapsibleBlock title="人物资料列表" summary={`当前显示 ${filtered.length} 个人物`}>
       <div className="ndr-character-list">
         {filtered.map((item) => <CharacterEditor key={`${item.character_id}:${item.version}`} item={item} bookId={bookId}
           disabled={batchProgress.running || autoMergeBusy}
           targets={entries.filter((row) => row.kind !== 'speaker' && row.character_id !== item.character_id)} onSaved={saved} />)}
       </div>
+      </CollapsibleBlock>
     </section>
   </div>
 }

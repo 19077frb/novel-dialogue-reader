@@ -7,6 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { CollapsibleBlock } from '../components/CollapsibleBlock'
 
 import { fetchBook, fetchChapters, fetchGaps, queryKeys } from '../api/books'
 import { fetchReviewQueue, submitGapCorrection, type ReviewFilters } from '../api/review'
@@ -229,6 +230,7 @@ export default function ReviewPage() {
             「未知/暂定/过期」数量，或调整筛选条件。
           </p>
         )}
+        <CollapsibleBlock title="待确认列表" summary={`当前已加载 ${groupedItems.length} 项`}>
         <ul className="ndr-review-list" data-testid="review-list">
           {groupedItems.map(({ item, reasons, statuses }) => {
             const quoteId = item.quote_id
@@ -293,6 +295,7 @@ export default function ReviewPage() {
             加载更多
           </button>
         )}
+        </CollapsibleBlock>
       </section>
 
       <QuoteDetailDrawer

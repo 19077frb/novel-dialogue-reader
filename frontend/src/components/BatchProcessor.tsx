@@ -21,6 +21,7 @@ import { readJournal, writeJournal, removeJournal, withWorkflowLock, assertWorkf
 import type { AnalyzeRosterInput } from '../api/characters'
 import type { CreateJobInput } from '../api/jobs'
 import { FormatRetrySetting } from './FormatRetrySetting'
+import { CollapsibleBlock } from './CollapsibleBlock'
 
 class BatchAbortError extends Error {}
 
@@ -1247,6 +1248,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const [forceReprocess, setForceReprocess] = useState(false)
   const [running, setRunning] = useState(false)
   const [estimating, setEstimating] = useState(false)
+  const [taskListOpen, setTaskListOpen] = useState(true)
   const [estimatedTokens, setEstimatedTokens] = useState<number | null>(null)
   const [plans, setPlans] = useState<ChapterPlan[]>([])
   const [progress, setProgress] = useState('')
@@ -1355,6 +1357,8 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
             已结束 {finishedTasks}/{batchProgress.tasks.length} 项；当前并发 {runningTasks} 项
           </span>
         </div>
+        <CollapsibleBlock title="批量任务明细" open={taskListOpen} onOpenChange={setTaskListOpen}
+          summary={<span>共 {batchProgress.tasks.length} 项；失败 {batchProgress.tasks.filter(task => task.state === 'failed').length} 项</span>}>
         <div className="ndr-table-wrap">
           <table className="ndr-batch-task-table">
             <thead>
@@ -1389,6 +1393,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
             </tbody>
           </table>
         </div>
+        </CollapsibleBlock>
         <p className="hint">{batchProgress.running
           ? '停止后不会再派发排队任务；已经发给模型的请求会安全收尾。'
           : '任务列表保留到下一批启动，可在应用内切换页面后返回查看；刷新或关闭页面会清除本列表。'}</p>
@@ -1469,7 +1474,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       {!validRange && <p className="status-error">结束章节不能早于开始章节。</p>}
       {progress && <p className="hint" data-testid="batch-progress">{progress}</p>}
       {error && <p className="status-error" data-testid="batch-error">
-        {error} {taskList && <a href="#batch-task-list">查看任务列表</a>}
+        {error} {taskList && <a href="#batch-task-list" onClick={() => setTaskListOpen(true)}>查看任务列表</a>}
       </p>}
     </section>
     </>

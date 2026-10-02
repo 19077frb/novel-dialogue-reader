@@ -51,6 +51,21 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('折叠人物资料不丢失未保存编辑，也不发起修改或模型请求', async () => {
+    renderPage()
+    const card = await screen.findByRole('article', { name: '人物 悠太' })
+    const input = within(card).getByLabelText('姓名')
+    await waitFor(() => expect(input).toBeEnabled())
+    await userEvent.clear(input)
+    await userEvent.type(input, '未保存姓名')
+    await userEvent.click(screen.getByRole('button', { name: '收起人物资料列表' }))
+    expect(card).not.toBeVisible()
+    expect(screen.getByText('当前显示 3 个人物')).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: '展开人物资料列表' }))
+    expect(input).toHaveValue('未保存姓名')
+    expect(api.editBookCharacter).not.toHaveBeenCalled()
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+  })
   it('按目录频次顺序展示人物和章节对白统计，搜索保持顺序', async () => {
     vi.mocked(api.fetchCharacterDirectory).mockResolvedValue([
       { ...entries[1], chapter_count: 8, dialogue_count: 90 },

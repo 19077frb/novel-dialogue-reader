@@ -6,6 +6,11 @@ import { describe, expect, it } from 'vitest'
 const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/styles/global.css'), 'utf8')
 
 describe('shared UI design rules', () => {
+  it('keeps collapsed content hidden and adapts block summaries with theme tokens', () => {
+    expect(css).toMatch(/\.ndr-collapsible-block > \[hidden\]\s*\{[^}]*display:\s*none/)
+    expect(css).toMatch(/\.ndr-collapsible-summary\s*\{[^}]*color:\s*var\(--ndr-muted\)/)
+    expect(css).toMatch(/\.ndr-collapsible-heading\s*\{[^}]*flex-wrap:\s*wrap/)
+  })
   it('top-aligns batch configuration fields and limits desktop layout to three columns', () => {
     expect(css).toMatch(/\.ndr-range-grid\s*\{[^}]*align-items:\s*start/)
     expect(css).toMatch(/\.ndr-range-grid > label\s*\{[^}]*min-width:\s*0/)

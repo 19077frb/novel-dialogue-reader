@@ -1422,3 +1422,17 @@ textarea:focus-visible {
   display: grid;
   gap: 12px;
 }
+
+/* Shared long-list blocks use theme tokens in both light and dark mode. */
+.ndr-collapsible-block { min-width: 0; }
+.ndr-collapsible-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.ndr-collapsible-heading h3 { margin: 0; overflow-wrap: anywhere; }
+.ndr-collapsible-summary { color: var(--ndr-muted); overflow-wrap: anywhere; }
+.ndr-collapsible-block > [hidden] { display: none; }

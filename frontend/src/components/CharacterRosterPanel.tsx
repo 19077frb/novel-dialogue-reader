@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { CollapsibleBlock } from './CollapsibleBlock'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
@@ -332,6 +333,7 @@ export function CharacterRosterPanel({
       )}
 
       {drafts.length > 0 ? (
+        <CollapsibleBlock title="本章人物名单" summary={`共 ${drafts.length} 个人物；已选 ${drafts.filter(item => item.accepted).length} 个`}>
         <div className="ndr-character-list" data-testid="roster-candidates">
           {drafts.map((item) => (
             <article key={item.temp_ref} className="ndr-character-card">
@@ -413,6 +415,7 @@ export function CharacterRosterPanel({
             </article>
           ))}
         </div>
+        </CollapsibleBlock>
       ) : (
         !textlessCompleted && <p className="hint">还没有人物候选。可以先分析，也可以直接手动添加。</p>
       )}
