@@ -119,6 +119,58 @@ function quotesFor(chapterId: string) {
 }
 
 describe('ReaderPage', () => {
+  it.each(['initial', 'reread'] as const)('右下角上一章/下一章沿目录切换并保存阅读位置（%s）', async mode => {
+    vi.mocked(booksApi.fetchBook).mockResolvedValue({ ...BOOK, reading_mode: mode })
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue(CHAPTERS.map((chapter, index) => ({ ...chapter, ordinal: index * 10 })))
+    vi.mocked(booksApi.saveReadingProgress).mockResolvedValue({ book_id: 'b1', book_version_id: 'v1', read_position_cp: 0, reading_mode: mode, version: 4 })
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c2')
+    await screen.findByText(/第二章的正文/)
+    const previous = screen.getByRole('button', { name: '上一章' })
+    const next = screen.getByRole('button', { name: '下一章' })
+    expect(next).toBeDisabled()
+    expect(next).toHaveAttribute('title', '已经是最后一章。')
+    const reading = document.querySelector<HTMLElement>('.ndr-reader-content')!
+    reading.scrollTop = 500
+    await userEvent.click(previous)
+    expect(await screen.findByText(/第一章的正文/)).toBeInTheDocument()
+    expect(reading.scrollTop).toBe(0)
+    await waitFor(() => expect(booksApi.saveReadingProgress).toHaveBeenCalledWith('b1', expect.objectContaining({ readPositionCp: 0, readingMode: mode })))
+    expect(previous).toBeDisabled()
+    expect(previous).toHaveAttribute('title', '已经是第一章。')
+    await userEvent.click(next)
+    expect(await screen.findByText(/第二章的正文/)).toBeInTheDocument()
+    await waitFor(() => expect(booksApi.saveReadingProgress).toHaveBeenCalledWith('b1', expect.objectContaining({ readPositionCp: 21, readingMode: mode })))
+    expect(screen.getByRole('link', { name: '预览与处理' })).toHaveAttribute('href', '/books/b1/preview?chapterId=c2')
+  })
+
+  it('无章节时禁用章节切换，不请求正文或保存位置', async () => {
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue([])
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一章' })).toHaveAttribute('title', '没有可切换的章节。'))
+    expect(screen.getByRole('button', { name: '上一章' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '下一章' })).toBeDisabled()
+    expect(booksApi.fetchContent).not.toHaveBeenCalled()
+    expect(booksApi.saveReadingProgress).not.toHaveBeenCalled()
+  })
+
+  it('目录读取失败时解释禁用原因，正文读取失败时仍允许切换', async () => {
+    vi.mocked(booksApi.fetchContent).mockImplementation(async (_bookId, query) => {
+      if (query?.chapterId === 'c2') throw new Error('测试正文读取失败')
+      return { book_id: 'b1', book_version_id: 'v1', canonical_length_cp: 60,
+        chapter_id: 'c1', start_cp: 0, end_cp: 20, nodes: nodesFor('c1'), next_cursor: null }
+    })
+    const page = renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c2')
+    await screen.findByText(/测试正文读取失败/)
+    expect(screen.getByRole('button', { name: '上一章' })).toBeEnabled()
+    await userEvent.click(screen.getByRole('button', { name: '上一章' }))
+    expect(await screen.findByText(/第一章的正文/)).toBeInTheDocument()
+    page.unmount()
+    vi.mocked(booksApi.fetchChapters).mockRejectedValue(new Error('测试目录读取失败'))
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一章' })).toHaveAttribute('title', '目录读取失败，请在左侧重新读取目录。'))
+    expect(screen.getByRole('button', { name: '上一章' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '下一章' })).toBeDisabled()
+  })
   beforeEach(() => {
     act(() => batch.clearBatchProgress('b1'))
     vi.mocked(booksApi.fetchBook).mockReset()

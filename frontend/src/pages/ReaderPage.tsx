@@ -258,6 +258,7 @@ export default function ReaderPage() {
 
   const handleChapterSelect = useCallback(
     (chapter: ChapterOut) => {
+      if (documentRef.current) documentRef.current.scrollTop = 0
       setChapterId(chapter.id)
       setResumeCp(null)
       setNotice(null)
@@ -265,6 +266,14 @@ export default function ReaderPage() {
     },
     [persist, readingMode],
   )
+  const chapterIndex = chapters.data?.findIndex(chapter => chapter.id === chapterId) ?? -1
+  const previousChapter = chapterIndex > 0 ? chapters.data?.[chapterIndex - 1] : undefined
+  const nextChapter = chapterIndex >= 0 ? chapters.data?.[chapterIndex + 1] : undefined
+  const chapterNavigationReason = chapters.isError ? '目录读取失败，请在左侧重新读取目录。'
+    : chapters.isPending ? '正在读取目录，请等待完成。'
+    : chapterIndex < 0 ? '没有可切换的章节。' : undefined
+  const previousReason = chapterNavigationReason ?? (!previousChapter ? '已经是第一章。' : undefined)
+  const nextReason = chapterNavigationReason ?? (!nextChapter ? '已经是最后一章。' : undefined)
 
   const focusQuote = useCallback((quoteId: string | null | undefined) => {
     if (!quoteId) return
@@ -375,7 +384,8 @@ export default function ReaderPage() {
           </div>}
         </aside>
 
-        <section className="card ndr-reader-content" ref={documentRef} onScroll={handleScroll}>
+        <div className="card ndr-reader-main">
+        <section className="ndr-reader-content" ref={documentRef} onScroll={handleScroll}>
           {chapterId === null && <p className="hint">这本书没有可显示的章节。</p>}
           {content.isPending && chapterId !== null && <p className="hint">正在读取正文…</p>}
           {content.isError && (
@@ -470,6 +480,15 @@ export default function ReaderPage() {
             </button>
           )}
         </section>
+        <nav className="ndr-chapter-navigation" aria-label="章节切换">
+          <button type="button" disabled={Boolean(previousReason)}
+            title={previousReason ?? `上一章：${previousChapter?.title || '未命名章节'}`}
+            onClick={() => { if (previousChapter) handleChapterSelect(previousChapter) }}>上一章</button>
+          <button type="button" disabled={Boolean(nextReason)}
+            title={nextReason ?? `下一章：${nextChapter?.title || '未命名章节'}`}
+            onClick={() => { if (nextChapter) handleChapterSelect(nextChapter) }}>下一章</button>
+        </nav>
+        </div>
       </div>
 
       <ExportDialog

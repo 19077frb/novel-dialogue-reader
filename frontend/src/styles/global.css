@@ -646,8 +646,20 @@ textarea:focus-visible {
 }
 
 .ndr-reader-content {
-  max-height: calc(100vh - 200px);
+  max-height: calc(100vh - 260px);
   overflow-y: auto;
+}
+
+.ndr-reader-main {
+  min-width: 0;
+}
+
+.ndr-chapter-navigation {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .ndr-window-picker {
