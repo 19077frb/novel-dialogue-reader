@@ -9,7 +9,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..domain.common import DataEnvelope
@@ -29,12 +30,61 @@ from ..jobs.service import (
     job_windows,
 )
 from ..recovery.service import job_recovery, profile_snapshot_of
-from ..storage.models import Book, BookVersion, Job, ModelProfile
+from ..storage.models import Book, BookVersion, Job, ModelProfile, Quote
 from ..storage.transactions import transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+@router.get(
+    "/recent", response_model=DataEnvelope[list[JobDetailOut]], summary="找回书籍或对白最近的任务"
+)
+def recent_jobs_route(
+    request: Request,
+    book_id: str | None = None,
+    book_version_id: str | None = None,
+    chapter_id: str | None = None,
+    quote_id: str | None = None,
+    kind: JobKind | None = None,
+    idempotency_key: str | None = None,
+    limit: int = Query(default=100, ge=1, le=200),
+    session: Session = Depends(get_session),
+) -> DataEnvelope[list[JobDetailOut]]:
+    if quote_id:
+        quote = session.get(Quote, quote_id)
+        if not quote:
+            raise ApiError.not_found("对白不存在")
+        version = session.get(BookVersion, quote.book_version_id)
+        if book_id and book_id != version.book_id:
+            raise ApiError.validation("对白不属于该书籍")
+        if book_version_id and book_version_id != version.id:
+            raise ApiError.validation("对白不属于该版本")
+        book_id, book_version_id = version.book_id, version.id
+    if not book_id:
+        raise ApiError.validation("请指定书籍或对白")
+    book = session.get(Book, book_id)
+    if not book:
+        raise ApiError.not_found("书籍不存在")
+    version = session.get(BookVersion, book_version_id or book.active_version_id)
+    if not version or version.book_id != book.id:
+        raise ApiError.validation("书籍版本无效")
+    statement = select(Job).where(Job.book_id == book.id, Job.book_version_id == version.id)
+    if kind:
+        statement = statement.where(Job.kind == kind)
+    if idempotency_key:
+        statement = statement.where(Job.idempotency_key == idempotency_key)
+    if chapter_id:
+        statement = statement.where(func.json_extract(Job.range_json, "$.chapter_id") == chapter_id)
+    if quote_id:
+        statement = statement.where(
+            func.json_extract(Job.range_json, "$.target_quote_id") == quote_id
+        )
+    jobs = session.scalars(statement.order_by(Job.created_at.desc(), Job.id.desc()).limit(limit))
+    return DataEnvelope(
+        data=[job_detail(session, job) for job in jobs], request_id=current_request_id(request)
+    )
 
 
 @router.post("", status_code=202, response_model=DataEnvelope[JobDetailOut], summary="创建任务")
@@ -90,9 +140,7 @@ def create_job_route(
         detail = job_detail(session, job)
 
     if payload.run_now and created:
-        background.add_task(
-            run_job, factory, settings, job_id=detail.id, credentials=credentials
-        )
+        background.add_task(run_job, factory, settings, job_id=detail.id, credentials=credentials)
     return DataEnvelope(data=detail, request_id=current_request_id(request))
 
 
@@ -168,9 +216,7 @@ def run_job_route(request: Request, job_id: str) -> DataEnvelope[JobRunOut]:
 
 
 @router.post("/{job_id}/reconcile", response_model=DataEnvelope[dict])
-def reconcile_job_route(
-    request: Request, job_id: str, payload: ReconcileIn
-) -> DataEnvelope[dict]:
+def reconcile_job_route(request: Request, job_id: str, payload: ReconcileIn) -> DataEnvelope[dict]:
     factory = request.app.state.session_factory
     with transaction(factory) as session:
         job = session.get(Job, job_id)

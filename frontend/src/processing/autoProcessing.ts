@@ -2,7 +2,7 @@ import { fetchChapters, fetchProcessingStatus } from '../api/books'
 import { estimateRange } from '../api/jobs'
 import type { ProcessingPreferences } from './preferences'
 import { mapWithConcurrency } from './concurrency'
-import { appendAutomaticProcessing, canAppendAutomaticProcessing, hasBatchWork, hasUnresolvedChapterResult, isBatchRunning, requestBatchStop, runBatchProcessing } from '../components/BatchProcessor'
+import { appendAutomaticProcessing, automaticAllowance, refreshAutomaticAllowance, canAppendAutomaticProcessing, hasBatchWork, hasUnresolvedChapterResult, isBatchRunning, requestBatchStop, runBatchProcessing } from '../components/BatchProcessor'
 
 interface AutoSession { spent: number; attempted: Set<string>; blocked: boolean; message: string; checked: string; revision: number }
 const sessions = new Map<string, AutoSession>()
@@ -25,6 +25,7 @@ export function notifyManualChapterStatus(bookId: string, versionId: string, cha
 export function resetAutomaticProcessing(bookId: string) {
   if (activeBook === bookId) return
   sessions.delete(bookId)
+  refreshAutomaticAllowance(bookId)
 }
 export function stopAutomaticProcessing() {
   if (!activeBook) return
@@ -37,7 +38,8 @@ export function stopAutomaticProcessing() {
 export async function scheduleAutomaticProcessing(bookId: string, bookVersionId: string, chapterId: string,
   lookAhead: number, preferences: ProcessingPreferences, onFinished: () => void = () => undefined) {
   const session = sessionFor(bookId)
-  const appending = activeBook === bookId && canAppendAutomaticProcessing(bookId, bookVersionId)
+  session.spent = automaticAllowance(bookId) ?? session.spent
+  const appending = canAppendAutomaticProcessing(bookId, bookVersionId)
   if (planningBooks.has(bookId) || (activeBook && !appending) || (hasBatchWork() && !appending)
     || session.blocked || !preferences.profileId) return
   const revision = session.revision

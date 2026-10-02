@@ -13,7 +13,8 @@ import { fetchJob } from '../api/books'
 import { OperationTimer } from './OperationTimer'
 import { ReadErrorNotice } from './ReadErrorNotice'
 import { JOB_STATE_LABELS } from './JobPanel'
-import { freshIdempotencyKey } from '../api/jobs'
+import { readJournal, writeJournal, removeJournal } from '../processing/journal'
+import { freshIdempotencyKey, fetchRecentJobs } from '../api/jobs'
 import type {
   JobDetailOut,
   InferenceOptions,
@@ -50,6 +51,7 @@ const TERMINAL_JOB_STATES = new Set<JobDetailOut['state']>([
   'BUDGET_EXHAUSTED',
   'PAUSED',
   'NEEDS_RECONCILIATION',
+  'PARTIAL',
 ])
 
 function draftFromCandidate(item: RosterCharacterCandidate): DraftCandidate {
@@ -81,6 +83,8 @@ export function CharacterRosterPanel({
   const [rosterJobId, setRosterJobId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [draftVersion, setDraftVersion] = useState<number | null>(null)
+  const draftKey = `roster-draft:${bookId}:${bookVersionId}:${chapterId}`
 
   const rosterKey = useMemo(
     () => characterKeys.roster(bookId, bookVersionId, chapterId),
@@ -97,6 +101,13 @@ export function CharacterRosterPanel({
     queryFn: ({ signal }) => fetchBookCharacters(bookId, bookVersionId, signal),
     enabled: Boolean(chapterId),
   })
+  const recent = useQuery({
+    queryKey: ['recent-roster-job', bookId, bookVersionId, chapterId],
+    queryFn: ({ signal }) => fetchRecentJobs({ bookId, versionId: bookVersionId ?? undefined,
+      chapterId: chapterId!, kind: 'CHARACTER_ROSTER', limit: 1 }, signal),
+    enabled: Boolean(chapterId),
+  })
+  useEffect(() => { setRosterJobId(recent.data?.[0]?.id ?? null) }, [chapterId, recent.data])
   const job = useQuery({
     queryKey: characterKeys.rosterJob(rosterJobId),
     queryFn: ({ signal }) => fetchJob(rosterJobId as string, signal),
@@ -109,13 +120,21 @@ export function CharacterRosterPanel({
 
   useEffect(() => {
     if (!roster.data) return
+    const saved = readJournal<{ version: number; drafts: DraftCandidate[]; pov: string | null }>(draftKey)
     const next = (roster.data.candidates ?? []).map(draftFromCandidate)
-    setDrafts(next)
+    setDrafts(saved?.version === roster.data.version ? saved.drafts : next)
     const suggested = (roster.data.candidates ?? []).find((item) => item.pov_candidate)
-    setPovTempRef(suggested?.temp_ref ?? null)
+    setPovTempRef(saved?.version === roster.data.version ? saved.pov : suggested?.temp_ref ?? null)
+    setDraftVersion(roster.data.version)
     setMessage(null)
     setError(null)
-  }, [roster.data])
+  }, [roster.data, draftKey])
+
+  useEffect(() => {
+    if (roster.data && draftVersion === roster.data.version && roster.data.status !== 'CONFIRMED') {
+      writeJournal(draftKey, { version: draftVersion, drafts, pov: povTempRef })
+    }
+  }, [draftKey, draftVersion, drafts, povTempRef, roster.data])
 
   useEffect(() => {
     onConfirmedChange(roster.data?.status === 'CONFIRMED')
@@ -137,8 +156,10 @@ export function CharacterRosterPanel({
       setError(null)
       setMessage('正在分析本章人物，请稍候…')
     },
-    onError: (err: unknown) =>
-      setError(err instanceof Error ? err.message : '人物分析任务创建失败'),
+    onError: (err: unknown) => {
+      setError(err instanceof Error ? err.message : '人物分析任务创建失败')
+      void recent.refetch()
+    },
   })
 
   const confirm = useMutation({
@@ -162,6 +183,7 @@ export function CharacterRosterPanel({
       })
     },
     onSuccess: () => {
+      removeJournal(draftKey)
       setMessage('人物与本章主人公已确认，可以开始对白归属。')
       setError(null)
       void queryClient.invalidateQueries({ queryKey: rosterKey })
@@ -263,7 +285,7 @@ export function CharacterRosterPanel({
                 ),
               })
             }}
-            disabled={disabled || profileId === '' || analyze.isPending || textlessCompleted}
+            disabled={disabled || profileId === '' || analyze.isPending || textlessCompleted || recent.isPending || recent.isError || Boolean(job.data && !TERMINAL_JOB_STATES.has(job.data.state))}
             data-testid="roster-analyze"
           >
             分析本章人物
@@ -281,6 +303,8 @@ export function CharacterRosterPanel({
         </p>
       )}
       {roster.isError && <p className="status-error">人物名单读取失败。</p>}
+      {recent.isPending && <p className="hint">正在找回人物识别任务…</p>}
+      {recent.isError && <p role="alert" className="status-error">人物任务读取失败：{recent.error.message} <button onClick={() => void recent.refetch()}>重新读取任务</button></p>}
       {error && (
         <p className="status-error" data-testid="roster-error">
           {error}

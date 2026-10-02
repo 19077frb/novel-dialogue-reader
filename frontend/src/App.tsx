@@ -15,6 +15,8 @@ import PreprocessingPage from './pages/PreprocessingPage'
 import SettingsPage from './pages/SettingsPage'
 import { useGeneralSettings } from './settings/preferences'
 import { stopAutomaticProcessing } from './processing/autoProcessing'
+import { restoreSavedBatches } from './components/BatchProcessor'
+import { restoreSavedSingles } from './processing/singleWorkflow'
 
 /** 后端连接状态：显示真实 /api/health 结果（不调用模型）。 */
 export function HealthBadge() {
@@ -50,6 +52,7 @@ export function HealthBadge() {
 }
 
 export default function App() {
+  useEffect(() => { restoreSavedBatches(); restoreSavedSingles() }, [])
   const [settings] = useGeneralSettings()
   useEffect(() => { if (!settings.autoProcessing) stopAutomaticProcessing() }, [settings.autoProcessing])
   useEffect(() => {

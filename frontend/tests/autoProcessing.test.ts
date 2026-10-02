@@ -7,7 +7,7 @@ import { getProcessingPreferences } from '../src/processing/preferences'
 
 vi.mock('../src/api/books', () => ({ fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn() }))
 vi.mock('../src/api/jobs', () => ({ estimateRange: vi.fn() }))
-vi.mock('../src/components/BatchProcessor', () => ({ appendAutomaticProcessing: vi.fn(), canAppendAutomaticProcessing: vi.fn(), hasBatchWork: vi.fn(), hasUnresolvedChapterResult: vi.fn(), isBatchRunning: vi.fn(), requestBatchStop: vi.fn(), runBatchProcessing: vi.fn() }))
+vi.mock('../src/components/BatchProcessor', () => ({ automaticAllowance: vi.fn(), refreshAutomaticAllowance: vi.fn(), appendAutomaticProcessing: vi.fn(), canAppendAutomaticProcessing: vi.fn(), hasBatchWork: vi.fn(), hasUnresolvedChapterResult: vi.fn(), isBatchRunning: vi.fn(), requestBatchStop: vi.fn(), runBatchProcessing: vi.fn() }))
 const chapters = [0, 1, 2, 3].map(index => ({ id: `c${index}`, ordinal: index, title: `第${index}章`, start_cp: index * 100, end_cp: index * 100 + 100, dialogue_processed: index === 0 }))
 const preferences = { ...getProcessingPreferences(), profileId: 'p1', concurrency: 2, tokenLimit: null }
 beforeEach(() => {

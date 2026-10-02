@@ -13,10 +13,10 @@ import {
   queryKeys,
 } from '../api/books'
 import {
-  createJob,
   estimateRange,
   freshIdempotencyKey,
   fetchUsage,
+  fetchRecentJobs,
   jobKeys,
   type BudgetInput,
 } from '../api/jobs'
@@ -36,8 +36,9 @@ import { ReadErrorNotice } from '../components/ReadErrorNotice'
 import { SpeakerLegend } from '../components/SpeakerLegend'
 import { UsageSummary } from '../components/UsageSummary'
 import { WindowPicker } from '../components/WindowPicker'
-import { mapWithConcurrency } from '../processing/concurrency'
-import { TERMINAL_JOB_STATES, waitForJobCompletion } from '../processing/jobCompletion'
+import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
+import { runSingleWorkflow, useSingleWorkflow } from '../processing/singleWorkflow'
+import type { SingleWorkflow } from '../processing/singleWorkflow'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
 import { ThinkingSettings } from '../components/ThinkingSettings'
 
@@ -118,6 +119,8 @@ export default function PreviewPage() {
   const [exportOpen, setExportOpen] = useState(false)
   const [rosterConfirmed, setRosterConfirmed] = useState(false)
   const batchProgress = useBatchProgress(bookId)
+  const singleProgress = useSingleWorkflow(bookId)
+  const restoredWindows = useRef(new Set<string>())
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -133,6 +136,42 @@ export default function PreviewPage() {
     queryKey: profileKeys.profiles(),
     queryFn: ({ signal }) => fetchProfiles(signal),
   })
+  const recentJobs = useQuery({ queryKey: ['recent-single-jobs', bookId, book.data?.active_version_id, range.chapterId],
+    queryFn: ({ signal }) => fetchRecentJobs({ bookId: bookId!, versionId: book.data!.active_version_id!,
+      chapterId: range.chapterId ?? undefined, kind: 'INFERENCE' }, signal),
+    enabled: Boolean(book.data?.active_version_id) && !singleProgress,
+  })
+  useEffect(() => {
+    if (singleProgress || !recentJobs.data?.length) return
+    const jobs = recentJobs.data
+    const active = jobs.find(job => !TERMINAL_JOB_STATES.has(job.state)) ?? jobs[0]
+    setCurrentJob(active)
+    setJobId(active.id)
+  }, [recentJobs.data, singleProgress])
+
+  useEffect(() => {
+    if (!singleProgress || singleProgress.versionId !== book.data?.active_version_id) return
+    setSingleTasks(singleProgress.tasks)
+    const job = singleProgress.tasks.find(task => task.job && !TERMINAL_JOB_STATES.has(task.job.state))?.job
+      ?? singleProgress.tasks.filter(task => task.job).at(-1)?.job
+    if (job) { setCurrentJob(job); if (!manuallySelectedJobRef.current) setJobId(job.id) }
+    if (singleProgress.running) {
+      setProcessingMode('single')
+      setRange({ chapterId: singleProgress.chapterId, startCp: singleProgress.startCp, endCp: singleProgress.endCp })
+    }
+    if (singleProgress.error) setError(singleProgress.error)
+    const completed = singleProgress.tasks.filter(task => task.job?.state === 'COMPLETED' && !restoredWindows.current.has(task.job.id))
+    if (completed.length) {
+      completed.forEach(task => restoredWindows.current.add(task.job!.id))
+      void queryClient.invalidateQueries({ queryKey: ['window-preview', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['annotations'] })
+      void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId ?? '') })
+    }
+    if (!singleProgress.running && !singleProgress.error && singleProgress.completeChapter && singleProgress.chapterId) {
+      reconcileCompletedChapter(bookId!, singleProgress.chapterId)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId!) })
+    }
+  }, [singleProgress, book.data?.active_version_id, bookId, queryClient])
 
   // 阅读页传入当前章节；按本书目录验证，只在进入该链接时初始化，之后由用户控制。
   useEffect(() => {
@@ -263,104 +302,33 @@ export default function PreviewPage() {
         queryClient.setQueryData<ChapterOut[]>(queryKeys.chapters(bookId), previous =>
           previous?.map(chapter => chapter.id === saved.id ? saved : chapter))
       }
-      if (plannedWindows.length === 0) {
-        const job = await createJob({
-          bookId: bookId as string,
-          mode,
-          bookVersionId: versionId,
-          range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
-          selectedWindowIds: null,
-          profileId: profileId || null,
-          inferenceOptions: options,
-          readingMode: PROCESSING_READING_MODE,
-          visibleHorizonCp: null,
-          budget,
-          idempotencyKey: freshIdempotencyKey(`${mode}:${bookId}`, JSON.stringify({ versionId, range, profileId, budget })),
-          runNow: true,
-        })
-        selectAutomaticJob(job.id)
-        return waitForJobCompletion(job, setCurrentJob)
-      }
-
-      const totalEstimated = plannedWindows.reduce(
-        (total, window) => total + Math.max(1, Number(window.estimated_tokens) || 1),
-        0,
-      )
+      const totalEstimated = plannedWindows.reduce((total, window) => total + Math.max(1, Number(window.estimated_tokens) || 1), 0)
       const allocate = (limit: number | null, estimated: number) =>
-        limit === null ? null : Math.max(1, Math.floor((limit * estimated) / totalEstimated))
+        limit === null ? null : Math.max(1, Math.floor(limit * estimated / totalEstimated))
+      const selected = plannedWindows.length ? plannedWindows : [{ window_id: 'range', ordinal: 1, estimated_tokens: 1 }]
+      const work: SingleWorkflow = {
+        bookId: bookId!, versionId: versionId!, chapterId: range.chapterId,
+        startCp: range.startCp, endCp: resolvedEnd, mode, concurrency, running: true, error: null,
+        completeChapter: mode === 'process' && Boolean(range.chapterId) && (estimate?.windows ?? []).every(
+          window => window.processing_status === 'completed' || selectedWindowIds.includes(String(window.window_id))),
+        tasks: selected.map(window => ({
+          windowId: String(window.window_id), ordinal: String(window.ordinal), job: null, error: null,
+          input: {
+            bookId: bookId!, mode, bookVersionId: versionId,
+            range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
+            selectedWindowIds: plannedWindows.length ? [String(window.window_id)] : null,
+            profileId: profileId || null, inferenceOptions: options, readingMode: PROCESSING_READING_MODE,
+            visibleHorizonCp: null, runNow: true,
+            budget: plannedWindows.length ? { ...budget,
+              maxInputTokens: allocate(budget.maxInputTokens, Math.max(1, Number(window.estimated_tokens) || 1)),
+              maxOutputTokens: allocate(budget.maxOutputTokens, Math.max(1, Number(window.estimated_tokens) || 1)) } : budget,
+            idempotencyKey: freshIdempotencyKey(`${mode}:${bookId}:window`, JSON.stringify({ versionId, range, profileId, budget, windowId: window.window_id })),
+          },
+        })),
+      }
       setError(null)
       setNotice(null)
-      setSingleTasks(plannedWindows.map((window) => ({
-        windowId: String(window.window_id), ordinal: String(window.ordinal), job: null, error: null,
-      })))
-      let stopDispatch = false
-      const updateTask = (windowId: string, job: JobDetailOut) => {
-        setSingleTasks((tasks) => tasks.map((task) => task.windowId === windowId ? { ...task, job } : task))
-        setCurrentJob(job)
-        queryClient.setQueryData(queryKeys.job(job.id), job)
-        if (TERMINAL_JOB_STATES.has(job.state)) {
-          void queryClient.invalidateQueries({ queryKey: ['window-preview', bookId] })
-          void queryClient.invalidateQueries({ queryKey: ['annotations'] })
-          void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId ?? '') })
-        }
-      }
-      const jobs = await mapWithConcurrency(plannedWindows, concurrency, async (window) => {
-        const windowId = String(window.window_id)
-        const estimated = Math.max(1, Number(window.estimated_tokens) || 1)
-        if (stopDispatch) {
-          setSingleTasks((tasks) => tasks.map((task) => task.windowId === windowId
-            ? { ...task, error: '前序任务提交或进度读取失败，本窗口尚未派发' } : task))
-          return null
-        }
-        try {
-          const job = await createJob({
-          bookId: bookId as string,
-          mode,
-          bookVersionId: versionId,
-          range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
-          selectedWindowIds: [windowId],
-          profileId: profileId || null,
-          inferenceOptions: options,
-          readingMode: PROCESSING_READING_MODE,
-          visibleHorizonCp: null,
-          budget: {
-            maxInputTokens: allocate(budget.maxInputTokens, estimated),
-            maxOutputTokens: allocate(budget.maxOutputTokens, estimated),
-            maxRechecks: budget.maxRechecks,
-            maxFormatRetries: budget.maxFormatRetries,
-          },
-          idempotencyKey: freshIdempotencyKey(
-            `${mode}:${bookId}:window`,
-            JSON.stringify({ versionId, range, profileId, budget, windowId }),
-          ),
-          runNow: true,
-          })
-          selectAutomaticJob(job.id)
-          return await waitForJobCompletion(job, (current) => updateTask(windowId, current))
-        } catch (reason) {
-          stopDispatch = true
-          setSingleTasks((tasks) => tasks.map((task) => task.windowId === windowId
-            ? { ...task, error: reason instanceof Error ? reason.message : '任务提交或进度读取失败' } : task))
-          return null
-        }
-      })
-      const failedJob = jobs.find((job) => job && job.state !== 'COMPLETED')
-      if (jobs.some((job) => job === null) || failedJob) {
-        throw new Error(failedJob?.last_error || (failedJob
-          ? `窗口任务结束于 ${SINGLE_TASK_LABELS[failedJob.state] ?? failedJob.state}，详见下方窗口任务进度`
-          : '任务提交或进度读取失败，详见下方窗口任务进度；后台任务可能仍在执行，请勿重复提交'))
-      }
-      if (
-        mode === 'process' &&
-        range.chapterId &&
-        versionId &&
-        (estimate?.windows ?? []).every(window => window.processing_status === 'completed' || selectedWindowIds.includes(String(window.window_id)))
-      ) {
-        await completeChapterProcessing(bookId as string, range.chapterId, versionId)
-        reconcileCompletedChapter(bookId as string, range.chapterId)
-        void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId as string) })
-      }
-      return jobs.at(-1) as JobDetailOut
+      return runSingleWorkflow(work)
     },
     onSuccess: (job) => {
       selectAutomaticJob(job.id)
@@ -418,11 +386,13 @@ export default function PreviewPage() {
   // 本章人物是逐句归属的前置：只有选中单一章节时才要求先确认名单与主人公；
   // 整本或自定义码点范围没有“本章”，后端也不会注入章节人物名单。
   const rosterRequired = range.chapterId !== null
-  const singleRunning = jobMutation.isPending || singleTasks.some(
+  const singleRunning = Boolean(singleProgress?.running) || jobMutation.isPending || singleTasks.some(
     (task) => task.job && !TERMINAL_JOB_STATES.has(task.job.state),
   ) || Boolean(currentJob && !TERMINAL_JOB_STATES.has(currentJob.state))
   const runBlockers: string[] = []
   if (singleRunning) runBlockers.push('当前单章任务尚未结束，请等待或在任务面板停止')
+  if (!singleProgress && recentJobs.isPending) runBlockers.push('正在读取已有任务')
+  if (recentJobs.isError) runBlockers.push('已有任务读取失败，请重新读取后再处理')
   if (!rangeValid) runBlockers.push('处理范围无效')
   if (profileId === '') runBlockers.push('未选择模型配置（见上方模型配置与本次思考设置）')
   if (rosterRequired && !rosterConfirmed) runBlockers.push('尚未确认本章人物（见第二步）')

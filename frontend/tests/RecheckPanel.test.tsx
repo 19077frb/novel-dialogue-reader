@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
 import * as profilesApi from '../src/api/profiles'
 import * as reviewApi from '../src/api/review'
+import * as jobsApi from '../src/api/jobs'
 import { RecheckPanel } from '../src/components/RecheckPanel'
 import { updateProcessingPreferences } from '../src/processing/preferences'
 import type { JobDetailOut, ModelProfileOut } from '../src/api/types'
@@ -10,6 +11,7 @@ import { renderWithProviders } from './helpers'
 
 vi.mock('../src/api/profiles', () => ({ profileKeys: { profiles: () => ['profiles'] }, fetchProfiles: vi.fn() }))
 vi.mock('../src/api/review', () => ({ recheckQuote: vi.fn() }))
+vi.mock('../src/api/jobs', async importOriginal => ({ ...await importOriginal<typeof import('../src/api/jobs')>(), fetchRecentJobs: vi.fn() }))
 vi.mock('../src/components/JobPanel', () => ({ JobPanel: ({ onUpdate }: { onUpdate: (job: JobDetailOut) => void }) =>
   <button onClick={() => onUpdate({ id: 'job', state: 'COMPLETED' } as JobDetailOut)}>模拟任务完成</button> }))
 const profile: ModelProfileOut = {
@@ -21,8 +23,17 @@ const profile: ModelProfileOut = {
 beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
+  vi.mocked(jobsApi.fetchRecentJobs).mockResolvedValue([])
   vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile])
   vi.mocked(reviewApi.recheckQuote).mockResolvedValue({ id: 'job', state: 'QUEUED' } as JobDetailOut)
+})
+
+it('finds an existing recheck after remount without creating a new model request', async () => {
+  vi.mocked(jobsApi.fetchRecentJobs).mockResolvedValue([{ id: 'saved-job', state: 'RUNNING' } as JobDetailOut])
+  renderWithProviders(<RecheckPanel quoteId="q1" />)
+  await waitFor(() => expect(jobsApi.fetchRecentJobs).toHaveBeenCalledWith({ quoteId: 'q1', kind: 'RECHECK', limit: 1 }, expect.any(AbortSignal)))
+  expect(screen.getByTestId('recheck-start')).toBeDisabled()
+  expect(reviewApi.recheckQuote).not.toHaveBeenCalled()
 })
 
 it('inherits shared thinking preferences, sends overrides and locks the running task', async () => {

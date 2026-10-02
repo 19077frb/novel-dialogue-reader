@@ -540,7 +540,9 @@ def test_auto_merge_retains_group_if_combined_description_would_lose_data(
     assert recovery["actions"] == []
 
 
-@pytest.mark.parametrize("state", [JobState.QUEUED, JobState.RUNNING, JobState.PARTIAL, JobState.COMPLETED])
+@pytest.mark.parametrize(
+    "state", [JobState.QUEUED, JobState.RUNNING, JobState.PARTIAL, JobState.COMPLETED]
+)
 def test_find_latest_auto_merge_without_client_storage(migrated_client, populated, state):
     client, ids = migrated_client, populated
     url = f"/api/books/{ids['book']}/character-directory/auto-merge"
@@ -555,3 +557,60 @@ def test_find_latest_auto_merge_without_client_storage(migrated_client, populate
     assert client.get(url, params={"book_version_id": "not-this-book"}).status_code == 422
     with transaction(client.app.state.session_factory) as session:
         assert session.scalar(select(Job).where(Job.id == job["id"])).state is state
+
+
+@pytest.mark.parametrize("kind", [JobKind.CHARACTER_ROSTER, JobKind.INFERENCE, JobKind.RECHECK])
+def test_recent_jobs_restores_scoped_task_metadata_without_dispatch(
+    migrated_client, populated, kind
+):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        quote = session.scalar(select(Quote).where(Quote.book_version_id == ids["version"]))
+        quote_id, chapter_id = quote.id, quote.chapter_id
+        job = Job(
+            kind=kind,
+            book_id=ids["book"],
+            book_version_id=ids["version"],
+            state=JobState.RUNNING,
+            idempotency_key="saved-request",
+            range_json=json.dumps(
+                {
+                    "chapter_id": chapter_id,
+                    "target_quote_id": quote_id,
+                    "selected_window_ids": ["w1"],
+                }
+            ),
+        )
+        session.add(job)
+        session.flush()
+        job_id = job.id
+    params = {
+        "book_id": ids["book"],
+        "book_version_id": ids["version"],
+        "kind": kind.value,
+        "chapter_id": chapter_id,
+        "idempotency_key": "saved-request",
+    }
+    response = client.get("/api/jobs/recent", params=params)
+    assert response.status_code == 200, response.text
+    restored = response.json()["data"]
+    assert len(restored) == 1 and restored[0]["id"] == job_id
+    assert restored[0]["range"]["selected_window_ids"] == ["w1"]
+    assert (
+        client.get("/api/jobs/recent", params={"quote_id": quote_id, "kind": kind.value}).json()[
+            "data"
+        ][0]["id"]
+        == job_id
+    )
+    assert (
+        client.get("/api/jobs/recent", params={**params, "idempotency_key": "other"}).json()["data"]
+        == []
+    )
+    assert (
+        client.get("/api/jobs/recent", params={**params, "book_version_id": "wrong"}).status_code
+        == 422
+    )
+    assert client.get("/api/jobs/recent", params={**params, "limit": 201}).status_code == 422
+    assert client.get("/api/jobs/recent").status_code == 422
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(Job, job_id).state is JobState.RUNNING

@@ -320,6 +320,7 @@ def recheck_quote_route(
         if profile is None:
             raise ApiError.not_found("模型配置不存在", profile_id=payload.profile_id)
         range_payload = recheck_range(session, quote=quote, version=version)
+        range_payload["target_quote_id"] = quote.id
         job, created = create_inference_job(
             session,
             book=book,

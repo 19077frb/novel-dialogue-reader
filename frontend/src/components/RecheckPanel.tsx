@@ -4,7 +4,7 @@
  * 与「展开更多原文」（本地只读）严格分开：这里必须显式选择模型配置、填写上限并再次确认。
  */
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { fetchProfiles, profileKeys } from '../api/profiles'
 import { recheckQuote } from '../api/review'
@@ -13,7 +13,7 @@ import { JobPanel } from './JobPanel'
 import { ThinkingSettings } from './ThinkingSettings'
 import { FormatRetrySetting } from './FormatRetrySetting'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
-import { freshIdempotencyKey } from '../api/jobs'
+import { freshIdempotencyKey, fetchRecentJobs } from '../api/jobs'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 
 export interface RecheckPanelProps {
@@ -32,7 +32,14 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
   const [currentJob, setCurrentJob] = useState<JobDetailOut | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const running = busy || Boolean(currentJob && !TERMINAL_JOB_STATES.has(currentJob.state))
+  const recent = useQuery({ queryKey: ['recent-recheck', quoteId],
+    queryFn: ({ signal }) => fetchRecentJobs({ quoteId, kind: 'RECHECK', limit: 1 }, signal) })
+  useEffect(() => {
+    const restored = recent.data?.[0]
+    setJobId(restored?.id ?? null)
+    setCurrentJob(restored ?? null)
+  }, [quoteId, recent.data])
+  const running = busy || recent.isPending || recent.isError || Boolean(currentJob && !TERMINAL_JOB_STATES.has(currentJob.state))
 
   const selectedProfile = profiles.data?.find(profile => profile.id === preferences.profileId) ?? profiles.data?.[0]
   const effectiveProfileId = selectedProfile?.id ?? ''
@@ -63,6 +70,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
       onStarted?.(job)
     } catch (err) {
       setError(err instanceof Error ? err.message : '复核任务创建失败')
+      void recent.refetch()
     } finally {
       setBusy(false)
     }
@@ -73,6 +81,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
       <p className="hint">
         局部复核会围绕**本场景**重新调用模型，可能产生费用；它不改变任何人工锁定的对白。
       </p>
+      {recent.isPending && <p className="hint">正在读取已有复核任务…</p>}
       <ThinkingSettings disabled={running} profiles={profiles.data ?? []} profileId={effectiveProfileId}
         onProfileChange={profileId => updatePreferences({ profileId })} profileTestId="recheck-profile" />
       <label className="ndr-field">
@@ -103,6 +112,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
           {error}
         </p>
       )}
+      {recent.isError && <p role="alert" className="status-error">已有复核任务读取失败：{recent.error.message} <button onClick={() => void recent.refetch()}>重新读取任务</button></p>}
       {jobId && <JobPanel jobId={jobId} onUpdate={setCurrentJob} />}
     </div>
   )

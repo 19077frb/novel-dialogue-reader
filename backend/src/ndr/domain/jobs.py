@@ -56,6 +56,7 @@ class JobWindowOut(ApiModel):
 
 
 class JobDetailOut(ApiModel):
+    range: dict[str, Any] = Field(default_factory=dict)
     id: str
     kind: JobKind
     purpose: JobPurpose | None = None

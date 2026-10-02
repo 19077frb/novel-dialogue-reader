@@ -18,6 +18,15 @@ export const jobKeys = {
   usage: (bookId: string) => ['usage', bookId] as const,
 }
 
+export function fetchRecentJobs(input: { bookId?: string; versionId?: string; chapterId?: string; quoteId?: string; kind?: JobDetailOut['kind']; idempotencyKey?: string; limit?: number }, signal?: AbortSignal): Promise<JobDetailOut[]> {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries({ book_id: input.bookId, book_version_id: input.versionId,
+    chapter_id: input.chapterId, quote_id: input.quoteId, kind: input.kind, idempotency_key: input.idempotencyKey, limit: input.limit })) {
+    if (value !== undefined) params.set(key, String(value))
+  }
+  return apiData<JobDetailOut[]>(`/api/jobs/recent?${params}`, { signal })
+}
+
 export interface RangeInput {
   chapterId: string | null
   startCp: number

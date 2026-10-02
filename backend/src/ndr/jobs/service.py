@@ -334,6 +334,7 @@ def job_detail(session: Session, job: Job) -> JobDetailOut:
     unknown_runs = sum(1 for run in runs if run.usage_json is None)
     progress = json.loads(job.progress_json) if job.progress_json else None
     return JobDetailOut(
+        range=json.loads(job.range_json or "{}"),
         id=job.id,
         kind=job.kind,
         purpose=job.purpose,

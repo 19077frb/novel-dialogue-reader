@@ -86,6 +86,7 @@ vi.mock('../src/api/jobs', () => ({
   estimateRange: vi.fn(),
   createJob: vi.fn(),
   fetchUsage: vi.fn(),
+  fetchRecentJobs: vi.fn().mockResolvedValue([]),
   shortHash: (value: string) => String(value.length),
   freshIdempotencyKey: (scope: string, value: string) =>
     `${scope}:${value.length}:test-nonce`,
@@ -538,7 +539,7 @@ describe('PreviewPage', () => {
     await screen.findByTestId('window-picker')
     fireEvent.change(screen.getByTestId('preview-concurrency'), { target: { value: '1' } })
     await userEvent.click(screen.getByTestId('preview-process'))
-    expect(await screen.findByTestId('single-task-w1')).toHaveTextContent('排队中')
+    await waitFor(() => expect(screen.getByTestId('single-task-w1')).toHaveTextContent('排队中'))
     expect(screen.getByTestId('single-task-w2')).toHaveTextContent('等待派发')
     expect(await screen.findByTestId('job-panel')).toBeInTheDocument()
     expect(screen.getByTestId('preview-process')).toBeDisabled()
@@ -587,7 +588,7 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('window-picker')
     await userEvent.click(screen.getByTestId('preview-process'))
-    expect(await screen.findByTestId('single-task-w1')).toHaveTextContent('提供方拒绝请求')
+    await waitFor(() => expect(screen.getByTestId('single-task-w1')).toHaveTextContent('提供方拒绝请求'))
     expect(screen.getByTestId('preview-process')).toBeDisabled()
     finishOther({ ...JOB, id: 'done' })
     expect(await screen.findByTestId('preview-error')).toHaveTextContent('提供方拒绝请求')

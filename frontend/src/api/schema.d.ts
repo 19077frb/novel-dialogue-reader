@@ -393,6 +393,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 找回书籍或对白最近的任务 */
+        get: operations["recent_jobs_route_api_jobs_recent_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs": {
         parameters: {
             query?: never;
@@ -2118,6 +2135,16 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[list[JobDetailOut]] */
+        DataEnvelope_list_JobDetailOut__: {
+            /** Data */
+            data: components["schemas"]["JobDetailOut"][];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[list[ModelProfileOut]] */
         DataEnvelope_list_ModelProfileOut__: {
             /** Data */
@@ -2499,6 +2526,10 @@ export interface components {
         };
         /** JobDetailOut */
         JobDetailOut: {
+            /** Range */
+            range?: {
+                [key: string]: unknown;
+            };
             /** Id */
             id: string;
             kind: components["schemas"]["JobKind"];
@@ -4485,6 +4516,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_ChapterRosterOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recent_jobs_route_api_jobs_recent_get: {
+        parameters: {
+            query?: {
+                book_id?: string | null;
+                book_version_id?: string | null;
+                chapter_id?: string | null;
+                quote_id?: string | null;
+                kind?: components["schemas"]["JobKind"] | null;
+                idempotency_key?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_list_JobDetailOut__"];
                 };
             };
             /** @description Validation Error */
