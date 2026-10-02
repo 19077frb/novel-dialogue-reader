@@ -533,6 +533,73 @@ def test_auto_merge_short_refs_reach_preview_as_stable_ids(migrated_client, popu
     assert len(adapter.calls) == 1
 
 
+@pytest.mark.parametrize("role,name", [("女神", "阿库娅"), ("女骑士", "达克妮丝")])
+def test_auto_merge_previews_alias_only_name_upgrade(migrated_client, populated, role, name):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        character = session.get(BookCharacter, ids["target"])
+        character.canonical_name = role
+        character.aliases_json = json.dumps([name, role], ensure_ascii=False)
+    job, _ = _auto_job(client, ids)
+    outcome, adapter = _run_merge(client, job, [_merge_group(
+        ids, source_ids=[], preferred_name=name,
+    )], accept=False)
+    assert outcome.state is JobState.COMPLETED
+    base = f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    proposal = client.get(base).json()["data"]["proposals"][0]
+    assert proposal["preferred_name"] == name and proposal["sources"] == []
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["target"]).canonical_name == role
+    response = client.post(f"{base}/confirm", json={"selected_target_ids": [ids["target"]]})
+    assert response.status_code == 200, response.text
+    with transaction(client.app.state.session_factory) as session:
+        character = session.get(BookCharacter, ids["target"])
+        assert character.canonical_name == name
+        assert role in json.loads(character.aliases_json)
+        assert name not in json.loads(character.aliases_json)
+    assert len(adapter.calls) == 1
+
+
+@pytest.mark.parametrize("locked,name", [(True, "阿库娅"), (False, "虚构姓名")])
+def test_auto_merge_rejects_locked_or_invented_name(migrated_client, populated, locked, name):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        character = session.get(BookCharacter, ids["target"])
+        character.canonical_name = "女神"
+        character.aliases_json = '["阿库娅"]'
+        character.name_locked = locked
+    job, _ = _auto_job(client, ids)
+    outcome, _ = _run_merge(client, job, [_merge_group(
+        ids, source_ids=[], preferred_name=name,
+    )], accept=False)
+    assert outcome.state is JobState.FAILED
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["target"]).canonical_name == "女神"
+
+
+def test_auto_merge_analyzes_single_character_for_name_upgrade(migrated_client):
+    client = migrated_client
+    imported = client.post("/api/books/import", files={
+        "file": ("single.txt", "第一章\n「我是阿库娅。」".encode(), "text/plain"),
+    }).json()["data"]
+    with transaction(client.app.state.session_factory) as session:
+        character = BookCharacter(
+            book_version_id=imported["book_version_id"], canonical_name="女神",
+            aliases_json='["阿库娅"]',
+        )
+        session.add(character)
+        session.flush()
+        ids = {"book": imported["book_id"], "version": imported["book_version_id"],
+               "target": character.id, "source": character.id}
+    job, _ = _auto_job(client, ids)
+    outcome, adapter = _run_merge(client, job, [_merge_group(
+        ids, source_ids=[], preferred_name="阿库娅",
+    )])
+    assert outcome.state is JobState.COMPLETED and len(adapter.calls) == 1
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["target"]).canonical_name == "阿库娅"
+
+
 @pytest.mark.parametrize("case", ["edited", "new_job", "stop"])
 def test_auto_merge_does_not_hold_transaction_during_model_call_and_rechecks_state(
     migrated_client, populated, case

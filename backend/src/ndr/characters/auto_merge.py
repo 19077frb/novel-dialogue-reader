@@ -25,9 +25,9 @@ from ..llm.adapters import sanitize
 from ..llm.errors import ProviderError, ProviderErrorKind
 from ..storage.models import Book, BookCharacter, BookVersion, InferenceRun, Job
 from ..storage.transactions import transaction
-from .directory import _guard, directory, edit, merge
+from .directory import _guard, _sync, directory, edit, merge
 from .merge_diagnostics import MergePlanError, character_refs, saved_model_groups
-from .names import GENERIC_NAMES, name_key, undecorated_name
+from .names import GENERIC_NAMES, name_key, revealed_name, undecorated_name
 
 MAX_OUTPUT_TOKENS = 4096
 MAX_INPUT_TOKENS = 64000
@@ -36,7 +36,8 @@ MAX_INPUT_TOKENS = 64000
 class MergeGroup(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target_id: str = Field(min_length=1, max_length=160)
-    source_ids: list[str] = Field(min_length=1, max_length=500)
+    source_ids: list[str] = Field(max_length=500)
+    preferred_name: str | None = Field(default=None, min_length=1, max_length=32)
     confidence: float = Field(ge=0, le=1)
     reason: str = Field(min_length=1, max_length=512)
     merged_description: str = Field(min_length=1, max_length=512)
@@ -110,10 +111,15 @@ def _messages(entries):
                 "merged_description 与合并依据 reason 分开：前者是保存后供读者查看的人物说明，"
                 "不是合并操作的理由。已有人工说明也须保留其中有效信息，新说明由用户预览确认后才替换。"
                 "每个人物 ID 最多属于一组，不允许循环、链式合并或新增 ID。"
+                "同时检查每个人物的正式名称是否仍是女神、女骑士等身份代称，而别名或同组姓名已明确揭示真实姓名。"
+                "此时preferred_name填写已有资料中的真实姓名，不得猜测或创造姓名；原代称保留为别名。"
+                "即使没有重复记录，也返回更名组：target_id为该人物、source_ids=[]，并给出依据和整理后的说明。"
+                "name_locked=true表示用户手动指定名称，不得建议更名；已有具体姓名也不得改为另一姓名或称呼。"
                 "人物引用只用输入提供的 C1、C2 等短引用，逐字复制；姓名不是引用，不能自造引用。"
                 '只返回 JSON：{"groups":[{"target_id":"C1","source_ids":["C2"],'
-                '"confidence":0.99,"reason":"中文身份依据","merged_description":"整理后的人物说明"}]}。'
-                "只建议置信度至少 0.95 且有明确依据的组；没有重复时返回空 groups。"
+                '"preferred_name":null,"confidence":0.99,"reason":"中文身份依据","merged_description":"整理后的人物说明"}]}。'
+                "只建议置信度至少 0.95 且有明确依据的组；"
+                "没有重复且没有需要升级的代称时才返回空 groups。"
             ),
         },
         {
@@ -192,6 +198,7 @@ def auto_merge_result(session, job) -> CharacterAutoMergeResultOut:
                 "confidence": group["confidence"],
                 "reason": group["reason"],
                 "merged_description": group.get("merged_description"),
+                "preferred_name": group.get("preferred_name"),
             }
             for group in proposal.get("groups", [])
         ],
@@ -244,6 +251,18 @@ def _validate_plan(output: MergeOutput, entries):
             local.add(key)
         if not group.reason.strip():
             add("missing_reason", f"第{index}组缺少明确的中文合并依据", index, "reason")
+        if group.preferred_name:
+            target = by_id.get(group.target_id, {})
+            names = [value for key in ids if key in by_id
+                     for value in [by_id[key]["name"], *by_id[key].get("aliases", [])]]
+            if (revealed_name(target.get("name"), group.preferred_name,
+                              locked=target.get("name_locked", False)) is None
+                    or group.preferred_name not in names):
+                add("invalid_preferred_name",
+                    f"第{index}组的更名缺少已提供姓名依据，或名称由用户指定",
+                    index, "preferred_name", group.target_id)
+        elif not group.source_ids:
+            add("empty_group", f"第{index}组既没有并入人物，也没有更名建议", index, "source_ids")
         if group.target_id in by_id and by_id[group.target_id]["kind"] == "speaker" and any(
             key in by_id and by_id[key]["kind"] != "speaker" for key in group.source_ids
         ):
@@ -303,7 +322,8 @@ def _check_current(session, job, entries):
     if not version or not book or book.active_version_id != version.id:
         raise ApiError(ErrorCode.RESOURCE_CONFLICT, "书籍版本已变化，未执行自动合并")
     _guard(session, version, job.id)
-    if _snapshot(session, version) != entries:
+    normalized_entries = [{**row, "name_locked": row.get("name_locked", False)} for row in entries]
+    if _snapshot(session, version) != normalized_entries:
         raise ApiError(
             ErrorCode.RESOURCE_CONFLICT, "人物资料在分析期间发生变化，未执行任何合并，请重新分析"
         )
@@ -336,7 +356,19 @@ def _apply(session, job, output, entries):
             ).character_id
         target = session.get(BookCharacter, target_id)
         target.user_confirmed = by_id[group.target_id]["user_confirmed"]
+        target.name_locked = by_id[group.target_id].get("name_locked", False)
         target.description = description
+        if group.preferred_name:
+            target.aliases_json = json.dumps(list(dict.fromkeys([
+                *json.loads(target.aliases_json or "[]"), target.canonical_name,
+            ])), ensure_ascii=False)
+            target.canonical_name = group.preferred_name
+            target.aliases_json = json.dumps(
+                [name for name in json.loads(target.aliases_json)
+                 if name and name != target.canonical_name], ensure_ascii=False,
+            )
+            target.version += 1
+            _sync(session, version, target)
         for source_id in group.source_ids:
             merge(
                 session,
@@ -357,6 +389,7 @@ def _apply(session, job, output, entries):
                 target_name=target.canonical_name,
                 source_names=[by_id[key]["name"] for key in group.source_ids],
                 reason=group.reason,
+                previous_name=by_id[group.target_id]["name"] if group.preferred_name else None,
             ).model_dump()
         )
     return {"merged_count": merged_count, "skipped_groups": skipped, "merges": applied}
@@ -436,7 +469,7 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
                 return job.state, 0
             session.refresh(job)
             entries = json.loads(job.range_json)["entries"]
-            if len(entries) < 2:
+            if not entries:
                 job.state = JobState.COMPLETED
                 job.checkpoint_json = json.dumps(
                     {"merge_result": {"merged_count": 0, "merges": [], "skipped_groups": 0}}

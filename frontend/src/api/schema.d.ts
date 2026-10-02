@@ -1200,6 +1200,8 @@ export interface components {
             source_names: string[];
             /** Reason */
             reason: string;
+            /** Previous Name */
+            previous_name?: string | null;
         };
         /**
          * Assignment
@@ -1243,6 +1245,11 @@ export interface components {
              * @default false
              */
             user_confirmed: boolean;
+            /**
+             * Name Locked
+             * @default false
+             */
+            name_locked: boolean;
         };
         /**
          * BookFormat
@@ -1559,6 +1566,11 @@ export interface components {
              */
             user_confirmed: boolean;
             /**
+             * Name Locked
+             * @default false
+             */
+            name_locked: boolean;
+            /**
              * Kind
              * @default book
              */
@@ -1605,6 +1617,8 @@ export interface components {
             confidence: number;
             /** Reason */
             reason: string;
+            /** Preferred Name */
+            preferred_name?: string | null;
             /** Merged Description */
             merged_description?: string | null;
         };

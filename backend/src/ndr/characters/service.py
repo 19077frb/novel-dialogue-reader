@@ -45,7 +45,7 @@ from ..storage.models import (
     ModelProfile,
 )
 from .identity import supplement_aliases
-from .names import GENERIC_NAMES, matches_name, undecorated_name
+from .names import GENERIC_NAMES, matches_name, revealed_name, undecorated_name
 
 
 def _json_list(raw: str | None) -> list[str]:
@@ -69,6 +69,7 @@ def _character_out(row: BookCharacter) -> BookCharacterOut:
         aliases=_json_list(row.aliases_json),
         description=row.description or "",
         user_confirmed=row.user_confirmed,
+        name_locked=row.name_locked,
     )
 
 
@@ -313,11 +314,24 @@ def store_roster_candidates(
             character.description = candidate.description
             character.version = (character.version or 0) + 1
         session.flush()
+        proposed_name = revealed_name(
+            character.canonical_name, candidate.real_name or candidate.name,
+            locked=character.name_locked,
+        ) if candidate.evidence_refs else None
+        if proposed_name and any(row.id != character.id and matches_name(
+            proposed_name, [row.canonical_name or "", *_json_list(row.aliases_json)],
+        ) for row in existing):
+            proposed_name = None
         duplicate = next(
             (record for record in records if record["character_id"] == character.id),
             None,
         )
         if duplicate is not None:
+            if proposed_name:
+                duplicate["canonical_name"] = proposed_name
+                duplicate["aliases"] = list(dict.fromkeys([
+                    *duplicate["aliases"], character.canonical_name,
+                ]))
             duplicate["pov_candidate"] |= candidate.pov_candidate
             duplicate["evidence_refs"] = list(
                 dict.fromkeys(
@@ -332,8 +346,11 @@ def store_roster_candidates(
             {
                 "temp_ref": candidate.temp_ref,
                 "character_id": character.id,
-                "canonical_name": character.canonical_name or candidate.name,
-                "aliases": _json_list(character.aliases_json),
+                "canonical_name": proposed_name or character.canonical_name or candidate.name,
+                "aliases": list(dict.fromkeys([
+                    *_json_list(character.aliases_json),
+                    *([character.canonical_name] if proposed_name else []),
+                ])),
                 "description": character.description or "",
                 "evidence_refs": candidate.evidence_refs,
                 "pov_candidate": candidate.pov_candidate,
@@ -382,12 +399,16 @@ def _upsert_confirmed_character(
     name = (item.canonical_name or (source or {}).get("canonical_name") or "").strip()
     if not name:
         raise ApiError.validation("已确认人物必须有名称", temp_ref=item.temp_ref)
+    old_name = character.canonical_name
+    if source is None or name != (source or {}).get("canonical_name"):
+        character.name_locked = True
     character.canonical_name = name
     # A roster may have been previewed before a parallel dialogue window
     # discovered a new alias. Confirming that snapshot must not erase it;
     # deliberate alias removal remains available in the book directory.
     character.aliases_json = json.dumps(
-        list(dict.fromkeys([*_json_list(character.aliases_json), *item.aliases])),
+        list(dict.fromkeys(value for value in [*_json_list(character.aliases_json), *item.aliases,
+                          old_name if old_name != name else None] if value and value != name)),
         ensure_ascii=False,
     )
     character.description = item.description or (source or {}).get("description") or ""
@@ -395,6 +416,9 @@ def _upsert_confirmed_character(
     character.user_confirmed = True
     character.version = (character.version or 0) + 1
     session.flush()
+    if old_name and old_name != name:
+        from .directory import _sync
+        _sync(session, version, character)
     return character
 
 

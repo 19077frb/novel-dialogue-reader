@@ -52,8 +52,8 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     {versionId && result.isPending && <p role="status">正在读取已有任务…</p>}
     {result.isError && <p className="status-error" role="alert">任务状态读取失败：{result.error.message} <button onClick={() => void result.refetch()}>重新读取进度</button>。确认已有任务状态前不能启动新任务。</p>}
     {open && <>
-      <h3 className="ndr-step-heading"><span className="ndr-step-badge">1</span>分析重复人物</h3>
-      <p className="hint">仅分析已保存的人物姓名、别名和说明，请先保存编辑。分析会消耗 Tokens，但不会修改人物。模型可能误判，完成后由你选择接受哪些建议；确认合并影响已有对白与导出，不改正文或章节完成状态。</p>
+      <h3 className="ndr-step-heading"><span className="ndr-step-badge">1</span>分析重复人物与姓名</h3>
+      <p className="hint">仅分析已保存的人物姓名、别名和说明，请先保存编辑。也会检查代称是否已有明确姓名，生成更名建议。分析会消耗 Tokens，但不会修改人物。模型可能误判，完成后由你选择接受哪些建议；确认后更新已有对白与导出，不改正文或章节完成状态。</p>
       <ThinkingSettings disabled={blocked} profiles={profiles.data ?? []} profileId={preferences.profileId}
         onProfileChange={profileId => update({ profileId })} profileTestId="character-merge-profile" />
       {profiles.isError && <p role="alert" className="status-error">模型配置读取失败：{profiles.error.message}</p>}
@@ -64,10 +64,10 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
         }} /></label>
       <label className="ndr-field"><span><input type="checkbox" checked={confirmed} disabled={blocked}
         onChange={event => setConfirmed(event.target.checked)} /> 我同意调用模型生成合并建议（会消耗 Tokens）</span></label>
-      <button disabled={blocked || !versionId || count < 2 || !profileReady || !confirmed}
+      <button disabled={blocked || !versionId || count < 1 || !profileReady || !confirmed}
         onClick={() => start.mutate()}>分析合并建议</button>
       {disabled && <p className="hint">请先停止本书处理任务再自动合并。</p>}
-      {count < 2 && <p className="hint">至少有两个人物才能自动合并。</p>}
+      {count < 1 && <p className="hint">至少有一个人物才能分析合并或更名建议。</p>}
       {!profileReady && <p className="hint">请选择可用的模型配置。</p>}
       {!confirmed && !awaiting && <p className="hint">开始前请勾选同意调用模型。</p>}
       {awaiting && <p className="hint">请先确认或放弃当前建议，再开始新的分析。</p>}
@@ -97,7 +97,8 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
             {proposals.map(group => <article className="card ndr-merge-card" key={group.target.character_id}>
               <label className="ndr-field"><span><input type="checkbox" disabled={disabled || busy} checked={selected.includes(group.target.character_id)}
                 onChange={event => setSelected(ids => event.target.checked ? [...ids, group.target.character_id] : ids.filter(id => id !== group.target.character_id))} />
-                接受：{group.sources.map(source => source.name).join('、')} → {group.target.name}</span></label>
+                接受：{group.sources.length ? group.sources.map(source => source.name).join('、') : group.target.name} → {group.preferred_name || group.target.name}</span></label>
+              {group.preferred_name && <p className="ndr-merge-text">正式名称：{group.target.name} → {group.preferred_name}；原称呼保留为别名。</p>}
               <p className="ndr-merge-text">合并依据：{group.reason}（模型置信度 {Math.round(group.confidence * 100)}%）</p>
               {group.merged_description?.trim()
                 ? <div className="ndr-merge-text"><strong>合并后的人物说明</strong><p>{group.merged_description}</p></div>
@@ -116,9 +117,9 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
             {selected.length === 0 && <p className="hint">请至少选择一组建议后确认合并，也可以放弃本次结果。</p>}
           </section>}
           {result.data.state === 'COMPLETED' && !awaiting && result.data.phase !== 'discarded' && <>
-            <p role="status">合并了 {result.data.merged_count} 个重复人物{result.data.skipped_groups ? `；保留 ${result.data.skipped_groups} 组未合并` : ''}。</p>
+            <p role="status">合并了 {result.data.merged_count} 个重复人物{result.data.merges?.some(group => group.previous_name) ? `；更新了 ${result.data.merges.filter(group => group.previous_name).length} 个正式名称` : ''}{result.data.skipped_groups ? `；保留 ${result.data.skipped_groups} 组未合并` : ''}。</p>
             <ul className="ndr-merge-text">{(result.data.merges ?? []).map(group => <li key={group.target_character_id}>
-              {group.source_names.join('、')} → {group.target_name}：{group.reason}
+              {group.source_names.join('、') || group.previous_name} → {group.target_name}：{group.reason}
             </li>)}</ul>
           </>}
           {busy && <button className="ndr-danger" disabled={stop.isPending || result.data.state === 'PAUSING'} onClick={() => stop.mutate()}>停止自动合并</button>}

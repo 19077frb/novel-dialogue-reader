@@ -21,9 +21,9 @@ vi.mock('../src/api/books', () => ({
 }))
 
 const entries: CharacterDirectoryOut[] = [
-  { character_id: 'u1', name: '悠太', aliases: ['哥哥'], description: '男主角', kind: 'book', version: 2, user_confirmed: true },
-  { character_id: 'u2', name: '浅村悠太', aliases: [], description: '书店店员', kind: 'book', version: 1, user_confirmed: false },
-  { character_id: 'speaker:s1', name: '女店员', aliases: [], description: '打工前辈', kind: 'speaker', version: 1, user_confirmed: false },
+  { character_id: 'u1', name: '悠太', aliases: ['哥哥'], description: '男主角', kind: 'book', version: 2, user_confirmed: true, name_locked: false },
+  { character_id: 'u2', name: '浅村悠太', aliases: [], description: '书店店员', kind: 'book', version: 1, user_confirmed: false, name_locked: false },
+  { character_id: 'speaker:s1', name: '女店员', aliases: [], description: '打工前辈', kind: 'speaker', version: 1, user_confirmed: false, name_locked: false },
 ]
 
 const mergeResult = {
@@ -51,6 +51,22 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('没有重复记录也能预览代称升级为真实姓名，确认前不修改人物', async () => {
+    const target = { ...entries[0], name: '女神', aliases: ['阿库娅', '水之女神'] }
+    vi.mocked(api.fetchCharacterDirectory).mockResolvedValue([target])
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue({
+      ...mergeResult, phase: 'awaiting_confirmation', merged_count: 0, merges: [],
+      proposals: [{ target, sources: [], preferred_name: '阿库娅', confidence: 0.99,
+        reason: '资料明确表明女神的姓名为阿库娅', merged_description: '阿库娅，水之女神。' }],
+    })
+    renderPage()
+    const panel = within(await screen.findByRole('region', { name: '合并建议预览' }))
+    expect(panel.getByText('接受：女神 → 阿库娅')).toBeInTheDocument()
+    expect(panel.getByText(/正式名称：女神 → 阿库娅；原称呼保留为别名/)).toBeInTheDocument()
+    expect(panel.getByRole('button', { name: '确认合并所选 0 组' })).toBeDisabled()
+    expect(api.confirmCharacterAutoMerge).not.toHaveBeenCalled()
+    expect(api.editBookCharacter).not.toHaveBeenCalled()
+  })
   it('合并引用失败显示具体分组与可展开详情，不自动付费重试', async () => {
     vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue({
       ...mergeResult, state: 'FAILED', merged_count: 0, merges: [],

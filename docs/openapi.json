@@ -4087,6 +4087,18 @@
           "reason": {
             "type": "string",
             "title": "Reason"
+          },
+          "previous_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Name"
           }
         },
         "additionalProperties": false,
@@ -4173,6 +4185,11 @@
           "user_confirmed": {
             "type": "boolean",
             "title": "User Confirmed",
+            "default": false
+          },
+          "name_locked": {
+            "type": "boolean",
+            "title": "Name Locked",
             "default": false
           }
         },
@@ -5004,6 +5021,11 @@
             "title": "User Confirmed",
             "default": false
           },
+          "name_locked": {
+            "type": "boolean",
+            "title": "Name Locked",
+            "default": false
+          },
           "kind": {
             "type": "string",
             "title": "Kind",
@@ -5126,6 +5148,18 @@
           "reason": {
             "type": "string",
             "title": "Reason"
+          },
+          "preferred_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Name"
           },
           "merged_description": {
             "anyOf": [

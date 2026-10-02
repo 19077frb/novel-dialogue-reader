@@ -208,6 +208,7 @@ const ROSTER = {
     {
       character_id: 'char1',
       name: 'Speaker',
+      name_locked: false,
       aliases: [],
       description: '',
       user_confirmed: true,

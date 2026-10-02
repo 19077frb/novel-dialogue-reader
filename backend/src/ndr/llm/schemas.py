@@ -42,6 +42,7 @@ class GapDecisionOut(ApiModel):
 
 class NewSpeaker(ApiModel):
     character_id: str | None = Field(default=None, min_length=1)
+    real_name: str | None = Field(default=None, max_length=32)
     aliases: list[str] = Field(default_factory=list, max_length=64)
     # Nullable only for parsing historical cached outputs. Live calls require a name.
     name: str | None = Field(default=None, min_length=1, max_length=32,
@@ -149,6 +150,8 @@ class RosterCharacter(ApiModel):
     temp_ref: str = Field(min_length=1, max_length=64)
     character_id: str | None = Field(default=None, min_length=1)
     name: str | None = Field(default=None, max_length=128)
+    real_name: str | None = Field(default=None, max_length=32,
+                                 description="原文明示的真实姓名；只有代称或身份称呼时为null")
     aliases: list[str] = Field(default_factory=list)
     description: str = Field(default="", max_length=512)
     evidence_refs: list[str] = Field(default_factory=list)

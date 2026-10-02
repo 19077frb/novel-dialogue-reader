@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from ..schemas import output_json_schema
 
-LABELING_PROMPT_VERSION = "labeling-14"
+LABELING_PROMPT_VERSION = "labeling-15"
 DATA_DELIMITER = "<<<NDR_DATA>>>"
 ESCAPED_DELIMITER = "<<<NDR_DATA_ESCAPED>>>"
 
@@ -46,7 +46,8 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
 12. 真实姓名规则：只有原文明示姓名，或能由明确称呼与本章已知人物唯一确认时，才填写
     labels[].speaker_name；不确定时省略该字段或填 null，不要在每条对白重复已确认姓名。
     若已知人物后来揭示真实姓名，在 new_speakers 中通过 character_id 关联旧身份，
-    name 可写新姓名，aliases 补充旧称呼；不要因姓名变化另建全书人物。
+    name 必须优先写新姓名，real_name填写原文明示的真实姓名，aliases补充旧称呼；
+    只有代称或身份称呼时real_name=null，不得猜测；不要因姓名变化另建全书人物。
     `description` 可写身份特征，但不能用推测姓名冒充已确认姓名。
 13. `RESPONSE_LINK` 的 evidence_refs 应包含与本句形成问答/承接关系的另一条 ref；
     `COREFERENCE` 应引用揭示同一人的称呼、动作或发言 ref。不要只引用目标自身。
@@ -81,7 +82,8 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
 20. 当前场景已有人物后来揭示姓名时，labels 仍用 EXISTING 和原 speaker_ref；
     另在 new_speakers 提供该人物的姓名补充声明，character_id 必须与该 speaker_ref 的
     character_id 相同，first_quote_id 为揭示姓名的目标对白，aliases 补充新称呼并给出证据。
-    该声明只补充别名，不代表出现另一个人。
+    real_name填写原文明示姓名，否则null。该声明补充同一身份的姓名，
+    不代表出现另一个人；程序只把未由用户指定的代称升级为明确姓名，不改已有具体姓名。
 """.strip()
 
 

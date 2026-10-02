@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..characters.identity import supplement_aliases
-from ..characters.names import GENERIC_NAMES, matches_name, valid_display_name
+from ..characters.names import GENERIC_NAMES, matches_name, revealed_name, valid_display_name
 from ..domain.enums import (
     AnnotationSource,
     AnnotationStatus,
@@ -214,6 +214,27 @@ def _discover_character(
             session.flush()
     if character is None:
         return None
+    promoted = revealed_name(character.canonical_name, declaration.real_name,
+                             locked=character.name_locked) if declaration.evidence_refs else None
+    if promoted:
+        others = list(session.scalars(select(BookCharacter).where(
+            BookCharacter.book_version_id == version_id, BookCharacter.id != character.id,
+        )))
+        if not any(matches_name(
+            promoted, [row.canonical_name or "", *json.loads(row.aliases_json or "[]")],
+        ) for row in others):
+            old_name = character.canonical_name
+            character.canonical_name = promoted
+            character.aliases_json = json.dumps(
+                list(dict.fromkeys(
+                    value for value in [*json.loads(character.aliases_json or "[]"), old_name]
+                    if value and value != promoted
+                )), ensure_ascii=False,
+            )
+            character.version += 1
+            from ..characters.directory import _sync
+            from ..storage.models import BookVersion
+            _sync(session, session.get(BookVersion, version_id), character)
     if declaration.character_id and declaration.evidence_refs:
         supplement_aliases(session, character, [declaration.name or "", *declaration.aliases])
     elif not character.user_confirmed and declaration.evidence_refs:

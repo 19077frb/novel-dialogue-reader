@@ -197,6 +197,10 @@ def run_character_roster_job(
             raise ValueError("关联已有全书人物必须提供原文证据")
         if any(not valid_display_name(person.name) for person in output.characters):
             raise ValueError("每个新人物必须填写简短 name（姓名或称呼），不能用描述或编号替代")
+        if any(person.real_name and (
+            not valid_display_name(person.real_name) or not person.evidence_refs)
+               for person in output.characters):
+            raise ValueError("真实姓名必须有原文证据且为简短姓名")
     except Exception as exc:  # noqa: BLE001
         with session_factory() as session:
             job = session.get(Job, job_id)

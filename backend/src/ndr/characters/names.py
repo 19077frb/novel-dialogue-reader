@@ -6,6 +6,25 @@ import re
 from collections.abc import Iterable
 
 GENERIC_NAMES = {"男生", "女生", "同学", "男同学", "女同学", "老师", "男客", "轻浮男客", "店员"}
+ROLE_NAMES = GENERIC_NAMES | {"女神", "水之女神", "女骑士", "骑士", "十字骑士", "圣骑士",
+                             "冒险者", "少女", "少年", "美少女", "大祭司", "师傅", "大师"}
+
+
+def is_role_name(value: str | None) -> bool:
+    value = undecorated_name(value)
+    return value in ROLE_NAMES or bool(re.fullmatch(
+        r"(?:自称|高个子|矮个子|金发|银发|黑发|红发)?"
+        r"(?:女神|女生|男生|少女|少年|美少女|女骑士|男骑士)", value,
+    ))
+
+
+def revealed_name(current: str | None, proposed: str | None, *, locked: bool = False) -> str | None:
+    """Only upgrade a role to an explicitly proposed name, never infer one from alias order."""
+    proposed = (proposed or "").strip()
+    if (not locked and is_role_name(current) and valid_display_name(proposed)
+            and not is_role_name(proposed) and name_key(proposed) != name_key(current)):
+        return proposed
+    return None
 
 
 def name_key(value: str | None) -> str:

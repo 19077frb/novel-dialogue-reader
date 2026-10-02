@@ -6,7 +6,12 @@ import pytest
 from sqlalchemy import select
 
 from ndr.characters.identity import supplement_aliases
-from ndr.characters.service import existing_characters_for_prompt, store_roster_candidates
+from ndr.characters.service import (
+    confirm_roster,
+    existing_characters_for_prompt,
+    store_roster_candidates,
+)
+from ndr.domain.characters import RosterConfirmIn
 from ndr.domain.enums import CharacterSource
 from ndr.llm.schemas import NewSpeaker, RosterOutput
 from ndr.scenes.engine import _discover_character
@@ -15,6 +20,79 @@ from ndr.speakers.groups import SpeakerRegistry
 from ndr.storage.engine import create_db_engine, create_session_factory
 from ndr.storage.models import BookCharacter, BookVersion, Chapter
 from ndr.storage.transactions import transaction
+
+
+@pytest.mark.parametrize("role,name", [("女神", "阿库娅"), ("女骑士", "达克妮丝")])
+@pytest.mark.parametrize("locked", [False, True])
+def test_roster_name_reveal_is_applied_at_confirmation(
+    migrated_client, migrated_settings, role, name, locked,
+):
+    imported = migrated_client.post("/api/books/import", files={
+        "file": ("reveal.txt", f"第一章\n「我是{name}。」".encode(), "text/plain"),
+    }).json()["data"]
+    engine = create_db_engine(migrated_settings)
+    try:
+        with transaction(create_session_factory(engine)) as session:
+            version = session.get(BookVersion, imported["book_version_id"])
+            chapter = session.scalar(select(Chapter).where(Chapter.book_version_id == version.id))
+            character = BookCharacter(
+                book_version_id=version.id, canonical_name=role, user_confirmed=True,
+                aliases_json=json.dumps([name]), name_locked=locked,
+            )
+            session.add(character)
+            session.flush()
+            output = RosterOutput.model_validate({"characters": [{
+                "temp_ref": "c1", "character_id": character.id, "name": role,
+                "real_name": name, "aliases": [name], "evidence_refs": ["L1"],
+            }]})
+            roster = store_roster_candidates(
+                session, version=version, chapter=chapter, output=output, job_id=None,
+            )
+            assert character.canonical_name == role
+            record = json.loads(roster.candidates_json)[0]
+            expected = role if locked else name
+            assert record["canonical_name"] == expected
+            payload = RosterConfirmIn(
+                expected_version=roster.version, pov_temp_ref="c1",
+                candidates=[{key: record[key] for key in (
+                    "temp_ref", "character_id", "canonical_name", "aliases", "description",
+                )}],
+            )
+            confirm_roster(session, version=version, chapter=chapter, payload=payload)
+            assert character.canonical_name == expected
+            assert character.id == record["character_id"]
+            if not locked:
+                assert role in json.loads(character.aliases_json)
+    finally:
+        engine.dispose()
+
+
+def test_dialogue_explicit_name_reveal_upgrades_same_identity(migrated_client, migrated_settings):
+    imported = migrated_client.post("/api/books/import", files={
+        "file": ("reveal.txt", "第一章\n「我是阿库娅。」".encode(), "text/plain"),
+    }).json()["data"]
+    engine = create_db_engine(migrated_settings)
+    try:
+        with transaction(create_session_factory(engine)) as session:
+            character = BookCharacter(
+                book_version_id=imported["book_version_id"], canonical_name="女神",
+                aliases_json='["阿库娅"]', user_confirmed=True,
+            )
+            session.add(character)
+            session.flush()
+            state = SceneState()
+            declaration = NewSpeaker(
+                character_id=character.id, name="阿库娅", real_name="阿库娅", aliases=["女神"],
+                temp_ref="new1", scene_ref="scene_current", first_quote_id="q1",
+                description="女神自报姓名", evidence_refs=["q1"],
+            )
+            assert _discover_character(session, state, imported["book_version_id"],
+                                       declaration, 0) == character.id
+            assert character.canonical_name == "阿库娅"
+            assert json.loads(character.aliases_json) == ["女神"]
+            assert state.book_characters[0].canonical_name == "阿库娅"
+    finally:
+        engine.dispose()
 
 
 def test_late_name_reuses_stable_identity(migrated_client, migrated_settings):

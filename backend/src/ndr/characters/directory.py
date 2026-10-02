@@ -223,6 +223,7 @@ def edit(
     row.aliases_json = json.dumps(aliases, ensure_ascii=False)
     row.description = payload.description.strip()
     row.user_confirmed = True
+    row.name_locked = True
     row.source = CharacterSource.USER
     row.version += 1
     _sync(session, version, row, source_group_id=group_id)

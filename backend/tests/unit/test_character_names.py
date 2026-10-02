@@ -2,11 +2,20 @@ from dataclasses import replace
 
 import pytest
 
-from ndr.characters.names import matches_name, valid_display_name
+from ndr.characters.names import matches_name, revealed_name, valid_display_name
 from ndr.llm.schemas import output_json_schema
 from ndr.llm.validation import LabelingTargets, parse_and_validate
 from ndr.scenes.state import ConfirmedCharacter, SceneState
 from ndr.speakers.groups import SpeakerRegistry
+
+
+@pytest.mark.parametrize("role,name", [("女神", "阿库娅"), ("女骑士", "达克妮丝")])
+def test_role_name_can_upgrade_only_with_explicit_unlocked_name(role, name):
+    assert revealed_name(role, name) == name
+    assert revealed_name(role, name, locked=True) is None
+    assert revealed_name(name, role) is None
+    assert revealed_name(role, "水之女神") is None
+    assert revealed_name(role, "S1") is None
 
 
 @pytest.mark.parametrize("value,expected", [

@@ -20,7 +20,8 @@ def saved_model_groups(payload: dict) -> dict:
     groups = payload.get("groups")
     if not isinstance(groups, list):
         return {"model_groups": [], "model_groups_type": type(groups).__name__}
-    fields = {"target_id", "source_ids", "confidence", "reason", "merged_description"}
+    fields = {"target_id", "source_ids", "preferred_name", "confidence", "reason",
+              "merged_description"}
     saved = []
     truncated = len(groups) > 500
     for group in groups[:500]:

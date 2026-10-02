@@ -376,6 +376,13 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
                 "missing_speaker_name", "新人物必须在 name 填写简短姓名或称呼，详细描述另填",
                 speaker.temp_ref,
             ))
+        if speaker.real_name and (
+            not valid_display_name(speaker.real_name) or not speaker.evidence_refs
+        ):
+            issues.append(ValidationIssue(
+                "missing_real_name_evidence", "真实姓名必须提供原文证据且为简短姓名",
+                speaker.temp_ref,
+            ))
         if speaker.temp_ref in new_speakers:
             issues.append(
                 ValidationIssue(
