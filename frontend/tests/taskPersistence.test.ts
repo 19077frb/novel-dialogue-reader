@@ -38,6 +38,19 @@ function single(): SingleWorkflow {
       { windowId: 'w2', ordinal: '2', input: { ...input, selectedWindowIds: ['w2'], idempotencyKey: 'next-key' }, job: null, error: null },
     ] }
 }
+it('ignores missing-book records without reading details, creating jobs or removing old records', async () => {
+  localStorage.setItem('ndr:tasks:v1:single:other-library', 'invalid legacy data')
+  localStorage.setItem('ndr:tasks:v1:batch:deleted-book', 'invalid legacy data')
+  const { restoreSavedSingles } = await import('../src/processing/singleWorkflow')
+  const { restoreSavedBatches } = await import('../src/components/BatchProcessor')
+  restoreSavedSingles(new Set(['b1']))
+  restoreSavedBatches(new Set(['b1']))
+  expect(api.fetchBook).not.toHaveBeenCalled()
+  expect(api.fetchJob).not.toHaveBeenCalled()
+  expect(api.createJob).not.toHaveBeenCalled()
+  expect(localStorage.getItem('ndr:tasks:v1:single:other-library')).toBe('invalid legacy data')
+  expect(localStorage.getItem('ndr:tasks:v1:batch:deleted-book')).toBe('invalid legacy data')
+})
 it('restores single in-flight IDs, dispatches only pending windows with saved keys and marks completion', async () => {
   const { runSingleWorkflow } = await import('../src/processing/singleWorkflow')
   await runSingleWorkflow(single())
@@ -51,7 +64,7 @@ it('restores a lost acknowledgement using the original key, never a new paid req
   const work = single(); work.tasks[0].job = null
   localStorage.setItem('ndr:tasks:v1:single:b1', JSON.stringify(work))
   const { restoreSavedSingles } = await import('../src/processing/singleWorkflow')
-  restoreSavedSingles()
+  restoreSavedSingles(new Set(['b1']))
   await vi.waitFor(() => expect(JSON.parse(localStorage.getItem('ndr:tasks:v1:single:b1')!).running).toBe(false))
   expect(api.createJob.mock.calls.map(([input]) => input.idempotencyKey)).toEqual(['old-key', 'next-key'])
 })

@@ -244,9 +244,11 @@ export async function restoreBatchProcessing(bookId: string) {
   } finally { restoringBatches.delete(bookId) }
 }
 
-export function restoreSavedBatches() {
+export function restoreSavedBatches(existingBookIds: ReadonlySet<string>) {
   for (const key of Object.keys(localStorage)) {
-    if (key.startsWith('ndr:tasks:v1:batch:')) void restoreBatchProcessing(key.slice('ndr:tasks:v1:batch:'.length))
+    if (!key.startsWith('ndr:tasks:v1:batch:')) continue
+    const bookId = key.slice('ndr:tasks:v1:batch:'.length)
+    if (existingBookIds.has(bookId)) void restoreBatchProcessing(bookId)
   }
 }
 

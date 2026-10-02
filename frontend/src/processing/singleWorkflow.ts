@@ -69,8 +69,12 @@ export function restoreSingleWorkflow(bookId: string) {
   if (work.running) void runSingleWorkflow(work).catch(() => undefined)
 }
 
-export function restoreSavedSingles() {
-  for (const key of Object.keys(localStorage)) if (key.startsWith('ndr:tasks:v1:single:')) restoreSingleWorkflow(key.slice('ndr:tasks:v1:single:'.length))
+export function restoreSavedSingles(existingBookIds: ReadonlySet<string>) {
+  for (const key of Object.keys(localStorage)) {
+    if (!key.startsWith('ndr:tasks:v1:single:')) continue
+    const bookId = key.slice('ndr:tasks:v1:single:'.length)
+    if (existingBookIds.has(bookId)) restoreSingleWorkflow(bookId)
+  }
 }
 
 export function hasSingleWork() { return [...snapshots.values()].some(work => work.running) }

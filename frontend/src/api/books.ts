@@ -32,8 +32,9 @@ export const queryKeys = {
   job: (jobId: string) => ['job', jobId] as const,
 }
 
-export function fetchBooks(signal?: AbortSignal): Promise<CursorPageBook> {
-  return apiData<CursorPageBook>('/api/books', { signal })
+export function fetchBooks(signal?: AbortSignal, cursor?: string): Promise<CursorPageBook> {
+  const suffix = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
+  return apiData<CursorPageBook>(`/api/books${suffix}`, { signal })
 }
 
 export function fetchBook(bookId: string, signal?: AbortSignal): Promise<BookOut> {
