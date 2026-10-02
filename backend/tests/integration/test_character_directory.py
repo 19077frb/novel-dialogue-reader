@@ -389,7 +389,10 @@ def test_auto_merge_preview_requires_explicit_confirmation(migrated_client, popu
         assert (session.get(BookCharacter, ids["source"]) is None) == (decision == "accept")
 
 
-def test_auto_merge_confirmation_applies_only_selected_groups(migrated_client, populated):
+@pytest.mark.parametrize("select_all", [False, True])
+def test_auto_merge_confirmation_applies_only_selected_groups(
+    migrated_client, populated, select_all
+):
     client, ids = migrated_client, populated
     with transaction(client.app.state.session_factory) as session:
         target = BookCharacter(book_version_id=ids["version"], canonical_name="沙季")
@@ -402,12 +405,16 @@ def test_auto_merge_confirmation_applies_only_selected_groups(migrated_client, p
     _run_merge(client, job, [_merge_group(ids), second], accept=False)
     response = client.post(
         f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}/confirm",
-        json={"selected_target_ids": [ids["target"]]},
+        json={
+            "selected_target_ids": [ids["target"], second_target] if select_all else [ids["target"]]
+        },
     )
-    assert response.status_code == 200 and response.json()["data"]["merged_count"] == 1
+    assert response.status_code == 200 and response.json()["data"]["merged_count"] == (
+        2 if select_all else 1
+    )
     with transaction(client.app.state.session_factory) as session:
         assert session.get(BookCharacter, ids["source"]) is None
-        assert session.get(BookCharacter, second_source) is not None
+        assert (session.get(BookCharacter, second_source) is None) == select_all
 
 
 @pytest.mark.parametrize("all_unnamed", [False, True])

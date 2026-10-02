@@ -1164,6 +1164,31 @@ textarea:focus-visible {
   align-items: center;
 }
 
+/* Merge previews contain long names and multiline model explanations. */
+.ndr-character-merge,
+.ndr-merge-preview,
+.ndr-merge-card,
+.ndr-merge-people > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ndr-merge-people {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.ndr-merge-people dd {
+  margin: 4px 0 0;
+}
+
+.ndr-merge-people dt,
+.ndr-merge-people dd,
+.ndr-merge-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .ndr-character-card input[type='checkbox'],
 .ndr-character-card input[type='radio'] {
   width: auto;

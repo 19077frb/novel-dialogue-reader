@@ -51,6 +51,32 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('全选多组建议只提交一次，计数包含同组多个重复人物', async () => {
+    const proposals = [
+      { target: entries[1], sources: [entries[0], { ...entries[0], character_id: 'u3' }], confidence: 0.99, reason: '第一行\n第二行' },
+      { target: { ...entries[1], character_id: 'u4', name: '沙季' }, sources: [{ ...entries[0], character_id: 'u5' }], confidence: 0.99, reason: '别名一致' },
+    ]
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue({ ...mergeResult, phase: 'awaiting_confirmation', merged_count: 0, merges: [], proposals })
+    vi.mocked(api.confirmCharacterAutoMerge).mockImplementation(async () => {
+      const result = { ...mergeResult, phase: 'applied' as const, merged_count: 3 }
+      vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(result)
+      return result
+    })
+    renderPage()
+    const panel = within(await screen.findByRole('region', { name: '合并建议预览' }))
+    expect(panel.getByText('共 2 组建议，涉及 3 条重复人物记录；已选 0 组。')).toBeInTheDocument()
+    await userEvent.click(panel.getByRole('button', { name: '全选合并建议' }))
+    expect(panel.getAllByRole('checkbox').every(box => (box as HTMLInputElement).checked)).toBe(true)
+    await userEvent.click(panel.getByRole('button', { name: '清空选择' }))
+    expect(panel.getAllByRole('checkbox').every(box => !(box as HTMLInputElement).checked)).toBe(true)
+    await userEvent.click(panel.getByRole('button', { name: '全选合并建议' }))
+    await userEvent.click(panel.getByRole('button', { name: '确认合并所选 2 组' }))
+    await screen.findByText('合并了 3 个重复人物。')
+    expect(api.confirmCharacterAutoMerge).toHaveBeenCalledTimes(1)
+    expect(api.confirmCharacterAutoMerge).toHaveBeenCalledWith('b1', 'merge-1', ['u2', 'u4'])
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+  })
+
   it('找回合并建议时只预览，勾选后才能确认且确认不调用模型', async () => {
     const preview = { ...mergeResult, phase: 'awaiting_confirmation' as const, merged_count: 0, merges: [],
       proposals: [{ target: entries[1], sources: [entries[0]], confidence: 0.99, reason: '姓名与别名吻合' }] }

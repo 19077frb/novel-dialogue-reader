@@ -43,7 +43,9 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
   }, [result.data, onSaved])
   const profileReady = profiles.data?.some(profile => profile.id === preferences.profileId)
   const blocked = disabled || busy || result.isError || awaiting
-  return <section className="card" aria-label="自动合并人物">
+  const proposals = result.data?.proposals ?? []
+  const duplicateCount = proposals.reduce((sum, group) => sum + group.sources.length, 0)
+  return <section className="card ndr-character-merge" aria-label="自动合并人物">
     <label className="ndr-field"><span><input type="checkbox" checked={open} disabled={busy}
       onChange={event => setOpen(event.target.checked)} /> 自动合并人物（先预览，再确认）</span></label>
     {versionId && result.isPending && <p role="status">正在读取已有任务…</p>}
@@ -75,18 +77,24 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
           <OperationTimer startedAt={Date.parse(result.data.created_at)} finishedAt={busy ? null : Date.parse(result.data.updated_at)} />
           <p>已知消耗 {result.data.usage?.total_tokens ?? 0} Tokens{result.data.unknown_usage_runs > 0 ? `；另有 ${result.data.unknown_usage_runs} 次调用用量未知` : ''}</p>
           {result.data.last_error && <p className="status-error" role="alert">{result.data.last_error}</p>}
-          {awaiting && <section aria-label="合并建议预览">
+          {awaiting && <section className="ndr-merge-preview" aria-label="合并建议预览">
             <h3 className="ndr-step-heading"><span className="ndr-step-badge">2</span>预览并选择合并建议</h3>
             <p className="hint">默认不选中。请核对姓名、别名、说明和依据；未选中的人物保持不变。确认后无法自动撤销，不会再次调用模型。</p>
+            <p>共 {proposals.length} 组建议，涉及 {duplicateCount} 条重复人物记录；已选 {selected.length} 组。</p>
+            <div className="ndr-form-actions">
+              <button disabled={disabled || busy || !proposals.length} onClick={() => setSelected(proposals.map(group => group.target.character_id))}>全选合并建议</button>
+              <button disabled={disabled || busy || !selected.length} onClick={() => setSelected([])}>清空选择</button>
+            </div>
             {!result.data.proposals?.length && <p>没有可接受的合并建议。</p>}
-            {(result.data.proposals ?? []).map(group => <article className="card" key={group.target.character_id}>
+            {proposals.map(group => <article className="card ndr-merge-card" key={group.target.character_id}>
               <label className="ndr-field"><span><input type="checkbox" disabled={disabled || busy} checked={selected.includes(group.target.character_id)}
                 onChange={event => setSelected(ids => event.target.checked ? [...ids, group.target.character_id] : ids.filter(id => id !== group.target.character_id))} />
                 接受：{group.sources.map(source => source.name).join('、')} → {group.target.name}</span></label>
-              <p>合并依据：{group.reason}（模型置信度 {Math.round(group.confidence * 100)}%）</p>
-              <dl>{[group.target, ...group.sources].map((person, index) => <div key={person.character_id}>
+              <p className="ndr-merge-text">合并依据：{group.reason}（模型置信度 {Math.round(group.confidence * 100)}%）</p>
+              <dl className="ndr-merge-people">{[group.target, ...group.sources].map((person, index) => <div key={person.character_id}>
                 <dt>{index === 0 ? '保留人物' : '并入人物'}：{person.name}</dt>
-                <dd>别名：{person.aliases?.join('、') || '无'}；说明：{person.description || '暂无说明'}</dd>
+                <dd>别名：{person.aliases?.join('、') || '无'}</dd>
+                <dd>说明：{person.description || '暂无说明'}</dd>
               </div>)}</dl>
             </article>)}
             {result.data.skipped_groups > 0 && <p>另有 {result.data.skipped_groups} 组因依据不足、姓名缺失或说明过长未纳入建议。</p>}
@@ -98,7 +106,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
           </section>}
           {result.data.state === 'COMPLETED' && !awaiting && result.data.phase !== 'discarded' && <>
             <p role="status">合并了 {result.data.merged_count} 个重复人物{result.data.skipped_groups ? `；保留 ${result.data.skipped_groups} 组（依据不足、姓名缺失或说明合并后过长）` : ''}。</p>
-            <ul>{(result.data.merges ?? []).map(group => <li key={group.target_character_id}>
+            <ul className="ndr-merge-text">{(result.data.merges ?? []).map(group => <li key={group.target_character_id}>
               {group.source_names.join('、')} → {group.target_name}：{group.reason}
             </li>)}</ul>
           </>}

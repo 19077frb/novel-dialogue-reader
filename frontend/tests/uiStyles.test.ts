@@ -6,6 +6,10 @@ import { describe, expect, it } from 'vitest'
 const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/styles/global.css'), 'utf8')
 
 describe('shared UI design rules', () => {
+  it('wraps multiline merge previews instead of using intrinsic-width columns', () => {
+    expect(css).toMatch(/\.ndr-merge-people\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/)
+    expect(css).toMatch(/\.ndr-merge-text\s*\{[^}]*white-space:\s*pre-wrap[^}]*overflow-wrap:\s*anywhere/)
+  })
   it('keeps literal colors, shadows and corner values inside design tokens only', () => {
     const rules = css.replace(/:root\s*\{[^}]*\}/g, '')
     expect(rules).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(/i)
