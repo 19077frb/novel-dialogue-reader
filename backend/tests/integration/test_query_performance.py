@@ -162,14 +162,14 @@ def test_query_indexes_match_models_and_are_used(migrated_engine) -> None:
     inspector = inspect(migrated_engine)
     for table in Base.metadata.sorted_tables:
         actual = {row["name"]: row["column_names"] for row in inspector.get_indexes(table.name)}
-        for index in table.indexes:
-            assert actual[index.name] == [column.name for column in index.columns]
+        expected = {index.name: [column.name for column in index.columns] for index in table.indexes}
+        assert actual == expected  # Also reject obsolete indexes left by upgrades.
     with migrated_engine.connect() as connection:
         for sql, expected in [
             ("SELECT id FROM books ORDER BY created_at,id LIMIT 10", "ix_books_created_at_id"),
             (
                 "SELECT id FROM quotes WHERE book_version_id='v' AND start_cp>100",
-                "ix_quotes_version_start",
+                "sqlite_autoindex_quotes_2",
             ),
             (
                 "SELECT id FROM jobs WHERE book_version_id='v' AND state='QUEUED'",

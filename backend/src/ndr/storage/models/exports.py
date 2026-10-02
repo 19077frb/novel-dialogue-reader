@@ -30,7 +30,7 @@ class ExportSnapshot(IdMixin, TimestampMixin, Base):
     identity_projection_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     visibility_policy: Mapped[str] = mapped_column(String(32), nullable=False)
     style_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     warnings_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
 

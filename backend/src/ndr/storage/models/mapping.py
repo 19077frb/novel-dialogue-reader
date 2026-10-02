@@ -20,11 +20,10 @@ class TextMapping(IdMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_text_mappings_version_canonical", "book_version_id", "canonical_start_cp"),
         Index("ix_text_mappings_version_ordinal", "book_version_id", "ordinal"),
-        Index("ix_text_mappings_version_source", "book_version_id", "source_text_start_cp"),
     )
 
     book_version_id: Mapped[str] = mapped_column(
-        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False
     )
     chapter_id: Mapped[str | None] = mapped_column(
         ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True

@@ -25,15 +25,14 @@ class Quote(IdMixin, TimestampMixin, Base):
             "scanner_version",
             name="uq_quotes_position",
         ),
-        Index("ix_quotes_version_start", "book_version_id", "start_cp"),
         Index("ix_quotes_chapter_start", "chapter_id", "start_cp"),
     )
 
     book_version_id: Mapped[str] = mapped_column(
-        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False
     )
     chapter_id: Mapped[str | None] = mapped_column(
-        ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True
+        ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True
     )
     start_cp: Mapped[int] = mapped_column(Integer, nullable=False)
     end_cp: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -42,7 +41,7 @@ class Quote(IdMixin, TimestampMixin, Base):
     parent_quote_id: Mapped[str | None] = mapped_column(
         ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    utterance_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    utterance_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     scanner_version: Mapped[str] = mapped_column(String(64), nullable=False)
     kind_hint: Mapped[QuoteKind | None] = mapped_column(
         enum_type(QuoteKind, name="quote_kind"), nullable=True
@@ -57,7 +56,7 @@ class Gap(IdMixin, TimestampMixin, Base):
     __table_args__ = (Index("ix_gaps_version_start", "book_version_id", "start_cp"),)
 
     book_version_id: Mapped[str] = mapped_column(
-        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False
     )
     left_quote_id: Mapped[str | None] = mapped_column(
         ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True, index=True
@@ -81,7 +80,7 @@ class Scene(IdMixin, TimestampMixin, VersionMixin, Base):
     __table_args__ = (Index("ix_scenes_version_start", "book_version_id", "start_cp"),)
 
     book_version_id: Mapped[str] = mapped_column(
-        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False
     )
     start_cp: Mapped[int] = mapped_column(Integer, nullable=False)
     end_cp: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -116,7 +115,7 @@ class SpeakerGroup(IdMixin, TimestampMixin, VersionMixin, Base):
     )
 
     scene_id: Mapped[str] = mapped_column(
-        ForeignKey("scenes.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("scenes.id", ondelete="CASCADE"), nullable=False
     )
     first_quote_id: Mapped[str | None] = mapped_column(
         ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True, index=True

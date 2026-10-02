@@ -16,7 +16,7 @@ class QuoteNormalization(IdMixin, TimestampMixin, VersionMixin, Base):
     )
 
     book_version_id: Mapped[str] = mapped_column(
-        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False
     )
     opening_cp: Mapped[int] = mapped_column(nullable=False)
     close_cp: Mapped[int] = mapped_column(nullable=False)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import Connection
 
 from ..config import Settings, get_settings
 
@@ -19,9 +20,15 @@ def build_alembic_config(settings: Settings) -> Config:
     return config
 
 
-def run_migrations(settings: Settings | None = None, *, revision: str = "head") -> None:
+def run_migrations(
+    settings: Settings | None = None, *, revision: str = "head",
+    connection: Connection | None = None,
+) -> None:
     """迁移到指定版本（默认 head）；重复运行安全，且会先建立数据目录。"""
 
     resolved = settings or get_settings()
     resolved.ensure_data_dir()
-    command.upgrade(build_alembic_config(resolved), revision)
+    config = build_alembic_config(resolved)
+    if connection is not None:
+        config.attributes["connection"] = connection
+    command.upgrade(config, revision)

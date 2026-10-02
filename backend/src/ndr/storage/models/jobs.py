@@ -30,10 +30,10 @@ class Job(IdMixin, TimestampMixin, VersionMixin, Base):
         enum_type(JobPurpose, name="job_purpose"), nullable=True
     )
     book_id: Mapped[str | None] = mapped_column(
-        ForeignKey("books.id", ondelete="CASCADE"), nullable=True, index=True
+        ForeignKey("books.id", ondelete="CASCADE"), nullable=True
     )
     book_version_id: Mapped[str | None] = mapped_column(
-        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=True, index=True
+        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=True
     )
     range_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     profile_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -57,7 +57,7 @@ class JobWindow(IdMixin, TimestampMixin, Base):
     )
 
     job_id: Mapped[str] = mapped_column(
-        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
     )
     window_id: Mapped[str] = mapped_column(String(64), nullable=False)
     target_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
@@ -79,7 +79,7 @@ class InferenceRun(IdMixin, TimestampMixin, Base):
     )
     window_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     profile_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
-    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     remote_request_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     state: Mapped[InferenceRunState] = mapped_column(
         enum_type(InferenceRunState, name="inference_run_state"), nullable=False

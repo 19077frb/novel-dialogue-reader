@@ -22,7 +22,7 @@ class BookCharacter(IdMixin, TimestampMixin, VersionMixin, Base):
     )
 
     book_version_id: Mapped[str] = mapped_column(
-        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False
     )
     temp_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
     canonical_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -50,7 +50,7 @@ class ChapterCharacterRoster(IdMixin, TimestampMixin, VersionMixin, Base):
     )
 
     chapter_id: Mapped[str] = mapped_column(
-        ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False
     )
     book_version_id: Mapped[str] = mapped_column(
         ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True

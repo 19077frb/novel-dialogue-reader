@@ -21,8 +21,8 @@ class Book(IdMixin, TimestampMixin, VersionMixin, Base):
     )
     source_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     # 逻辑引用 book_versions.id。SQLite 下与 book_versions 互为引用，SQLAlchemy/Alembic
-    # 会报循环依赖且 SQLite 不支持 ADD CONSTRAINT，因此这里不建外键约束，只保留索引。
-    active_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # 会报循环依赖且 SQLite 不支持 ADD CONSTRAINT，因此这里不建外键约束。
+    active_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     import_status: Mapped[ImportStatus] = mapped_column(
         enum_type(ImportStatus, name="import_status"),
         nullable=False,
@@ -56,13 +56,13 @@ class BookVersion(IdMixin, TimestampMixin, Base):
     )
 
     book_id: Mapped[str] = mapped_column(
-        ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("books.id", ondelete="CASCADE"), nullable=False
     )
     source_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     encoding: Mapped[str] = mapped_column(String(64), nullable=False)
     parser_version: Mapped[str] = mapped_column(String(64), nullable=False)
     normalization_version: Mapped[str] = mapped_column(String(64), nullable=False)
-    canonical_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    canonical_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     canonical_length_cp: Mapped[int] = mapped_column(Integer, nullable=False)
     # 规范化全文的相对路径（位于数据目录内）；原始文件路径见 source_path。
     canonical_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
@@ -78,7 +78,7 @@ class Chapter(IdMixin, TimestampMixin, Base):
     )
 
     book_version_id: Mapped[str] = mapped_column(
-        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False
     )
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -99,7 +99,7 @@ class ContentNode(IdMixin, TimestampMixin, Base):
     )
 
     chapter_id: Mapped[str] = mapped_column(
-        ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False
     )
     node_id: Mapped[str] = mapped_column(String(128), nullable=False)
     node_type: Mapped[ContentNodeType] = mapped_column(
@@ -122,7 +122,7 @@ class Resource(IdMixin, TimestampMixin, Base):
     )
 
     book_version_id: Mapped[str] = mapped_column(
-        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=False
     )
     resource_id: Mapped[str] = mapped_column(String(128), nullable=False)
     media_type: Mapped[str] = mapped_column(String(128), nullable=False)

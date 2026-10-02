@@ -1,0 +1,37 @@
+name: Database regression checks
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - 'AGENTS.md'
+      - '.github/workflows/schema-indexes.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'AGENTS.md'
+      - '.github/workflows/schema-indexes.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  database:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install locked dependencies
+        run: uv sync --project backend --locked --group dev
+      - name: Check backend and database regressions
+        run: ./scripts/verify.ps1 -SkipFrontend

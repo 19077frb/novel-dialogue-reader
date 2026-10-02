@@ -30,10 +30,10 @@ class Annotation(IdMixin, TimestampMixin, VersionMixin, Base):
     )
 
     quote_id: Mapped[str] = mapped_column(
-        ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False
     )
     scene_id: Mapped[str | None] = mapped_column(
-        ForeignKey("scenes.id", ondelete="SET NULL"), nullable=True, index=True
+        ForeignKey("scenes.id", ondelete="SET NULL"), nullable=True
     )
     kind: Mapped[QuoteKind] = mapped_column(
         enum_type(QuoteKind, name="annotation_kind"), nullable=False
@@ -73,7 +73,7 @@ class AnnotationHistory(IdMixin, TimestampMixin, Base):
     )
 
     annotation_id: Mapped[str] = mapped_column(
-        ForeignKey("annotations.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("annotations.id", ondelete="CASCADE"), nullable=False
     )
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)

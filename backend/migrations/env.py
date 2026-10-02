@@ -3,6 +3,7 @@
 数据库 URL 优先取调用方注入的 ``config.attributes["sqlalchemy_url"]``（测试使用），
 否则取 ``alembic.ini`` 中的 ``sqlalchemy.url``，最后回落到应用配置推导出的 URL。
 元数据来自 ``ndr.storage.models``，保证模型与迁移不漂移。
+离线维护可注入 ``config.attributes["connection"]``，在已有独占连接上迁移。
 """
 
 from __future__ import annotations
@@ -49,19 +50,27 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    supplied = config.attributes.get("connection")
+    if supplied is not None:
+        configure_migrations(supplied)
+        return
     section = config.get_section(config.config_ini_section, {})
     section["sqlalchemy.url"] = database_url()
     connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,
-            render_as_batch=True,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+        configure_migrations(connection)
+
+
+def configure_migrations(connection) -> None:
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        render_as_batch=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
 
 
 if context.is_offline_mode():

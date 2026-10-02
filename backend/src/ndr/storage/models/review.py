@@ -33,10 +33,10 @@ class ReviewItem(IdMixin, TimestampMixin, VersionMixin, Base):
         enum_type(ReviewTargetType, name="review_target_type"), nullable=False
     )
     quote_id: Mapped[str | None] = mapped_column(
-        ForeignKey("quotes.id", ondelete="CASCADE"), nullable=True, index=True
+        ForeignKey("quotes.id", ondelete="CASCADE"), nullable=True
     )
     gap_id: Mapped[str | None] = mapped_column(
-        ForeignKey("gaps.id", ondelete="CASCADE"), nullable=True, index=True
+        ForeignKey("gaps.id", ondelete="CASCADE"), nullable=True
     )
     reason: Mapped[ReviewReason] = mapped_column(
         enum_type(ReviewReason, name="review_reason"), nullable=False
@@ -58,7 +58,6 @@ class Correction(IdMixin, TimestampMixin, Base):
     target_type: Mapped[CorrectionTargetType] = mapped_column(
         enum_type(CorrectionTargetType, name="correction_target_type"),
         nullable=False,
-        index=True,
     )
     target_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     action: Mapped[CorrectionAction] = mapped_column(
