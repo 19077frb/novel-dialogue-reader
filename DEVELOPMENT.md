@@ -2,6 +2,8 @@
 
 本文只记录维护项目所需的核心信息。安装、启动和使用方式见 [README.md](README.md)。
 
+Windows 免安装包由 GitHub Actions 手动构建和发布，流程与本地验收见 [发布指南](docs/RELEASING.md)。二进制仅发布为 Release 附件，不提交构建成品。
+
 ## 1. 开发原则
 
 - 原文不可变；模型结果、人工更正和导出快照单独保存。

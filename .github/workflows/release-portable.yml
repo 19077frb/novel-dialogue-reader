@@ -1,0 +1,136 @@
+name: Windows portable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version already recorded in the repository (e.g. 1.0.0, without v)'
+        required: true
+        type: string
+      publish:
+        description: 'Publish to Releases (disable to build and test only)'
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Validate release version and refuse existing releases
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+$') { throw 'Use x.y.z without a v prefix.' }
+          $metadata = Get-Content frontend/package.json -Raw | ConvertFrom-Json
+          if ($metadata.version -ne $env:RELEASE_VERSION) { throw 'Update repository version metadata first.' }
+          if ($env:PUBLISH -eq 'true') {
+            $releases = @(gh api "repos/$env:GH_REPO/releases" --paginate --jq '.[].tag_name')
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect existing Releases.' }
+            if ($releases -contains "v$env:RELEASE_VERSION") { throw 'Release already exists; do not overwrite it.' }
+          }
+      - name: Install locked dependencies
+        shell: pwsh
+        run: |
+          uv sync --project backend --locked --all-groups
+          if ($LASTEXITCODE -ne 0) { throw 'Backend dependency installation failed.' }
+          npm --prefix frontend ci
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency installation failed.' }
+      - name: Regression checks
+        shell: pwsh
+        run: ./scripts/verify.ps1
+      - name: Build portable ZIP and SHA256
+        id: package
+        shell: pwsh
+        run: ./scripts/build-portable.ps1
+      - name: Test the extracted EXE without development tools on PATH
+        shell: pwsh
+        env:
+          PORTABLE_ZIP: ${{ steps.package.outputs.zip }}
+        run: ./scripts/test-portable.ps1 -ZipPath $env:PORTABLE_ZIP
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-portable
+          path: release-assets
+      - name: Verify checksum and publish a new release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        working-directory: release-assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum --check *.sha256
+          tag="v$VERSION"
+          # Existing tags must point to the built commit; never silently publish old code.
+          tags=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag")
+          ref=$(printf '%s' "$tags" | jq -c --arg ref "refs/tags/$tag" '.[] | select(.ref == $ref)')
+          if [[ -n "$ref" ]]; then
+            kind=$(printf '%s' "$ref" | jq -r '.object.type')
+            sha=$(printf '%s' "$ref" | jq -r '.object.sha')
+            while [[ "$kind" == tag ]]; do
+              object=$(gh api "repos/$GH_REPO/git/tags/$sha")
+              kind=$(printf '%s' "$object" | jq -r '.object.type')
+              sha=$(printf '%s' "$object" | jq -r '.object.sha')
+            done
+            [[ "$kind" == commit && "$sha" == "$COMMIT" ]] || { echo 'Tag points to another commit. Use a new version.'; exit 1; }
+          fi
+          releases=$(gh api "repos/$GH_REPO/releases" --paginate --jq '.[].tag_name')
+          if printf '%s\n' "$releases" | grep -Fxq "$tag"; then
+            echo 'Release already exists; no files were overwritten.'
+            exit 1
+          fi
+          gh release create "$tag" --target "$COMMIT" --draft --title "$tag · Windows 免安装版" \
+            --notes $'Windows 10/11 x64：完整解压 ZIP，双击 NovelDialogueReader.exe。无需安装 Python、Node.js 或 npm。\n\n数据保存在 %LOCALAPPDATA%\\NovelDialogueReader\\data；升级前请停止旧服务并备份数据。\n\nSHA256 校验文件随包发布。当前程序未代码签名。详细说明见仓库 docs/RELEASING.md。'
+          gh release upload "$tag" *.zip *.sha256
+          gh release edit "$tag" --draft=false
+          gh release view "$tag" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"

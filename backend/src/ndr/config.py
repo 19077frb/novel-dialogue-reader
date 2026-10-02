@@ -6,25 +6,30 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))
 
 
 def default_data_dir() -> Path:
-    """仓库内 ``data/``，解析为绝对路径。"""
+    """源码使用仓库 data；免安装版使用稳定的用户数据目录。"""
 
+    if getattr(sys, "frozen", False):
+        user_root = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        return (user_root / "NovelDialogueReader" / "data").resolve()
     return (REPO_ROOT / "data").resolve()
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NDR_",
-        env_file=".env",
+        env_file=None if getattr(sys, "frozen", False) else ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )

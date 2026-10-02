@@ -1,6 +1,6 @@
 # 轻小说对话辅助阅读器
 
-当前版本：`0.2.0`。
+当前版本：`1.0.0`。
 
 本地运行的轻小说阅读与对白标注工具：用大语言模型识别说话人，以颜色和人物标签辅助阅读，并支持人工确认与修正。
 
@@ -15,6 +15,8 @@
 - 导出带标注的 EPUB / HTML；本工具导出的 EPUB 回导可恢复可见标注和已处理章节状态。
 
 ## 安装与启动
+
+Windows x64 免安装版发布后可从 [Releases](https://github.com/19077frb/novel-dialogue-reader/releases) 下载，完整解压后双击 `NovelDialogueReader.exe`，无需安装 Python 或 Node.js。数据与发布说明见 [免安装版与发布指南](docs/RELEASING.md)。以下为源码运行方式。
 
 环境：Windows 10/11、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Node.js 22 / npm 10。
 
