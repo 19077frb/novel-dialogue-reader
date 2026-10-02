@@ -105,6 +105,7 @@ def build_epub(
             )
         spine: list[str] = []
         nav_items: list[str] = []
+        nav_volume: str | None = None
         used_images: dict[str, str] = {}
 
         for index, chapter in enumerate(rendered.chapters, start=1):
@@ -132,7 +133,19 @@ def build_epub(
                 f'<item id="chapter-{index}" href="{href}" media-type="application/xhtml+xml"/>'
             )
             spine.append(f'<itemref idref="chapter-{index}"/>')
-            nav_items.append(f'<li><a href="{href}">{escape(chapter.title)}</a></li>')
+            volume, separator, leaf = chapter.title.partition(" · ")
+            volume = volume if separator else None
+            if volume != nav_volume:
+                if nav_volume is not None:
+                    nav_items.append("</ol></li>")
+                if volume is not None:
+                    nav_items.append(f"<li><span>{escape(volume)}</span><ol>")
+                nav_volume = volume
+            label = leaf if separator else chapter.title
+            nav_items.append(f'<li><a href="{href}">{escape(label)}</a></li>')
+
+        if nav_volume is not None:
+            nav_items.append("</ol></li>")
 
         for resource_id, filename in used_images.items():
             media_type = next(

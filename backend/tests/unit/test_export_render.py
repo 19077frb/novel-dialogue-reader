@@ -56,6 +56,29 @@ def test_style_uses_covers_three_presets() -> None:
     assert style_uses(ExportStylePreset.COLOR_ONLY) == (True, False)
 
 
+def test_export_nav_preserves_volume_groups_and_leaf_order() -> None:
+    from xml.etree import ElementTree as ET
+
+    from ndr.exports.epub import build_epub
+    from ndr.ingest.epub import _parse_toc_nav, parse_epub
+
+    titles = ["第一卷 · 彩页", "第一卷 · 目录", "第二卷 · 序章", "后记"]
+    chapters = [RenderedChapter(chapter_id=str(i), ordinal=i, title=title,
+                blocks=[RenderedBlock(node_type=ContentNodeType.PARAGRAPH,
+                                      runs=[RenderedRun(text=f"正文{i}。")])])
+                for i, title in enumerate(titles)]
+    raw = build_epub(_book(chapters=chapters), images={}, generated_at="test", identifier="test")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        nav = archive.read("OEBPS/nav.xhtml")
+    root = ET.fromstring(nav)
+    ns = {"h": "http://www.w3.org/1999/xhtml"}
+    groups = root.findall(".//h:nav/h:ol/h:li", ns)
+    assert [group.find("h:span", ns).text for group in groups[:2]] == ["第一卷", "第二卷"]
+    assert [item["title"] for item in _parse_toc_nav(nav)] == ["彩页", "目录", "序章", "后记"]
+    assert [item["volume"] for item in _parse_toc_nav(nav)] == ["第一卷", "第一卷", "第二卷", ""]
+    assert [chapter.title for chapter in parse_epub(raw).chapters] == titles
+
+
 def test_extended_colors_are_emitted_in_html_and_epub_without_modulo():
     from ndr.characters.colors import color_css
     from ndr.exports.epub import build_epub

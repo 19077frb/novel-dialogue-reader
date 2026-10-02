@@ -14,6 +14,31 @@ const CHAPTERS = [
 
 describe('ChapterNavigation', () => {
   beforeEach(() => { vi.restoreAllMocks(); localStorage.clear() })
+  it('卷目录可折叠，切换当前章自动展开所属卷，保留原章节选择', () => {
+    const chapters = CHAPTERS.map((chapter, index) => ({ ...chapter,
+      title: `${index < 2 ? '第一卷' : '第二卷'} · ${chapter.title}` }))
+    const select = vi.fn()
+    const { rerender } = render(<ChapterNavigation chapters={chapters} activeChapterId="c1" onSelect={select} />)
+    expect(screen.getByRole('button', { name: '收起第一卷' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: '展开第二卷' })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(screen.getByText('第二章'))
+    expect(select).toHaveBeenCalledWith(chapters[1])
+    fireEvent.click(screen.getByRole('button', { name: '收起第一卷' }))
+    expect(screen.getByRole('button', { name: '展开第一卷' })).toHaveAttribute('aria-expanded', 'false')
+    rerender(<ChapterNavigation chapters={chapters} activeChapterId="c3" onSelect={select} />)
+    expect(screen.getByRole('button', { name: '收起第二卷' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('第三章').closest('button')).toHaveAttribute('aria-current', 'true')
+  })
+  it('收起卷仍显示任务失败摘要，展开后保留章节旁重试操作', () => {
+    const chapters = [{ ...CHAPTERS[0], title: '第一卷 · 彩页' },
+      { ...CHAPTERS[1], title: '第二卷 · 第一章' }]
+    render(<ChapterNavigation bookId="b1" chapters={chapters} activeChapterId="c1" onSelect={vi.fn()}
+      processingStates={{ c2: { state: 'failed', completedWindows: 0, totalWindows: 1, error: '测试错误' } }} />)
+    expect(screen.getByText('1 个章节 · 0 章排队/处理中 · 1 章失败/已停止')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '重试第二卷 · 第一章的任务' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '展开第二卷' }))
+    expect(screen.getByRole('button', { name: '重试第二卷 · 第一章的任务' })).toBeEnabled()
+  })
   it('双击切换默认关闭，不写入章节状态', () => {
     const save = vi.fn()
     render(<ChapterNavigation chapters={CHAPTERS} activeChapterId="c1" onSelect={vi.fn()} onSetProcessingStatus={save} />)

@@ -366,6 +366,19 @@ def test_image_only_book_keeps_all_images_as_one_readable_chapter() -> None:
     assert len(parsed.nodes) == 5
 
 
+def test_toc_named_colour_pages_keep_boundary_before_contents() -> None:
+    spec = _illustration_spec()
+    spec.documents = [spec.documents[0], spec.documents[2], spec.documents[1]]
+    spec.nav = [("text/cover.xhtml", "封面"), ("text/inside.xhtml", "彩页"),
+                ("text/one.xhtml", "目录")]
+    parsed = _parse(spec)
+    assert [c.title for c in parsed.chapters] == ["封面", "彩页", "目录"]
+    images = [n for n in parsed.nodes if n.node_type is ContentNodeType.IMAGE]
+    assert [n.chapter_ordinal for n in images] == [0, 1]
+    assert parsed.chapters[1].start_cp == parsed.chapters[1].end_cp
+    assert parsed.canonical_text == "第一章正文。"
+
+
 def test_unlisted_image_caption_remains_in_its_toc_chapter() -> None:
     spec = _illustration_spec()
     spec.documents[2].body += "<p>原书的说明文字。</p>"

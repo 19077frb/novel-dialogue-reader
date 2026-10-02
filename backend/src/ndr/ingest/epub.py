@@ -39,7 +39,7 @@ from .document import (
 )
 from .layout import LayoutNormalizer
 
-EPUB_PARSER_VERSION = "epub-5"
+EPUB_PARSER_VERSION = "epub-6"
 EPUB_NORMALIZATION_VERSION = "canonical-epub-blocks-2"
 
 CONTAINER_PATH = "META-INF/container.xml"
@@ -987,11 +987,14 @@ def parse_epub(
     if not strip_ndr_auxiliary:
         if grouped_by_toc := _group_by_toc(spine_documents, toc_entries, warnings):
             spine_documents = grouped_by_toc
-        grouped = _group_illustration_pages(spine_documents, toc_titles)
-        merged_count = len(spine_documents) - len(grouped)
-        if merged_count:
-            warnings.append(f"已将 {merged_count} 个独立插画页并入相邻章节，图片顺序保持不变。")
-        spine_documents = grouped
+        else:
+            # TOC boundaries are authoritative, including named image-only leaves.
+            # Unlisted images have already joined their chapter in _group_by_toc.
+            grouped = _group_illustration_pages(spine_documents, toc_titles)
+            merged_count = len(spine_documents) - len(grouped)
+            if merged_count:
+                warnings.append(f"已将 {merged_count} 个独立插画页并入相邻章节，图片顺序保持不变。")
+            spine_documents = grouped
 
     # 先收集所有文本块，便于计算段间分隔符覆盖范围
     text_records: list[dict[str, Any]] = []
