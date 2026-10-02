@@ -9,13 +9,21 @@ from ndr.scenes.state import ConfirmedCharacter, SceneState
 from ndr.speakers.groups import SpeakerRegistry
 
 
-@pytest.mark.parametrize("role,name", [("女神", "阿库娅"), ("女骑士", "达克妮丝")])
+@pytest.mark.parametrize("role,name", [
+    ("女神", "阿库娅"), ("女骑士", "达克妮丝"), ("无头骑士", "贝尔迪亚"),
+    ("魔王军干部", "贝尔迪亚"), ("自称无头骑士", "贝尔迪亚"),
+])
 def test_role_name_can_upgrade_only_with_explicit_unlocked_name(role, name):
     assert revealed_name(role, name) == name
     assert revealed_name(role, name, locked=True) is None
     assert revealed_name(name, role) is None
     assert revealed_name(role, "水之女神") is None
     assert revealed_name(role, "S1") is None
+
+
+@pytest.mark.parametrize("name", ["贝尔迪亚", "骑士团长雷恩", "无头骑士贝尔迪亚"])
+def test_named_people_are_not_treated_as_roles(name):
+    assert revealed_name(name, "达克妮丝") is None
 
 
 @pytest.mark.parametrize("value,expected", [

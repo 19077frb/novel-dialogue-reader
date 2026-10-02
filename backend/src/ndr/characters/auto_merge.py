@@ -27,7 +27,7 @@ from ..storage.models import Book, BookCharacter, BookVersion, InferenceRun, Job
 from ..storage.transactions import transaction
 from .directory import _guard, _sync, directory, edit, merge
 from .merge_diagnostics import MergePlanError, character_refs, saved_model_groups
-from .names import GENERIC_NAMES, name_key, revealed_name, undecorated_name
+from .names import GENERIC_NAMES, is_role_name, name_key, revealed_name, undecorated_name
 
 MAX_OUTPUT_TOKENS = 4096
 MAX_INPUT_TOKENS = 64000
@@ -112,7 +112,8 @@ def _messages(entries):
                 "merged_description 与合并依据 reason 分开：前者是保存后供读者查看的人物说明，"
                 "不是合并操作的理由。已有人工说明也须保留其中有效信息，新说明由用户预览确认后才替换。"
                 "每个人物 ID 最多属于一组，不允许循环、链式合并或新增 ID。"
-                "同时检查每个人物的正式名称是否仍是女神、女骑士等身份代称，而别名或同组姓名已明确揭示真实姓名。"
+                "同时检查每个人物的正式名称是否仍是女神、女骑士、无头骑士、魔王军干部等身份代称，"
+                "而别名或同组姓名已明确揭示真实姓名。"
                 "此时preferred_name填写已有资料中的真实姓名，不得猜测或创造姓名；原代称保留为别名。"
                 "即使没有重复记录，也返回更名组：target_id为该人物、source_ids=[]，并给出依据和整理后的说明。"
                 "name_locked=true表示用户手动指定名称，不得建议更名；已有具体姓名也不得改为另一姓名或称呼。"
@@ -256,11 +257,21 @@ def _validate_plan(output: MergeOutput, entries):
             target = by_id.get(group.target_id, {})
             names = [value for key in ids if key in by_id
                      for value in [by_id[key]["name"], *by_id[key].get("aliases", [])]]
-            if (revealed_name(target.get("name"), group.preferred_name,
-                              locked=target.get("name_locked", False)) is None
-                    or group.preferred_name not in names):
+            current_name = sanitize(target.get("name", ""), limit=80)
+            proposed_name = sanitize(group.preferred_name, limit=80)
+            problem = None
+            if target.get("name_locked", False):
+                problem = f"名称“{current_name}”由用户指定，不能自动更名"
+            elif group.preferred_name not in names:
+                problem = f"建议姓名“{proposed_name}”不在本组已提供的姓名或别名中"
+            elif not is_role_name(target.get("name")):
+                problem = (f"当前名称“{current_name}”未被识别为身份代称，"
+                           "为保护已有姓名，不能自动更名")
+            elif revealed_name(target.get("name"), group.preferred_name) is None:
+                problem = f"建议姓名“{proposed_name}”仍是身份代称或不符合简短姓名要求"
+            if problem:
                 add("invalid_preferred_name",
-                    f"第{index}组的更名缺少已提供姓名依据，或名称由用户指定",
+                    f"第{index}组无法更名：{problem}",
                     index, "preferred_name", group.target_id)
         elif not group.source_ids:
             add("empty_group", f"第{index}组既没有并入人物，也没有更名建议", index, "source_ids")
