@@ -10,6 +10,54 @@ import { expect, test } from '@playwright/test'
  */
 const SECRET = 'sk-e2e-secret-value'
 
+test.describe('通用设置保存', () => {
+  test('阅读和思考配置编辑后保存才生效，重新加载后保留', async ({ page }) => {
+    await page.goto('/settings/general')
+    await page.getByLabel('正文字号', { exact: true }).fill('22')
+    await page.getByTestId('processing-thinking-mode').selectOption('enabled')
+    await page.getByTestId('processing-thinking-effort').selectOption('high')
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ndr:general-settings:v1') ?? '{}').fontSize)).not.toBe(22)
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ndr:processing-preferences:v1') ?? '{}').thinkingMode)).not.toBe('enabled')
+    await page.getByRole('button', { name: '保存阅读与处理设置', exact: true }).click()
+    await expect(page.getByText('阅读与处理设置已保存。', { exact: true })).toBeVisible()
+    await page.reload()
+    await expect(page.getByLabel('正文字号', { exact: true })).toHaveValue('22')
+    await expect(page.getByTestId('processing-thinking-mode')).toHaveValue('enabled')
+    await expect(page.getByTestId('processing-thinking-effort')).toHaveValue('high')
+  })
+
+  test('应用配置全中文可见，保存显示待重启；窄屏没有横向溢出', async ({ page }) => {
+    // Only GET reads the isolated server. PATCH is intercepted: never write the user's config.
+    let saved: Record<string, unknown> | undefined
+    await page.route('**/api/settings/application', async route => {
+      if (route.request().method() === 'PATCH') {
+        saved = route.request().postDataJSON()
+        const response = await route.fetch({ method: 'GET', postData: undefined })
+        const payload = await response.json()
+        payload.data.fields.find((field: { key: string }) => field.key === 'max_import_bytes').value = 104857600
+        payload.data.restart_required = ['max_import_bytes']
+        payload.data.revision = 'browser-test-only'
+        await route.fulfill({ json: payload })
+      } else {
+        await route.continue()
+      }
+    })
+    await page.goto('/settings/general')
+    const section = page.getByRole('region', { name: '应用配置', exact: true })
+    await expect(section.getByLabel('导入文件大小上限（字节）', { exact: true })).toBeVisible()
+    await section.getByLabel('导入文件大小上限（字节）', { exact: true }).fill('104857600')
+    expect(saved).toBeUndefined()
+    await section.getByRole('button', { name: '保存应用配置', exact: true }).click()
+    await expect(section.getByText(/已保存，重启后生效：导入文件大小上限/)).toBeVisible()
+    expect(saved).toMatchObject({ values: { max_import_bytes: 104857600 } })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(section.getByLabel('导入文件大小上限（字节）', { exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await expect(section.getByRole('button', { name: '保存并重启', exact: true })).toBeVisible()
+  })
+})
+
 test.describe('模型配置', () => {
   test('新建、编辑、清除密钥与删除配置', async ({ page }) => {
     const name = `E2E 网关 ${Date.now()}`

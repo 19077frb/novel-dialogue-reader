@@ -1458,6 +1458,18 @@ textarea:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.ndr-application-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+}
+
+.ndr-application-grid > div {
+  min-width: 0;
+}
+
+.ndr-application-settings .hint {
+  overflow-wrap: anywhere;
+}
+
 .ndr-batch-config-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }

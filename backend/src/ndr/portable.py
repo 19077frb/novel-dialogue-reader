@@ -76,6 +76,15 @@ def portable_settings(*, data_dir: Path | None, port: int | None) -> Settings:
     if port is not None:
         options["port"] = port
     settings = Settings(_env_file=None, **options)
+    settings._startup_locks = {
+        "host": "免安装版固定监听本机，避免书库和模型操作暴露到网络。",
+        "static_dir": "免安装版使用内置网页文件，不需要配置路径。",
+        "auto_migrate": "免安装版由启动器自动备份并升级数据库，不使用此开关。",
+    }
+    if data_dir is not None:
+        settings._startup_locks["data_dir"] = "由启动参数 --data-dir 指定；移除参数并重启后可修改。"
+    if port is not None:
+        settings._startup_locks["port"] = "由启动参数 --port 指定；移除参数并重启后可修改。"
     if not 1 <= settings.port <= 65535:
         raise ValueError("端口必须在 1 到 65535 之间。")
     return settings
@@ -136,7 +145,7 @@ def running_url(data_dir: Path) -> str | None:
     return None
 
 
-def launch(settings: Settings, *, no_browser: bool, run_seconds: float | None) -> None:
+def launch(settings: Settings, *, no_browser: bool, run_seconds: float | None) -> bool:
     import uvicorn
 
     from .storage.migrate import run_migrations
@@ -148,6 +157,8 @@ def launch(settings: Settings, *, no_browser: bool, run_seconds: float | None) -
     done = threading.Event()
     watcher: threading.Thread | None = None
     errors: list[Exception] = []
+    previous_environment: dict[str, str | None] = {}
+    restart = False
     try:
         # Reserve before any DB write; do not reuse/terminate strangers on this port.
         if os.name == "nt":
@@ -169,12 +180,22 @@ def launch(settings: Settings, *, no_browser: bool, run_seconds: float | None) -
             ("NDR_HOST", settings.host),
             ("NDR_PORT", str(settings.port)),
         ):
+            previous_environment[name] = os.environ.get(name)
+            if previous_environment[name] is None:
+                settings._internal_environment_keys.add(name.removeprefix("NDR_").lower())
             os.environ[name] = value
         get_settings.cache_clear()
         from .app import create_app
 
         app = create_app(settings)
         server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port))
+
+        def request_restart() -> None:
+            nonlocal restart
+            restart = True
+            server.should_exit = True
+
+        app.state.request_restart = request_restart
 
         def on_ready() -> None:
             try:
@@ -202,12 +223,19 @@ def launch(settings: Settings, *, no_browser: bool, run_seconds: float | None) -
             raise errors[0]
         if not server.started:
             raise RuntimeError("服务未能启动，请查看控制台的错误信息。")
+        return restart
     finally:
         done.set()
         if watcher is not None:
             watcher.join(timeout=2)
         listener.close()
         status_file.unlink(missing_ok=True)
+        for name, value in previous_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        get_settings.cache_clear()
 
 
 def main() -> int:
@@ -223,28 +251,39 @@ def main() -> int:
         if args.check_runtime:
             from .llm.credentials import SystemCredentialStore
 
-            print(json.dumps({
-                "version": __version__,
-                "system_credentials_available": SystemCredentialStore().available,
-                "frozen": bool(getattr(sys, "frozen", False)),
-            }))
+            print(
+                json.dumps(
+                    {
+                        "version": __version__,
+                        "system_credentials_available": SystemCredentialStore().available,
+                        "frozen": bool(getattr(sys, "frozen", False)),
+                    }
+                )
+            )
             return 0
         if args.run_seconds is not None and args.run_seconds <= 0:
             raise ValueError("限时运行秒数必须大于 0。")
-        settings = portable_settings(data_dir=args.data_dir, port=args.port)
-        try:
-            with LibraryLock(settings.data_dir):
-                launch(settings, no_browser=args.no_browser, run_seconds=args.run_seconds)
-        except LibraryInUseError:
-            for _ in range(20):
-                url = running_url(settings.data_dir)
-                if url:
-                    print(f"阅读器已经启动：{url}")
-                    if not args.no_browser:
-                        webbrowser.open(url)
-                    return 0
-                time.sleep(0.1)
-            raise
+        while True:
+            settings = portable_settings(data_dir=args.data_dir, port=args.port)
+            try:
+                with LibraryLock(settings.data_dir):
+                    restart = launch(
+                        settings,
+                        no_browser=args.no_browser,
+                        run_seconds=args.run_seconds,
+                    )
+            except LibraryInUseError:
+                for _ in range(20):
+                    url = running_url(settings.data_dir)
+                    if url:
+                        print(f"阅读器已经启动：{url}")
+                        if not args.no_browser:
+                            webbrowser.open(url)
+                        return 0
+                    time.sleep(0.1)
+                raise
+            if not restart:
+                break
         return 0
     except KeyboardInterrupt:
         return 0

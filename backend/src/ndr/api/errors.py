@@ -104,7 +104,24 @@ def install_request_id_middleware(app: FastAPI) -> None:
     async def _attach_request_id(request: Request, call_next):  # noqa: ANN001, ANN202
         request_id = uuid.uuid4().hex
         request.state.request_id = request_id
-        response = await call_next(request)
+        writing = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        if writing and getattr(request.app.state, "restart_pending", False):
+            return JSONResponse(
+                status_code=409,
+                content=error_payload(
+                    ErrorCode.RESOURCE_CONFLICT,
+                    "服务正在重启，请等待重新启动后再操作。",
+                    request_id=request_id,
+                ),
+                headers={"X-Request-ID": request_id},
+            )
+        if writing:
+            request.app.state.active_writes = getattr(request.app.state, "active_writes", 0) + 1
+        try:
+            response = await call_next(request)
+        finally:
+            if writing:
+                request.app.state.active_writes -= 1
         response.headers["X-Request-ID"] = request_id
         return response
 
@@ -154,9 +171,7 @@ def install_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(StarletteHTTPException)
-    async def _handle_http_exception(
-        request: Request, exc: StarletteHTTPException
-    ) -> JSONResponse:
+    async def _handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         rid = current_request_id(request)
         code = CODE_BY_STATUS.get(exc.status_code, ErrorCode.INTERNAL_ERROR)
         message = exc.detail if isinstance(exc.detail, str) else "请求失败"
@@ -172,7 +187,5 @@ def install_error_handlers(app: FastAPI) -> None:
         logger.exception("未处理异常 %s (request_id=%s)", type(exc).__name__, rid)
         return JSONResponse(
             status_code=500,
-            content=error_payload(
-                ErrorCode.INTERNAL_ERROR, "服务器内部错误", request_id=rid
-            ),
+            content=error_payload(ErrorCode.INTERNAL_ERROR, "服务器内部错误", request_id=rid),
         )

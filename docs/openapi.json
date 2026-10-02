@@ -30,6 +30,107 @@
         }
       }
     },
+    "/api/settings/application": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Get Application Settings",
+        "operationId": "get_application_settings_api_settings_application_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationSettingsEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Update Application Settings",
+        "operationId": "update_application_settings_api_settings_application_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplicationSettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/application/save-and-restart": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Save And Restart",
+        "operationId": "save_and_restart_api_settings_application_save_and_restart_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplicationSettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/books/{book_id}": {
       "delete": {
         "tags": [
@@ -4128,6 +4229,168 @@
         ],
         "title": "AnnotationsResponse"
       },
+      "ApplicationField": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "group": {
+            "type": "string",
+            "title": "Group"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "number"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Options",
+            "default": []
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "current_value": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "locked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "description",
+          "group",
+          "value",
+          "current_value"
+        ],
+        "title": "ApplicationField"
+      },
+      "ApplicationSettingsEnvelope": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ApplicationSettingsOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "ApplicationSettingsEnvelope"
+      },
+      "ApplicationSettingsOut": {
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationField"
+            },
+            "type": "array",
+            "title": "Fields"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "config_path": {
+            "type": "string",
+            "title": "Config Path"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required"
+          },
+          "restart_blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restart Blocked Reason",
+            "default": "当前启动方式需要手动重启服务。"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fields",
+          "revision",
+          "config_path",
+          "restart_required"
+        ],
+        "title": "ApplicationSettingsOut"
+      },
+      "ApplicationSettingsPatch": {
+        "properties": {
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Values"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "values",
+          "revision"
+        ],
+        "title": "ApplicationSettingsPatch"
+      },
       "AppliedCharacterMergeOut": {
         "properties": {
           "target_character_id": {
@@ -8173,6 +8436,7 @@
         ],
         "title": "JobWindowOut"
       },
+      "JsonValue": {},
       "LocateOut": {
         "properties": {
           "book_id": {

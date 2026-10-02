@@ -18,6 +18,8 @@
 
 Windows x64 免安装版发布后可从 [Releases](https://github.com/19077frb/novel-dialogue-reader/releases) 下载，完整解压后双击 `NovelDialogueReader.exe`，无需安装 Python 或 Node.js。数据与发布说明见 [免安装版与发布指南](docs/RELEASING.md)。以下为源码运行方式。
 
+应用配置可在“通用设置”中修改并保存，无需创建 `.env`；免安装版支持保存后直接重启。
+
 环境：Windows 10/11、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Node.js 22 / npm 10。
 
 克隆仓库后，在项目根目录运行：

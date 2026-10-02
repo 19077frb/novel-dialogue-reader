@@ -11,7 +11,7 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, PrivateAttr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))
@@ -33,6 +33,28 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    _startup_locks: dict[str, str] = PrivateAttr(default_factory=dict)
+    _internal_environment_keys: set[str] = PrivateAttr(default_factory=set)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        from ndr.application_settings import read_saved_settings
+
+        return (
+            init_settings,
+            env_settings,
+            read_saved_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     environment: str = "local"
 

@@ -24,6 +24,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/application": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Application Settings */
+        get: operations["get_application_settings_api_settings_application_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Application Settings */
+        patch: operations["update_application_settings_api_settings_application_patch"];
+        trace?: never;
+    };
+    "/api/settings/application/save-and-restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save And Restart */
+        post: operations["save_and_restart_api_settings_application_save_and_restart_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}": {
         parameters: {
             query?: never;
@@ -1206,6 +1241,64 @@ export interface components {
             scenes?: {
                 [key: string]: unknown;
             }[];
+        };
+        /** ApplicationField */
+        ApplicationField: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+            /** Group */
+            group: string;
+            /**
+             * Kind
+             * @default number
+             */
+            kind: string;
+            /** Minimum */
+            minimum?: number | null;
+            /** Maximum */
+            maximum?: number | null;
+            /**
+             * Options
+             * @default []
+             */
+            options: string[];
+            value: components["schemas"]["JsonValue"];
+            current_value: components["schemas"]["JsonValue"];
+            /** Locked Reason */
+            locked_reason?: string | null;
+        };
+        /** ApplicationSettingsEnvelope */
+        ApplicationSettingsEnvelope: {
+            data: components["schemas"]["ApplicationSettingsOut"];
+        };
+        /** ApplicationSettingsOut */
+        ApplicationSettingsOut: {
+            /** Fields */
+            fields: components["schemas"]["ApplicationField"][];
+            /** Revision */
+            revision: string;
+            /** Config Path */
+            config_path: string;
+            /** Restart Required */
+            restart_required: string[];
+            /**
+             * Restart Blocked Reason
+             * @default 当前启动方式需要手动重启服务。
+             */
+            restart_blocked_reason: string | null;
+        };
+        /** ApplicationSettingsPatch */
+        ApplicationSettingsPatch: {
+            /** Values */
+            values: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Revision */
+            revision: string;
         };
         /** AppliedCharacterMergeOut */
         AppliedCharacterMergeOut: {
@@ -2836,6 +2929,7 @@ export interface components {
              */
             attempts: number;
         };
+        JsonValue: unknown;
         /** LocateOut */
         LocateOut: {
             /** Book Id */
@@ -3758,6 +3852,92 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    get_application_settings_api_settings_application_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationSettingsEnvelope"];
+                };
+            };
+        };
+    };
+    update_application_settings_api_settings_application_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationSettingsPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationSettingsEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_and_restart_api_settings_application_save_and_restart_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationSettingsPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationSettingsEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
