@@ -5059,6 +5059,30 @@
             "type": "integer",
             "title": "Version",
             "default": 1
+          },
+          "chapter_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Count"
+          },
+          "dialogue_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dialogue Count"
           }
         },
         "additionalProperties": false,

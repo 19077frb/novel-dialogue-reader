@@ -51,6 +51,21 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('按目录频次顺序展示人物和章节对白统计，搜索保持顺序', async () => {
+    vi.mocked(api.fetchCharacterDirectory).mockResolvedValue([
+      { ...entries[1], chapter_count: 8, dialogue_count: 90 },
+      { ...entries[0], chapter_count: 3, dialogue_count: 20 },
+      { ...entries[2], chapter_count: 1, dialogue_count: 2 },
+    ])
+    renderPage()
+    await screen.findByText('出现 8 章 · 90 句对白')
+    expect(screen.getAllByRole('article').map((node) => node.getAttribute('aria-label')))
+      .toEqual(['人物 浅村悠太', '人物 悠太', '人物 女店员'])
+    await userEvent.type(screen.getByLabelText('搜索人物'), '悠太')
+    expect(screen.getAllByRole('article').map((node) => node.getAttribute('aria-label')))
+      .toEqual(['人物 浅村悠太', '人物 悠太'])
+    expect(screen.getByText('出现 3 章 · 20 句对白')).toBeInTheDocument()
+  })
   it('区分批量自动确认、人工确认、旧记录与导入人物，不靠旧布尔值声称人工确认', async () => {
     const records: CharacterDirectoryOut[] = [
       { ...entries[0], character_id: 'auto', name: '自动人物', confirmation_source: 'automatic', user_confirmed: false },

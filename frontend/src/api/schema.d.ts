@@ -1592,6 +1592,10 @@ export interface components {
              * @default 1
              */
             version: number;
+            /** Chapter Count */
+            chapter_count?: number | null;
+            /** Dialogue Count */
+            dialogue_count?: number | null;
         };
         /** CharacterEditIn */
         CharacterEditIn: {

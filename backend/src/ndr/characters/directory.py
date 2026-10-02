@@ -4,17 +4,26 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
 from ..domain.characters import CharacterDirectoryOut, CharacterEditIn, CharacterMergeIn
-from ..domain.enums import CharacterSource, ErrorCode, JobState
+from ..domain.enums import (
+    AnnotationStatus,
+    CharacterRosterStatus,
+    CharacterSource,
+    ErrorCode,
+    JobState,
+    QuoteKind,
+)
 from ..storage.models import (
+    Annotation,
     BookCharacter,
     BookVersion,
     ChapterCharacterRoster,
     Job,
+    Quote,
     Scene,
     SpeakerGroup,
 )
@@ -35,7 +44,46 @@ def _groups(session: Session, version: BookVersion, *filters) -> list[SpeakerGro
     )
 
 
-def directory(session: Session, version: BookVersion) -> list[CharacterDirectoryOut]:
+def _appearance_statistics(session: Session, version: BookVersion) -> dict[str, tuple[int, int]]:
+    """Read current assignments in one grouped query, not one query per character."""
+    chapters: dict[str, set[str]] = {}
+    dialogues: dict[str, int] = {}
+    key = func.coalesce(SpeakerGroup.character_id, literal("speaker:") + SpeakerGroup.id)
+    for entry_id, chapter_id, count in session.execute(
+        select(key, Quote.chapter_id, func.count(func.distinct(Annotation.quote_id)))
+        .select_from(Quote)
+        .join(Annotation, Annotation.quote_id == Quote.id)
+        .join(SpeakerGroup, SpeakerGroup.id == Annotation.speaker_id)
+        .join(Scene, Scene.id == SpeakerGroup.scene_id)
+        .where(
+            Quote.book_version_id == version.id, Scene.book_version_id == version.id,
+            Annotation.kind == QuoteKind.SPEECH, Annotation.stale.is_(False),
+            Annotation.status.in_((
+                AnnotationStatus.ACCEPTED, AnnotationStatus.PROVISIONAL,
+                AnnotationStatus.USER_CONFIRMED,
+            )),
+        )
+        .group_by(key, Quote.chapter_id)
+    ):
+        dialogues[entry_id] = dialogues.get(entry_id, 0) + count
+        if chapter_id:
+            chapters.setdefault(entry_id, set()).add(chapter_id)
+    for chapter_id, ids_json in session.execute(
+        select(
+            ChapterCharacterRoster.chapter_id, ChapterCharacterRoster.confirmed_character_ids_json,
+        )
+        .where(ChapterCharacterRoster.book_version_id == version.id,
+               ChapterCharacterRoster.status == CharacterRosterStatus.CONFIRMED)
+    ):
+        for character_id in _json_list(ids_json):
+            chapters.setdefault(character_id, set()).add(chapter_id)
+    return {key: (len(chapters.get(key, set())), dialogues.get(key, 0))
+            for key in chapters.keys() | dialogues.keys()}
+
+
+def directory(
+    session: Session, version: BookVersion, *, include_statistics: bool = True,
+) -> list[CharacterDirectoryOut]:
     entries = [
         CharacterDirectoryOut(**_character_out(row).model_dump(), version=row.version)
         for row in list_book_characters(session, version)
@@ -51,6 +99,14 @@ def directory(session: Session, version: BookVersion) -> list[CharacterDirectory
                     description=group.description or "",
                 )
             )
+    if include_statistics:
+        statistics = _appearance_statistics(session, version)
+        for entry in entries:
+            entry.chapter_count, entry.dialogue_count = statistics.get(entry.character_id, (0, 0))
+        entries.sort(key=lambda row: (
+            -(row.chapter_count or 0), -(row.dialogue_count or 0),
+            row.name.casefold(), row.character_id,
+        ))
     return entries
 
 

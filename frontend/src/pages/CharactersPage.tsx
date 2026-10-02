@@ -40,6 +40,9 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled }: {
   const error = save.error ?? merge.error
   return <article className="ndr-character-card" aria-label={`人物 ${item.name}`}>
     <h3>{item.name}</h3>
+    {item.chapter_count != null && item.dialogue_count != null && <p className="hint">
+      出现 {item.chapter_count} 章 · {item.dialogue_count} 句对白
+    </p>}
     <p className="hint">{item.kind === 'speaker' ? '尚未关联全书人物；保存后纳入全书人物表。' :
       ({ manual: '已人工确认', automatic: '批量自动确认（未经人工复核）',
         legacy: '已确认（旧记录未区分来源）', imported: '导入恢复的人物',
@@ -126,6 +129,7 @@ export default function CharactersPage() {
         <button type="button" disabled={directory.isFetching} onClick={() => void directory.refetch()}>重新读取</button>
       </div>
       {directory.isPending && <p>正在读取全书人物…</p>}
+      <p className="hint">按出现章节数从多到少排列，章节数相同时按对白数排列。仅统计已识别章节和当前有效的对白归属，未处理章节不计入。</p>
       {directory.isError && <p role="alert" className="status-error">人物读取失败：{directory.error.message}</p>}
       {directory.data && <p>共 {entries.length} 个人物{term ? `，匹配 ${filtered.length} 个` : ''}</p>}
       {!directory.isPending && !directory.isError && !entries.length && <p>尚未识别人物，请先在预览与处理中分析人物。</p>}

@@ -24,6 +24,8 @@ class BookCharacterOut(ApiModel):
 class CharacterDirectoryOut(BookCharacterOut):
     kind: str = "book"
     version: int = 1
+    chapter_count: int | None = Field(default=None, ge=0)
+    dialogue_count: int | None = Field(default=None, ge=0)
 
 
 class CharacterEditIn(ApiModel):

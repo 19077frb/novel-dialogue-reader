@@ -4,6 +4,8 @@
 
 ## 响应与错误
 
+人物目录 GET 返回 `chapter_count` 和 `dialogue_count`，按章节数降序、对白数降序、姓名及 ID 排序。章节数为本版本已确认名单与当前有效发言章节的去重并集；对白数为非 stale 的 SPEECH 标注（ACCEPTED、PROVISIONAL、USER_CONFIRMED），跨场景按全书人物 ID 汇总，未关联分组单独统计。不扫描任务历史、不发起模型请求。编辑/合并响应及合并建议中的这两个字段允许为空（未计算），不能当作零；自动合并身份快照排除统计字段，避免对白数量变化误判人物资料已修改。
+
 本地窗口估算的 `windows` 含 `processing_status`（`completed` / `failed` / `unprocessed`）、`processed_target_count` 和 `last_error`。完成状态由当前已保存标注的覆盖率决定，不依赖浏览器任务列表；未完成窗口的失败状态来自该书籍版本中对应窗口的最近一次任务。查询不调用模型、不写数据库。补做窗口后，整章覆盖完整才写入 `dialogue_processed`；该状态优先于已结束批量任务的旧失败状态，正在重做时仍显示实时进度。
 
 成功响应使用统一数据包：

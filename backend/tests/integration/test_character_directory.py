@@ -4,7 +4,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from ndr.domain.enums import (
     AnnotationSource,
@@ -22,6 +22,8 @@ from ndr.scenes.state import SceneState, SpeakerSlot
 from ndr.storage.models import (
     Annotation,
     BookCharacter,
+    BookVersion,
+    Chapter,
     ChapterCharacterRoster,
     Job,
     Quote,
@@ -113,6 +115,86 @@ def populated(migrated_client: TestClient):
             "roster": roster.id,
         }
     return ids
+
+
+def test_directory_counts_current_appearances_and_sorts_main_characters(migrated_client, populated):
+    from ndr.characters.auto_merge import _snapshot
+    from ndr.characters.directory import directory
+
+    client, ids = migrated_client, populated
+    base = f"/api/books/{ids['book']}/character-directory"
+    initial = client.get(base).json()["data"]
+    assert [row["character_id"] for row in initial] == [
+        ids["source"], ids["target"], f"speaker:{ids['unlinked']}",
+    ]
+    assert (initial[0]["chapter_count"], initial[0]["dialogue_count"]) == (1, 1)
+    assert (initial[1]["chapter_count"], initial[1]["dialogue_count"]) == (1, 0)
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, ids["version"])
+        before = _snapshot(session, version)
+        roster = session.get(ChapterCharacterRoster, ids["roster"])
+        chapter = Chapter(book_version_id=version.id, ordinal=999, start_cp=100, end_cp=200)
+        session.add(chapter)
+        session.flush()
+        session.add(ChapterCharacterRoster(
+            book_version_id=version.id, chapter_id=chapter.id,
+            status=CharacterRosterStatus.CONFIRMED,
+            confirmed_character_ids_json=json.dumps([ids["target"], ids["target"]]),
+        ))
+        group = session.get(SpeakerGroup, ids["linked"])
+        second = SpeakerGroup(scene_id=group.scene_id, display_label="S3",
+                              character_id=ids["source"], canonical_name="浅村悠太")
+        session.add(second)
+        session.flush()
+        for index, (status, stale, kind, speaker) in enumerate([
+            (AnnotationStatus.ACCEPTED, False, QuoteKind.SPEECH, second.id),
+            (AnnotationStatus.PROVISIONAL, False, QuoteKind.SPEECH, second.id),
+            (AnnotationStatus.ACCEPTED, True, QuoteKind.SPEECH, second.id),
+            (AnnotationStatus.UNKNOWN, False, QuoteKind.SPEECH, second.id),
+            (AnnotationStatus.ACCEPTED, False, QuoteKind.THOUGHT, second.id),
+            (AnnotationStatus.ACCEPTED, False, QuoteKind.SPEECH, None),
+            (AnnotationStatus.ACCEPTED, False, QuoteKind.SPEECH, ids["unlinked"]),
+        ]):
+            quote = Quote(book_version_id=version.id, chapter_id=roster.chapter_id,
+                          start_cp=300 + index * 10, end_cp=305 + index * 10,
+                          delimiter="「」", scanner_version="statistics-test")
+            session.add(quote)
+            session.flush()
+            session.add(Annotation(quote_id=quote.id, scene_id=group.scene_id,
+                                   speaker_id=speaker, kind=kind, source=AnnotationSource.MODEL,
+                                   status=status, stale=stale))
+        session.flush()
+        assert _snapshot(session, version) == before  # Counts are not identity edits.
+        statements = []
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+
+        event.listen(session.bind, "before_cursor_execute", capture)
+        try:
+            result = directory(session, version)
+        finally:
+            event.remove(session.bind, "before_cursor_execute", capture)
+        assert len(statements) == 4  # Constant query budget, no per-person queries.
+        assert [row.character_id for row in result] == [
+            ids["target"], ids["source"], f"speaker:{ids['unlinked']}",
+        ]
+        assert [(row.chapter_count, row.dialogue_count) for row in result] == [
+            (2, 0), (1, 3), (1, 1),
+        ]
+
+
+def test_directory_merge_deduplicates_shared_chapters(migrated_client, populated):
+    client, ids = migrated_client, populated
+    base = f"/api/books/{ids['book']}/character-directory"
+    response = client.post(f"{base}/{ids['source']}/merge", json={
+        "target_character_id": ids["target"], "expected_version": 1,
+        "expected_target_version": 1,
+    })
+    assert response.status_code == 200, response.text
+    listed = client.get(base).json()["data"]
+    assert listed[0]["character_id"] == ids["target"]
+    assert (listed[0]["chapter_count"], listed[0]["dialogue_count"]) == (1, 1)
 
 
 def test_edit_directory_promotes_speaker_and_updates_existing_groups(migrated_client, populated):
