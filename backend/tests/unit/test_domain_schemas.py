@@ -61,6 +61,7 @@ def test_enum_values_match_contract() -> None:
         "IMPORT",
         "INFERENCE",
         "CHARACTER_ROSTER",
+        "CHARACTER_MERGE",
         "RECHECK",
         "RECOMPUTE",
         "EXPORT",

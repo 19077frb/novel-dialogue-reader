@@ -6,6 +6,7 @@ import { editBookCharacter, fetchCharacterDirectory, mergeBookCharacter } from '
 import { fetchBook, queryKeys } from '../api/books'
 import type { CharacterDirectoryOut } from '../api/types'
 import { useBatchProgress } from '../components/BatchProcessor'
+import { CharacterAutoMerge } from '../components/CharacterAutoMerge'
 
 function CharacterEditor({ item, targets, bookId, onSaved, disabled }: {
   item: CharacterDirectoryOut
@@ -72,6 +73,7 @@ export default function CharactersPage() {
   const [search, setSearch] = useState('')
   const [message, setMessage] = useState('')
   const batchProgress = useBatchProgress(bookId)
+  const [autoMergeBusy, setAutoMergeBusy] = useState(false)
   const book = useQuery({
     queryKey: queryKeys.book(bookId),
     queryFn: ({ signal }) => fetchBook(bookId, signal),
@@ -90,6 +92,7 @@ export default function CharactersPage() {
       queryClient.invalidateQueries({ queryKey: ['annotations', bookId] }),
       queryClient.invalidateQueries({ queryKey: ['review-items', bookId] }),
       queryClient.invalidateQueries({ queryKey: ['review-item'] }),
+      queryClient.invalidateQueries({ queryKey: ['usage', bookId] }),
     ])
     setMessage('人物修改已保存。')
   }
@@ -110,6 +113,8 @@ export default function CharactersPage() {
         <Link to="/library">返回书架</Link>
       </nav>
     </header>
+    <CharacterAutoMerge key={bookId} bookId={bookId} versionId={book.data?.active_version_id} count={entries.length}
+      disabled={batchProgress.running} onBusyChange={setAutoMergeBusy} onSaved={saved} />
     <section className="card">
       <p className="hint">汇总当前书籍版本已识别的人物（包括未发言人物），可能包含后文剧透。修改会影响已有对白、后续人物识别和导出，不改原文或章节完成状态。请先停止本书处理任务再编辑。</p>
       {batchProgress.running && <p role="status">批量处理正在运行，停止后可修改人物。</p>}
@@ -124,7 +129,7 @@ export default function CharactersPage() {
       {!directory.isPending && !directory.isError && !entries.length && <p>尚未识别人物，请先在预览与处理中分析人物。</p>}
       <div className="ndr-character-list">
         {filtered.map((item) => <CharacterEditor key={`${item.character_id}:${item.version}`} item={item} bookId={bookId}
-          disabled={batchProgress.running}
+          disabled={batchProgress.running || autoMergeBusy}
           targets={entries.filter((row) => row.kind !== 'speaker' && row.character_id !== item.character_id)} onSaved={saved} />)}
       </div>
     </section>

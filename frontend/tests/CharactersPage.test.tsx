@@ -4,13 +4,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '../src/api/characters'
 import * as booksApi from '../src/api/books'
+import * as profilesApi from '../src/api/profiles'
+import { updateProcessingPreferences } from '../src/processing/preferences'
 import type { CharacterDirectoryOut } from '../src/api/types'
 import CharactersPage from '../src/pages/CharactersPage'
 import { renderRoute } from './helpers'
 
 vi.mock('../src/api/characters', () => ({
   fetchCharacterDirectory: vi.fn(), editBookCharacter: vi.fn(), mergeBookCharacter: vi.fn(),
+  startCharacterAutoMerge: vi.fn(), fetchCharacterAutoMergeResult: vi.fn(),
 }))
+vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['profiles'] } }))
 vi.mock('../src/api/books', () => ({
   fetchBook: vi.fn(), queryKeys: { book: (id: string) => ['book', id] },
 }))
@@ -23,7 +27,17 @@ const entries: CharacterDirectoryOut[] = [
 
 beforeEach(() => {
   vi.resetAllMocks()
-  vi.mocked(booksApi.fetchBook).mockResolvedValue({ id: 'b1', title: '测试小说' } as never)
+  sessionStorage.clear()
+  updateProcessingPreferences({ profileId: 'p1', tokenLimit: null, thinkingMode: 'default', thinkingEffort: 'default' })
+  vi.mocked(booksApi.fetchBook).mockResolvedValue({ id: 'b1', title: '测试小说', active_version_id: 'v1' } as never)
+  vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([{ id: 'p1', name: '合并模型', protocol: 'fake', model: 'test', params: {} }] as never)
+  vi.mocked(api.startCharacterAutoMerge).mockResolvedValue({ id: 'merge-1', state: 'QUEUED' } as never)
+  vi.mocked(api.fetchCharacterAutoMergeResult).mockResolvedValue({
+    job_id: 'merge-1', state: 'COMPLETED', merged_count: 1, skipped_groups: 0,
+    merges: [{ target_character_id: 'u2', target_name: '浅村悠太', source_names: ['悠太'], reason: '别名和说明指向同一人' }],
+    usage: { total_tokens: 40 }, unknown_usage_runs: 0, last_error: null,
+    created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:01Z',
+  })
   vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(entries)
   vi.mocked(api.editBookCharacter).mockResolvedValue(entries[0])
   vi.mocked(api.mergeBookCharacter).mockResolvedValue(entries[0])
@@ -34,6 +48,50 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('自动合并默认关闭，确认后才派发模型任务并展示结果与用量', async () => {
+    renderPage()
+    await screen.findByText('共 3 个人物')
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByLabelText('自动合并人物（由模型判断并执行）'))
+    const start = screen.getByRole('button', { name: '开始自动合并' })
+    expect(start).toBeDisabled()
+    await userEvent.selectOptions(await screen.findByTestId('character-merge-profile'), 'p1')
+    await userEvent.click(screen.getByLabelText('我同意按模型判断直接合并，已知此操作无法自动撤销'))
+    await userEvent.click(start)
+    expect(api.startCharacterAutoMerge).toHaveBeenCalledWith('b1', expect.objectContaining({
+      book_version_id: 'v1', profile_id: 'p1', max_total_tokens: null, run_now: true,
+    }))
+    await screen.findByText('合并了 1 个重复人物。')
+    expect(screen.getByText(/悠太 → 浅村悠太/)).toHaveTextContent('别名和说明指向同一人')
+    expect(screen.getByText('已知消耗 40 Tokens')).toBeInTheDocument()
+    expect(api.fetchCharacterDirectory).toHaveBeenCalledTimes(2)
+  })
+
+  it('自动合并进行中禁止新任务与人物编辑，重新进入页面继续跟踪任务', async () => {
+    sessionStorage.setItem('ndr-character-auto-merge:b1', 'merge-1')
+    vi.mocked(api.fetchCharacterAutoMergeResult).mockResolvedValue({
+      job_id: 'merge-1', state: 'RUNNING', usage: {}, merged_count: 0, unknown_usage_runs: 0,
+      created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:01Z',
+    } as never)
+    renderPage()
+    await screen.findByText('自动合并：处理中')
+    expect(screen.getByRole('button', { name: '开始自动合并' })).toBeDisabled()
+    expect(screen.getAllByRole('button', { name: '保存人物资料' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true)
+    expect(screen.getByRole('button', { name: '停止自动合并' })).toBeEnabled()
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+  })
+
+  it('自动合并失败展示具体错误，不清空原有人物资料', async () => {
+    renderPage()
+    await screen.findByText('共 3 个人物')
+    await userEvent.click(screen.getByLabelText('自动合并人物（由模型判断并执行）'))
+    vi.mocked(api.startCharacterAutoMerge).mockRejectedValue(new Error('本书有处理任务正在运行'))
+    await screen.findByRole('option', { name: /合并模型/ })
+    await userEvent.click(screen.getByLabelText('我同意按模型判断直接合并，已知此操作无法自动撤销'))
+    await userEvent.click(screen.getByRole('button', { name: '开始自动合并' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('本书有处理任务正在运行')
+    expect(screen.getByRole('article', { name: '人物 浅村悠太' })).toBeInTheDocument()
+  })
   it('列出全书与未关联人物，保留阅读章节并可按别名搜索', async () => {
     renderPage()
     await screen.findByText('共 3 个人物')

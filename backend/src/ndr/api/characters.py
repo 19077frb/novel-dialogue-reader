@@ -8,6 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlalchemy.orm import Session
 
+from ..characters.auto_merge import auto_merge_result, create_auto_merge_job
 from ..characters.directory import directory, edit, merge
 from ..characters.service import (
     confirm_roster,
@@ -18,6 +19,8 @@ from ..characters.service import (
 from ..domain.characters import (
     BookCharacterOut,
     ChapterRosterOut,
+    CharacterAutoMergeIn,
+    CharacterAutoMergeResultOut,
     CharacterDirectoryOut,
     CharacterEditIn,
     CharacterMergeIn,
@@ -25,15 +28,70 @@ from ..domain.characters import (
     RosterConfirmIn,
 )
 from ..domain.common import DataEnvelope
+from ..domain.enums import JobKind
 from ..domain.jobs import JobDetailOut
 from ..jobs.scheduler import run_job
 from ..jobs.service import job_detail
-from ..storage.models import Book, BookVersion, Chapter, ModelProfile
+from ..storage.models import Book, BookVersion, Chapter, Job, ModelProfile
 from ..storage.transactions import transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
 
 router = APIRouter(tags=["characters"])
+
+
+@router.post(
+    "/books/{book_id}/character-directory/auto-merge",
+    status_code=202,
+    response_model=DataEnvelope[JobDetailOut],
+    summary="模型判断并自动合并重复人物",
+)
+def auto_merge_characters_route(
+    request: Request,
+    book_id: str,
+    payload: CharacterAutoMergeIn,
+    background: BackgroundTasks,
+) -> DataEnvelope[JobDetailOut]:
+    factory = request.app.state.session_factory
+    with transaction(factory) as session:
+        book = _book_or_404(session, book_id)
+        version = _version_or_400(session, book, payload.book_version_id)
+        if book.active_version_id != version.id:
+            raise ApiError.validation("只能自动合并当前书籍版本的人物")
+        profile = session.get(ModelProfile, payload.profile_id)
+        if profile is None:
+            raise ApiError.not_found("模型配置不存在")
+        job, created = create_auto_merge_job(session, book, version, profile, payload)
+        detail = job_detail(session, job)
+    if created and payload.run_now:
+        background.add_task(
+            run_job,
+            factory,
+            request.app.state.settings,
+            job_id=job.id,
+            credentials=request.app.state.credentials,
+        )
+    return DataEnvelope(data=detail, request_id=current_request_id(request))
+
+
+@router.get(
+    "/books/{book_id}/character-directory/auto-merge/{job_id}",
+    response_model=DataEnvelope[CharacterAutoMergeResultOut],
+    summary="自动合并进度和结果",
+)
+def auto_merge_result_route(
+    request: Request,
+    book_id: str,
+    job_id: str,
+    session: Session = Depends(get_session),
+) -> DataEnvelope[CharacterAutoMergeResultOut]:
+    _book_or_404(session, book_id)
+    job = session.get(Job, job_id)
+    if not job or job.book_id != book_id or job.kind is not JobKind.CHARACTER_MERGE:
+        raise ApiError.not_found("自动合并任务不存在")
+    return DataEnvelope(
+        data=auto_merge_result(session, job), request_id=current_request_id(request)
+    )
 
 
 @router.get(

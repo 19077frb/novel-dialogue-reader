@@ -8,6 +8,8 @@ import type {
   CharacterDirectoryOut,
   CharacterEditIn,
   CharacterMergeIn,
+  CharacterAutoMergeIn,
+  CharacterAutoMergeResultOut,
   ChapterRosterOut,
   JobDetailOut,
   RosterConfirmCandidateIn,
@@ -122,4 +124,12 @@ export function confirmCharacterRoster(
       body: payload,
     },
   )
+}
+
+export function startCharacterAutoMerge(bookId: string, input: CharacterAutoMergeIn): Promise<JobDetailOut> {
+  return apiData<JobDetailOut>(`/api/books/${bookId}/character-directory/auto-merge`, { method: 'POST', body: input })
+}
+
+export function fetchCharacterAutoMergeResult(bookId: string, jobId: string, signal?: AbortSignal): Promise<CharacterAutoMergeResultOut> {
+  return apiData<CharacterAutoMergeResultOut>(`/api/books/${bookId}/character-directory/auto-merge/${jobId}`, { signal })
 }

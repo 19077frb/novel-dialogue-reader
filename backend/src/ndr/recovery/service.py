@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..domain.enums import CredentialMode, InferenceRunState, JobState
+from ..domain.enums import CredentialMode, InferenceRunState, JobKind, JobState
 from ..domain.recovery import JobRecoveryOut, RecoveryActionOut
 from ..jobs.scheduler import reconcile_stale_runs
 from ..jobs.service import job_windows
@@ -203,7 +203,7 @@ def job_recovery(
     requires_credential = mode != CredentialMode.NONE.value and has_credential is False
     progress = progress_of(job)
     retry_in = progress.get("retry_in_seconds")
-    return JobRecoveryOut(
+    result = JobRecoveryOut(
         job_id=job.id,
         state=job.state,
         summary=recovery_summary(
@@ -225,6 +225,14 @@ def job_recovery(
         last_error=job.last_error,
         updated_at=job.updated_at.isoformat(),
     )
+    if job.kind is JobKind.CHARACTER_MERGE and job.state not in {
+        JobState.QUEUED,
+        JobState.RUNNING,
+        JobState.PAUSING,
+    }:
+        result.actions = []
+        result.summary = "请在全书人物页查看合并结果；再次分析需新建一次自动合并，可能再次计费。"
+    return result
 
 
 def recover_on_startup(

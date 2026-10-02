@@ -14,6 +14,9 @@ from ndr.domain.enums import (
     JobState,
     QuoteKind,
 )
+from ndr.jobs.scheduler import run_job
+from ndr.llm.adapters.fake import FakeProviderAdapter
+from ndr.llm.errors import ProviderError, ProviderErrorKind
 from ndr.scenes.engine import _ensure_group
 from ndr.scenes.state import SceneState, SpeakerSlot
 from ndr.storage.models import (
@@ -279,3 +282,258 @@ def test_directory_rejects_stale_cross_book_and_active_job_edits(migrated_client
             ).canonical_name
             == "浅村悠太"
         )
+
+
+def _auto_job(client, ids, **overrides):
+    profile = ids.get("profile")
+    if profile is None:
+        profile = client.post(
+            "/api/model-profiles",
+            json={
+                "name": "合并测试",
+                "protocol": "chat-completions-compatible",
+                "base_url": "http://127.0.0.1:1",
+                "model": "test",
+                "credential_mode": "none",
+            },
+        ).json()["data"]["id"]
+        ids["profile"] = profile
+    body = {
+        "book_version_id": ids["version"],
+        "profile_id": profile,
+        "idempotency_key": f"auto-{ids['book']}",
+        "run_now": False,
+        **overrides,
+    }
+    response = client.post(f"/api/books/{ids['book']}/character-directory/auto-merge", json=body)
+    assert response.status_code == 202, response.text
+    return response.json()["data"], body
+
+
+def _merge_group(ids, **overrides):
+    return {
+        "target_id": ids["target"],
+        "source_ids": [ids["source"]],
+        "confidence": 0.99,
+        "reason": "姓名及哥哥别名指向同一人物",
+        **overrides,
+    }
+
+
+def _run_merge(client, job, groups, adapter=None):
+    adapter = adapter or FakeProviderAdapter(
+        script=[{"groups": groups}], usage={"input_tokens": 30, "output_tokens": 10}
+    )
+    outcome = run_job(
+        client.app.state.session_factory,
+        client.app.state.settings,
+        job_id=job["id"],
+        adapter_factory=lambda *_: adapter,
+    )
+    return outcome, adapter
+
+
+def test_auto_merge_applies_and_preserves_names_descriptions_references_usage(
+    migrated_client, populated
+):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        session.get(BookCharacter, ids["source"]).description = "书店店员"
+    job, payload = _auto_job(client, ids)
+    # A queued merge locks manual writes and creates no provider usage yet.
+    base = f"/api/books/{ids['book']}/character-directory"
+    blocked = client.put(
+        f"{base}/{ids['source']}",
+        json={
+            "name": "另一个名字",
+            "expected_version": 1,
+        },
+    )
+    assert blocked.status_code == 409
+    outcome, adapter = _run_merge(client, job, [_merge_group(ids)])
+    assert outcome.state is JobState.COMPLETED
+    result = client.get(f"{base}/auto-merge/{job['id']}").json()["data"]
+    assert result["merged_count"] == 1
+    assert result["merges"][0]["source_names"] == ["浅村悠太"]
+    assert result["usage"]["total_tokens"] == 40
+    rows = client.get(base).json()["data"]
+    target = next(row for row in rows if row["character_id"] == ids["target"])
+    assert target["description"] == "目标说明；书店店员"
+    assert {"浅村悠太", "哥哥"}.issubset(target["aliases"])
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["source"]) is None
+        assert session.get(SpeakerGroup, ids["linked"]).character_id == ids["target"]
+        assert session.get(ChapterCharacterRoster, ids["roster"]).pov_character_id == ids["target"]
+    repeat = client.post(f"{base}/auto-merge", json=payload)
+    assert repeat.json()["data"]["id"] == job["id"]
+    _run_merge(client, job, [], adapter)
+    assert len(adapter.calls) == 1
+    assert adapter.calls[0]["payload"]["max_tokens_override"] == 4096
+
+
+@pytest.mark.parametrize("case", ["unknown", "overlap", "self", "extra"])
+def test_auto_merge_rejects_invalid_plan_atomically_and_keeps_usage(
+    migrated_client, populated, case
+):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids)
+    groups = [_merge_group(ids)]
+    if case == "unknown":
+        groups.append(_merge_group(ids, target_id="not-a-character"))
+    elif case == "overlap":
+        groups.append(_merge_group(ids))
+    elif case == "self":
+        groups[0]["source_ids"] = [ids["target"]]
+    else:
+        groups[0]["rename_to"] = "不能修改姓名"
+    outcome, _ = _run_merge(client, job, groups)
+    assert outcome.state is JobState.FAILED
+    result = client.get(
+        f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    ).json()["data"]
+    assert result["merged_count"] == 0 and result["usage"]["total_tokens"] == 40
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["source"]) is not None
+
+
+@pytest.mark.parametrize("case", ["edited", "new_job", "stop"])
+def test_auto_merge_does_not_hold_transaction_during_model_call_and_rechecks_state(
+    migrated_client, populated, case
+):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids)
+
+    class ChangingAdapter(FakeProviderAdapter):
+        async def generate_labels(self, payload):
+            raw = await super().generate_labels(payload)
+            with transaction(client.app.state.session_factory) as session:
+                if case == "edited":
+                    person = session.get(BookCharacter, ids["source"])
+                    person.description = "已经被更正"
+                    person.version += 1
+                elif case == "new_job":
+                    session.add(
+                        Job(
+                            book_id=ids["book"],
+                            book_version_id=ids["version"],
+                            kind=JobKind.INFERENCE,
+                            state=JobState.QUEUED,
+                        )
+                    )
+                else:
+                    session.get(Job, job["id"]).state = JobState.PAUSING
+            return raw
+
+    adapter = ChangingAdapter(script=[{"groups": [_merge_group(ids)]}], usage={"total_tokens": 40})
+    outcome, _ = _run_merge(client, job, [], adapter)
+    assert outcome.state is (JobState.PAUSED if case == "stop" else JobState.FAILED)
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["source"]) is not None
+    result = client.get(
+        f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    ).json()["data"]
+    assert result["usage"]["total_tokens"] == 40
+
+
+def test_auto_merge_budget_prevents_call_and_low_confidence_is_not_merged(
+    migrated_client, populated
+):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids, max_total_tokens=1)
+    outcome, adapter = _run_merge(client, job, [_merge_group(ids)])
+    assert outcome.state is JobState.BUDGET_EXHAUSTED and not adapter.calls
+    job, _ = _auto_job(client, ids, idempotency_key="low-confidence")
+    outcome, _ = _run_merge(client, job, [_merge_group(ids, confidence=0.5)])
+    assert outcome.state is JobState.COMPLETED
+    result = client.get(
+        f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    ).json()["data"]
+    assert result["skipped_groups"] == 1 and result["merged_count"] == 0
+
+
+def test_auto_merge_can_link_unassociated_speakers_and_never_replays_unknown(
+    migrated_client, populated
+):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids)
+    group = _merge_group(ids, source_ids=[f"speaker:{ids['unlinked']}"])
+    outcome, _ = _run_merge(client, job, [group])
+    assert outcome.state is JobState.COMPLETED
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(SpeakerGroup, ids["unlinked"]).character_id == ids["target"]
+    job, _ = _auto_job(client, ids, idempotency_key="timeout-merge")
+    adapter = FakeProviderAdapter(script=[ProviderError(ProviderErrorKind.TIMEOUT, "请求超时")])
+    outcome, _ = _run_merge(client, job, [], adapter)
+    assert outcome.state is JobState.NEEDS_RECONCILIATION
+    with transaction(client.app.state.session_factory) as session:
+        session.get(Job, job["id"]).state = JobState.QUEUED
+    outcome, _ = _run_merge(client, job, [], adapter)
+    assert outcome.state is JobState.FAILED and len(adapter.calls) == 1
+
+
+def test_auto_merge_promotes_unlinked_target_without_claiming_human_confirmation(
+    migrated_client, populated
+):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        target = session.get(SpeakerGroup, ids["unlinked"])
+        source = SpeakerGroup(
+            scene_id=target.scene_id,
+            display_label="S3",
+            canonical_name="轻浮男客",
+            description="书店客人",
+        )
+        session.add(source)
+        session.flush()
+        source_id = source.id
+    job, _ = _auto_job(client, ids)
+    group = _merge_group(
+        ids, target_id=f"speaker:{ids['unlinked']}", source_ids=[f"speaker:{source_id}"]
+    )
+    outcome, _ = _run_merge(client, job, [group])
+    assert outcome.state is JobState.COMPLETED
+    with transaction(client.app.state.session_factory) as session:
+        target = session.get(SpeakerGroup, ids["unlinked"])
+        assert target.character_id == session.get(SpeakerGroup, source_id).character_id
+        person = session.get(BookCharacter, target.character_id)
+        assert not person.user_confirmed
+        assert "轻浮男客" in json.loads(person.aliases_json)
+
+
+@pytest.mark.parametrize("unknown", [True, False])
+def test_auto_merge_missing_or_excess_actual_usage_with_limit_does_not_apply(
+    migrated_client, populated, unknown
+):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids, max_total_tokens=100000)
+    adapter = FakeProviderAdapter(
+        script=[{"groups": [_merge_group(ids)]}],
+        usage=None if unknown else {"total_tokens": 100001},
+    )
+    outcome, _ = _run_merge(client, job, [], adapter)
+    assert outcome.state is JobState.BUDGET_EXHAUSTED
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["source"]) is not None
+
+
+def test_auto_merge_retains_group_if_combined_description_would_lose_data(
+    migrated_client, populated
+):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        session.get(BookCharacter, ids["target"]).description = "甲" * 270
+        session.get(BookCharacter, ids["source"]).description = "乙" * 270
+    job, payload = _auto_job(client, ids)
+    duplicate = client.post(
+        f"/api/books/{ids['book']}/character-directory/auto-merge",
+        json={**payload, "idempotency_key": "overlapping-merge"},
+    )
+    assert duplicate.status_code == 409
+    outcome, _ = _run_merge(client, job, [_merge_group(ids)])
+    assert outcome.state is JobState.COMPLETED
+    result = client.get(
+        f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    ).json()["data"]
+    assert result["skipped_groups"] == 1 and result["merged_count"] == 0
+    recovery = client.get(f"/api/jobs/{job['id']}/recovery").json()["data"]
+    assert recovery["actions"] == []

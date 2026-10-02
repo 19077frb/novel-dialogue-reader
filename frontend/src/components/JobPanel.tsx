@@ -22,6 +22,7 @@ export const JOB_STATE_LABELS: Record<string, string> = {
 }
 const JOB_KIND_LABELS: Record<string, string> = {
   IMPORT: '导入', INFERENCE: '对白归属', CHARACTER_ROSTER: '人物识别',
+  CHARACTER_MERGE: '自动合并人物',
   RECHECK: '局部复核', RECOMPUTE: '重新计算', EXPORT: '导出',
 }
 

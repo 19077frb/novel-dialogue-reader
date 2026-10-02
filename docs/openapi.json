@@ -968,6 +968,109 @@
         }
       }
     },
+    "/api/books/{book_id}/character-directory/auto-merge": {
+      "post": {
+        "tags": [
+          "characters"
+        ],
+        "summary": "模型判断并自动合并重复人物",
+        "operationId": "auto_merge_characters_route_api_books__book_id__character_directory_auto_merge_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CharacterAutoMergeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_JobDetailOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/character-directory/auto-merge/{job_id}": {
+      "get": {
+        "tags": [
+          "characters"
+        ],
+        "summary": "自动合并进度和结果",
+        "operationId": "auto_merge_result_route_api_books__book_id__character_directory_auto_merge__job_id__get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_CharacterAutoMergeResultOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/books/{book_id}/character-directory": {
       "get": {
         "tags": [
@@ -3706,6 +3809,38 @@
         ],
         "title": "AnnotationsResponse"
       },
+      "AppliedCharacterMergeOut": {
+        "properties": {
+          "target_character_id": {
+            "type": "string",
+            "title": "Target Character Id"
+          },
+          "target_name": {
+            "type": "string",
+            "title": "Target Name"
+          },
+          "source_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Names"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "target_character_id",
+          "target_name",
+          "source_names",
+          "reason"
+        ],
+        "title": "AppliedCharacterMergeOut"
+      },
       "Assignment": {
         "type": "string",
         "enum": [
@@ -4414,6 +4549,127 @@
           "status"
         ],
         "title": "ChapterRosterOut"
+      },
+      "CharacterAutoMergeIn": {
+        "properties": {
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id"
+          },
+          "inference_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InferenceOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "max_total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Total Tokens"
+          },
+          "run_now": {
+            "type": "boolean",
+            "title": "Run Now",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_version_id",
+          "profile_id",
+          "idempotency_key"
+        ],
+        "title": "CharacterAutoMergeIn"
+      },
+      "CharacterAutoMergeResultOut": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "merged_count": {
+            "type": "integer",
+            "title": "Merged Count",
+            "default": 0
+          },
+          "skipped_groups": {
+            "type": "integer",
+            "title": "Skipped Groups",
+            "default": 0
+          },
+          "merges": {
+            "items": {
+              "$ref": "#/components/schemas/AppliedCharacterMergeOut"
+            },
+            "type": "array",
+            "title": "Merges"
+          },
+          "usage": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Usage"
+          },
+          "unknown_usage_runs": {
+            "type": "integer",
+            "title": "Unknown Usage Runs",
+            "default": 0
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CharacterAutoMergeResultOut"
       },
       "CharacterDirectoryOut": {
         "properties": {
@@ -5188,6 +5444,25 @@
           "request_id"
         ],
         "title": "DataEnvelope[ChapterRosterOut]"
+      },
+      "DataEnvelope_CharacterAutoMergeResultOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CharacterAutoMergeResultOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[CharacterAutoMergeResultOut]"
       },
       "DataEnvelope_CharacterDirectoryOut_": {
         "properties": {
@@ -6941,6 +7216,7 @@
           "IMPORT",
           "INFERENCE",
           "CHARACTER_ROSTER",
+          "CHARACTER_MERGE",
           "RECHECK",
           "RECOMPUTE",
           "EXPORT"

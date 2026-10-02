@@ -762,6 +762,19 @@ def run_job(
         if job.state in STOP_STATES:
             outcome.state = job.state
             return outcome
+        if job.kind is JobKind.CHARACTER_MERGE:
+            # Do not retain the dispatcher read transaction during the model call.
+            session.close()
+            from ..characters.auto_merge import run_auto_merge_job
+
+            state, merge_calls = run_auto_merge_job(
+                session_factory,
+                settings,
+                job_id=job_id,
+                credentials=credentials,
+                adapter_factory=adapter_factory,
+            )
+            return JobRunOutcome(job_id=job_id, state=state, calls=merge_calls)
         if job.kind is JobKind.CHARACTER_ROSTER:
             roster_outcome = run_character_roster_job(
                 session_factory,

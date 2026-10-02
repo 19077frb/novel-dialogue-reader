@@ -71,12 +71,13 @@ def _resolve(
     raise ApiError.not_found("人物不存在或已合并，请重新读取人物表")
 
 
-def _guard(session: Session, version: BookVersion) -> None:
+def _guard(session: Session, version: BookVersion, active_job_id: str | None = None) -> None:
     job = session.scalars(
         select(Job)
         .where(
             Job.book_version_id == version.id,
             Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
+            Job.id != active_job_id if active_job_id else True,
         )
         .limit(1)
     ).first()
@@ -195,9 +196,14 @@ def _sync(
 
 
 def edit(
-    session: Session, version: BookVersion, entry_id: str, payload: CharacterEditIn
+    session: Session,
+    version: BookVersion,
+    entry_id: str,
+    payload: CharacterEditIn,
+    *,
+    active_job_id: str | None = None,
 ) -> CharacterDirectoryOut:
-    _guard(session, version)
+    _guard(session, version, active_job_id)
     row = _resolve(session, version, entry_id)
     check_version(row, payload.expected_version)
     name = payload.name.strip()
@@ -224,9 +230,15 @@ def edit(
 
 
 def merge(
-    session: Session, version: BookVersion, entry_id: str, payload: CharacterMergeIn
+    session: Session,
+    version: BookVersion,
+    entry_id: str,
+    payload: CharacterMergeIn,
+    *,
+    active_job_id: str | None = None,
+    model_decision: bool = False,
 ) -> CharacterDirectoryOut:
-    _guard(session, version)
+    _guard(session, version, active_job_id)
     source = _resolve(session, version, entry_id)
     target = _resolve(session, version, payload.target_character_id)
     if (
@@ -251,8 +263,8 @@ def merge(
             target.first_seen_cp if target.first_seen_cp is not None else source.first_seen_cp,
             source.first_seen_cp,
         )
-    target.user_confirmed = True
-    target.source = CharacterSource.USER
+    target.user_confirmed = target.user_confirmed if model_decision else True
+    target.source = CharacterSource.MODEL if model_decision else CharacterSource.USER
     target.version += 1
     _sync(
         session,

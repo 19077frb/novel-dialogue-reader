@@ -255,6 +255,40 @@ export interface paths {
         patch: operations["edit_bookmark_api_books__book_id__bookmarks__bookmark_id__patch"];
         trace?: never;
     };
+    "/api/books/{book_id}/character-directory/auto-merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 模型判断并自动合并重复人物 */
+        post: operations["auto_merge_characters_route_api_books__book_id__character_directory_auto_merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/character-directory/auto-merge/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 自动合并进度和结果 */
+        get: operations["auto_merge_result_route_api_books__book_id__character_directory_auto_merge__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/character-directory": {
         parameters: {
             query?: never;
@@ -1121,6 +1155,17 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /** AppliedCharacterMergeOut */
+        AppliedCharacterMergeOut: {
+            /** Target Character Id */
+            target_character_id: string;
+            /** Target Name */
+            target_name: string;
+            /** Source Names */
+            source_names: string[];
+            /** Reason */
+            reason: string;
+        };
         /**
          * Assignment
          * @description 普通 speech 的归属结论；其他类型 conclusion 为 None，不强行指定说话人。
@@ -1398,6 +1443,56 @@ export interface components {
              * @default 1
              */
             version: number;
+        };
+        /** CharacterAutoMergeIn */
+        CharacterAutoMergeIn: {
+            /** Book Version Id */
+            book_version_id: string;
+            /** Profile Id */
+            profile_id: string;
+            inference_options?: components["schemas"]["InferenceOptions"] | null;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Max Total Tokens */
+            max_total_tokens?: number | null;
+            /**
+             * Run Now
+             * @default true
+             */
+            run_now: boolean;
+        };
+        /** CharacterAutoMergeResultOut */
+        CharacterAutoMergeResultOut: {
+            /** Job Id */
+            job_id: string;
+            state: components["schemas"]["JobState"];
+            /**
+             * Merged Count
+             * @default 0
+             */
+            merged_count: number;
+            /**
+             * Skipped Groups
+             * @default 0
+             */
+            skipped_groups: number;
+            /** Merges */
+            merges?: components["schemas"]["AppliedCharacterMergeOut"][];
+            /** Usage */
+            usage?: {
+                [key: string]: number;
+            };
+            /**
+             * Unknown Usage Runs
+             * @default 0
+             */
+            unknown_usage_runs: number;
+            /** Last Error */
+            last_error?: string | null;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
         };
         /** CharacterDirectoryOut */
         CharacterDirectoryOut: {
@@ -1682,6 +1777,15 @@ export interface components {
         /** DataEnvelope[ChapterRosterOut] */
         DataEnvelope_ChapterRosterOut_: {
             data: components["schemas"]["ChapterRosterOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[CharacterAutoMergeResultOut] */
+        DataEnvelope_CharacterAutoMergeResultOut_: {
+            data: components["schemas"]["CharacterAutoMergeResultOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -2444,7 +2548,7 @@ export interface components {
          * JobKind
          * @enum {string}
          */
-        JobKind: "IMPORT" | "INFERENCE" | "CHARACTER_ROSTER" | "RECHECK" | "RECOMPUTE" | "EXPORT";
+        JobKind: "IMPORT" | "INFERENCE" | "CHARACTER_ROSTER" | "CHARACTER_MERGE" | "RECHECK" | "RECOMPUTE" | "EXPORT";
         /**
          * JobPurpose
          * @description INFERENCE 的目的；preview/process 共用同一识别引擎与缓存。
@@ -4027,6 +4131,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_BookmarkOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auto_merge_characters_route_api_books__book_id__character_directory_auto_merge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CharacterAutoMergeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_JobDetailOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auto_merge_result_route_api_books__book_id__character_directory_auto_merge__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CharacterAutoMergeResultOut_"];
                 };
             };
             /** @description Validation Error */

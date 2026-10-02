@@ -5,7 +5,7 @@ from __future__ import annotations
 from pydantic import Field, model_validator
 
 from .common import ApiModel
-from .enums import CharacterRosterStatus
+from .enums import CharacterRosterStatus, JobState
 from .inference_options import InferenceOptions
 
 
@@ -35,6 +35,35 @@ class CharacterMergeIn(ApiModel):
     target_character_id: str
     expected_version: int = Field(ge=1)
     expected_target_version: int = Field(ge=1)
+
+
+class CharacterAutoMergeIn(ApiModel):
+    book_version_id: str
+    profile_id: str
+    inference_options: InferenceOptions | None = None
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    max_total_tokens: int | None = Field(default=None, ge=1)
+    run_now: bool = True
+
+
+class AppliedCharacterMergeOut(ApiModel):
+    target_character_id: str
+    target_name: str
+    source_names: list[str]
+    reason: str
+
+
+class CharacterAutoMergeResultOut(ApiModel):
+    job_id: str
+    state: JobState
+    merged_count: int = 0
+    skipped_groups: int = 0
+    merges: list[AppliedCharacterMergeOut] = Field(default_factory=list)
+    usage: dict[str, int] = Field(default_factory=dict)
+    unknown_usage_runs: int = 0
+    last_error: str | None = None
+    created_at: str
+    updated_at: str
 
 
 class RosterCharacterCandidate(ApiModel):
