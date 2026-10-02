@@ -1,12 +1,16 @@
 {
+  "config_version": "2.0",
   "config_id": "b0-rule-baseline",
-  "label": "B0 仅明确归属规则（无 LLM）",
+  "label": "B0 离线显式归属规则",
   "strategy": "rule_baseline",
-  "scene_state": false,
-  "prompt_version": "n/a",
-  "context_policy": "n/a",
+  "context_policy": "context-1",
   "reading_mode": "reread",
-  "budget": {"max_input_tokens": 0, "max_output_tokens": 0, "max_rechecks": 0},
-  "model": null,
-  "notes": "PLAN B0：不调用模型的最低成本基线。用表面形式规则找显式归属，找不到就拒答；弱点（同人不同称会被拆成两组）由指标如实暴露。"
+  "budget": {
+    "max_recheck_rounds": 0
+  },
+  "inference_options": {
+    "thinking_mode": "default",
+    "reasoning_effort": "default"
+  },
+  "notes": "模型由 --profile-id 指定；使用当前程序提示词。额度按章节任务生效，不是全书总费用上限。"
 }

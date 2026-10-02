@@ -1,12 +1,19 @@
 {
+  "config_version": "2.0",
   "config_id": "b3-compressed-context",
-  "label": "B3 长 Gap 保守筛选（context-2，无复核）",
+  "label": "B3 当前章节流程（压缩上下文）",
   "strategy": "llm",
-  "scene_state": true,
-  "prompt_version": "labeling-2",
   "context_policy": "context-2",
   "reading_mode": "reread",
-  "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 0},
-  "model": null,
-  "notes": "B3：相对 B2 只改上下文策略（长 Gap 只留线索句 + 前后各一句，省不下来就整体保留）。必须与 B2 使用同一清单、同一模型配置、同一提示版本，否则数字不可比；没有对比证据前默认策略仍是 context-1。"
+  "budget": {
+    "max_input_tokens": 200000,
+    "max_output_tokens": 20000,
+    "max_recheck_rounds": 0,
+    "max_format_retries": 1
+  },
+  "inference_options": {
+    "thinking_mode": "default",
+    "reasoning_effort": "default"
+  },
+  "notes": "模型由 --profile-id 指定；使用当前程序提示词。额度按章节任务生效，不是全书总费用上限。"
 }

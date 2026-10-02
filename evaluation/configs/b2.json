@@ -1,12 +1,19 @@
 {
-  "config_id": "b2-scene-state",
-  "label": "B2 B1 + 持续场景状态与边界判断",
+  "config_version": "2.0",
+  "config_id": "b2-chapter-pipeline",
+  "label": "B2 当前章节流程（保守上下文）",
   "strategy": "llm",
-  "scene_state": true,
-  "prompt_version": "labeling-2",
   "context_policy": "context-1",
   "reading_mode": "reread",
-  "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 0},
-  "model": null,
-  "notes": "PLAN B2：在 B1 之上加持续场景状态与边界判断（等于当前引擎默认行为）。需要真实模型配置才能运行。"
+  "budget": {
+    "max_input_tokens": 200000,
+    "max_output_tokens": 20000,
+    "max_recheck_rounds": 0,
+    "max_format_retries": 1
+  },
+  "inference_options": {
+    "thinking_mode": "default",
+    "reasoning_effort": "default"
+  },
+  "notes": "模型由 --profile-id 指定；使用当前程序提示词。额度按章节任务生效，不是全书总费用上限。"
 }

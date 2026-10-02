@@ -103,6 +103,6 @@ def test_configs_have_stable_fingerprints() -> None:
     b0 = load_config(REPO_ROOT / "evaluation" / "configs" / "b0.json")
     b2 = load_config(REPO_ROOT / "evaluation" / "configs" / "b2.json")
     assert b0.strategy == "rule_baseline"
-    assert b2.strategy == "llm" and b2.scene_state is True
+    assert b2.strategy == "llm" and b2.budget["max_recheck_rounds"] == 0
     assert b0.fingerprint != b2.fingerprint
     assert b0.fingerprint == load_config(REPO_ROOT / "evaluation" / "configs" / "b0.json").fingerprint

@@ -21,6 +21,7 @@ from ..config import Settings, get_settings
 from ..context.budget import CONTEXT_POLICY_COMPRESSED, CONTEXT_POLICY_CONSERVATIVE
 from ..context.window_builder import CONTEXT_POLICY_VERSION
 from ..llm.prompts.labeling import LABELING_PROMPT_VERSION
+from ..llm.prompts.roster import ROSTER_PROMPT_VERSION
 from ..quotes.scanner import SCANNER_VERSION
 from ..scenes.engine import ENGINE_VERSION
 from .baselines import RULE_BASELINE_VERSION, RuleBaselineOptions, rule_baseline_predictions
@@ -30,9 +31,9 @@ from .live import run_live_predictions
 from .manifest import load_manifest, validate_manifest
 from .metrics import compute_metrics, targets_met
 
-EVALUATION_VERSION = "evaluation-1"
+EVALUATION_VERSION = "evaluation-2"
 
-RUN_STATES = ("COMPLETED", "OFFLINE_BASELINE", "NOT_RUN")
+RUN_STATES = ("COMPLETED", "OFFLINE_BASELINE", "NOT_RUN", "LIVE_FAILED")
 
 
 @dataclass
@@ -45,6 +46,7 @@ class BookResult:
     usage: dict[str, Any] = field(default_factory=dict)
     provider: str | None = None
     hard_case_stats: dict[str, dict[str, int]] = field(default_factory=dict)
+    model_config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -68,6 +70,7 @@ def versions() -> dict[str, Any]:
         "app": __version__,
         "engine": ENGINE_VERSION,
         "prompt": LABELING_PROMPT_VERSION,
+        "roster_prompt": ROSTER_PROMPT_VERSION,
         "scanner": SCANNER_VERSION,
         # 默认（保守）策略版本 + 本次评测可选的两版策略（B3/B4 消融用）
         "context_policy": CONTEXT_POLICY_VERSION,
@@ -130,6 +133,7 @@ def merge_predictions(
                 }
             )
     return {"quotes": quotes}
+
 
 def _hard_case_stats(gold: dict, metrics: dict) -> dict[str, dict[str, int]]:
     """按难例类别统计金标准数量（把每类样本量如实写进报告）。"""
@@ -209,22 +213,26 @@ def build_report(options: RunOptions) -> dict[str, Any]:
                 config_id=config.config_id,
                 reading_mode=config.reading_mode,
                 context_policy=config.context_policy,
-                recheck_max_targets=int((config.budget or {}).get("max_rechecks", 0) or 0),
+                budget=config.budget,
+                inference_options=config.inference_options,
                 allow_live=options.allow_live,
             )
         else:
             reason = "既没有 --config 也没有 --predictions"
 
-        if prediction is None:
+        if prediction is None or state == "LIVE_FAILED":
             results.append(
                 BookResult(
                     book_id=book.book_id,
                     work_id=book.work_id,
-                    state="NOT_RUN",
+                    state=state,
                     reason=reason,
+                    usage=dict((prediction or {}).get("usage") or {}),
+                    provider=(prediction or {}).get("provider"),
+                    model_config=dict((prediction or {}).get("model_config") or {}),
                 )
             )
-            blocks.append(f"{book.book_id}: NOT_RUN（{reason}）")
+            blocks.append(f"{book.book_id}: {state}（{reason}）")
             continue
 
         if not prediction.get("quality_evidence", False):
@@ -243,6 +251,7 @@ def build_report(options: RunOptions) -> dict[str, Any]:
                 metrics=book_metrics,
                 usage=dict(prediction.get("usage", {}) or {}),
                 provider=prediction.get("provider"),
+                model_config=dict(prediction.get("model_config") or {}),
                 hard_case_stats=_hard_case_stats(gold, book_metrics),
             )
         )
@@ -262,7 +271,9 @@ def build_report(options: RunOptions) -> dict[str, Any]:
         usage = result.usage or {}
         if usage.get("provider") in {None, "none"} and not usage:
             continue
-        if any(usage.get(key) is None for key in ("input_tokens", "output_tokens")):
+        if usage.get("unknown_runs") or any(
+            usage.get(key) is None for key in ("input_tokens", "output_tokens")
+        ):
             unknown_usage += 1
         usage_total["calls"] += int(usage.get("calls") or 0)
         usage_total["input_tokens"] += int(usage.get("input_tokens") or 0)
@@ -295,6 +306,7 @@ def build_report(options: RunOptions) -> dict[str, Any]:
                 "state": result.state,
                 "reason": result.reason,
                 "provider": result.provider,
+                "model_config": result.model_config,
                 "usage": result.usage,
                 "hard_cases": result.hard_case_stats,
                 "metrics": result.metrics,
