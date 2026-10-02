@@ -89,7 +89,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
                 <dd>别名：{person.aliases?.join('、') || '无'}；说明：{person.description || '暂无说明'}</dd>
               </div>)}</dl>
             </article>)}
-            {result.data.skipped_groups > 0 && <p>另有 {result.data.skipped_groups} 组因依据不足或说明过长未纳入建议。</p>}
+            {result.data.skipped_groups > 0 && <p>另有 {result.data.skipped_groups} 组因依据不足、姓名缺失或说明过长未纳入建议。</p>}
             <div className="ndr-form-actions">
               <button className="ndr-primary" disabled={disabled || busy || selected.length === 0} onClick={() => accept.mutate(selected)}>确认合并所选 {selected.length} 组</button>
               <button disabled={disabled || busy} onClick={() => accept.mutate([])}>放弃本次建议</button>
@@ -97,7 +97,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
             {selected.length === 0 && <p className="hint">请至少选择一组建议后确认合并，也可以放弃本次结果。</p>}
           </section>}
           {result.data.state === 'COMPLETED' && !awaiting && result.data.phase !== 'discarded' && <>
-            <p role="status">合并了 {result.data.merged_count} 个重复人物{result.data.skipped_groups ? `；保留 ${result.data.skipped_groups} 组（依据不足或说明合并后过长）` : ''}。</p>
+            <p role="status">合并了 {result.data.merged_count} 个重复人物{result.data.skipped_groups ? `；保留 ${result.data.skipped_groups} 组（依据不足、姓名缺失或说明合并后过长）` : ''}。</p>
             <ul>{(result.data.merges ?? []).map(group => <li key={group.target_character_id}>
               {group.source_names.join('、')} → {group.target_name}：{group.reason}
             </li>)}</ul>

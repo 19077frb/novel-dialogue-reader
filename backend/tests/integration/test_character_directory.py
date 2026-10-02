@@ -410,6 +410,28 @@ def test_auto_merge_confirmation_applies_only_selected_groups(migrated_client, p
         assert session.get(BookCharacter, second_source) is not None
 
 
+@pytest.mark.parametrize("all_unnamed", [False, True])
+def test_auto_merge_never_uses_an_unnamed_target(migrated_client, populated, all_unnamed):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        session.get(BookCharacter, ids["target"]).canonical_name = ""
+        if all_unnamed:
+            session.get(BookCharacter, ids["source"]).canonical_name = ""
+    job, _ = _auto_job(client, ids)
+    _run_merge(client, job, [_merge_group(ids)], accept=False)
+    base = f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    preview = client.get(base).json()["data"]
+    if all_unnamed:
+        assert preview["proposals"] == [] and preview["skipped_groups"] == 1
+    else:
+        assert preview["proposals"][0]["target"]["character_id"] == ids["source"]
+        response = client.post(f"{base}/confirm", json={"selected_target_ids": [ids["source"]]})
+        assert response.status_code == 200 and response.json()["data"]["merged_count"] == 1
+        with transaction(client.app.state.session_factory) as session:
+            assert session.get(BookCharacter, ids["target"]) is None
+            assert session.get(BookCharacter, ids["source"]).canonical_name == "浅村悠太"
+
+
 def test_auto_merge_applies_and_preserves_names_descriptions_references_usage(
     migrated_client, populated
 ):

@@ -60,6 +60,7 @@ def _messages(entries):
                 "不要仅因同名、相似名字、相同职务或泛称（男生、女生、同学、男客）合并；"
                 "亲属、同事、搭档是不同人。不确定则不合并，不可虚构正文证据。"
                 "目标优先选择具有简短完整人名、明确说明的已有全书人物；只有同组全为未关联说话人时才用其中一项为目标。"
+                "姓名为空的已有记录只能作为并入人物，不能作为保留目标；整组都没有可用姓名时不建议合并。"
                 "每个人物 ID 最多属于一组，不允许循环、链式合并或新增 ID。"
                 '只返回 JSON：{"groups":[{"target_id":"已有ID","source_ids":["重复ID"],'
                 '"confidence":0.99,"reason":"中文身份依据"}]}。'
@@ -160,6 +161,39 @@ def _validate_plan(output: MergeOutput, entries):
             raise ValueError("已有全书人物不能合并到未关联说话人")
         seen.update(ids)
     return by_id
+
+
+def _named_targets(output: MergeOutput, entries):
+    """Prefer a named identity within the model's group; never invent a new name."""
+    by_id = _validate_plan(output, entries)
+    groups = []
+    skipped = 0
+    for group in output.groups:
+        ids = [group.target_id, *group.source_ids]
+        # A blank book target may be replaced only by another book identity;
+        # all-speaker groups can instead retain a named scene speaker.
+        candidates = [
+            key
+            for key in ids
+            if by_id[key]["name"].strip()
+            and (
+                by_id[key]["kind"] == "book"
+                or all(by_id[item]["kind"] == "speaker" for item in ids)
+            )
+        ]
+        if not candidates:
+            skipped += 1
+            continue
+        target_id = group.target_id if group.target_id in candidates else candidates[0]
+        groups.append(
+            group.model_copy(
+                update={
+                    "target_id": target_id,
+                    "source_ids": [key for key in ids if key != target_id],
+                }
+            )
+        )
+    return MergeOutput(groups=groups), skipped
 
 
 def _check_current(session, job, entries):
@@ -392,6 +426,7 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
                     )
                     return job.state, 1
             _check_current(session, job, entries)
+            output, unnamed_groups = _named_targets(output, entries)
             by_id = _validate_plan(output, entries)
             accepted = []
             for group in output.groups:
@@ -402,7 +437,7 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
                 )
                 if group.confidence >= 0.95 and len("；".join(descriptions)) <= 512:
                     accepted.append(group.model_dump())
-            skipped = len(output.groups) - len(accepted)
+            skipped = unnamed_groups + len(output.groups) - len(accepted)
             job.checkpoint_json = json.dumps(
                 {
                     "phase": "awaiting_confirmation",
