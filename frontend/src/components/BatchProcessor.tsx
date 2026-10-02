@@ -1408,7 +1408,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
           <p className="hint">人物按章节顺序确认；上一章人物完成后，本章对白窗口会与下一章人物识别共享并发任务池。</p>
         </div>
       </div>
-      <div className="ndr-range-grid">
+      <div className="ndr-range-grid ndr-batch-config-grid">
         <label>
           开始章节
           <select value={firstId} onChange={(event) => { setStartId(event.target.value); resetEstimate() }} disabled={running} data-testid="batch-start">
@@ -1429,8 +1429,9 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         <FormatRetrySetting value={maxFormatRetries} disabled={running}
           onChange={value => { setPreferences({ maxFormatRetries: value }); resetEstimate() }} testId="batch-format-retries" />
         <label>
-          本次 Token 使用上限（留空＝不限制）
+          本次 Token 使用上限
           <input type="number" min={1} value={tokenLimitText} onChange={(event) => { setTokenLimitText(event.target.value); resetEstimate() }} disabled={running} data-testid="batch-token-limit" />
+          <span className="hint">留空表示不限制。</span>
         </label>
         <label>
           最大并发任务数

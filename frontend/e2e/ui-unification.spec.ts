@@ -2,13 +2,12 @@ import { expect, test } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { confirmChapterRoster } from './roster'
-
 // Actual local frontend/backend, isolated test library, offline FakeProvider only.
 const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures/sample-utf8.txt')
 for (const layout of [
   { name: 'desktop-light', width: 1280, height: 900, colorScheme: 'light' as const },
   { name: 'desktop-dark', width: 1280, height: 900, colorScheme: 'dark' as const },
+  { name: 'tablet-light', width: 800, height: 900, colorScheme: 'light' as const },
   { name: 'mobile-dark', width: 360, height: 740, colorScheme: 'dark' as const },
 ]) {
   test(`unified headers, navigation, controls and screenshots: ${layout.name}`, async ({ page }, testInfo) => {
@@ -30,9 +29,6 @@ for (const layout of [
       .first().getByRole('link', { name: '开始阅读' }).getAttribute('href')
     const bookId = /\/books\/([^/]+)\/read/.exec(href ?? '')?.[1]
     expect(bookId).toBeTruthy()
-    await page.goto(`/books/${bookId}/preview`)
-    await confirmChapterRoster(page)
-
     const pages = [
       { name: 'library', route: '/library', title: '书架', nav: [] },
       { name: 'reader', route: `/books/${bookId}/read`, title: '阅读', nav: ['预览与处理', '全书人物', '待确认队列', '导出', '返回书架'] },
@@ -69,6 +65,19 @@ for (const layout of [
       if (item.name === 'batch') {
         await page.getByTestId('processing-mode-batch').check()
         await expect(page.getByTestId('batch-processor').locator('.ndr-step-badge')).toHaveText('1')
+        const grid = page.locator('.ndr-batch-config-grid')
+        await expect(grid).toBeVisible()
+        const fields = await grid.locator(':scope > label').evaluateAll(labels => labels.map(label => {
+          const bounds = label.getBoundingClientRect()
+          return { top: bounds.top, left: bounds.left, width: bounds.width }
+        }))
+        const columns = layout.width > 900 ? 3 : layout.width > 600 ? 2 : 1
+        expect(fields).toHaveLength(6)
+        for (let index = 1; index < columns; index += 1) {
+          expect(Math.abs(fields[index].top - fields[0].top)).toBeLessThanOrEqual(1)
+        }
+        expect(Math.abs(fields[columns].left - fields[0].left)).toBeLessThanOrEqual(1)
+        expect(fields[columns].top).toBeGreaterThan(fields[0].top)
       }
       if (item.nav.length) {
         const actual = await header.locator('.ndr-book-nav a, .ndr-book-nav button').allTextContents()

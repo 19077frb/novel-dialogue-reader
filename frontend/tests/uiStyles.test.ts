@@ -6,6 +6,13 @@ import { describe, expect, it } from 'vitest'
 const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/styles/global.css'), 'utf8')
 
 describe('shared UI design rules', () => {
+  it('top-aligns batch configuration fields and limits desktop layout to three columns', () => {
+    expect(css).toMatch(/\.ndr-range-grid\s*\{[^}]*align-items:\s*start/)
+    expect(css).toMatch(/\.ndr-range-grid > label\s*\{[^}]*min-width:\s*0/)
+    expect(css).toMatch(/\.ndr-batch-config-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/)
+    expect(css).toMatch(/@media \(max-width: 900px\)[\s\S]*?\.ndr-batch-config-grid[^}]*repeat\(2, minmax\(0, 1fr\)\)/)
+    expect(css).toMatch(/@media \(max-width: 600px\)[\s\S]*?\.ndr-batch-config-grid[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/)
+  })
   it('wraps multiline merge previews instead of using intrinsic-width columns', () => {
     expect(css).toMatch(/\.ndr-merge-people\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/)
     expect(css).toMatch(/\.ndr-merge-text\s*\{[^}]*white-space:\s*pre-wrap[^}]*overflow-wrap:\s*anywhere/)
