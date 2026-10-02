@@ -4,6 +4,7 @@ import * as batch from '../src/components/BatchProcessor'
 
 import { ChapterNavigation } from '../src/components/ChapterNavigation'
 import type { ChapterOut } from '../src/api/types'
+import { updateGeneralSettings } from '../src/settings/preferences'
 
 const CHAPTERS = [
   { id: 'c1', ordinal: 0, title: '第一章', start_cp: 0, end_cp: 10, source_href: null },
@@ -12,7 +13,39 @@ const CHAPTERS = [
 ] as ChapterOut[]
 
 describe('ChapterNavigation', () => {
-  beforeEach(() => { vi.restoreAllMocks() })
+  beforeEach(() => { vi.restoreAllMocks(); localStorage.clear() })
+  it('双击切换默认关闭，不写入章节状态', () => {
+    const save = vi.fn()
+    render(<ChapterNavigation chapters={CHAPTERS} activeChapterId="c1" onSelect={vi.fn()} onSetProcessingStatus={save} />)
+    fireEvent.doubleClick(screen.getByText('第一章'))
+    expect(save).not.toHaveBeenCalled()
+  })
+  it.each(['unprocessed', 'queued', 'roster', 'dialogue', 'failed', 'stopped'] as const)(
+    '%s 先双击标为完成，再次双击改为未处理，实时进度不覆盖手动状态', async state => {
+      updateGeneralSettings({ doubleClickChapterStatus: true })
+      const save = vi.fn(async (chapter: ChapterOut, processed: boolean) => ({ ...chapter,
+        dialogue_processed: processed, processing_status_override: processed }))
+      const select = vi.fn()
+      render(<ChapterNavigation bookId="b1" chapters={CHAPTERS} activeChapterId="c1" onSelect={select} onSetProcessingStatus={save}
+        processingStates={{ c1: { state, completedWindows: 0, totalWindows: 1, error: null } }} />)
+      fireEvent.click(screen.getByText('第一章'), { detail: 1 })
+      fireEvent.doubleClick(screen.getByText('第一章'))
+      await waitFor(() => expect(screen.getByText('第一章').closest('button')).toHaveAttribute('data-processing-state', 'processed'))
+      expect(save).toHaveBeenLastCalledWith(CHAPTERS[0], true)
+      fireEvent.doubleClick(screen.getByText('第一章'))
+      await waitFor(() => expect(screen.getByText('第一章').closest('button')).toHaveAttribute('data-processing-state', 'unprocessed'))
+      expect(save).toHaveBeenLastCalledWith(CHAPTERS[0], false)
+      expect(select).not.toHaveBeenCalled()
+    })
+  it('已完成章节双击变为未处理，保存失败保留原状态并显示具体错误', async () => {
+    updateGeneralSettings({ doubleClickChapterStatus: true })
+    const save = vi.fn().mockRejectedValue(new Error('数据库繁忙'))
+    render(<ChapterNavigation chapters={[{ ...CHAPTERS[0], dialogue_processed: true }]} activeChapterId="c1" onSelect={vi.fn()} onSetProcessingStatus={save} />)
+    fireEvent.doubleClick(screen.getByText('第一章'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('数据库繁忙')
+    expect(save).toHaveBeenCalledWith(expect.anything(), false)
+    expect(screen.getByText('第一章').closest('button')).toHaveAttribute('data-processing-state', 'processed')
+  })
   it('章节旁显示重试图标，点击只重试本章而不跳转阅读', async () => {
     const retry = vi.spyOn(batch, 'retryChapterProcessing').mockResolvedValue()
     const select = vi.fn()

@@ -86,6 +86,7 @@ class Chapter(IdMixin, TimestampMixin, Base):
     end_cp: Mapped[int] = mapped_column(Integer, nullable=False)
     source_href: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     dialogue_processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    processing_status_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
 
 class ContentNode(IdMixin, TimestampMixin, Base):

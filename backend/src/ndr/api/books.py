@@ -23,6 +23,7 @@ from ..domain.documents import (
     ChapterOut,
     ChapterProcessingCompleteIn,
     ChapterProcessingCompleteOut,
+    ChapterProcessingStatusIn,
     ChapterRepairsIn,
     ChapterRepairSuggestion,
     ContentResponse,
@@ -46,6 +47,7 @@ from ..ingest.query import (
 )
 from ..ingest.resources import get_resource_or_404, read_resource_bytes
 from ..ingest.service import import_epub, import_txt, record_failed_import
+from ..storage.chapter_status import complete_chapter_automatically
 from ..storage.models import Annotation, BookVersion, Chapter, Job, Quote
 from ..storage.transactions import apply_versioned_update, transaction
 from .deps import get_session
@@ -305,6 +307,34 @@ def chapter_repair_route(
     return DataEnvelope(data=result, request_id=current_request_id(request))
 
 
+@router.put(
+    "/{book_id}/chapters/{chapter_id}/processing-status",
+    response_model=DataEnvelope[ChapterOut],
+    summary="手动设置章节完成标记或恢复自动更新",
+)
+def set_chapter_processing_status_route(
+    request: Request, book_id: str, chapter_id: str, payload: ChapterProcessingStatusIn,
+) -> DataEnvelope[ChapterOut]:
+    with transaction(request.app.state.session_factory) as session:
+        get_book_or_404(session, book_id)
+        version = session.get(BookVersion, payload.book_version_id)
+        if version is None or version.book_id != book_id:
+            raise ApiError.validation("book_version_id 不属于该书籍")
+        chapter = session.get(Chapter, chapter_id)
+        if chapter is None or chapter.book_version_id != version.id:
+            raise ApiError.not_found("章节不存在或不属于指定书籍版本")
+        chapter.processing_status_override = payload.dialogue_processed
+        if payload.dialogue_processed is not None:
+            chapter.dialogue_processed = payload.dialogue_processed
+        result = ChapterOut(
+            id=chapter.id, ordinal=chapter.ordinal, title=chapter.title,
+            start_cp=chapter.start_cp, end_cp=chapter.end_cp, source_href=chapter.source_href,
+            dialogue_processed=chapter.dialogue_processed,
+            processing_status_override=chapter.processing_status_override,
+        )
+    return DataEnvelope(data=result, request_id=current_request_id(request))
+
+
 @router.post(
     "/{book_id}/chapters/{chapter_id}/processing-complete",
     response_model=DataEnvelope[ChapterProcessingCompleteOut],
@@ -316,7 +346,7 @@ def complete_chapter_processing_route(
     chapter_id: str,
     payload: ChapterProcessingCompleteIn,
 ) -> DataEnvelope[ChapterProcessingCompleteOut]:
-    """只在本章每条外层候选对白都有当前标注时写入完成状态。"""
+    """自动完成要求完整标注覆盖；手动指定的完成标记优先，不改任务状态。"""
 
     factory = request.app.state.session_factory
     with transaction(factory) as session:
@@ -357,7 +387,7 @@ def complete_chapter_processing_route(
             )
             or 0
         )
-        if annotated_quote_count != quote_count:
+        if annotated_quote_count != quote_count and chapter.processing_status_override is None:
             raise ApiError(
                 ErrorCode.RESOURCE_CONFLICT,
                 "章节仍有未处理对白，不能标记为已处理",
@@ -368,10 +398,10 @@ def complete_chapter_processing_route(
                 },
                 status_code=409,
             )
-        chapter.dialogue_processed = True
+        complete_chapter_automatically(session, chapter)
         result = ChapterProcessingCompleteOut(
             chapter_id=chapter.id,
-            dialogue_processed=True,
+            dialogue_processed=chapter.dialogue_processed,
             quote_count=quote_count,
             annotated_quote_count=annotated_quote_count,
         )

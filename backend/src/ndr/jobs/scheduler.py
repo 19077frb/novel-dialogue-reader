@@ -47,6 +47,7 @@ from ..scenes.engine import apply_window
 from ..scenes.runner import _messages_for, _restore_output_references, _targets_for
 from ..scenes.state import ConfirmedCharacter, SceneState
 from ..storage.cache import CacheKeyParts, ResultCacheStore, compute_cache_key, fingerprint
+from ..storage.chapter_status import complete_chapter_automatically
 from ..storage.models import (
     Annotation,
     BookVersion,
@@ -1308,7 +1309,7 @@ def run_job(
                 ):
                     chapter = session.get(Chapter, str(chapter_id))
                     if chapter is not None and chapter.book_version_id == job.book_version_id:
-                        chapter.dialogue_processed = True
+                        complete_chapter_automatically(session, chapter)
                 job.progress_json = json.dumps(
                     {
                         "stage": "completed",

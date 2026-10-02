@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 
-import { completeChapterProcessing, fetchBook, fetchChapters, fetchProcessingStatus } from '../api/books'
+import { completeChapterProcessing, fetchBook, fetchChapters, fetchProcessingStatus, setChapterProcessingStatus } from '../api/books'
 import { ApiError } from '../api/client'
 import {
   analyzeCharacterRoster,
@@ -669,7 +669,13 @@ export async function runBatchProcessing({ bookId, bookVersionId, requested, pla
       updateChapterProgress(bookId, chapterId, { pendingTasks: 0 })
     }
 
-    const scheduleRoster = (plan: ChapterPlan, index: number) => {
+    const scheduleRoster = async (plan: ChapterPlan, index: number) => {
+      if (plan.cancelled) return
+      if (plan.chapter.processing_status_override != null) {
+        plan.chapter = await setChapterProcessingStatus(bookId, plan.chapter.id, bookVersionId, null)
+        const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
+        publishBatch(bookId, { catalogRevision: current.catalogRevision + 1 })
+      }
       const { chapter } = plan
       const taskId = `roster:${chapter.id}`
       if (plan.cancelled) return Promise.resolve()

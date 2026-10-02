@@ -389,13 +389,74 @@
         }
       }
     },
+    "/api/books/{book_id}/chapters/{chapter_id}/processing-status": {
+      "put": {
+        "tags": [
+          "books"
+        ],
+        "summary": "手动设置章节完成标记或恢复自动更新",
+        "operationId": "set_chapter_processing_status_route_api_books__book_id__chapters__chapter_id__processing_status_put",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chapter Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChapterProcessingStatusIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_ChapterOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/books/{book_id}/chapters/{chapter_id}/processing-complete": {
       "post": {
         "tags": [
           "books"
         ],
         "summary": "确认并发窗口已覆盖整章并标记为已处理",
-        "description": "只在本章每条外层候选对白都有当前标注时写入完成状态。",
+        "description": "自动完成要求完整标注覆盖；手动指定的完成标记优先，不改任务状态。",
         "operationId": "complete_chapter_processing_route_api_books__book_id__chapters__chapter_id__processing_complete_post",
         "parameters": [
           {
@@ -4103,6 +4164,17 @@
             "type": "boolean",
             "title": "Dialogue Processed",
             "default": false
+          },
+          "processing_status_override": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processing Status Override"
           }
         },
         "additionalProperties": false,
@@ -4160,6 +4232,32 @@
           "annotated_quote_count"
         ],
         "title": "ChapterProcessingCompleteOut"
+      },
+      "ChapterProcessingStatusIn": {
+        "properties": {
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "dialogue_processed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dialogue Processed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_version_id",
+          "dialogue_processed"
+        ],
+        "title": "ChapterProcessingStatusIn"
       },
       "ChapterRepairIn": {
         "properties": {
@@ -5033,6 +5131,25 @@
           "request_id"
         ],
         "title": "DataEnvelope[BookmarkOut]"
+      },
+      "DataEnvelope_ChapterOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChapterOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[ChapterOut]"
       },
       "DataEnvelope_ChapterProcessingCompleteOut_": {
         "properties": {

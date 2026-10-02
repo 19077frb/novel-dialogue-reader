@@ -9,7 +9,7 @@ import { getProcessingPreferences } from '../src/processing/preferences'
 import { waitForJobCompletion } from '../src/processing/jobCompletion'
 import type { ChapterOut, EstimateOut, JobDetailOut } from '../src/api/types'
 
-vi.mock('../src/api/books', () => ({ completeChapterProcessing: vi.fn(), fetchBook: vi.fn(), fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn() }))
+vi.mock('../src/api/books', () => ({ completeChapterProcessing: vi.fn(), fetchBook: vi.fn(), fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn(), setChapterProcessingStatus: vi.fn() }))
 vi.mock('../src/api/characters', () => ({ analyzeCharacterRoster: vi.fn(), confirmCharacterRoster: vi.fn(), fetchCharacterRoster: vi.fn() }))
 vi.mock('../src/api/jobs', () => ({ pauseJob: vi.fn(), createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
 vi.mock('../src/processing/jobCompletion', () => ({ waitForJobCompletion: vi.fn(async job => job) }))
@@ -41,6 +41,19 @@ beforeEach(() => {
   vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: estimate.windows!.map(window => ({ ...window, processing_status: window.window_id === 'w2' ? 'completed' : 'failed' })) })
 })
 afterEach(() => { cleanup(); clearBatchProgress('b1') })
+
+it('解除手动未处理保护后才启动新的批次，恢复正常完成状态', async () => {
+  const manual = { ...chapter, processing_status_override: false }
+  vi.mocked(books.setChapterProcessingStatus).mockResolvedValue({ ...manual, processing_status_override: null })
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [manual], plans: [{ chapter: manual, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: null } })
+  expect(books.setChapterProcessingStatus).toHaveBeenCalledWith('b1', 'c1', 'v1', null)
+  expect(vi.mocked(books.setChapterProcessingStatus).mock.invocationCallOrder[0]).toBeLessThan(
+    vi.mocked(characters.analyzeCharacterRoster).mock.invocationCallOrder[0])
+  render(<Snapshot />)
+  expect(readSnapshot().chapterStates.c1.state).toBe('processed')
+})
 
 it('records a textless chapter as completed and refreshes its persistent catalog status without dialogue calls', async () => {
   vi.mocked(characters.analyzeCharacterRoster).mockResolvedValue({

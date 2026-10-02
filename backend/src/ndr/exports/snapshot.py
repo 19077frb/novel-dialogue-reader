@@ -25,7 +25,7 @@ from ..storage.models import (
     Scene,
 )
 
-EXPORT_SNAPSHOT_VERSION = "export-snapshot-1"
+EXPORT_SNAPSHOT_VERSION = "export-snapshot-2"
 
 
 @dataclass(frozen=True)
@@ -114,6 +114,14 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
     payload = projection.model_dump(mode="json")
     payload["warnings"] = warnings
     payload["snapshot_version"] = EXPORT_SNAPSHOT_VERSION
+    payload["chapter_processing"] = {
+        chapter.id: {"processed": chapter.dialogue_processed,
+                     "override": chapter.processing_status_override}
+        for chapter in session.scalars(select(Chapter).where(
+            Chapter.book_version_id == version.id,
+            *([Chapter.id.in_(resolved.chapter_ids)] if resolved.chapter_ids else []),
+        ))
+    }
     source_revision = fingerprint(
         {
             "snapshot_version": EXPORT_SNAPSHOT_VERSION,

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 from alembic import command
@@ -189,29 +190,32 @@ def test_processing_state_is_backfilled_once_when_upgrading_from_0009(
             )
             session.add(version)
             session.flush()
-            chapter = Chapter(
+            # Insert with the historical shape: today's ORM also contains
+            # columns that correctly do not exist before the later migration.
+            chapter_id = str(uuid4())
+            session.execute(Chapter.__table__.insert().values(
+                id=chapter_id,
                 book_version_id=version.id,
                 ordinal=0,
                 title="第一章",
                 start_cp=0,
                 end_cp=10,
-            )
-            session.add(chapter)
-            session.flush()
+                dialogue_processed=False,
+            ))
             session.add(Job(
                 kind=JobKind.INFERENCE,
                 purpose=JobPurpose.PROCESS,
                 book_id=book.id,
                 book_version_id=version.id,
-                range_json=f'{{"chapter_id":"{chapter.id}","selected_window_ids":null}}',
+                range_json=f'{{"chapter_id":"{chapter_id}","selected_window_ids":null}}',
                 state=JobState.COMPLETED,
                 budget_json="{}",
             ))
-            chapter_id = chapter.id
 
         run_migrations(tmp_settings)
         with transaction(factory) as session:
             assert session.get(Chapter, chapter_id).dialogue_processed is True
+            assert session.get(Chapter, chapter_id).processing_status_override is None
     finally:
         engine.dispose()
 

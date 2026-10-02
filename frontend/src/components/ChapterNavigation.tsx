@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useGeneralSettings } from '../settings/preferences'
 import type { ChapterOut } from '../api/types'
 import { cancelChapterProcessing, retryChapterProcessing } from './BatchProcessor'
 import type { ChapterProcessingProgress, ChapterProcessingState } from './BatchProcessor'
@@ -9,6 +10,7 @@ export interface ChapterNavigationProps {
   activeChapterId: string | null
   onSelect: (chapter: ChapterOut) => void
   processingStates?: Record<string, ChapterProcessingProgress>
+  onSetProcessingStatus?: (chapter: ChapterOut, processed: boolean) => Promise<ChapterOut>
 }
 
 const STATE_LABELS: Record<ChapterProcessingState, string> = {
@@ -29,9 +31,25 @@ function progressLabel(progress: ChapterProcessingProgress): string {
   return STATE_LABELS[progress.state]
 }
 
-export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect, processingStates = {} }: ChapterNavigationProps) {
+export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect, processingStates = {}, onSetProcessingStatus }: ChapterNavigationProps) {
+  const [settings] = useGeneralSettings()
+  const selectionTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const statusLocks = useRef(new Set<string>())
+  const [manualUpdates, setManualUpdates] = useState<Record<string, { source: ChapterOut; saved: ChapterOut }>>({})
+  const canToggle = settings.doubleClickChapterStatus && Boolean(onSetProcessingStatus)
+  useEffect(() => () => { if (selectionTimer.current) clearTimeout(selectionTimer.current) }, [bookId, canToggle])
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
+  const toggleStatus = (chapter: ChapterOut, processed: boolean) => {
+    if (selectionTimer.current) clearTimeout(selectionTimer.current)
+    if (!canToggle || !onSetProcessingStatus || statusLocks.current.has(chapter.id)) return
+    statusLocks.current.add(chapter.id)
+    setBusy(current => ({ ...current, [chapter.id]: true })); setError(null)
+    void onSetProcessingStatus(chapter, processed).then(saved => {
+      setManualUpdates(current => ({ ...current, [chapter.id]: { source: chapter, saved } }))
+    }).catch(reason => setError(`${chapter.title ?? '本章'}：${reason instanceof Error ? reason.message : '状态保存失败'}`))
+      .finally(() => { statusLocks.current.delete(chapter.id); setBusy(current => ({ ...current, [chapter.id]: false })) })
+  }
   const act = (chapter: ChapterOut, cancel: boolean) => {
     if (!bookId) return
     setBusy(current => ({ ...current, [chapter.id]: true })); setError(null)
@@ -42,6 +60,7 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
   return (
     <nav className="ndr-chapter-nav" aria-label="章节导航">
       {error && <p className="status-error" role="alert">{error}</p>}
+      {canToggle && <p className="hint">双击章节名可切换未处理/已完成，仅改变完成标记。</p>}
       {chapters.length === 0 ? (
         <p className="hint">这本书还没有章节。</p>
       ) : (
@@ -55,10 +74,15 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
             <span className="failed">失败/已停止</span>
           </p>
           <ol>
-          {chapters.map((chapter) => {
+          {chapters.map((sourceChapter) => {
+            const manual = manualUpdates[sourceChapter.id]
+            const chapter = manual?.source === sourceChapter ? manual.saved : sourceChapter
             const active = chapter.id === activeChapterId
             const recorded = processingStates[chapter.id]
-            const progress = chapter.dialogue_processed && !recorded?.cancelRequested && !(recorded?.pendingTasks ?? 0)
+            const progress = chapter.processing_status_override != null
+              ? { state: chapter.processing_status_override ? 'processed' as const : 'unprocessed' as const,
+                completedWindows: 0, totalWindows: 0, error: null }
+              : chapter.dialogue_processed && !recorded?.cancelRequested && !(recorded?.pendingTasks ?? 0)
               && !['queued', 'roster', 'dialogue'].includes(recorded?.state ?? '')
               ? { state: 'processed' as const, completedWindows: recorded?.totalWindows ?? 0, totalWindows: recorded?.totalWindows ?? 0, error: null }
               : recorded ?? {
@@ -67,7 +91,9 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
               totalWindows: 0,
               error: null,
             }
-            const cancellable = progress.cancelRequested || (progress.pendingTasks ?? 0) > 0 || ['queued', 'roster', 'dialogue'].includes(progress.state)
+            const cancellable = recorded?.cancelRequested || (recorded?.pendingTasks ?? 0) > 0
+              || ['queued', 'roster', 'dialogue'].includes(recorded?.state ?? '')
+              || progress.cancelRequested || (progress.pendingTasks ?? 0) > 0 || ['queued', 'roster', 'dialogue'].includes(progress.state)
             const retryable = !cancellable && ['failed', 'stopped'].includes(progress.state)
             const label = `${cancellable ? '取消' : '重试'}${chapter.title ?? `第 ${chapter.ordinal + 1} 节`}的任务`
             return (
@@ -78,9 +104,16 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
                   data-processing-state={progress.state}
                   title={progress.error ?? undefined}
                   aria-current={active ? 'true' : undefined}
-                  onClick={() => onSelect(chapter)}
+                  disabled={Boolean(busy[chapter.id]) && statusLocks.current.has(chapter.id)}
+                  onClick={event => {
+                    if (!canToggle || event.detail === 0) { onSelect(chapter); return }
+                    if (selectionTimer.current) clearTimeout(selectionTimer.current)
+                    selectionTimer.current = setTimeout(() => onSelect(chapter), 500)
+                  }}
                 >
-                  <span className="ndr-chapter-title">{chapter.title ?? `第 ${chapter.ordinal + 1} 节`}</span>
+                  <span className="ndr-chapter-title" onDoubleClick={event => {
+                    event.stopPropagation(); toggleStatus(sourceChapter, progress.state !== 'processed')
+                  }}>{chapter.title ?? `第 ${chapter.ordinal + 1} 节`}</span>
                   <span className="ndr-chapter-range">
                     {progressLabel(progress)}
                   </span>

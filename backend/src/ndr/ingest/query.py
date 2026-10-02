@@ -158,6 +158,7 @@ def list_chapters(session: Session, version_id: str) -> list[ChapterOut]:
             end_cp=row.end_cp,
             source_href=row.source_href,
             dialogue_processed=bool(row.dialogue_processed),
+            processing_status_override=row.processing_status_override,
         )
         for row in rows
     ]

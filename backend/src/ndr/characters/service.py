@@ -33,6 +33,7 @@ from ..ingest.query import load_canonical_text
 from ..jobs.service import digest_request, profile_snapshot
 from ..llm.prompts import build_roster_messages
 from ..llm.schemas import RosterOutput
+from ..storage.chapter_status import complete_chapter_automatically
 from ..storage.models import (
     Book,
     BookCharacter,
@@ -155,7 +156,7 @@ def complete_textless_chapter(session: Session, chapter: Chapter) -> ChapterChar
     roster.candidates_json = "[]"
     roster.confirmed_character_ids_json = "[]"
     roster.pov_character_id = None
-    chapter.dialogue_processed = True
+    complete_chapter_automatically(session, chapter)
     session.flush()
     return roster
 
@@ -182,6 +183,7 @@ def complete_existing_textless_chapters(session: Session, settings) -> int:  # n
         BookVersion, BookVersion.id == Chapter.book_version_id,
     ).where(
         Chapter.dialogue_processed.is_(False),
+        Chapter.processing_status_override.is_(None),
         Chapter.end_cp - Chapter.start_cp <= func.coalesce(func.length(Chapter.title), 0) + 64,
     ).order_by(Chapter.book_version_id, Chapter.id)).all()
     count = 0

@@ -69,6 +69,46 @@ def _rewrite_manifest(epub_bytes: bytes, mutate) -> bytes:  # noqa: ANN001 - 测
     return output.getvalue()
 
 
+def test_manual_chapter_status_survives_epub_roundtrip(fake_provider_client: TestClient) -> None:
+    data = import_sample(fake_provider_client)
+    book_id = data["book_id"]
+    chapters = fake_provider_client.get(f"/api/books/{book_id}/chapters").json()["data"]
+    for index, chapter in enumerate(chapters):
+        response = fake_provider_client.put(
+            f"/api/books/{book_id}/chapters/{chapter['id']}/processing-status",
+            json={"book_version_id": data["book_version_id"], "dialogue_processed": index == 0},
+        )
+        assert response.status_code == 200, response.text
+    raw = _export(fake_provider_client, book_id, _preview(fake_provider_client, book_id)["snapshot_id"])
+    imported = fake_provider_client.post("/api/books/import", files={
+        "file": ("manual.epub", raw, "application/epub+zip"),
+    })
+    assert imported.status_code == 202, imported.text
+    restored = fake_provider_client.get(
+        f"/api/books/{imported.json()['data']['book_id']}/chapters",
+    ).json()["data"]
+    assert [chapter["dialogue_processed"] for chapter in restored] == [True, False]
+    assert [chapter["processing_status_override"] for chapter in restored] == [True, False]
+
+
+def test_manual_status_changes_export_cache_key_but_not_saved_preview(fake_provider_client: TestClient) -> None:
+    data = import_sample(fake_provider_client)
+    book_id = data["book_id"]
+    chapter = fake_provider_client.get(f"/api/books/{book_id}/chapters").json()["data"][0]
+    before = _preview(fake_provider_client, book_id)
+    raw_before = _export(fake_provider_client, book_id, before["snapshot_id"])
+    fake_provider_client.put(f"/api/books/{book_id}/chapters/{chapter['id']}/processing-status", json={
+        "book_version_id": data["book_version_id"], "dialogue_processed": True,
+    })
+    after = _preview(fake_provider_client, book_id)
+    raw_after = _export(fake_provider_client, book_id, after["snapshot_id"])
+    with zipfile.ZipFile(io.BytesIO(raw_before)) as archive:
+        assert json.loads(archive.read("OEBPS/annotations.json"))["manual_processing_status"] == {}
+    with zipfile.ZipFile(io.BytesIO(raw_after)) as archive:
+        assert json.loads(archive.read("OEBPS/annotations.json"))["manual_processing_status"] == {"0": True}
+    assert _export(fake_provider_client, book_id, before["snapshot_id"]) == raw_before
+
+
 def test_exported_epub_roundtrip_restores_annotations(
     fake_provider_client: TestClient, migrated_settings
 ) -> None:

@@ -57,6 +57,7 @@ class ChapterOut(ApiModel):
     end_cp: int = Field(ge=0)
     source_href: str | None = None
     dialogue_processed: bool = False
+    processing_status_override: bool | None = None
 
 
 class ChapterRepairSuggestion(ApiModel):
@@ -83,6 +84,11 @@ class ChapterProcessingCompleteIn(ApiModel):
     """并发窗口全部完成后，由编排器请求确认章节覆盖状态。"""
 
     book_version_id: str
+
+
+class ChapterProcessingStatusIn(ApiModel):
+    book_version_id: str
+    dialogue_processed: bool | None
 
 
 class ChapterProcessingCompleteOut(ApiModel):

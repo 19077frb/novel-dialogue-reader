@@ -79,6 +79,18 @@ def restore_annotations_from_manifest(
         if chapter is not None and not chapter.dialogue_processed:
             chapter.dialogue_processed = True
             processed_count += 1
+    manual_status = manifest.get("manual_processing_status", {})
+    if isinstance(manual_status, dict):
+        for raw_index, status in manual_status.items():
+            if not isinstance(status, bool):
+                continue
+            try:
+                chapter = binding.get(int(raw_index))
+            except (TypeError, ValueError):
+                continue
+            if chapter is not None:
+                chapter.processing_status_override = status
+                chapter.dialogue_processed = status
     if not entries:
         return {
             "restored": 0,

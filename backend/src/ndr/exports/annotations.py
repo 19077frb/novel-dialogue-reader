@@ -38,6 +38,7 @@ def build_annotations_manifest(
     canonical_text: str,
     style: ExportStylePreset,
     processed_chapter_indices: list[int] | None = None,
+    manual_processing_status: dict[int, bool] | None = None,
 ) -> dict[str, Any]:
     """从冻结投影 + 渲染结果生成标注清单。
 
@@ -99,6 +100,8 @@ def build_annotations_manifest(
         "book_title": rendered.title,
         "chapter_titles": [chapter.title for chapter in rendered.chapters],
         "processed_chapter_indices": sorted(set(processed_chapter_indices or [])),
+        "manual_processing_status": {str(index): status for index, status in
+                                     (manual_processing_status or {}).items()},
         "speakers": [speakers[key] for key in sorted(speakers)],
         "annotations": [entry for _, entry in entries],
     }

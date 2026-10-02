@@ -24,6 +24,7 @@ from ..storage.cache import fingerprint
 from ..storage.models import (
     Book,
     BookVersion,
+    Chapter,
     ExportArtifact,
     ExportSnapshot,
     Job,
@@ -193,7 +194,19 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
         fmt = artifact.format
         annotations_manifest = None
         if fmt is ExportFormat.EPUB:
-            processed_ids = processed_chapter_ids(session, version.id)
+            frozen_processing = payload.get("chapter_processing")
+            if isinstance(frozen_processing, dict):
+                processed_ids = {key for key, state in frozen_processing.items()
+                                 if state.get("processed")}
+                manual_status = {key: state["override"] for key, state in frozen_processing.items()
+                                 if state.get("override") is not None}
+            else:
+                # Older saved previews did not freeze completion flags.
+                processed_ids = processed_chapter_ids(session, version.id)
+                manual_status = dict(session.execute(select(
+                    Chapter.id, Chapter.processing_status_override,
+                ).where(Chapter.book_version_id == version.id,
+                        Chapter.processing_status_override.is_not(None))).all())
             annotations_manifest = build_annotations_manifest(
                 projection_payload=payload,
                 rendered=rendered,
@@ -204,6 +217,9 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
                     for index, chapter in enumerate(rendered.chapters)
                     if chapter.chapter_id in processed_ids
                 ],
+                manual_processing_status={index: manual_status[chapter.chapter_id]
+                                          for index, chapter in enumerate(rendered.chapters)
+                                          if chapter.chapter_id in manual_status},
             )
 
     out_dir = export_dir(settings, artifact_id)

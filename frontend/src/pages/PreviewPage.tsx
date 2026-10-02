@@ -5,6 +5,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { annotationKeys, fetchAnnotations } from '../api/annotations'
 import {
   completeChapterProcessing,
+  setChapterProcessingStatus,
   fetchBook,
   fetchChapters,
   fetchContent,
@@ -20,7 +21,7 @@ import {
   type BudgetInput,
 } from '../api/jobs'
 import { fetchProfiles, profileKeys } from '../api/profiles'
-import type { AnnotationItemOut, JobDetailOut } from '../api/types'
+import type { AnnotationItemOut, ChapterOut, JobDetailOut } from '../api/types'
 import { BudgetForm } from '../components/BudgetForm'
 import { OperationTimer, useRequestClock } from '../components/OperationTimer'
 import { BatchProcessor, reconcileCompletedChapter, useBatchProgress } from '../components/BatchProcessor'
@@ -255,6 +256,12 @@ export default function PreviewPage() {
         : []
       if (range.chapterId && plannedWindows.length === 0) {
         throw new Error('没有选中当前章节的有效窗口，不能开始处理')
+      }
+      const selectedChapter = chapters.data?.find(chapter => chapter.id === range.chapterId)
+      if (mode === 'process' && selectedChapter?.processing_status_override != null && versionId && bookId) {
+        const saved = await setChapterProcessingStatus(bookId, selectedChapter.id, versionId, null)
+        queryClient.setQueryData<ChapterOut[]>(queryKeys.chapters(bookId), previous =>
+          previous?.map(chapter => chapter.id === saved.id ? saved : chapter))
       }
       if (plannedWindows.length === 0) {
         const job = await createJob({

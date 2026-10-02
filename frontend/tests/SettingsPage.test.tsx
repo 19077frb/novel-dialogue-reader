@@ -32,6 +32,16 @@ it('bounds corrupt stored values and falls back safely for invalid JSON', () => 
   expect(getGeneralSettings()).toMatchObject({ fontSize: 28, lineHeight: 1.5, showAnnotations: true })
 })
 
+it('双击目录状态默认关闭，开启后保存并在重新进入设置时恢复', async () => {
+  const page = renderWithProviders(<SettingsPage />)
+  expect(screen.getByLabelText('双击目录章节名切换完成状态')).not.toBeChecked()
+  await userEvent.click(screen.getByLabelText('双击目录章节名切换完成状态'))
+  expect(getGeneralSettings().doubleClickChapterStatus).toBe(true)
+  page.unmount()
+  renderWithProviders(<SettingsPage />)
+  expect(screen.getByLabelText('双击目录章节名切换完成状态')).toBeChecked()
+})
+
 it('keeps automatic processing off by default and remembers look-ahead and shared limits', async () => {
   renderWithProviders(<SettingsPage />)
   expect(screen.getByLabelText(/阅读时自动处理当前章/)).not.toBeChecked()

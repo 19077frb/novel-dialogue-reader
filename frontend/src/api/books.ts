@@ -76,6 +76,14 @@ export function completeChapterProcessing(
   )
 }
 
+export function setChapterProcessingStatus(
+  bookId: string, chapterId: string, bookVersionId: string, processed: boolean | null,
+): Promise<ChapterOut> {
+  return apiData(`/api/books/${bookId}/chapters/${chapterId}/processing-status`, {
+    method: 'PUT', body: { book_version_id: bookVersionId, dialogue_processed: processed },
+  })
+}
+
 export interface ContentQuery {
   startCp?: number | null
   chapterId?: string | null

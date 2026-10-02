@@ -128,6 +128,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/chapters/{chapter_id}/processing-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 手动设置章节完成标记或恢复自动更新 */
+        put: operations["set_chapter_processing_status_route_api_books__book_id__chapters__chapter_id__processing_status_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/chapters/{chapter_id}/processing-complete": {
         parameters: {
             query?: never;
@@ -139,7 +156,7 @@ export interface paths {
         put?: never;
         /**
          * 确认并发窗口已覆盖整章并标记为已处理
-         * @description 只在本章每条外层候选对白都有当前标注时写入完成状态。
+         * @description 自动完成要求完整标注覆盖；手动指定的完成标记优先，不改任务状态。
          */
         post: operations["complete_chapter_processing_route_api_books__book_id__chapters__chapter_id__processing_complete_post"];
         delete?: never;
@@ -1297,6 +1314,8 @@ export interface components {
              * @default false
              */
             dialogue_processed: boolean;
+            /** Processing Status Override */
+            processing_status_override?: boolean | null;
         };
         /**
          * ChapterProcessingCompleteIn
@@ -1316,6 +1335,13 @@ export interface components {
             quote_count: number;
             /** Annotated Quote Count */
             annotated_quote_count: number;
+        };
+        /** ChapterProcessingStatusIn */
+        ChapterProcessingStatusIn: {
+            /** Book Version Id */
+            book_version_id: string;
+            /** Dialogue Processed */
+            dialogue_processed: boolean | null;
         };
         /** ChapterRepairIn */
         ChapterRepairIn: {
@@ -1629,6 +1655,15 @@ export interface components {
         /** DataEnvelope[BookmarkOut] */
         DataEnvelope_BookmarkOut_: {
             data: components["schemas"]["BookmarkOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[ChapterOut] */
+        DataEnvelope_ChapterOut_: {
+            data: components["schemas"]["ChapterOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -3681,6 +3716,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_dict_str__int__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_chapter_processing_status_route_api_books__book_id__chapters__chapter_id__processing_status_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                chapter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChapterProcessingStatusIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_ChapterOut_"];
                 };
             };
             /** @description Validation Error */

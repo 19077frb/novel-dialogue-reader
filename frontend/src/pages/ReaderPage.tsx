@@ -10,6 +10,7 @@ import {
   fetchContent,
   fetchQuotes,
   queryKeys,
+  setChapterProcessingStatus,
 } from '../api/books'
 import { addBookmark, bookmarkKey } from '../api/bookmarks'
 import { BookmarkList } from '../components/BookmarkList'
@@ -338,6 +339,14 @@ export default function ReaderPage() {
               activeChapterId={chapterId}
               onSelect={handleChapterSelect}
               processingStates={batchChapterProgress}
+              onSetProcessingStatus={async (chapter, processed) => {
+                const versionId = book.data?.active_version_id
+                if (!bookId || !versionId) throw new Error('书籍版本尚未读取完成')
+                const saved = await setChapterProcessingStatus(bookId, chapter.id, versionId, processed)
+                queryClient.setQueryData<ChapterOut[]>(queryKeys.chapters(bookId), previous =>
+                  previous?.map(item => item.id === saved.id ? saved : item))
+                return saved
+              }}
             />
           )}
           {chapters.isError && (

@@ -22,8 +22,10 @@ export default function SettingsPage() {
         <label><input type="checkbox" checked={settings.resumeReading} onChange={e => update({ resumeReading: e.target.checked })} />重新打开时自动续读（不影响最后阅读位置的保存）</label>
         <label><input type="checkbox" checked={settings.showCandidates} onChange={e => update({ showCandidates: e.target.checked })} />阅读页默认显示候选引语</label>
         <label><input type="checkbox" checked={settings.showAnnotations} onChange={e => update({ showAnnotations: e.target.checked })} />阅读页默认显示人物标注</label>
+        <label><input type="checkbox" checked={settings.doubleClickChapterStatus} onChange={e => update({ doubleClickChapterStatus: e.target.checked })} />双击目录章节名切换完成状态</label>
       </div>
       <p className="hint">显示开关在下一次进入阅读页时作为默认值；阅读中仍可临时调整。字号和行距也用于处理页原文预览，不改变导出样式。</p>
+      <p className="hint">双击切换默认关闭，开启后立即生效：未处理与已完成互相切换；处理中、失败或已停止先标为已完成，再次双击改为未处理。仅改完成标记，不删除标注或停止已发送的模型请求；重新启动本章处理后恢复自动进度更新。</p>
       <div className="ndr-document"><p>阅读样例：「雨停了。」少女合上伞。</p></div>
       <button onClick={() => { if (window.confirm('恢复通用设置默认值？不会清除书籍、书签或模型配置。')) update(defaultSettings) }}>恢复默认设置</button>
     </section>

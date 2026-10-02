@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,6 +7,7 @@ import * as booksApi from '../src/api/books'
 import type { BookOut, ChapterOut, ContentNodeOut } from '../src/api/types'
 import ReaderPage, { findCurrentStartCp } from '../src/pages/ReaderPage'
 import { renderRoute } from './helpers'
+import { updateGeneralSettings } from '../src/settings/preferences'
 
 vi.mock('../src/api/annotations', () => ({
   annotationKeys: {
@@ -38,6 +39,7 @@ vi.mock('../src/api/books', () => ({
   fetchContent: vi.fn(),
   fetchQuotes: vi.fn(),
   saveReadingProgress: vi.fn(),
+  setChapterProcessingStatus: vi.fn(),
   resourceUrl: (bookId: string, resourceId: string) =>
     `/api/books/${bookId}/resources/${resourceId}`,
 }))
@@ -195,6 +197,24 @@ describe('ReaderPage', () => {
       reading_mode: 'initial',
       version: 4,
     })
+  })
+
+  it('目录双击保存状态，不重新读取正文和标注，也不切换当前阅读章', async () => {
+    updateGeneralSettings({ doubleClickChapterStatus: true })
+    vi.mocked(booksApi.setChapterProcessingStatus).mockImplementation(async (_book, chapterId, _version, processed) => ({
+      ...CHAPTERS.find(chapter => chapter.id === chapterId)!, dialogue_processed: Boolean(processed), processing_status_override: processed,
+    }))
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
+    const title = await screen.findByText(CHAPTERS[0].title as string)
+    await waitFor(() => expect(annotationsApi.fetchAnnotations).toHaveBeenCalled())
+    const contentCount = vi.mocked(booksApi.fetchContent).mock.calls.length
+    const annotationCount = vi.mocked(annotationsApi.fetchAnnotations).mock.calls.length
+    await userEvent.dblClick(title)
+    await waitFor(() => expect(title.closest('button')).toHaveAttribute('data-processing-state', 'processed'))
+    expect(booksApi.setChapterProcessingStatus).toHaveBeenCalledWith('b1', 'c1', 'v1', true)
+    expect(booksApi.fetchContent).toHaveBeenCalledTimes(contentCount)
+    expect(annotationsApi.fetchAnnotations).toHaveBeenCalledTimes(annotationCount)
+    act(() => updateGeneralSettings({ doubleClickChapterStatus: false }))
   })
 
   it('按书签位置打开对应章节并渲染正文', async () => {
