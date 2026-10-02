@@ -21,6 +21,52 @@ beforeEach(() => {
   vi.mocked(api.fetchApplicationSettings).mockResolvedValue(example)
 })
 afterEach(() => vi.restoreAllMocks())
+
+const capacityExamples = [
+  ['max_import_bytes', '导入文件大小上限', 50],
+  ['max_epub_total_uncompressed_bytes', 'EPUB解压总大小上限', 200],
+  ['max_epub_entry_bytes', 'EPUB单个内部文件大小上限', 32],
+] as const
+
+it.each(capacityExamples)('%s 使用MB展示、范围和小数输入，保存仍使用整数字节', async (key, label, amount) => {
+  const field = { ...example.fields[0], key, label: `${label}（字节）`, value: amount * 1024 ** 2,
+    current_value: amount * 1024 ** 2, default_value: amount * 1024 ** 2, minimum: 1, maximum: 10 * 1024 ** 3 }
+  const settings = { ...example, fields: [...example.fields, field] }
+  vi.mocked(api.fetchApplicationSettings).mockResolvedValue(settings)
+  vi.mocked(api.saveApplicationSettings).mockResolvedValue({ ...settings, restart_required: [key],
+    fields: [...example.fields, { ...field, value: 100.5 * 1024 ** 2 }] })
+  renderWithProviders(<ApplicationSettings />)
+  const input = await screen.findByLabelText(`${label}（MB）`)
+  expect(input).toHaveValue(amount)
+  expect(input).toHaveAttribute('min', String(1 / 1024 ** 2))
+  expect(input).toHaveAttribute('max', '10240')
+  expect(input).toHaveAttribute('step', 'any')
+  fireEvent.change(input, { target: { value: '100.5' } })
+  expect(api.saveApplicationSettings).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: '保存应用配置' }))
+  await waitFor(() => expect(api.saveApplicationSettings).toHaveBeenCalledWith({ values: { [key]: 100.5 * 1024 ** 2 }, revision: 'missing' }))
+  expect(await screen.findByText(`当前生效：${amount} MB`)).toBeVisible()
+  expect(input).toHaveValue(100.5)
+  expect(screen.getByText(/已保存，重启后生效/)).toHaveTextContent(`${label}（MB）`)
+})
+
+it('字节旧配置精确显示，恢复容量默认及保存并重启不会二次换算', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  const field = { ...example.fields[0], key: 'max_import_bytes', label: '导入文件大小上限（字节）',
+    value: 1048577, current_value: 1048577, default_value: 50 * 1024 ** 2 }
+  const settings = { ...example, fields: [...example.fields, field] }
+  vi.mocked(api.fetchApplicationSettings).mockResolvedValue(settings)
+  vi.mocked(api.saveAndRestartApplication).mockResolvedValue(settings)
+  renderWithProviders(<ApplicationSettings />)
+  const input = await screen.findByLabelText('导入文件大小上限（MB）')
+  expect(input).toHaveValue(1048577 / 1024 ** 2)
+  expect(screen.getByRole('button', { name: '保存应用配置' })).toBeDisabled()
+  await userEvent.click(screen.getByRole('button', { name: '恢复应用配置默认值' }))
+  expect(input).toHaveValue(50)
+  await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
+  await waitFor(() => expect(api.saveAndRestartApplication).toHaveBeenCalledWith({ values: { max_import_bytes: 50 * 1024 ** 2 }, revision: 'missing' }))
+})
+
 it('编辑不自动保存，保存显示待重启状态和新端口', async () => {
   vi.mocked(api.saveApplicationSettings).mockResolvedValue({ ...example, revision: 'saved', restart_required: ['port'], fields: [{ ...example.fields[0], value: 8800 }, example.fields[1]] })
   renderWithProviders(<ApplicationSettings />)

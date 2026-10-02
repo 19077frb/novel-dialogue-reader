@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 from pydantic_settings import EnvSettingsSource
 
+from .capacity_settings import BYTES_PER_MB, CAPACITY_KEYS, capacity_source, mb_to_bytes
+
 if TYPE_CHECKING:
     from .config import Settings
 
@@ -253,8 +255,13 @@ def _read() -> tuple[dict[str, JsonValue], str]:
     try:
         raw = path.read_bytes()
         values = json.loads(raw)
-        if not isinstance(values, dict) or set(values) - {field.key for field in DEFINITIONS}:
+        if not isinstance(values, dict) or set(values) - (
+            {field.key for field in DEFINITIONS} | set(CAPACITY_KEYS.values())
+        ):
             raise ValueError("包含未知配置项")
+        for byte_key, mb_key in CAPACITY_KEYS.items():
+            if mb_key in values:
+                values[byte_key] = mb_to_bytes(values.pop(mb_key), mb_key)
     except (ValueError, UnicodeError) as exc:
         raise ValueError(f"应用配置文件损坏，请检查或还原：{path}") from exc
     return values, hashlib.sha256(raw).hexdigest()
@@ -266,10 +273,15 @@ def read_saved_settings() -> dict[str, JsonValue]:
 
 def _locks(settings: Settings) -> dict[str, str]:
     locks = {}
-    source = EnvSettingsSource(type(settings))()
+    env_source = EnvSettingsSource(type(settings))
+    source = capacity_source(env_source)()
     for key in type(settings).model_fields:
         if key in source and key not in settings._internal_environment_keys:
-            locks[key] = f"由启动环境变量 NDR_{key.upper()} 指定；移除该变量并重启后才能在此修改。"
+            mb_key = CAPACITY_KEYS.get(key)
+            variable = mb_key if mb_key and f"ndr_{mb_key}" in env_source.env_vars else key
+            locks[key] = (
+                f"由启动环境变量 NDR_{variable.upper()} 指定；移除该变量并重启后才能在此修改。"
+            )
     locks.update(settings._startup_locks)
     return locks
 
@@ -385,7 +397,11 @@ def save_settings(settings: Settings, patch: ApplicationSettingsPatch) -> Applic
         except ValidationError as exc:
             raise ApiError.validation("配置值无效，请检查格式。") from exc
         output = {**saved, **{key: validated[key] for key in patch.values}}
-        encoded = json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False).encode()
+        stored = {
+            CAPACITY_KEYS.get(key, key): value / BYTES_PER_MB if key in CAPACITY_KEYS else value
+            for key, value in output.items()
+        }
+        encoded = json.dumps(stored, ensure_ascii=False, indent=2, allow_nan=False).encode()
         if len(encoded) > 65536:
             raise ApiError.validation("应用配置内容过大，请缩短文字或减少网页来源。")
         path = settings_path()

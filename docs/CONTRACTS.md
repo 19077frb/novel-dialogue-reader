@@ -171,6 +171,7 @@ EPUB 标注清单兼容现有版本，新增可选 speaker `identity` / `history
 
 - `GET /api/settings/application` 返回全部应用配置的中文定义、当前值、待生效值、锁定原因、配置文件版本摘要及重启阻塞原因，不包含模型密钥。`PATCH` 接收 `{revision, values}`，按字段验证并原子保存，版本冲突返回409，不热更新运行中的Settings。
 - 每个应用配置字段的 `default_value` 返回未受环境变量、.env或本地配置覆盖的程序默认值（目录使用当前运行方式的默认路径），用于前端恢复未锁定的草稿；不新增实际重置端点，不改变保存和重启的保护条件。
+- 容量配置在界面、环境变量和本地JSON中使用 MB（1 MB = 1024 × 1024 字节，可填小数）；API 的 `max_import_bytes`、`max_epub_total_uncompressed_bytes`、`max_epub_entry_bytes` 及其范围、当前值和默认值仍为整数字节，前端负责换算。新 `NDR_*_MB` / JSON `*_mb` 同来源优先旧字节键；旧配置兼容读取，JSON仅在显式保存时统一写为MB，来源优先级不变。
 - `POST /api/settings/application/save-and-restart` 使用同一请求格式；仅受控EXE/模块入口且无排队、运行或暂停过渡任务时可用，拒绝时不保存配置。响应发出后请求优雅重启，重启期间写操作返回409；现有请求收尾，重启读取新配置。外部重载/uvicorn入口需手动重启。修改配置的请求校验Origin，拒绝未知字段及不可信网页来源，界面只允许本机监听。
 - 配置来源优先级：显式启动参数 > 环境变量 > 固定本地JSON配置 > 源码.env > 默认；免安装版忽略.env。data_dir改变不迁移业务数据，JSON定位始终基于默认数据目录，启动器固定安全策略不得由JSON覆盖。无需数据库迁移。
 

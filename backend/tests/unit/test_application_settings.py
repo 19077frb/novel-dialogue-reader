@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from ndr import application_settings as preferences
 from ndr.api.errors import ApiError
 from ndr.app import create_app
+from ndr.capacity_settings import BYTES_PER_MB, CAPACITY_KEYS
 from ndr.config import Settings
 from ndr.portable import portable_settings
 from ndr.storage.migrate import run_migrations
@@ -20,7 +21,72 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     for key in Settings.model_fields:
         monkeypatch.delenv(f"NDR_{key.upper()}", raising=False)
+    for key in CAPACITY_KEYS.values():
+        monkeypatch.delenv(f"NDR_{key.upper()}", raising=False)
     return tmp_path
+
+
+@pytest.mark.parametrize("byte_key,mb_key", CAPACITY_KEYS.items())
+def test_capacity_mb_sources_priority_lock_and_legacy(isolated, monkeypatch, byte_key, mb_key):
+    variable = f"NDR_{mb_key.upper()}"
+    legacy = f"NDR_{byte_key.upper()}"
+    (isolated / ".env").write_text(f"{variable}=40.5\n{legacy}=123", encoding="utf-8")
+    assert getattr(Settings(), byte_key) == int(40.5 * BYTES_PER_MB)
+    preferences.settings_path().parent.mkdir()
+    preferences.settings_path().write_text(json.dumps({mb_key: 80.25}), encoding="utf-8")
+    assert getattr(Settings(), byte_key) == int(80.25 * BYTES_PER_MB)
+    monkeypatch.setenv(legacy, "4321")
+    assert getattr(Settings(), byte_key) == 4321  # environment wins even over saved MB
+    monkeypatch.setenv(variable, "100.5")
+    settings = Settings()
+    assert getattr(settings, byte_key) == int(100.5 * BYTES_PER_MB)
+    assert getattr(Settings(**{byte_key: 999}), byte_key) == 999
+    field = next(f for f in preferences.describe_settings(settings).fields if f.key == byte_key)
+    assert variable in field.locked_reason
+    with pytest.raises(ApiError, match=variable):
+        preferences.save_settings(
+            settings,
+            preferences.ApplicationSettingsPatch(
+                revision=preferences.describe_settings(settings).revision, values={byte_key: 1000}
+            ),
+        )
+
+
+def test_saved_capacity_migrates_only_on_save_and_restarts_exactly(isolated):
+    preferences.settings_path().parent.mkdir()
+    legacy = {key: 1048577 for key in CAPACITY_KEYS}
+    preferences.settings_path().write_text(json.dumps(legacy), encoding="utf-8")
+    before = preferences.settings_path().read_bytes()
+    settings = Settings()
+    description = preferences.describe_settings(settings)
+    assert all(getattr(settings, key) == 1048577 for key in CAPACITY_KEYS)
+    assert preferences.settings_path().read_bytes() == before
+    preferences.save_settings(
+        settings,
+        preferences.ApplicationSettingsPatch(revision=description.revision, values={"port": 8800}),
+    )
+    stored = json.loads(preferences.settings_path().read_text())
+    assert all(key not in stored for key in CAPACITY_KEYS)
+    assert all(stored[key] == 1048577 / BYTES_PER_MB for key in CAPACITY_KEYS.values())
+    assert all(getattr(Settings(), key) == 1048577 for key in CAPACITY_KEYS)
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-1", "0", "not-a-number", "100000000"])
+def test_invalid_mb_environment_rejected(isolated, monkeypatch, value):
+    monkeypatch.setenv("NDR_MAX_IMPORT_MB", value)
+    with pytest.raises(ValueError, match="NDR_MAX_IMPORT_MB"):
+        Settings()
+
+
+def test_mb_json_has_priority_over_legacy_and_rejects_invalid(isolated):
+    preferences.settings_path().parent.mkdir()
+    preferences.settings_path().write_text(
+        json.dumps({"max_import_bytes": 1, "max_import_mb": 1.5})
+    )
+    assert Settings().max_import_bytes == int(1.5 * BYTES_PER_MB)
+    preferences.settings_path().write_text(json.dumps({"max_import_mb": True}))
+    with pytest.raises(ValueError, match="应用配置文件损坏"):
+        Settings()
 
 
 def test_all_fields_have_chinese_definitions_and_no_implicit_write(isolated):
@@ -44,7 +110,10 @@ def test_default_metadata_ignores_environment_dotenv_and_saved_configuration(iso
     assert fields["port"].current_value == 8030
     assert fields["port"].locked_reason
     assert fields["data_dir"].default_value != str(settings.data_dir)
-    assert fields["cors_origins"].default_value == ["http://127.0.0.1:5173", "http://localhost:5173"]
+    assert fields["cors_origins"].default_value == [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
     assert preferences.settings_path().read_bytes() == before
 
 

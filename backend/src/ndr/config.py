@@ -47,12 +47,13 @@ class Settings(BaseSettings):
         file_secret_settings,
     ):
         from ndr.application_settings import read_saved_settings
+        from ndr.capacity_settings import capacity_source
 
         return (
             init_settings,
-            env_settings,
+            capacity_source(env_settings),
             read_saved_settings,
-            dotenv_settings,
+            capacity_source(dotenv_settings),
             file_secret_settings,
         )
 

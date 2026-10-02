@@ -6,6 +6,16 @@ import {
 import type { ApplicationSettingsPatch } from '../api/applicationSettings'
 import { CollapsibleBlock } from './CollapsibleBlock'
 
+const BYTES_PER_MB = 1024 * 1024
+const capacityFields: Record<string, { label: string; description: string }> = {
+  max_import_bytes: { label: '导入文件大小上限（MB）', description: '单个上传文件的最大大小。过大文件会占用更多内存和磁盘。' },
+  max_epub_total_uncompressed_bytes: { label: 'EPUB解压总大小上限（MB）', description: '限制全部解压内容的总大小，不是原始上传文件大小。' },
+  max_epub_entry_bytes: { label: 'EPUB单个内部文件大小上限（MB）', description: '限制解压后每个内部文件的大小，不能超过解压总大小上限。' },
+}
+const displayValue = (key: string, value: ApplicationSettingsPatch['values'][string]) =>
+  capacityFields[key] && typeof value === 'number' ? value / BYTES_PER_MB : value
+const fieldLabel = (field: { key: string; label: string }) => capacityFields[field.key]?.label ?? field.label
+
 export function ApplicationSettings() {
   const queryClient = useQueryClient()
   const query = useQuery({ queryKey: applicationSettingsKey, queryFn: ({ signal }) => fetchApplicationSettings(signal) })
@@ -48,7 +58,7 @@ export function ApplicationSettings() {
     {data && <>
       {(saved || data.restart_required.length > 0) && <p role="status">
         {data.restart_required.length > 0
-          ? `已保存，重启后生效：${data.fields.filter(field => data.restart_required.includes(field.key)).map(field => field.label).join('、')}。`
+          ? `已保存，重启后生效：${data.fields.filter(field => data.restart_required.includes(field.key)).map(fieldLabel).join('、')}。`
           : '配置已保存，当前值没有变化。'}
       </p>}
       {(data.restart_required.includes('port') || data.restart_required.includes('host')) && <p className="hint">重启后的阅读地址：{restartAddress}</p>}
@@ -58,12 +68,13 @@ export function ApplicationSettings() {
         <div className="ndr-range-grid ndr-application-grid">
           {data.fields.filter(field => field.group === group).map(field => {
             const value = Object.hasOwn(draft, field.key) ? draft[field.key] : field.value
+            const capacity = capacityFields[field.key]
             const reason = busy ? '正在保存或重启，请等待完成后再修改。' : field.locked_reason
             const disabled = Boolean(reason)
             const hintId = `application-${field.key}-hint`
             const attributes = { disabled, title: reason ?? undefined, 'aria-describedby': hintId }
             return <div key={field.key}>
-              <label className="ndr-field">{field.label}
+              <label className="ndr-field">{fieldLabel(field)}
                 {field.kind === 'boolean'
                   ? <input type="checkbox" checked={value === true} {...attributes} onChange={event => edit(field.key, event.target.checked)} />
                   : field.kind === 'select'
@@ -73,15 +84,16 @@ export function ApplicationSettings() {
                     : field.kind === 'lines'
                       ? <textarea rows={3} value={Array.isArray(value) ? value.join('\n') : ''} {...attributes}
                         onChange={event => edit(field.key, event.target.value.split('\n').map(line => line.trim()).filter(Boolean))} />
-                      : <input type={field.kind === 'number' ? 'number' : 'text'} value={String(value ?? '')}
-                        min={field.minimum ?? undefined} max={field.maximum ?? undefined}
-                        step={field.key === 'llm_timeout_seconds' ? 'any' : 1} {...attributes}
+                      : <input type={field.kind === 'number' ? 'number' : 'text'} value={String(displayValue(field.key, value) ?? '')}
+                        min={displayValue(field.key, field.minimum) as number | null ?? undefined}
+                        max={displayValue(field.key, field.maximum) as number | null ?? undefined}
+                        step={capacity || field.key === 'llm_timeout_seconds' ? 'any' : 1} {...attributes}
                         onChange={event => edit(field.key, field.kind === 'number'
-                          ? (event.target.value === '' ? null : Number(event.target.value))
+                          ? (event.target.value === '' ? null : capacity ? Math.round(Number(event.target.value) * BYTES_PER_MB) : Number(event.target.value))
                           : (field.key === 'static_dir' && !event.target.value ? null : event.target.value))} />}
               </label>
-              <p className="hint" id={hintId}>{field.description}{reason && <> {reason}</>}</p>
-              {data.restart_required.includes(field.key) && <p className="hint">当前生效：{Array.isArray(field.current_value) ? field.current_value.join('、') : typeof field.current_value === 'boolean' ? (field.current_value ? '开启' : '关闭') : String(field.current_value ?? '未设置')}</p>}
+              <p className="hint" id={hintId}>{capacity ? `${capacity.description} 可填写小数，1 MB = 1024 × 1024 字节。` : field.description}{reason && <> {reason}</>}</p>
+              {data.restart_required.includes(field.key) && <p className="hint">当前生效：{Array.isArray(field.current_value) ? field.current_value.join('、') : typeof field.current_value === 'boolean' ? (field.current_value ? '开启' : '关闭') : String(displayValue(field.key, field.current_value) ?? '未设置')}{capacity && ' MB'}</p>}
             </div>
           })}
         </div>
