@@ -5,7 +5,7 @@ import { fetchProfiles, profileKeys } from '../api/profiles'
 import { ThinkingSettings } from '../components/ThinkingSettings'
 import { ApplicationSettings } from '../components/ApplicationSettings'
 import { useProcessingPreferences } from '../processing/preferences'
-import { getProcessingPreferences } from '../processing/preferences'
+import { getProcessingPreferences, getDefaultProcessingPreferences } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
 import { stopAutomaticProcessing } from '../processing/autoProcessing'
 import { defaultSettings, useGeneralSettings } from '../settings/preferences'
@@ -39,12 +39,21 @@ export default function SettingsPage() {
       <p className="hint">显示开关在下一次进入阅读页时作为默认值；阅读中仍可临时调整。字号和行距也用于处理页原文预览，不改变导出样式。</p>
       <p className="hint">双击切换默认关闭，保存开启后生效：未处理与已完成互相切换；处理中、失败或已停止先标为已完成，再次双击改为未处理。仅改完成标记，不删除标注或停止已发送的模型请求；重新启动本章处理后恢复自动进度更新。</p>
       <div className="ndr-document"><p>阅读样例：「雨停了。」少女合上伞。</p></div>
-      <button onClick={() => { if (window.confirm('恢复通用设置默认值？不会清除书籍、书签或模型配置。')) update(defaultSettings) }}>恢复默认设置</button>
+      <button onClick={() => {
+        if (!window.confirm('仅恢复阅读显示的默认值？其他区域不变，点击保存后生效。')) return
+        const { fontSize, lineHeight, resumeReading, showCandidates, showAnnotations, doubleClickChapterStatus } = defaultSettings
+        update({ fontSize, lineHeight, resumeReading, showCandidates, showAnnotations, doubleClickChapterStatus })
+      }}>恢复阅读显示默认值</button>
     </section>
     <section className="card">
       <h3>人物资料更新</h3>
       <label><input type="checkbox" checked={settings.allowOverwriteManualCharacters} onChange={event => update({ allowOverwriteManualCharacters: event.target.checked })} />允许后台人物识别更新人工姓名与说明</label>
       <p className="hint">默认关闭。保存开启后，批量处理及阅读时的自动处理可以根据有原文依据的人物识别结果修正人工资料；模型可能误判。仅影响之后创建的人物任务，已有任务保持原设置。单章人工确认仍由你选择。</p>
+      <button onClick={() => {
+        if (window.confirm('仅恢复人物资料更新的默认值（关闭后台覆盖人工资料）？其他区域不变，点击保存后生效。')) {
+          update({ allowOverwriteManualCharacters: defaultSettings.allowOverwriteManualCharacters })
+        }
+      }}>恢复人物资料更新默认值</button>
     </section>
     <section className="card" data-testid="automatic-processing-settings">
       <h3>自动提前处理章节</h3>
@@ -64,6 +73,13 @@ export default function SettingsPage() {
       {profiles.isError && <p className="status-error">模型配置读取失败：{profiles.error.message}<button onClick={() => void profiles.refetch()}>重新读取</button></p>}
       <p className="hint">这些模型、思考、并发和额度设置与单章、批量处理共用。自动处理额度按本页会话中每本书累计；接近上限时会提醒调整，阅读侧栏可停止或刷新额度并重试。修改设置不改变已启动的任务。</p>
       <Link className="ndr-button" to="/settings/models">管理模型账号</Link>
+      <button onClick={() => {
+        if (!window.confirm('恢复本栏的自动处理开关、提前章节数、模型选择、思考、并发、复核和Token上限默认值？不删除模型账号，其他区域及未在本栏显示的参数不变，点击保存后生效。')) return
+        update({ autoProcessing: defaultSettings.autoProcessing, lookAheadChapters: defaultSettings.lookAheadChapters })
+        const { profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort } = getDefaultProcessingPreferences()
+        updatePreferences({ profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort })
+      }}>恢复自动处理默认值</button>
+      <p className="hint">恢复仅修改本栏草稿，不停止任务或删除模型账号；保存后生效。其他页面的输出上限和校验失败重试次数保持不变。</p>
     </section>
     <section className="card" aria-label="保存阅读与处理设置">
       <button className="ndr-primary" disabled={!changed} title={!changed ? '尚未修改阅读或处理设置。' : undefined} onClick={() => {

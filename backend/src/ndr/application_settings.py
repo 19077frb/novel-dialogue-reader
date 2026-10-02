@@ -219,6 +219,7 @@ DEFINITIONS = [
 class ApplicationField(SettingDefinition):
     value: JsonValue
     current_value: JsonValue
+    default_value: JsonValue
     locked_reason: str | None = None
 
 
@@ -276,11 +277,14 @@ def _locks(settings: Settings) -> dict[str, str]:
 def describe_settings(settings: Settings) -> ApplicationSettingsOut:
     saved, revision = _read()
     current = settings.model_dump(mode="json")
+    # Construct defaults without reading environment variables, .env or saved preferences.
+    defaults = type(settings).model_construct().model_dump(mode="json")
     locks = _locks(settings)
     fields = [
         ApplicationField(
             **definition.model_dump(),
             current_value=current[definition.key],
+            default_value=defaults[definition.key],
             value=current[definition.key]
             if definition.key in locks
             else saved.get(

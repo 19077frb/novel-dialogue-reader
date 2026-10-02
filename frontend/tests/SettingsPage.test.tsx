@@ -3,10 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import SettingsPage from '../src/pages/SettingsPage'
-import { getGeneralSettings, SETTINGS_KEY } from '../src/settings/preferences'
+import { getGeneralSettings, updateGeneralSettings, SETTINGS_KEY } from '../src/settings/preferences'
 import * as profiles from '../src/api/profiles'
 import * as applicationSettings from '../src/api/applicationSettings'
-import { getProcessingPreferences } from '../src/processing/preferences'
+import { getProcessingPreferences, updateProcessingPreferences } from '../src/processing/preferences'
 import { renderWithProviders } from './helpers'
 
 vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['profiles'] } }))
@@ -41,7 +41,7 @@ it('persists display preferences and rehydrates the same values on reopening', a
   expect(screen.getByLabelText('正文字号')).toHaveValue(22)
   expect(screen.getByLabelText(/默认显示候选引语/)).not.toBeChecked()
   vi.spyOn(window, 'confirm').mockReturnValue(true)
-  await userEvent.click(screen.getByRole('button', { name: '恢复默认设置' }))
+  await userEvent.click(screen.getByRole('button', { name: '恢复阅读显示默认值' }))
   expect(screen.getByLabelText('正文字号')).toHaveValue(16)
   expect(getGeneralSettings().fontSize).toBe(22)
   await userEvent.click(screen.getByRole('button', { name: '保存阅读与处理设置' }))
@@ -76,4 +76,60 @@ it('keeps automatic processing off by default and remembers look-ahead and share
   await userEvent.click(screen.getByRole('button', { name: '保存阅读与处理设置' }))
   expect(getGeneralSettings()).toMatchObject({ autoProcessing: true, lookAheadChapters: 4 })
   expect(getProcessingPreferences()).toMatchObject({ concurrency: 3, tokenLimit: 50000 })
+})
+
+it('恢复阅读显示不改变人物及自动处理区域，保存前不写浏览器设置', async () => {
+  updateGeneralSettings({ fontSize: 22, allowOverwriteManualCharacters: true, autoProcessing: true, lookAheadChapters: 8 })
+  updateProcessingPreferences({ concurrency: 5, tokenLimit: 4000, thinkingMode: 'enabled' })
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  renderWithProviders(<SettingsPage />)
+  await userEvent.click(screen.getByRole('button', { name: '恢复阅读显示默认值' }))
+  expect(screen.getByLabelText('正文字号')).toHaveValue(16)
+  expect(screen.getByLabelText('允许后台人物识别更新人工姓名与说明')).toBeChecked()
+  expect(screen.getByLabelText(/阅读时自动处理当前章/)).toBeChecked()
+  expect(getGeneralSettings().fontSize).toBe(22)
+  await userEvent.click(screen.getByRole('button', { name: '保存阅读与处理设置' }))
+  expect(getGeneralSettings()).toMatchObject({ fontSize: 16, allowOverwriteManualCharacters: true, autoProcessing: true, lookAheadChapters: 8 })
+  expect(getProcessingPreferences()).toMatchObject({ concurrency: 5, tokenLimit: 4000, thinkingMode: 'enabled' })
+})
+
+it('恢复人物资料更新仅关闭该开关，保留阅读和自动处理设置', async () => {
+  updateGeneralSettings({ fontSize: 22, allowOverwriteManualCharacters: true, autoProcessing: true, lookAheadChapters: 8 })
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  renderWithProviders(<SettingsPage />)
+  await userEvent.click(screen.getByRole('button', { name: '恢复人物资料更新默认值' }))
+  expect(getGeneralSettings().allowOverwriteManualCharacters).toBe(true)
+  await userEvent.click(screen.getByRole('button', { name: '保存阅读与处理设置' }))
+  expect(getGeneralSettings()).toMatchObject({ fontSize: 22, allowOverwriteManualCharacters: false, autoProcessing: true, lookAheadChapters: 8 })
+})
+
+it('恢复自动处理涵盖本栏可见参数，但保留其他区域及隐藏处理参数', async () => {
+  updateGeneralSettings({ fontSize: 22, allowOverwriteManualCharacters: true, autoProcessing: true, lookAheadChapters: 8 })
+  updateProcessingPreferences({ profileId: 'existing-profile', concurrency: 5, tokenLimit: 4000, maxRecheckRounds: 3,
+    thinkingMode: 'enabled', thinkingEffort: 'high', maxFormatRetries: 5, maxOutputTokens: 8000 })
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  renderWithProviders(<SettingsPage />)
+  await userEvent.click(screen.getByRole('button', { name: '恢复自动处理默认值' }))
+  expect(screen.getByLabelText(/阅读时自动处理当前章/)).not.toBeChecked()
+  expect(screen.getByLabelText('最大并发任务数')).toHaveValue(2)
+  expect(screen.getByTestId('processing-thinking-mode')).toHaveValue('default')
+  expect(getProcessingPreferences().concurrency).toBe(5)
+  expect(getGeneralSettings().autoProcessing).toBe(true)
+  await userEvent.click(screen.getByRole('button', { name: '保存阅读与处理设置' }))
+  expect(getGeneralSettings()).toMatchObject({ fontSize: 22, allowOverwriteManualCharacters: true, autoProcessing: false, lookAheadChapters: 2 })
+  expect(getProcessingPreferences()).toMatchObject({ profileId: '', concurrency: 2, tokenLimit: null, maxRecheckRounds: 0,
+    thinkingMode: 'default', thinkingEffort: 'default', maxFormatRetries: 5, maxOutputTokens: 8000 })
+})
+
+it('取消任意区域恢复时不改变草稿或已保存配置', async () => {
+  updateGeneralSettings({ fontSize: 22, allowOverwriteManualCharacters: true, autoProcessing: true })
+  vi.spyOn(window, 'confirm').mockReturnValue(false)
+  renderWithProviders(<SettingsPage />)
+  for (const name of ['恢复阅读显示默认值', '恢复人物资料更新默认值', '恢复自动处理默认值']) {
+    await userEvent.click(screen.getByRole('button', { name }))
+  }
+  expect(screen.getByLabelText('正文字号')).toHaveValue(22)
+  expect(screen.getByLabelText('允许后台人物识别更新人工姓名与说明')).toBeChecked()
+  expect(screen.getByLabelText(/阅读时自动处理当前章/)).toBeChecked()
+  expect(screen.getByRole('button', { name: '保存阅读与处理设置' })).toBeDisabled()
 })

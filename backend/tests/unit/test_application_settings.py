@@ -32,6 +32,22 @@ def test_all_fields_have_chinese_definitions_and_no_implicit_write(isolated):
     assert not preferences.settings_path().exists()
 
 
+def test_default_metadata_ignores_environment_dotenv_and_saved_configuration(isolated, monkeypatch):
+    (isolated / ".env").write_text("NDR_PORT=8010", encoding="utf-8")
+    preferences.settings_path().parent.mkdir()
+    preferences.settings_path().write_text(json.dumps({"port": 8020}), encoding="utf-8")
+    monkeypatch.setenv("NDR_PORT", "8030")
+    settings = Settings(data_dir=isolated / "library")
+    before = preferences.settings_path().read_bytes()
+    fields = {field.key: field for field in preferences.describe_settings(settings).fields}
+    assert fields["port"].default_value == 8765
+    assert fields["port"].current_value == 8030
+    assert fields["port"].locked_reason
+    assert fields["data_dir"].default_value != str(settings.data_dir)
+    assert fields["cors_origins"].default_value == ["http://127.0.0.1:5173", "http://localhost:5173"]
+    assert preferences.settings_path().read_bytes() == before
+
+
 def test_save_is_restart_only_and_precedence_preserves_explicit_environment(isolated, monkeypatch):
     (isolated / ".env").write_text("NDR_PORT=8010\nNDR_LLM_TIMEOUT_SECONDS=20", encoding="utf-8")
     original = Settings()

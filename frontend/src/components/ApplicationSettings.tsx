@@ -87,6 +87,18 @@ export function ApplicationSettings() {
         </div>
       </CollapsibleBlock>)}
       <p className="hint">配置文件：{data.config_path}。更换书库目录不会改变这个文件的位置；请勿在文件里填写模型密钥。</p>
+      <button disabled={busy || data.fields.every(field => field.locked_reason)}
+        title={busy ? '正在保存或重启，请等待完成。' : data.fields.every(field => field.locked_reason) ? '全部应用配置已由启动参数或安全策略锁定，无法恢复。' : '仅恢复未锁定的应用配置草稿，仍需保存和重启。'}
+        onClick={() => {
+          const staticField = data.fields.find(field => field.key === 'static_dir')
+          const pageWarning = staticField && !staticField.locked_reason && staticField.default_value === null && (draft.static_dir ?? staticField.value)
+            ? '源码版网页目录会恢复为空，重启后本服务可能不再提供页面。' : ''
+          if (!window.confirm(`恢复未锁定的应用配置默认值？可能包括书库目录、端口和密钥保存方式；不会搬迁或删除书籍、密钥。${pageWarning}其他区域不变，仍需保存并重启才生效。`)) return
+          setDraft(previous => ({ ...previous, ...Object.fromEntries(data.fields.filter(field => !field.locked_reason)
+            .map(field => [field.key, field.default_value])) }))
+          setSaved(false); mutation.reset()
+        }}>恢复应用配置默认值</button>
+      <p className="hint">只恢复未锁定的应用配置；阅读、人物资料更新和自动处理偏好不变。恢复后仍需保存并重启，不会自动切换书库或删除数据。</p>
       {mutation.isError && <p role="alert" className="status-error">保存失败：{mutation.error.message}</p>}
       <button className="ndr-primary" disabled={!changed || busy}
         title={mutation.isPending ? '正在保存，请等待完成。' : !changed ? '尚未修改应用配置。' : undefined}

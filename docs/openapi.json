@@ -4288,6 +4288,9 @@
           "current_value": {
             "$ref": "#/components/schemas/JsonValue"
           },
+          "default_value": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
           "locked_reason": {
             "anyOf": [
               {
@@ -4307,7 +4310,8 @@
           "description",
           "group",
           "value",
-          "current_value"
+          "current_value",
+          "default_value"
         ],
         "title": "ApplicationField"
       },

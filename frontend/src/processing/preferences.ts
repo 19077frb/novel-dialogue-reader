@@ -16,6 +16,9 @@ const defaults: ProcessingPreferences = {
   profileId: '', concurrency: 2, maxRecheckRounds: 0, maxFormatRetries: 1, tokenLimit: null, maxOutputTokens: null,
   thinkingMode: 'default', thinkingEffort: 'default',
 }
+export function getDefaultProcessingPreferences(): ProcessingPreferences {
+  return { ...defaults }
+}
 let cachedRaw: string | null | undefined
 let cached = defaults
 let fallbackRaw: string | null = null

@@ -24,6 +24,15 @@ test.describe('通用设置保存', () => {
     await expect(page.getByLabel('正文字号', { exact: true })).toHaveValue('22')
     await expect(page.getByTestId('processing-thinking-mode')).toHaveValue('enabled')
     await expect(page.getByTestId('processing-thinking-effort')).toHaveValue('high')
+    page.once('dialog', dialog => dialog.accept())
+    await page.getByRole('button', { name: '恢复阅读显示默认值', exact: true }).click()
+    await expect(page.getByLabel('正文字号', { exact: true })).toHaveValue('16')
+    await expect(page.getByTestId('processing-thinking-mode')).toHaveValue('enabled')
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ndr:general-settings:v1') ?? '{}').fontSize)).toBe(22)
+    await page.getByRole('button', { name: '保存阅读与处理设置', exact: true }).click()
+    await page.reload()
+    await expect(page.getByLabel('正文字号', { exact: true })).toHaveValue('16')
+    await expect(page.getByTestId('processing-thinking-effort')).toHaveValue('high')
   })
 
   test('应用配置全中文可见，保存显示待重启；窄屏没有横向溢出', async ({ page }) => {

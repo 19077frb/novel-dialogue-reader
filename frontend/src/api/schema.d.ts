@@ -1268,6 +1268,7 @@ export interface components {
             options: string[];
             value: components["schemas"]["JsonValue"];
             current_value: components["schemas"]["JsonValue"];
+            default_value: components["schemas"]["JsonValue"];
             /** Locked Reason */
             locked_reason?: string | null;
         };
