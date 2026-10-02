@@ -12,11 +12,15 @@ from typing import Any
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..characters.names import valid_display_name
-from ..characters.service import complete_textless_chapter, roster_messages, store_roster_candidates
+from ..characters.service import (
+    chapter_has_body_text,
+    complete_textless_chapter,
+    roster_messages,
+    store_roster_candidates,
+)
 from ..config import Settings
 from ..context.budget import estimate_tokens
 from ..domain.enums import CredentialMode, InferenceRunState, JobKind, JobState
-from ..ingest.query import load_canonical_text
 from ..llm.adapters import AdapterSpec, build_adapter
 from ..llm.errors import ProviderError
 from ..llm.schemas import RosterOutput
@@ -103,8 +107,7 @@ def run_character_roster_job(
             outcome.errors.append("invalid_chapter")
             return outcome
 
-        text = load_canonical_text(settings, version)[chapter.start_cp : chapter.end_cp]
-        if not text.strip():
+        if not chapter_has_body_text(session, settings, version, chapter):
             roster = complete_textless_chapter(session, chapter)
             roster.analysis_job_id = job.id
             job.state = JobState.COMPLETED

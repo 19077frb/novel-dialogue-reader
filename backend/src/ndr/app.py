@@ -42,11 +42,13 @@ from .api.model_profiles import router as model_profiles_router
 from .api.openapi import install_openapi
 from .api.quotes import quote_router
 from .api.quotes import router as quotes_router
+from .characters.service import complete_existing_textless_chapters
 from .config import Settings, get_settings
 from .llm.credentials import CredentialService, SystemCredentialStore
 from .recovery.service import recover_on_startup
 from .storage.engine import create_db_engine, create_session_factory
 from .storage.migrate import run_migrations
+from .storage.transactions import transaction
 
 logger = logging.getLogger("ndr.app")
 
@@ -73,6 +75,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except Exception as exc:  # noqa: BLE001 - 恢复失败不能阻止服务启动
                 app.state.recovery = {"error": type(exc).__name__}
                 logger.warning("启动恢复扫描失败：%s", type(exc).__name__)
+        try:
+            with transaction(session_factory) as session:
+                completed = complete_existing_textless_chapters(session, resolved)
+            if completed:
+                logger.info("已补齐 %s 个无正文章节的完成状态", completed)
+        except Exception as exc:  # noqa: BLE001 - do not prevent startup with an unmigrated DB
+            logger.warning("无正文章节完成状态检查失败：%s", type(exc).__name__)
         yield
         engine.dispose()
 

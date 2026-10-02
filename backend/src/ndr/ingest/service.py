@@ -348,7 +348,11 @@ def _write_text(path: Path, text: str) -> None:
 
 def _insert_chapters(session: Session, version: BookVersion, parsed: ParsedBook) -> list[str]:
     from ..characters.service import complete_textless_chapter
+    from ..domain.enums import ContentNodeType
+    from .document import has_chapter_body_text
 
+    heading_chapters = {node.chapter_ordinal for node in parsed.nodes
+                        if node.node_type == ContentNodeType.HEADING}
     rows: list[Chapter] = []
     for chapter in parsed.chapters:
         row = Chapter(
@@ -360,7 +364,10 @@ def _insert_chapters(session: Session, version: BookVersion, parsed: ParsedBook)
             source_href=chapter.source_href,
         )
         session.add(row)
-        if not parsed.canonical_text[chapter.start_cp : chapter.end_cp].strip():
+        if not has_chapter_body_text(
+            parsed.canonical_text[chapter.start_cp : chapter.end_cp], chapter.title,
+            has_heading=chapter.ordinal in heading_chapters,
+        ):
             session.flush()
             complete_textless_chapter(session, row)
         rows.append(row)

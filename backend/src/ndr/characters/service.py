@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
@@ -22,11 +22,13 @@ from ..domain.characters import (
 from ..domain.enums import (
     CharacterRosterStatus,
     CharacterSource,
+    ContentNodeType,
     ErrorCode,
     JobKind,
     JobPurpose,
     JobState,
 )
+from ..ingest.document import collapse_whitespace, has_chapter_body_text
 from ..ingest.query import load_canonical_text
 from ..jobs.service import digest_request, profile_snapshot
 from ..llm.prompts import build_roster_messages
@@ -37,6 +39,7 @@ from ..storage.models import (
     BookVersion,
     Chapter,
     ChapterCharacterRoster,
+    ContentNode,
     Job,
     ModelProfile,
 )
@@ -155,6 +158,43 @@ def complete_textless_chapter(session: Session, chapter: Chapter) -> ChapterChar
     chapter.dialogue_processed = True
     session.flush()
     return roster
+
+
+def chapter_has_body_text(
+    session: Session, settings, version: BookVersion, chapter: Chapter,  # noqa: ANN001
+) -> bool:
+    canonical = load_canonical_text(settings, version)
+    if not 0 <= chapter.start_cp <= chapter.end_cp <= len(canonical):
+        raise ApiError.validation("章节文字范围超出正文，不能判断为空白章", chapter_id=chapter.id)
+    text = canonical[chapter.start_cp : chapter.end_cp]
+    has_heading = False
+    if chapter.title and collapse_whitespace(text) == collapse_whitespace(chapter.title):
+        has_heading = session.scalar(select(ContentNode.id).where(
+            ContentNode.chapter_id == chapter.id,
+            ContentNode.node_type == ContentNodeType.HEADING,
+        ).limit(1)) is not None
+    return has_chapter_body_text(text, chapter.title, has_heading=has_heading)
+
+
+def complete_existing_textless_chapters(session: Session, settings) -> int:  # noqa: ANN001
+    """Startup backfill: inspect short unfinished chapters, not historical jobs."""
+    candidates = session.execute(select(Chapter, BookVersion).join(
+        BookVersion, BookVersion.id == Chapter.book_version_id,
+    ).where(
+        Chapter.dialogue_processed.is_(False),
+        Chapter.end_cp - Chapter.start_cp <= func.coalesce(func.length(Chapter.title), 0) + 64,
+    ).order_by(Chapter.book_version_id, Chapter.id)).all()
+    count = 0
+    for chapter, version in candidates:
+        try:
+            has_text = chapter_has_body_text(session, settings, version, chapter)
+        except (ApiError, OSError, UnicodeError):
+            # Missing files are real read errors, not evidence that a chapter is empty.
+            continue
+        if not has_text:
+            complete_textless_chapter(session, chapter)
+            count += 1
+    return count
 
 
 def _match_existing(

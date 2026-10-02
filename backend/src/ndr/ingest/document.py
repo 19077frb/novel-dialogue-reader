@@ -23,6 +23,14 @@ def collapse_whitespace(text: str) -> str:
     return WHITESPACE_RE.sub(" ", text).strip()
 
 
+def has_chapter_body_text(text: str, title: str | None, *, has_heading: bool) -> bool:
+    """A stored chapter heading alone is not narrative content to infer from."""
+    visible = collapse_whitespace(text)
+    return bool(visible) and not (
+        has_heading and bool(title) and visible == collapse_whitespace(title)
+    )
+
+
 @dataclass(frozen=True)
 class ParsedChapter:
     ordinal: int

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from fixtures.epub_factory import Document, EpubSpec, build_epub
+from ndr.app import create_app
 from ndr.characters.service import store_roster_candidates
 from ndr.config import Settings
 from ndr.domain.enums import CharacterSource, JobState
@@ -106,6 +107,61 @@ def test_completion_requires_absent_text_not_absent_quotes(
         f"/api/books/{book_id}/chapters/{chapter['id']}/character-roster",
     ).json()["data"]
     assert roster["status"] == ("CONFIRMED" if completed else "DRAFT")
+
+
+@pytest.mark.parametrize(("body", "completed"), [
+    ("<h1>第一卷 插图</h1>", True),
+    ("<h1>第一卷 插图</h1><p>这里有一段叙述。</p>", False),
+    ("<p>第一卷 插图</p>", False),
+])
+def test_heading_only_chapters_complete_on_import_and_startup(
+    migrated_client: TestClient, migrated_settings: Settings, body: str, completed: bool,
+) -> None:
+    raw = build_epub(EpubSpec(documents=[Document("chapter", "chapter.xhtml", body)],
+                            nav=[("chapter.xhtml", "第一卷 插图")]))
+    imported = migrated_client.post("/api/books/import", files={
+        "file": ("chapter.epub", raw, "application/epub+zip"),
+    }).json()["data"]
+    path = f"/api/books/{imported['book_id']}/chapters"
+    chapter = migrated_client.get(path).json()["data"][0]
+    assert chapter["dialogue_processed"] is completed
+    engine = create_db_engine(migrated_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            session.get(Chapter, chapter["id"]).dialogue_processed = False
+        # No task creation or model calls are needed to repair legacy status.
+        with TestClient(create_app(migrated_settings)) as restarted:
+            assert restarted.get(path).json()["data"][0]["dialogue_processed"] is completed
+        with TestClient(create_app(migrated_settings)) as restarted:
+            assert restarted.get(path).json()["data"][0]["dialogue_processed"] is completed
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("invalid", ["missing_file", "invalid_range"])
+def test_startup_does_not_complete_unreadable_heading_chapters(
+    migrated_client: TestClient, migrated_settings: Settings, invalid: str,
+) -> None:
+    imported = migrated_client.post("/api/books/import", files={
+        "file": ("chapter.txt", "第一卷 插图\n".encode(), "text/plain"),
+    }).json()["data"]
+    path = f"/api/books/{imported['book_id']}/chapters"
+    chapter = migrated_client.get(path).json()["data"][0]
+    engine = create_db_engine(migrated_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            row = session.get(Chapter, chapter["id"])
+            row.dialogue_processed = False
+            if invalid == "invalid_range":
+                row.end_cp += 1
+            else:
+                session.get(BookVersion, imported["book_version_id"]).canonical_path = "missing.txt"
+        with TestClient(create_app(migrated_settings)) as restarted:
+            assert restarted.get(path).json()["data"][0]["dialogue_processed"] is False
+    finally:
+        engine.dispose()
 
 
 def test_roster_analysis_cannot_overwrite_user_confirmed_identity(
