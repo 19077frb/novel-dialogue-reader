@@ -9436,6 +9436,11 @@
       },
       "RosterAnalyzeIn": {
         "properties": {
+          "allow_overwrite_manual": {
+            "type": "boolean",
+            "title": "Allow Overwrite Manual",
+            "default": false
+          },
           "book_version_id": {
             "anyOf": [
               {

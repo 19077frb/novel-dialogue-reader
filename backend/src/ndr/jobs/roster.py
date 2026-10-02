@@ -232,6 +232,7 @@ def run_character_roster_job(
             chapter=chapter,
             output=output,
             job_id=job.id,
+            allow_overwrite_manual=bool(_job_range(job).get("allow_overwrite_manual", False)),
         )
         usage = raw.get("_usage") if isinstance(raw, dict) else None
         run = session.get(InferenceRun, run_id)

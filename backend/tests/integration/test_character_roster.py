@@ -11,12 +11,83 @@ from ndr.app import create_app
 from ndr.characters.service import store_roster_candidates
 from ndr.config import Settings
 from ndr.domain.enums import CharacterSource, JobState
+from ndr.jobs.roster import run_character_roster_job
 from ndr.jobs.scheduler import run_job
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.llm.schemas import RosterOutput
 from ndr.storage.engine import create_db_engine, create_session_factory
 from ndr.storage.models import BookCharacter, BookVersion, Chapter, InferenceRun
 from ndr.storage.transactions import transaction
+
+
+@pytest.mark.parametrize("allow", [False, True])
+def test_background_manual_correction_is_controlled_by_saved_job_setting(migrated_client, allow):
+    client = migrated_client
+    imported = client.post("/api/books/import", files={
+        "file": ("names.txt", "第一章\n「我是阿库娅。」".encode(), "text/plain"),
+    }).json()["data"]
+    book_id = imported["book_id"]
+    chapter_id = client.get(f"/api/books/{book_id}/chapters").json()["data"][0]["id"]
+    with transaction(client.app.state.session_factory) as session:
+        character = BookCharacter(book_version_id=imported["book_version_id"],
+                                  canonical_name="阿库亚", description="人工旧说明",
+                                  user_confirmed=True, name_locked=True,
+                                  confirmation_source="manual", source=CharacterSource.USER)
+        session.add(character)
+        session.flush()
+        character_id = character.id
+        from ndr.characters.visibility import capture
+        capture(character, 0)
+    profile = client.post("/api/model-profiles", json={
+        "name": "fake", "protocol": "fake-provider", "base_url": "http://127.0.0.1:1",
+        "model": "fake", "credential_mode": "none",
+    }).json()["data"]
+    job = client.post(f"/api/books/{book_id}/chapters/{chapter_id}/character-roster/analyze",
+                      json={"profile_id": profile["id"], "idempotency_key": "saved-policy",
+                            "run_now": False, "allow_overwrite_manual": allow}).json()["data"]
+    repeated = client.post(f"/api/books/{book_id}/chapters/{chapter_id}/character-roster/analyze",
+                           json={"profile_id": profile["id"], "idempotency_key": "saved-policy",
+                                 "run_now": False,
+                                 **({"allow_overwrite_manual": True} if allow else {})})
+    assert repeated.status_code == 202 and repeated.json()["data"]["id"] == job["id"]
+    changed = client.post(f"/api/books/{book_id}/chapters/{chapter_id}/character-roster/analyze",
+                          json={"profile_id": profile["id"], "idempotency_key": "saved-policy",
+                                "run_now": False, "allow_overwrite_manual": not allow})
+    assert changed.status_code == 409
+    adapter = FakeProviderAdapter(script=[{"schema_version": "1.0", "characters": [{
+        "temp_ref": "c1", "character_id": character_id, "name": "阿库娅",
+        "real_name": "阿库娅", "description": "有原文依据的新说明", "aliases": [],
+        "evidence_refs": ["L1"], "pov_candidate": True,
+    }]}])
+    outcome = run_character_roster_job(client.app.state.session_factory, client.app.state.settings,
+                      job_id=job["id"], adapter_factory=lambda *_: adapter)
+    assert outcome.state is JobState.COMPLETED
+    path = f"/api/books/{book_id}/chapters/{chapter_id}/character-roster"
+    roster = client.get(path).json()["data"]
+    # Merely analyzing must not rewrite human data even when permission is enabled.
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, character_id).canonical_name == "阿库亚"
+    candidate = roster["candidates"][0]
+    accepted = {key: candidate[key] for key in (
+        "temp_ref", "character_id", "canonical_name", "aliases", "description",
+    )}
+    response = client.put(path, json={"candidates": [accepted], "pov_temp_ref": "c1",
+                                      "expected_version": roster["version"],
+                                      "confirmation_mode": "automatic"})
+    assert response.status_code == 200, response.text
+    with transaction(client.app.state.session_factory) as session:
+        character = session.get(BookCharacter, character_id)
+        assert character.canonical_name == ("阿库娅" if allow else "阿库亚")
+        assert character.description == ("有原文依据的新说明" if allow else "人工旧说明")
+        assert character.user_confirmed and character.name_locked
+        assert character.confirmation_source == "manual"
+        if allow:
+            assert "阿库亚" in json.loads(character.aliases_json)
+            history = json.loads(character.presentation_history_json)
+            assert history[0]["name"] == "阿库亚"
+            assert history[-1]["name"] == "阿库娅"
+            assert history[-1]["cp"] == session.get(Chapter, chapter_id).end_cp
+
 
 
 @pytest.mark.parametrize("body", ["", "<p>   </p>", '<img src="plate.png" alt="插图"/>'])

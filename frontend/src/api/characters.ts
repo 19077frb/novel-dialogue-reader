@@ -59,6 +59,7 @@ export function fetchBookCharacters(
 }
 
 export interface AnalyzeRosterInput {
+  allowOverwriteManual?: boolean
   inferenceOptions?: InferenceOptions
   bookVersionId: string | null | undefined
   profileId: string
@@ -81,6 +82,7 @@ export function analyzeCharacterRoster(
       body: {
         book_version_id: input.bookVersionId ?? null,
         profile_id: input.profileId,
+        allow_overwrite_manual: input.allowOverwriteManual ?? false,
         ...(input.inferenceOptions ? { inference_options: input.inferenceOptions } : {}),
         idempotency_key: input.idempotencyKey,
         max_input_tokens: input.maxInputTokens ?? null,

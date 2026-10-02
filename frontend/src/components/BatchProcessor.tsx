@@ -22,6 +22,7 @@ import type { AnalyzeRosterInput } from '../api/characters'
 import type { CreateJobInput } from '../api/jobs'
 import { FormatRetrySetting } from './FormatRetrySetting'
 import { CollapsibleBlock } from './CollapsibleBlock'
+import { getGeneralSettings } from '../settings/preferences'
 
 class BatchAbortError extends Error {}
 
@@ -965,6 +966,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
               inferenceOptions: options,
               maxInputTokens: available,
               idempotencyKey: freshIdempotencyKey('batch-roster', `${bookId}:${chapter.id}:${profileId}`),
+              allowOverwriteManual: getGeneralSettings().allowOverwriteManualCharacters,
             }),
           )
           retryable = (rosterJob.state === 'FAILED' || rosterJob.state === 'COMPLETED')

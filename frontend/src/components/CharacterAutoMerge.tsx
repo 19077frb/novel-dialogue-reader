@@ -70,7 +70,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     {result.isError && <p className="status-error" role="alert">任务状态读取失败：{result.error.message} <button onClick={() => void result.refetch()}>重新读取进度</button>。确认已有任务状态前不能启动新任务。</p>}
     {open && <>
       <h3 className="ndr-step-heading"><span className="ndr-step-badge">1</span>分析重复人物与姓名</h3>
-      <p className="hint">仅分析已保存的人物姓名、别名和说明，请先保存编辑。也会检查代称是否已有明确姓名，生成更名建议。分析会消耗 Tokens，但不会修改人物。模型可能误判，完成后由你选择接受哪些建议；确认后更新已有对白与导出，不改正文或章节完成状态。</p>
+      <p className="hint">仅分析已保存的人物姓名、别名和说明，请先保存编辑。也会检查代称及已有姓名，包括人工指定的名称，提出有资料依据的修正建议。分析会消耗 Tokens，但不会修改人物。模型可能误判，完成后由你选择接受哪些建议；确认后更新已有对白与导出，不改正文或章节完成状态。</p>
       <ThinkingSettings disabled={blocked} disabledReason={blockedReason ?? undefined} profiles={profiles.data ?? []} profileId={preferences.profileId}
         onProfileChange={profileId => update({ profileId })} profileTestId="character-merge-profile" />
       {profiles.isError && <p role="alert" className="status-error">模型配置读取失败：{profiles.error.message}</p>}

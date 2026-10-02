@@ -29,6 +29,11 @@ export default function SettingsPage() {
       <div className="ndr-document"><p>阅读样例：「雨停了。」少女合上伞。</p></div>
       <button onClick={() => { if (window.confirm('恢复通用设置默认值？不会清除书籍、书签或模型配置。')) update(defaultSettings) }}>恢复默认设置</button>
     </section>
+    <section className="card">
+      <h3>人物资料更新</h3>
+      <label><input type="checkbox" checked={settings.allowOverwriteManualCharacters} onChange={event => update({ allowOverwriteManualCharacters: event.target.checked })} />允许后台人物识别更新人工姓名与说明</label>
+      <p className="hint">默认关闭。开启后，批量处理及阅读时的自动处理可以根据有原文依据的人物识别结果修正人工资料；模型可能误判。设置自动保存，仅影响之后创建的人物任务，已有任务保持原设置。单章人工确认仍由你选择。</p>
+    </section>
     <section className="card" data-testid="automatic-processing-settings">
       <h3>自动提前处理章节</h3>
       <label><input type="checkbox" checked={settings.autoProcessing} onChange={event => {

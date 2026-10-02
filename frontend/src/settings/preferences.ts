@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
 export const SETTINGS_KEY = 'ndr:general-settings:v1'
-export const defaultSettings = { fontSize: 16, lineHeight: 1.95, resumeReading: true, showCandidates: true, showAnnotations: true, autoProcessing: false, lookAheadChapters: 2, doubleClickChapterStatus: false }
+export const defaultSettings = { fontSize: 16, lineHeight: 1.95, resumeReading: true, showCandidates: true, showAnnotations: true, autoProcessing: false, lookAheadChapters: 2, doubleClickChapterStatus: false, allowOverwriteManualCharacters: false }
 export type GeneralSettings = typeof defaultSettings
 let fallback = JSON.stringify(defaultSettings)
 let rawCache: string | undefined
@@ -20,6 +20,7 @@ export function getGeneralSettings(): GeneralSettings {
         showCandidates: typeof value.showCandidates === 'boolean' ? value.showCandidates : true,
         showAnnotations: typeof value.showAnnotations === 'boolean' ? value.showAnnotations : true,
         autoProcessing: typeof value.autoProcessing === 'boolean' ? value.autoProcessing : false,
+        allowOverwriteManualCharacters: value.allowOverwriteManualCharacters === true,
         doubleClickChapterStatus: typeof value.doubleClickChapterStatus === 'boolean' ? value.doubleClickChapterStatus : false,
         lookAheadChapters: Number.isSafeInteger(value.lookAheadChapters) ? Math.min(100, Math.max(0, value.lookAheadChapters)) : 2 }
     } catch { cache = defaultSettings }

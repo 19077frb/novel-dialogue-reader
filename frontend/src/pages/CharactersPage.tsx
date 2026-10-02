@@ -145,7 +145,7 @@ export default function CharactersPage() {
     <CharacterAutoMerge key={bookId} bookId={bookId} versionId={book.data?.active_version_id} count={entries.length} visibleFromCp={visibleFromCp}
       disabled={batchProgress.running} onBusyChange={setAutoMergeBusy} onSaved={saved} />
     <section className="card">
-      <p className="hint">汇总当前书籍版本已识别的人物（包括未发言人物），可能包含后文剧透。修改会影响已有对白、后续人物识别和导出，不改原文或章节完成状态。请先停止本书处理任务再编辑。</p>
+      <p className="hint">汇总当前书籍版本已识别的人物（包括未发言人物），可能包含后文剧透。人工确认只是来源记录，并不表示永远正确；仍可手动修改，或让模型提出更名、合并与说明修正建议，预览接受后才生效。后台是否更新人工姓名与说明由通用设置决定，默认关闭。修改会影响已有对白、后续人物识别和导出，不改原文或章节完成状态。请先停止本书处理任务再编辑。</p>
       {batchProgress.running && <p role="status">批量处理正在运行，停止后可修改人物。</p>}
       {message && <p role="status">{message}</p>}
       <div className="ndr-toolbar">

@@ -245,6 +245,7 @@ def store_roster_candidates(
     chapter: Chapter,
     output: RosterOutput,
     job_id: str | None,
+    allow_overwrite_manual: bool = False,
 ) -> ChapterCharacterRoster:
     roster = _roster_for_chapter(session, chapter.id)
     if roster is None:
@@ -320,8 +321,13 @@ def store_roster_candidates(
         session.flush()
         proposed_name = revealed_name(
             character.canonical_name, candidate.real_name or candidate.name,
-            locked=character.name_locked,
+            locked=character.name_locked and not allow_overwrite_manual,
         ) if candidate.evidence_refs else None
+        if allow_overwrite_manual and candidate.evidence_refs:
+            suggested = candidate.real_name or candidate.name
+            from .names import is_role_name, valid_display_name
+            if valid_display_name(suggested) and not is_role_name(suggested):
+                proposed_name = suggested if suggested != character.canonical_name else None
         if proposed_name and any(row.id != character.id and matches_name(
             proposed_name, [row.canonical_name or "", *_json_list(row.aliases_json)],
         ) for row in existing):
@@ -355,7 +361,8 @@ def store_roster_candidates(
                     *_json_list(character.aliases_json),
                     *([character.canonical_name] if proposed_name else []),
                 ])),
-                "description": character.description or "",
+                "description": (candidate.description if allow_overwrite_manual
+                                and candidate.evidence_refs else character.description) or "",
                 "evidence_refs": candidate.evidence_refs,
                 "pov_candidate": candidate.pov_candidate,
             }
@@ -382,11 +389,16 @@ def _upsert_confirmed_character(
     item: Any,
     source: dict[str, Any] | None,
     automatic: bool = False,
+    allow_overwrite_manual: bool = False,
 ) -> BookCharacter:
     character_id = item.character_id or (source or {}).get("character_id")
     character = session.get(BookCharacter, character_id) if character_id else None
     if character is not None and character.book_version_id != version.id:
         raise ApiError.validation("character_id 不属于本书版本", character_id=character_id)
+    if automatic and not allow_overwrite_manual and character is not None and (
+        character.user_confirmed or character.name_locked
+    ):
+        return character
 
     if character is None:
         temp_key = f"chapter-user:{chapter.id}:{item.temp_ref}"
@@ -468,6 +480,10 @@ def confirm_roster(
         for item in json.loads(roster.candidates_json or "[]")
         if isinstance(item, dict)
     }
+    analysis_job = session.get(Job, roster.analysis_job_id) if roster.analysis_job_id else None
+    allow_overwrite_manual = bool(analysis_job and json.loads(
+        analysis_job.range_json or "{}"
+    ).get("allow_overwrite_manual", False))
     confirmed_ids: list[str] = []
     character_by_ref: dict[str, BookCharacter] = {}
     for item in payload.candidates:
@@ -491,6 +507,7 @@ def confirm_roster(
             item=item,
             source=source,
             automatic=payload.confirmation_mode == "automatic",
+            allow_overwrite_manual=allow_overwrite_manual,
         )
         confirmed_ids.append(character.id)
         character_by_ref[item.temp_ref] = character
@@ -548,6 +565,7 @@ def create_roster_job(
     idempotency_key: str,
     max_input_tokens: int | None = None,
     inference_options: dict[str, Any] | None = None,
+    allow_overwrite_manual: bool = False,
 ) -> tuple[Job, bool]:
     request_payload = {
         "kind": JobKind.CHARACTER_ROSTER.value,
@@ -558,6 +576,10 @@ def create_roster_job(
         "max_input_tokens": max_input_tokens,
         "inference_options": inference_options or {},
     }
+    # Preserve the digest of pre-setting requests so restored legacy jobs keep
+    # their original idempotency keys. Opting in is a distinct request.
+    if allow_overwrite_manual:
+        request_payload["allow_overwrite_manual"] = True
     digest = digest_request(request_payload)
     existing = session.execute(
         select(Job).where(Job.idempotency_key == idempotency_key)
@@ -595,6 +617,7 @@ def create_roster_job(
         range_json=json.dumps(
             {
                 "chapter_id": chapter.id,
+                "allow_overwrite_manual": allow_overwrite_manual,
                 "start_cp": chapter.start_cp,
                 "end_cp": chapter.end_cp,
             },

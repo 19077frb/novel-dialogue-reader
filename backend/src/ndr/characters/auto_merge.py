@@ -27,7 +27,7 @@ from ..storage.models import Book, BookCharacter, BookVersion, InferenceRun, Job
 from ..storage.transactions import transaction
 from .directory import _guard, _sync, directory, edit, merge
 from .merge_diagnostics import MergePlanError, character_refs, saved_model_groups
-from .names import GENERIC_NAMES, is_role_name, name_key, revealed_name, undecorated_name
+from .names import GENERIC_NAMES, is_role_name, name_key, undecorated_name, valid_display_name
 from .visibility import baseline
 from .visibility import position as visibility_position
 
@@ -116,14 +116,18 @@ def _messages(entries):
                 "每个人物 ID 最多属于一组，不允许循环、链式合并或新增 ID。"
                 "同时检查每个人物的正式名称是否仍是女神、女骑士、无头骑士、魔王军干部等身份代称，"
                 "而别名或同组姓名已明确揭示真实姓名。"
-                "此时preferred_name填写已有资料中的真实姓名，不得猜测或创造姓名；原代称保留为别名。"
+                "也检查已有具体姓名是否误写或误选，不能把人工确认当成绝对正确。"
+                "preferred_name填写同组已有姓名或别名中有明确依据的正确姓名，不得猜测或创造姓名；原名称保留为别名。"
                 "即使没有重复记录，也返回更名组：target_id为该人物、source_ids=[]，并给出依据和整理后的说明。"
-                "name_locked=true表示用户手动指定名称，不得建议更名；已有具体姓名也不得改为另一姓名或称呼。"
+                "name_locked=true和user_confirmed=true只表示人工资料的保护标记与确认来源，"
+                "不禁止本次提出修正建议，因为本次必须由用户再次预览并接受才会生效。"
+                "修改人工指定名称或已有具体姓名时，必须根据本组提供的姓名、别名与说明解释旧名为何需要纠正；"
+                "缺少明确依据则不更名，不建议相同名称或把具体姓名改成身份泛称。"
                 "人物引用只用输入提供的 C1、C2 等短引用，逐字复制；姓名不是引用，不能自造引用。"
                 '只返回 JSON：{"groups":[{"target_id":"C1","source_ids":["C2"],'
                 '"preferred_name":null,"confidence":0.99,"reason":"中文身份依据","merged_description":"整理后的人物说明"}]}。'
                 "只建议置信度至少 0.95 且有明确依据的组；"
-                "没有重复且没有需要升级的代称时才返回空 groups。"
+                "没有重复且没有需要修正的姓名或升级的代称时才返回空 groups。"
             ),
         },
         {
@@ -267,14 +271,11 @@ def _validate_plan(output: MergeOutput, entries):
             current_name = sanitize(target.get("name", ""), limit=80)
             proposed_name = sanitize(group.preferred_name, limit=80)
             problem = None
-            if target.get("name_locked", False):
-                problem = f"名称“{current_name}”由用户指定，不能自动更名"
-            elif group.preferred_name not in names:
+            if group.preferred_name not in names:
                 problem = f"建议姓名“{proposed_name}”不在本组已提供的姓名或别名中"
-            elif not is_role_name(target.get("name")):
-                problem = (f"当前名称“{current_name}”未被识别为身份代称，"
-                           "为保护已有姓名，不能自动更名")
-            elif revealed_name(target.get("name"), group.preferred_name) is None:
+            elif name_key(group.preferred_name) == name_key(target.get("name")):
+                problem = f"建议姓名“{proposed_name}”与当前名称“{current_name}”相同，无需更名"
+            elif not valid_display_name(group.preferred_name) or is_role_name(group.preferred_name):
                 problem = f"建议姓名“{proposed_name}”仍是身份代称或不符合简短姓名要求"
             if problem:
                 add("invalid_preferred_name",

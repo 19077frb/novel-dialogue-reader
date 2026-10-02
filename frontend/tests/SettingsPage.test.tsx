@@ -11,6 +11,16 @@ import { renderWithProviders } from './helpers'
 vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['profiles'] } }))
 beforeEach(() => { localStorage.clear(); vi.mocked(profiles.fetchProfiles).mockResolvedValue([]) })
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks() })
+it('后台更新人工人物默认关闭，开启后重新进入仍保留', async () => {
+  const page = renderWithProviders(<SettingsPage />)
+  const label = '允许后台人物识别更新人工姓名与说明'
+  expect(screen.getByLabelText(label)).not.toBeChecked()
+  await userEvent.click(screen.getByLabelText(label))
+  expect(getGeneralSettings().allowOverwriteManualCharacters).toBe(true)
+  page.unmount()
+  renderWithProviders(<SettingsPage />)
+  expect(screen.getByLabelText(label)).toBeChecked()
+})
 it('persists display preferences and rehydrates the same values on reopening', async () => {
   const first = renderWithProviders(<SettingsPage />)
   fireEvent.change(screen.getByLabelText('正文字号'), { target: { value: 22 } })

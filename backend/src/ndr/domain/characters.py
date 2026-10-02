@@ -123,6 +123,7 @@ class ChapterRosterOut(ApiModel):
 
 
 class RosterAnalyzeIn(ApiModel):
+    allow_overwrite_manual: bool = False
     book_version_id: str | None = None
     profile_id: str
     inference_options: InferenceOptions | None = None

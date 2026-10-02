@@ -3351,6 +3351,11 @@ export interface components {
         ReviewTargetType: "quote" | "gap";
         /** RosterAnalyzeIn */
         RosterAnalyzeIn: {
+            /**
+             * Allow Overwrite Manual
+             * @default false
+             */
+            allow_overwrite_manual: boolean;
             /** Book Version Id */
             book_version_id?: string | null;
             /** Profile Id */

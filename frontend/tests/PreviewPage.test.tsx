@@ -22,6 +22,7 @@ import type {
 import PreviewPage from '../src/pages/PreviewPage'
 import PreprocessingPage from '../src/pages/PreprocessingPage'
 import { renderRoute } from './helpers'
+import { updateGeneralSettings } from '../src/settings/preferences'
 
 vi.mock('../src/api/books', () => ({
   queryKeys: {
@@ -752,7 +753,8 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('preview-process')).toBeDisabled()
   })
 
-  it('批量处理会先识别并确认人物，再处理所选章节对白', async () => {
+  it.each([false, true])('批量先确认人物，并传入后台覆盖人工资料设置 %s', async (allow) => {
+    updateGeneralSettings({ allowOverwriteManualCharacters: allow })
     const meteredJob = {
       ...JOB,
       unknown_usage_runs: 0,
@@ -788,7 +790,7 @@ describe('PreviewPage', () => {
     expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledWith(
       'b1',
       'c1',
-      expect.objectContaining({ profileId: 'p1', maxInputTokens: 2020, inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' } }),
+      expect.objectContaining({ profileId: 'p1', maxInputTokens: 2020, allowOverwriteManual: allow, inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' } }),
     )
     expect(jobsApi.createJob).toHaveBeenCalledWith(
       expect.objectContaining({
