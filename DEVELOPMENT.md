@@ -1,14 +1,14 @@
 # 开发说明
 
-本文只记录维护项目所需的核心信息。安装、启动和使用方式见 [README.md](README.md)。
+本页面向贡献者和部署维护者，负责开发环境、架构边界、检查、配置及离线维护。安装入口见 [README](README.md)，页面操作见 [用户指南](docs/USER_GUIDE.md)，接口语义见 [契约](docs/CONTRACTS.md)。文档分工见 [职责索引](docs/README.md)。
 
 Windows 免安装包由 GitHub Actions 手动构建和发布，流程与本地验收见 [发布指南](docs/RELEASING.md)。二进制仅发布为 Release 附件，不提交构建成品。
 
 ## 1. 开发原则
 
 - 原文不可变；模型结果、人工更正和导出快照单独保存。
-- 用户确认的结果优先，后续模型任务不能覆盖 `user_locked` 标注。
-- 无法判断时保留为未知，不能为了覆盖率自动创建人物。
+- 后续模型任务不能覆盖 `user_locked` 的对白归属；人工人物姓名/说明的后台更新由显式设置控制，不能混同两种保护。
+- 无法判断归属时保留未知；有证据的匿名人物可以使用简短称呼，不能为了覆盖率虚构身份。
 - 章节、场景和单次模型窗口是不同边界。
 - 模型只返回结构化判断，不负责改写原文或直接操作数据库。
 - 模型调用必须有明确预算，并记录实际或未知的 token 用量。
@@ -69,7 +69,7 @@ pwsh -File scripts/verify.ps1
 
 - 场景切换后，旧场景编号不能直接复用；已确认人物应在新场景重新声明。
 - 章节人物表是候选目录，不表示所有人物都已在当前场景发言。
-- 已确认人物身份不可因模型名称或编号冲突被反向改写。
+- 人物通过稳定ID关联，不能仅因名称相似或编号冲突强行合并；姓名更新、人工资料保护与初读可见历史按契约处理。
 - 初读模式不能使用阅读位置之后的证据；重读模式可以使用后文。
 - 导出读取冻结快照，不调用模型，也不覆盖原始书籍。
 
@@ -89,7 +89,7 @@ pwsh -File scripts/verify.ps1
 - `frontend/src/api/`：API 调用与生成类型。
 - `frontend/src/pages/`、`components/`：页面和交互组件。
 
-完整机器可读接口见 [docs/openapi.json](docs/openapi.json)。
+完整机器可读接口见 [docs/openapi.json](docs/openapi.json)。手工说明不复制字段全集，接口修改必须同步生成定义和前端类型。
 
 ## 6. 模型、安全与成本
 
@@ -121,3 +121,45 @@ pwsh -File scripts/verify.ps1
 - 导出正文与原文一致，未处理对白保持原样。
 
 Git 提交格式和自动化修改要求见 [AGENTS.md](AGENTS.md)。
+
+## 8. 配置与离线维护
+
+用户页面操作见 [用户使用指南](docs/USER_GUIDE.md)。下面的命令面向源码部署和维护，不是日常阅读步骤。
+
+所有命令默认在项目根目录执行，特别注明的除外。真实库操作前停止服务、备份并核对目标；离线测试使用独立数据目录，不调用真实模型。
+
+### 环境配置
+
+源码版可复制 `.env.example` 为 `.env`；免安装版不读取 `.env`。配置优先级、保存和重启契约见 [接口与安全约定](docs/CONTRACTS.md)，可配置项以 [`.env.example`](.env.example) 为准。
+
+容量使用 `NDR_MAX_IMPORT_MB`、`NDR_MAX_EPUB_TOTAL_UNCOMPRESSED_MB`、`NDR_MAX_EPUB_ENTRY_MB`，支持小数，1 MB = 1024 × 1024 字节。旧 `*_BYTES` 仍兼容，同一来源 MB 优先。应用配置 JSON 使用小写 `*_mb`，仅在显式保存时转换旧容量键；内部 Settings 和 API 继续使用整数字节。
+
+源码版配置文件位于 `<仓库>/data/application-settings.json`，免安装版位于 `%LOCALAPPDATA%\NovelDialogueReader\data\application-settings.json`。切换书库不改变配置文件位置，也不搬迁数据。模型密钥不能写入 `.env` 或 JSON。
+
+### 数据库空间维护
+
+普通启动不自动压缩数据库；删除数据或精简索引后，空闲页可复用，但文件未必立即缩小。检查空间：
+
+```powershell
+uv run --project backend python -m ndr.storage.maintenance
+```
+
+执行压缩前，停止任务、等待收尾并停止服务，预留数据库大小三倍的空闲空间：
+
+```powershell
+uv run --project backend python -m ndr.storage.maintenance --apply
+```
+
+可用 `--data-dir "实际书库目录"` 指定其他书库。维护会先生成校验过的 `backups/before-compact-*.sqlite3.gz` 备份，再升级索引、压缩并核对业务数据；数据库被占用、存在未结束任务或空间不足时拒绝执行。不会清理旧备份、回收文件或模型缓存，完成前不要启动服务。
+
+免安装版没有维护按钮；维护其书库前，须准备与当前迁移版本匹配的 EXE，旧 EXE 可能无法打开升级后的书库。恢复备份时先停服，解压为独立文件并检查后再替换，不能在服务运行中覆盖数据库或手改迁移版本。
+
+### 历史待确认记录检查
+
+对旧版人物引用或队列同步问题，可在 `backend` 目录进行预检查：
+
+```powershell
+.venv\Scripts\python.exe -m ndr.scenes.repair_reviews --book-id 书籍ID
+```
+
+加 `--apply` 才会应用，并先备份数据库；有运行或排队任务时拒绝应用。不调用模型，仅修复符合证据约束的旧自动记录，保留人工锁定结果，不能替代正常人物推理或人工复核。备份回退必须停服执行。

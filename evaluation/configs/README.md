@@ -1,30 +1,24 @@
-# 评测配置
+# 评测配置格式与执行边界
 
-| 配置 | 含义（PLAN） | 是否调用模型 |
-| --- | --- | --- |
-| `b0.json` | B0：仅明确归属规则，无 LLM 的最低成本基线 | 否（纯规则） |
-| `b1.json` | B1：固定窗口 + 完整上下文 + LLM 批量标签 | 是（需 `--profile-id --allow-live`） |
-| `b2.json` | B2：B1 + 持续场景状态与边界判断（当前引擎默认行为） | 是（需 `--profile-id --allow-live`） |
-| `b3.json` | B3：B2 + 长 Gap 保守筛选（`context_policy=context-2`，`max_rechecks=0`） | 是（需 `--profile-id --allow-live`） |
-| `b4.json` | B4：B3 + 有限局部复核（`max_rechecks=3`，复核回到保守策略补回证据） | 是（需 `--profile-id --allow-live`） |
+本目录保存可复现的机器配置，不是页面设置，也不是实施计划。改变配置会改变指纹，旧报告须继续关联旧配置。
 
-字段：
+| 文件 | 实际使用的策略 |
+| --- | --- |
+| `b0.json` | rule_baseline，离线显式归属规则 |
+| `b1.json` / `b2.json` | llm、context-1、不复核；当前执行路径相同 |
+| `b3.json` | llm、context-2、不复核 |
+| `b4.json` | llm、context-2、每窗口最多复核3条待定对白 |
 
-```json
-{
-  "config_id": "b2-scene-state",
-  "label": "……",
-  "strategy": "llm",              // rule_baseline | llm
-  "scene_state": true,            // 是否使用持续场景状态
-  "prompt_version": "labeling-2",
-  "context_policy": "context-1",     // context-1 保守 / context-2 长 Gap 保守筛选
-  "reading_mode": "reread",
-  "budget": {"max_input_tokens": 200000, "max_output_tokens": 20000, "max_rechecks": 0},   // max_rechecks → recheck_max_targets
-  "model": null,                  // null 表示用 --profile-id 指定的配置
-  "notes": "……"
-}
-```
+## 字段
 
-每个配置都会算出一个**配置指纹**（`fingerprint`），报告里记录它，便于证明“这份数字是这组参数跑出来的”。
-压缩与复核的消融（B2/B3/B4）口径与判定门槛见 `evaluation/ablations.md`；压缩丢掉的行文可以用
-`python -m ndr.evaluation loss --manifest … --context-policy context-2` 离线复核。
+- `config_id`、`label`、`notes`：配置身份和说明。
+- `strategy`：rule_baseline 或 llm。
+- `context_policy`：context-1 / context-2，实际传给上下文策略。
+- `reading_mode`：实际用于任务和预测读取。
+- `budget.max_rechecks`：真实路径转换为策略的待定对白复核条数；不是全窗口轮次。
+- `scene_state`、`prompt_version`、`model`：记录并参与指纹，但当前真实路径不据此切换场景能力、提示词或模型。模型由 `--profile-id` 指定，提示词使用实际程序实现。
+- `budget.max_input_tokens` / `max_output_tokens`：被记录，但当前真实路径未接入任务硬额度。不能据此保证费用上限。
+
+读取与指纹实现为 `backend/src/ndr/evaluation/configs.py`；实际调用由 `runner.py` 和 `live.py` 决定。配置名和历史备注不代表所有设想已经接入。
+
+真实调用需明确 `--allow-live --profile-id`，会产生费用并写入书库。离线检查和对照门槛见 [评测方法](../ablations.md)。

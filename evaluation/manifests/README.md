@@ -1,48 +1,21 @@
-# 评测清单
+# 评测清单格式
 
-一份清单描述「用哪些作品、哪些书、哪些金标准」跑评测：
+清单负责声明作品、数据划分、正文、金标准和授权，不负责选择模型参数；模型参数见 [配置说明](../configs/README.md)。
 
-```json
-{
-  "manifest_version": "1.0",
-  "description": "评测用途说明",
-  "works": [
-    {
-      "work_id": "work-a",
-      "title": "作品 A",
-      "split": "dev",
-      "license": "授权说明或来源",
-      "notes": "备注",
-      "books": [
-        {
-          "book_id": "book-a-1",
-          "text": "evaluation/examples/a/text.txt",
-          "gold": "evaluation/examples/a/gold.json",
-          "format": "TXT",
-          "hard_cases": ["no_explicit_attribution", "scene_boundary"],
-          "notes": "备注"
-        }
-      ]
-    }
-  ],
-  "notes": "整体说明"
-}
-```
+根字段为 `manifest_version`、`description`、`works` 和可选 `notes`。每个作品记录 `work_id`、`title`、`split`、`license`，并在 `books` 列出 `book_id`、`text`、`gold`、`format` 和可选难例/备注。可参考本目录 `dev.json`。
 
-规则：
+## 数据要求
 
-- `split` 取值 `dev` / `calibration` / `test`，按**整部作品**划分；
-  **同一部作品只能出现在一个 split**（调参/校准与最终测试必须用不同作品，否则数字不可信）。
-- `text` 可以是 TXT 或 EPUB；`gold` 必须符合 `evaluation/schemas/gold-standard.schema.json`。
-- 路径先按**清单文件所在目录**解析，找不到再按**仓库根目录**解析。
-- `hard_cases` 目前认识：`no_explicit_attribution`、`scene_boundary`、`nested_quote`、`thought`、
-  `group_voice`、`long_gap`、`repeated_quote`、`astral_text`（未知类别只给 warning）。
+- split 为 dev / calibration / test；按整部作品划分，同一作品不能跨集合。
+- text 指向TXT或EPUB，gold符合 [金标准schema](../schemas/gold-standard.schema.json)。
+- 路径先相对清单目录解析，找不到再相对仓库根目录解析。
+- hard_cases 支持 no_explicit_attribution、scene_boundary、nested_quote、thought、group_voice、long_gap、repeated_quote、astral_text；未知类别给出警告。
+- 公开清单和正文必须有合法来源，不得上传个人书库、凭据或未授权小说。
 
-校验：
+## 校验
 
 ```powershell
 uv run --project backend python -m ndr.evaluation validate --manifest evaluation/manifests/dev.json
 ```
 
-当前仓库只有 `dev.json`（原创最小样例，样本量远不到宣布达标的要求）；
-**真实作品请另建清单**，并把最终评测放在 `test` 划分里。
+仓库 `dev.json` 仅包含原创最小样例，不足以宣布真实作品质量达标。新增评测使用独立清单，最终测试集冻结后不得用来调整提示词。
