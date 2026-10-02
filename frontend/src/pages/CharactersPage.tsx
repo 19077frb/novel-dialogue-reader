@@ -2,13 +2,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
-import { editBookCharacter, fetchCharacterDirectory, mergeBookCharacter } from '../api/characters'
+import { editBookCharacter, fetchCharacterDirectory, mergeBookCharacter, setCharacterColor } from '../api/characters'
 import { fetchBook, fetchChapters, queryKeys } from '../api/books'
 import type { CharacterDirectoryOut } from '../api/types'
 import { useBatchProgress } from '../components/BatchProcessor'
 import { CharacterAutoMerge } from '../components/CharacterAutoMerge'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
 import { DisabledHint } from '../components/DisabledHint'
+import { colorForIndex } from '../styles/palette'
+
+const COLOR_NAMES = ['蓝色', '橙色', '绿色', '红色', '紫色', '青色', '金黄色', '粉色',
+  '棕色', '墨绿色', '靛蓝色', '酒红色', '橄榄绿', '灰蓝色', '灰紫色', '深灰色']
 
 function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFromCp }: {
   item: CharacterDirectoryOut
@@ -21,6 +25,7 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
   const [name, setName] = useState(item.name)
   const [aliases, setAliases] = useState((item.aliases ?? []).join('、'))
   const [description, setDescription] = useState(item.description ?? '')
+  const [color, setColor] = useState<number | null>(item.preferred_color_index ?? null)
   const [targetId, setTargetId] = useState('')
   const [confirmMerge, setConfirmMerge] = useState(false)
   const [message, setMessage] = useState('')
@@ -41,11 +46,24 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
     }),
     onSuccess: onSaved,
   })
-  const busy = disabled || save.isPending || merge.isPending
-  const lockReason = disabled ? '本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。' : save.isPending || merge.isPending ? '正在保存人物资料或合并人物，请等待完成。' : undefined
-  const error = save.error ?? merge.error
+  const saveColor = useMutation({
+    mutationFn: () => setCharacterColor(bookId, item.character_id, { color_index: color, expected_version: item.version ?? 1 }),
+    onSuccess: onSaved,
+  })
+  const busy = disabled || save.isPending || merge.isPending || saveColor.isPending
+  const lockReason = disabled ? '本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。' : save.isPending || merge.isPending || saveColor.isPending ? '正在保存人物资料或合并人物，请等待完成。' : undefined
+  const dirty = name !== item.name || aliases !== (item.aliases ?? []).join('、') || description !== (item.description ?? '')
+  const colorReason = lockReason ?? (item.kind === 'speaker' ? '请先保存人物资料，纳入全书人物后再设置颜色。' : dirty ? '有未保存的人物资料，请先保存，避免改色后丢失编辑。' : color === (item.preferred_color_index ?? null) ? '颜色设置没有变化。' : undefined)
+  const error = save.error ?? merge.error ?? saveColor.error
+  const colorChoices = Array.from({ length: 32 }, (_, index) => index)
+  const reserved = new Set(targets.map(row => row.preferred_color_index))
+  for (let index = 32, added = 0; added < 16; index++) {
+    if (!reserved.has(index)) { colorChoices.push(index); added++ }
+  }
+  if (color != null && !colorChoices.includes(color)) colorChoices.push(color)
+  if (item.color_index != null && item.color_index >= 32 && !colorChoices.includes(item.color_index)) colorChoices.push(item.color_index)
   return <article className="ndr-character-card" aria-label={`人物 ${item.name}`}>
-    <h3>{item.name}</h3>
+    <h3 style={{ color: colorForIndex(item.color_index) }}>{item.name}</h3>
     <DisabledHint reason={lockReason} />
     {item.chapter_count != null && item.dialogue_count != null && <p className="hint">
       出现 {item.chapter_count} 章 · {item.dialogue_count} 句对白
@@ -54,6 +72,20 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
       ({ manual: '已人工确认', automatic: '批量自动确认（未经人工复核）',
         legacy: '已确认（旧记录未区分来源）', imported: '导入恢复的人物',
         model: '模型识别人物' }[item.confirmation_source ?? (item.user_confirmed ? 'legacy' : 'model')])}</p>
+    <label className="ndr-field">人物颜色<select value={color ?? ''} disabled={busy || item.kind === 'speaker'}
+      title={lockReason ?? (item.kind === 'speaker' ? '请先保存人物资料，纳入全书人物后再设置颜色。' : undefined)}
+      onChange={event => setColor(event.target.value === '' ? null : Number(event.target.value))}>
+      <option value="">自动分配{item.color_index != null ? `（当前色号 ${item.color_index + 1}）` : ''}</option>
+      {colorChoices.map(index => {
+        const owner = targets.find(row => row.preferred_color_index === index)
+        return <option key={index} value={index} disabled={Boolean(owner)}>{`${COLOR_NAMES[index] ?? '扩展色'} · 色号 ${index + 1}${owner ? `（${owner.name}已指定）` : ''}`}</option>
+      })}
+    </select></label>
+    <p style={{ color: colorForIndex(color ?? item.color_index) }}>颜色预览：〔{item.name}〕「你好。」</p>
+    {color == null && item.preferred_color_index != null && <p className="hint">恢复自动分配后的颜色以保存结果为准。</p>}
+    <button type="button" title={colorReason} disabled={Boolean(colorReason)} onClick={() => saveColor.mutate()}>保存颜色</button>
+    <DisabledHint reason={colorReason} />
+    <p className="hint">颜色由程序生成，保存不调用模型、不更改人工确认状态。选择“自动分配”可恢复；自动占用的色号会为手动选择让位。改色在初读和重读中均生效。</p>
     <label>姓名<input value={name} maxLength={128} onChange={(e) => setName(e.target.value)} disabled={busy} /></label>
     <label>别名（用、分隔）<input value={aliases} onChange={(e) => setAliases(e.target.value)} disabled={busy} /></label>
     <label>说明<textarea value={description} maxLength={512} rows={3} onChange={(e) => setDescription(e.target.value)} disabled={busy} /></label>

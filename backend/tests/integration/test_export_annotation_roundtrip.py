@@ -180,6 +180,17 @@ def test_exported_epub_roundtrip_restores_annotations(
     run_deterministic_job(
         migrated_settings, fake_provider_client, book_id=book_id, profile_id=profile_id, key="k-rt"
     )
+    base = f"/api/books/{book_id}/character-directory"
+    person = fake_provider_client.get(base).json()["data"][0]
+    if person["kind"] == "speaker":
+        person = fake_provider_client.put(f"{base}/{person['character_id']}", json={
+            "name": person["name"], "description": person["description"],
+            "expected_version": person["version"],
+        }).json()["data"]
+    colored = fake_provider_client.put(f"{base}/{person['character_id']}/color", json={
+        "color_index": 24, "expected_version": person["version"],
+    })
+    assert colored.status_code == 200, colored.text
     with session_scope(migrated_settings) as factory, transaction(factory) as session:
         first_chapter = session.execute(
             select(Chapter).where(Chapter.book_version_id == data["book_version_id"])
@@ -194,6 +205,7 @@ def test_exported_epub_roundtrip_restores_annotations(
         item for item in original["items"] if item["label"] and item["color_index"] is not None
     ]
     assert styled
+    assert any(item["color_index"] == 24 for item in styled)
 
     epub_bytes = _export(fake_provider_client, book_id, preview["snapshot_id"])
 

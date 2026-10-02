@@ -59,7 +59,9 @@ class MergeOutput(BaseModel):
 
 def _snapshot(session, version):
     return sorted(
-        (row.model_dump(exclude={"chapter_count", "dialogue_count"})
+        (row.model_dump(exclude={
+            "chapter_count", "dialogue_count", "color_index", "preferred_color_index",
+        })
          for row in directory(session, version, include_statistics=False)),
         key=lambda row: row["character_id"],
     )

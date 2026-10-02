@@ -1076,6 +1076,67 @@
         }
       }
     },
+    "/api/books/{book_id}/character-directory/{entry_id}/color": {
+      "put": {
+        "tags": [
+          "characters"
+        ],
+        "summary": "设置人物颜色或恢复自动配色（不调用模型）",
+        "operationId": "set_character_color_route_api_books__book_id__character_directory__entry_id__color_put",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CharacterColorIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_CharacterDirectoryOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/books/{book_id}/character-directory/auto-merge/{job_id}": {
       "get": {
         "tags": [
@@ -5019,6 +5080,45 @@
         ],
         "title": "CharacterAutoMergeResultOut"
       },
+      "CharacterColorIn": {
+        "properties": {
+          "book_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Version Id"
+          },
+          "color_index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Index"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "CharacterColorIn"
+      },
       "CharacterDirectoryOut": {
         "properties": {
           "character_id": {
@@ -5062,6 +5162,30 @@
             ],
             "title": "Confirmation Source",
             "default": "model"
+          },
+          "color_index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Index"
+          },
+          "preferred_color_index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Color Index"
           },
           "kind": {
             "type": "string",

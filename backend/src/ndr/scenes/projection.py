@@ -18,7 +18,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from ..characters.visibility import visible_value
+from ..characters.colors import color_projection
 from ..domain.annotations import (
     AnnotationCountsOut,
     AnnotationItemOut,
@@ -28,11 +28,9 @@ from ..domain.annotations import (
 from ..domain.enums import AnnotationStatus, ReadingMode
 from ..storage.models import (
     Annotation,
-    BookCharacter,
     IdentityRevision,
     Quote,
     Scene,
-    SpeakerGroup,
 )
 
 
@@ -158,68 +156,18 @@ def build_projection(
             )
         ).scalars()
     }
-    groups = list(
-        session.execute(
-            select(
-                SpeakerGroup.id,
-                SpeakerGroup.scene_id,
-                SpeakerGroup.first_quote_id,
-                SpeakerGroup.character_id,
-                SpeakerGroup.canonical_name,
-                SpeakerGroup.description,
-                SpeakerGroup.presentation_history_json,
-                Quote.start_cp.label("first_start_cp"),
-                BookCharacter.preferred_color_index,
-            )
-            .join(Scene, SpeakerGroup.scene_id == Scene.id)
-            .outerjoin(Quote, SpeakerGroup.first_quote_id == Quote.id)
-            .outerjoin(BookCharacter, SpeakerGroup.character_id == BookCharacter.id)
-            .where(Scene.book_version_id == book_version_id)
-        )
-    )
-
-    # 已确认真实姓名是章节/书籍级身份键：跨场景的同名人物共享颜色。
-    # 没有姓名的分组仍以 group_id 隔离，绝不因为都叫 S1 就误合并。
-    groups.sort(
-        key=lambda group: (
-            group.first_start_cp if group.first_start_cp is not None else 2**63 - 1,
-            group.id,
-        )
-    )
-    reserved_colors = {
-        row.preferred_color_index
-        for row in groups
-        if row.preferred_color_index is not None and row.preferred_color_index >= 0
-    }
+    groups, presentations, color_by_identity = color_projection(session, book_version_id, horizon)
     identity_by_group: dict[str, str] = {}
     color_by_group: dict[str, int] = {}
     label_by_group: dict[str, str] = {}
     description_by_group: dict[str, str] = {}
-    color_by_identity: dict[str, int] = {}
     representative_by_identity: dict[str, Any] = {}
     ordered_identities: list[str] = []
-    used_colors: set[int] = set()
-    next_free_color = 0
     for group in groups:
-        presentation = visible_value(group.presentation_history_json, horizon, fallback={
-            "identity": (f"character:{group.character_id}" if group.character_id else
-                         f"name:{group.canonical_name.casefold()}" if group.canonical_name else
-                         f"group:{group.id}"),
-            "private_identity": f"group:{group.id}",
-            "name": group.canonical_name or "", "description": group.description or "",
-        })
+        presentation = presentations[group.id]
         name = presentation["name"].strip()
         identity = presentation["identity"]
-        if identity not in color_by_identity:
-            preferred = group.preferred_color_index
-            if preferred is not None and preferred >= 0 and preferred not in used_colors:
-                color = preferred
-            else:
-                while next_free_color in used_colors or next_free_color in reserved_colors:
-                    next_free_color += 1
-                color = next_free_color
-            color_by_identity[identity] = color
-            used_colors.add(color)
+        if identity not in representative_by_identity:
             representative_by_identity[identity] = group
             ordered_identities.append(identity)
         identity_by_group[group.id] = identity

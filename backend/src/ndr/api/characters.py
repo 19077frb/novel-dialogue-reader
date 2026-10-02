@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..characters.auto_merge import auto_merge_result, confirm_auto_merge, create_auto_merge_job
-from ..characters.directory import directory, edit, merge
+from ..characters.directory import directory, edit, merge, set_color
 from ..characters.service import (
     confirm_roster,
     create_roster_job,
@@ -23,6 +23,7 @@ from ..domain.characters import (
     CharacterAutoMergeConfirmIn,
     CharacterAutoMergeIn,
     CharacterAutoMergeResultOut,
+    CharacterColorIn,
     CharacterDirectoryOut,
     CharacterEditIn,
     CharacterMergeIn,
@@ -68,6 +69,19 @@ def latest_auto_merge_route(
         data=auto_merge_result(session, job) if job else None,
         request_id=current_request_id(request),
     )
+
+
+@router.put(
+    "/books/{book_id}/character-directory/{entry_id}/color",
+    response_model=DataEnvelope[CharacterDirectoryOut],
+    summary="设置人物颜色或恢复自动配色（不调用模型）",
+)
+def set_character_color_route(request: Request, book_id: str, entry_id: str,
+                              payload: CharacterColorIn) -> DataEnvelope[CharacterDirectoryOut]:
+    with transaction(request.app.state.session_factory) as session:
+        version = _version_or_400(session, _book_or_404(session, book_id), payload.book_version_id)
+        result = set_color(session, version, entry_id, payload)
+    return DataEnvelope(data=result, request_id=current_request_id(request))
 
 
 @router.post(

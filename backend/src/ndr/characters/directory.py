@@ -8,7 +8,12 @@ from sqlalchemy import func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
-from ..domain.characters import CharacterDirectoryOut, CharacterEditIn, CharacterMergeIn
+from ..domain.characters import (
+    CharacterColorIn,
+    CharacterDirectoryOut,
+    CharacterEditIn,
+    CharacterMergeIn,
+)
 from ..domain.enums import (
     AnnotationStatus,
     CharacterRosterStatus,
@@ -28,6 +33,7 @@ from ..storage.models import (
     SpeakerGroup,
 )
 from ..storage.transactions import check_version
+from .colors import color_projection
 from .service import _character_out, _json_list, list_book_characters
 from .visibility import baseline, capture, position
 
@@ -85,11 +91,16 @@ def _appearance_statistics(session: Session, version: BookVersion) -> dict[str, 
 def directory(
     session: Session, version: BookVersion, *, include_statistics: bool = True,
 ) -> list[CharacterDirectoryOut]:
+    characters = list_book_characters(session, version)
+    if include_statistics:
+        groups, presentations, colors = color_projection(session, version.id, characters=characters)
+    else:
+        groups = _groups(session, version, SpeakerGroup.character_id.is_(None))
     entries = [
         CharacterDirectoryOut(**_character_out(row).model_dump(), version=row.version)
-        for row in list_book_characters(session, version)
+        for row in characters
     ]
-    for group in _groups(session, version, SpeakerGroup.character_id.is_(None)):
+    for group in groups:
         if not group.character_id:
             entries.append(
                 CharacterDirectoryOut(
@@ -101,6 +112,13 @@ def directory(
                 )
             )
     if include_statistics:
+        for entry in entries:
+            key = (presentations[entry.character_id.removeprefix("speaker:")]["identity"]
+                   if entry.kind == "speaker" else f"character:{entry.character_id}")
+            entry.color_index = colors.get(key)
+        preferred = {row.id: row.preferred_color_index for row in characters}
+        for entry in entries:
+            entry.preferred_color_index = preferred.get(entry.character_id)
         statistics = _appearance_statistics(session, version)
         for entry in entries:
             entry.chapter_count, entry.dialogue_count = statistics.get(entry.character_id, (0, 0))
@@ -109,6 +127,27 @@ def directory(
             row.name.casefold(), row.character_id,
         ))
     return entries
+
+
+def set_color(session, version, entry_id, payload: CharacterColorIn):
+    _guard(session, version)
+    row = _resolve(session, version, entry_id)
+    check_version(row, payload.expected_version)
+    if not isinstance(row, BookCharacter):
+        raise ApiError.validation("请先保存该人物资料，纳入全书人物后再设置颜色")
+    if payload.color_index is not None:
+        conflict = session.scalar(select(BookCharacter).where(
+            BookCharacter.book_version_id == version.id, BookCharacter.id != row.id,
+            BookCharacter.preferred_color_index == payload.color_index,
+        ).limit(1))
+        if conflict:
+            raise ApiError.validation(
+                f"此颜色已由“{conflict.canonical_name}”手动指定，请选择另一颜色",
+            )
+    row.preferred_color_index = payload.color_index
+    row.version += 1
+    session.flush()
+    return next(entry for entry in directory(session, version) if entry.character_id == row.id)
 
 
 def _resolve(

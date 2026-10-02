@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from ..domain.enums import ContentNodeType
 from .annotations import ANNOTATIONS_ENTRY
 from .html import render_block
-from .render import EXPORT_CSS, RenderedBook, escape
+from .render import RenderedBook, escape, export_css
 
 _CONTAINER_XML = """<?xml version="1.0" encoding="utf-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -90,7 +90,7 @@ def build_epub(
         # 规范要求：mimetype 必须第一项且不压缩
         _write(archive, "mimetype", b"application/epub+zip", compress=False)
         _write(archive, "META-INF/container.xml", _CONTAINER_XML)
-        _write(archive, "OEBPS/style.css", EXPORT_CSS)
+        _write(archive, "OEBPS/style.css", export_css(rendered))
         if annotations is not None:
             _write(archive, ANNOTATIONS_ENTRY, json.dumps(annotations, ensure_ascii=False))
 

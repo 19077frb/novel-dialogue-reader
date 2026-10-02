@@ -14,6 +14,7 @@ from ndr.exports.render import (
     RenderedLegendEntry,
     RenderedRun,
     escape,
+    export_css,
     export_filename,
     style_uses,
     usable_items,
@@ -53,6 +54,28 @@ def _book(**overrides) -> RenderedBook:
 def test_style_uses_covers_three_presets() -> None:
     assert style_uses(ExportStylePreset.COLOR_AND_LABEL) == (True, True)
     assert style_uses(ExportStylePreset.COLOR_ONLY) == (True, False)
+
+
+def test_extended_colors_are_emitted_in_html_and_epub_without_modulo():
+    from ndr.characters.colors import color_css
+    from ndr.exports.epub import build_epub
+    from ndr.exports.html import render_html
+    from ndr.exports.render import _runs_for_node
+
+    runs = _runs_for_node("「雨停了。」", node_start=0, node_end=7,
+                          items=[{"start_cp": 0, "end_cp": 7, "quote_id": "q1",
+                                  "color_index": 24, "label": "惠惠"}],
+                          use_color=True, use_label=True)
+    assert runs[0].color_class == "speaker-24"
+    book = _book(chapters=[RenderedChapter(chapter_id="c1", ordinal=0, title="测试",
+                 blocks=[RenderedBlock(node_type=ContentNodeType.PARAGRAPH, runs=runs)])])
+    expected = f".speaker-24 {{ color: {color_css(24)}; }}"
+    assert expected in export_css(book)
+    assert expected in render_html(book, images={}, generated_at="test")
+    with zipfile.ZipFile(io.BytesIO(build_epub(
+        book, images={}, generated_at="test", identifier="test",
+    ))) as archive:
+        assert expected in archive.read("OEBPS/style.css").decode()
     assert style_uses(ExportStylePreset.LABEL_ONLY) == (False, True)
 
 

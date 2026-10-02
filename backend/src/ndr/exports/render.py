@@ -18,24 +18,15 @@ from typing import Any
 
 from sqlalchemy import select
 
+from ..characters.colors import BASE_COLORS, color_css
 from ..domain.enums import ContentNodeType, ExportStylePreset
 from ..ingest.query import load_canonical_text
 from ..intervals import SpanIndex
 from ..storage.models import Book, BookVersion, Chapter, ContentNode
 
-EXPORTER_VERSION = "exporter-2"
+EXPORTER_VERSION = "exporter-3"
 
-# 与阅读器一致的 8 色板；超出时靠编号辨认（不假装颜色足够）
-EXPORT_PALETTE: tuple[str, ...] = (
-    "#2f6feb",
-    "#d97706",
-    "#16a34a",
-    "#dc2626",
-    "#7c3aed",
-    "#0891b2",
-    "#ca8a04",
-    "#db2777",
-)
+EXPORT_PALETTE = BASE_COLORS
 
 EXPORT_CSS = """/* 轻小说对话辅助阅读器导出样式：不依赖外部资源，可在离线环境打开 */
 body { font-family: "Noto Serif CJK SC", "Songti SC", "Microsoft YaHei", serif; line-height: 1.9;
@@ -123,6 +114,21 @@ class RenderedBook:
                 if block.resource_id and block.resource_id not in ids:
                     ids.append(block.resource_id)
         return ids
+
+
+def export_css(rendered: RenderedBook) -> str:
+    classes = {entry.color_class for entry in rendered.legend}
+    classes.update(run.color_class for chapter in rendered.chapters
+                   for block in chapter.blocks for run in block.runs)
+    indices = sorted({int(value.removeprefix("speaker-")) for value in classes
+                      if value and value.startswith("speaker-")
+                      and value.removeprefix("speaker-").isdigit()})
+    light = "\n".join(f".speaker-{index} {{ color: {color_css(index)}; }}" for index in indices)
+    dark = "\n".join(f".speaker-{index} {{ color: {color_css(index, dark=True)}; }}"
+                     for index in indices)
+    return (EXPORT_CSS + "\n" + light + "\n@media (prefers-color-scheme: dark) {\n"
+            "body { color: #e6e8eb; background: #17191c; }\n"
+            "p.meta { color: #a3abb5; }\n" + dark + "\n}")
 
 
 def style_uses(style: ExportStylePreset) -> tuple[bool, bool]:
@@ -213,7 +219,7 @@ def _runs_for_node(
             continue
         color_class = None
         if use_color:
-            index = int(item.get("color_index") or 0) % len(EXPORT_PALETTE)
+            index = int(item.get("color_index") or 0)
             color_class = f"speaker-{index}"
         label = f"〔{item['label']}〕" if use_label and item.get("label") else None
         runs.append(
@@ -326,7 +332,7 @@ def render_book(
         RenderedLegendEntry(
             label=str(row.get("label")),
             color_class=(
-                f"speaker-{int(row.get('color_index') or 0) % len(EXPORT_PALETTE)}"
+                f"speaker-{int(row.get('color_index') or 0)}"
                 if use_color
                 else None
             ),

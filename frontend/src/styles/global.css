@@ -1,4 +1,22 @@
 :root {
+  --ndr-speaker-0: #2f6feb;
+  --ndr-speaker-1: #d97706;
+  --ndr-speaker-2: #16a34a;
+  --ndr-speaker-3: #dc2626;
+  --ndr-speaker-4: #7c3aed;
+  --ndr-speaker-5: #0891b2;
+  --ndr-speaker-6: #ca8a04;
+  --ndr-speaker-7: #db2777;
+  --ndr-speaker-8: #78512d;
+  --ndr-speaker-9: #00695c;
+  --ndr-speaker-10: #3949ab;
+  --ndr-speaker-11: #8e2458;
+  --ndr-speaker-12: #596c12;
+  --ndr-speaker-13: #48687c;
+  --ndr-speaker-14: #77557a;
+  --ndr-speaker-15: #414b55;
+  --ndr-speaker-saturation: 65%;
+  --ndr-speaker-lightness: 38%;
   --ndr-reading-font-size: 16px;
   --ndr-reading-line-height: 1.95;
   color-scheme: light;
@@ -40,6 +58,23 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --ndr-speaker-0: #82b1ff;
+    --ndr-speaker-1: #ffb74d;
+    --ndr-speaker-2: #81c784;
+    --ndr-speaker-3: #ff8a80;
+    --ndr-speaker-4: #b39ddb;
+    --ndr-speaker-5: #80deea;
+    --ndr-speaker-6: #e6d267;
+    --ndr-speaker-7: #f48fb1;
+    --ndr-speaker-8: #bc9473;
+    --ndr-speaker-9: #80cbc4;
+    --ndr-speaker-10: #9fa8da;
+    --ndr-speaker-11: #d98aaf;
+    --ndr-speaker-12: #b6c66c;
+    --ndr-speaker-13: #9ab5c8;
+    --ndr-speaker-14: #c3a3c7;
+    --ndr-speaker-15: #b0bec5;
+    --ndr-speaker-lightness: 72%;
     color-scheme: dark;
     --ndr-bg: #17191c;
     --ndr-fg: #e6e8eb;

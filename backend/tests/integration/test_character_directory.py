@@ -117,6 +117,46 @@ def populated(migrated_client: TestClient):
     return ids
 
 
+def test_color_is_independent_persistent_and_matches_reader(migrated_client, populated):
+    client, ids = migrated_client, populated
+    base = f"/api/books/{ids['book']}/character-directory"
+    before = {row["character_id"]: row for row in client.get(base).json()["data"]}
+    source = before[ids["source"]]
+    path = f"{base}/{ids['source']}/color"
+    response = client.put(path, json={"color_index": 24, "expected_version": source["version"]})
+    assert response.status_code == 200, response.text
+    saved = response.json()["data"]
+    assert saved["preferred_color_index"] == saved["color_index"] == 24
+    for key in ("name", "aliases", "description", "user_confirmed", "name_locked", "confirmation_source"):
+        assert saved[key] == source[key]
+    projection = client.get(f"/api/books/{ids['book']}/annotations",
+                            params={"reading_mode": "reread"}).json()["data"]
+    assert projection["items"][0]["color_index"] == 24
+    assert client.put(path, json={"color_index": 7, "expected_version": source["version"]}).status_code == 409
+    target = before[ids["target"]]
+    conflict = client.put(f"{base}/{ids['target']}/color",
+                          json={"color_index": 24, "expected_version": target["version"]})
+    assert conflict.status_code == 422 and "手动指定" in conflict.text
+    reset = client.put(path, json={"color_index": None, "expected_version": saved["version"]})
+    assert reset.status_code == 200
+    assert reset.json()["data"]["preferred_color_index"] is None
+    assert reset.json()["data"]["color_index"] != 24
+    assert client.put(f"{base}/speaker:{ids['unlinked']}/color",
+                      json={"color_index": 1, "expected_version": 1}).status_code == 422
+    assert client.put(path, json={"color_index": -1, "expected_version": 1}).status_code == 422
+
+
+def test_color_update_respects_active_job_guard(migrated_client, populated):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        session.add(Job(book_id=ids["book"], book_version_id=ids["version"],
+                        kind=JobKind.CHARACTER_ROSTER, state=JobState.RUNNING,
+                        idempotency_key="color-running", request_digest="test"))
+    response = client.put(f"/api/books/{ids['book']}/character-directory/{ids['source']}/color",
+                          json={"color_index": 24, "expected_version": 1})
+    assert response.status_code == 409
+
+
 def test_directory_counts_current_appearances_and_sorts_main_characters(migrated_client, populated):
     from ndr.characters.auto_merge import _snapshot
     from ndr.characters.directory import directory
@@ -213,6 +253,7 @@ def test_merge_and_edit_preserve_initial_names_descriptions_and_separate_colors(
         source.description = "早期身份"
         target = session.get(BookCharacter, ids["target"])
         target.canonical_name = "阿库娅"
+        target.preferred_color_index = 24
         target.description = "最终身份"
         first = session.get(SpeakerGroup, ids["linked"])
         first.canonical_name = source.canonical_name
@@ -255,6 +296,7 @@ def test_merge_and_edit_preserve_initial_names_descriptions_and_separate_colors(
                                   "visible_horizon_cp": boundary}).json()["data"]
     assert {item["label"] for item in late["items"]} == {"阿库娅"}
     assert len({item["color_index"] for item in late["items"]}) == 1
+    assert {item["color_index"] for item in late["items"]} == {24}
     target = next(row for row in client.get(base).json()["data"]
                   if row["character_id"] == ids["target"])
     response = client.put(f"{base}/{ids['target']}", json={

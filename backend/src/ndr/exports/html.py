@@ -10,7 +10,7 @@ import base64
 from collections.abc import Mapping
 
 from ..domain.enums import ContentNodeType, ExportStylePreset
-from .render import EXPORT_CSS, RenderedBlock, RenderedBook, escape
+from .render import RenderedBlock, RenderedBook, escape, export_css
 
 
 def _image_data_url(media_type: str | None, data: bytes) -> str:
@@ -71,7 +71,7 @@ def render_html(
         '<meta charset="utf-8"/>',
         '<meta name="viewport" content="width=device-width, initial-scale=1"/>',
         f"<title>{escape(rendered.title)}</title>",
-        f"<style>{EXPORT_CSS}</style>",
+        f"<style>{export_css(rendered)}</style>",
         "</head>",
         "<body>",
         f'<h1 class="book-title">{escape(rendered.title)}</h1>',

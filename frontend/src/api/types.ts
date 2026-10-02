@@ -13,6 +13,7 @@ export type CharacterDirectoryOut = components['schemas']['CharacterDirectoryOut
 export type CharacterAutoMergeIn = components['schemas']['CharacterAutoMergeIn']
 export type CharacterAutoMergeResultOut = components['schemas']['CharacterAutoMergeResultOut']
 export type CharacterEditIn = components['schemas']['CharacterEditIn']
+export type CharacterColorIn = components['schemas']['CharacterColorIn']
 export type CharacterMergeIn = components['schemas']['CharacterMergeIn']
 export type RosterCharacterCandidate = components['schemas']['RosterCharacterCandidate']
 export type ChapterRosterOut = components['schemas']['ChapterRosterOut']

@@ -12,6 +12,7 @@ import { renderRoute } from './helpers'
 
 vi.mock('../src/api/characters', () => ({
   fetchCharacterDirectory: vi.fn(), editBookCharacter: vi.fn(), mergeBookCharacter: vi.fn(),
+  setCharacterColor: vi.fn(),
   confirmCharacterAutoMerge: vi.fn(),
   startCharacterAutoMerge: vi.fn(), fetchLatestCharacterAutoMerge: vi.fn(),
 }))
@@ -52,6 +53,42 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('可恢复自动配色，有未保存的人物资料时阻止改色并说明原因', async () => {
+    vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(entries.map((row, index) => ({
+      ...row, color_index: index === 0 ? 8 : index, preferred_color_index: index === 0 ? 8 : null,
+    })))
+    vi.mocked(api.setCharacterColor).mockResolvedValue(entries[0])
+    renderPage()
+    const card = await screen.findByRole('article', { name: '人物 悠太' })
+    await waitFor(() => expect(within(card).getByLabelText('人物颜色')).toBeEnabled())
+    await userEvent.selectOptions(within(card).getByLabelText('人物颜色'), '')
+    await userEvent.type(within(card).getByLabelText('姓名'), '未保存')
+    expect(within(card).getByRole('button', { name: '保存颜色' })).toBeDisabled()
+    expect(within(card).getByText(/有未保存的人物资料，请先保存/)).toBeVisible()
+    await userEvent.clear(within(card).getByLabelText('姓名'))
+    await userEvent.type(within(card).getByLabelText('姓名'), '悠太')
+    await userEvent.click(within(card).getByRole('button', { name: '保存颜色' }))
+    await waitFor(() => expect(api.setCharacterColor).toHaveBeenCalledWith('b1', 'u1', { color_index: null, expected_version: 2 }))
+    expect(api.editBookCharacter).not.toHaveBeenCalled()
+  })
+  it('预览并独立保存颜色，不提交姓名资料或调用模型', async () => {
+    vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(entries.map((row, index) => ({
+      ...row, color_index: index, preferred_color_index: null,
+    })))
+    vi.mocked(api.setCharacterColor).mockResolvedValue({ ...entries[0], color_index: 8, preferred_color_index: 8 })
+    renderPage()
+    const card = await screen.findByRole('article', { name: '人物 悠太' })
+    await waitFor(() => expect(within(card).getByLabelText('人物颜色')).toBeEnabled())
+    expect(within(card).getByRole('button', { name: '保存颜色' })).toBeDisabled()
+    await userEvent.selectOptions(within(card).getByLabelText('人物颜色'), '8')
+    await userEvent.click(within(card).getByRole('button', { name: '保存颜色' }))
+    await waitFor(() => expect(api.setCharacterColor).toHaveBeenCalledWith('b1', 'u1', { color_index: 8, expected_version: 2 }))
+    expect(api.editBookCharacter).not.toHaveBeenCalled()
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+    const anonymous = screen.getByRole('article', { name: '人物 女店员' })
+    expect(within(anonymous).getByLabelText('人物颜色')).toBeDisabled()
+    expect(within(anonymous).getByText(/请先保存人物资料，纳入全书人物后再设置颜色/)).toBeVisible()
+  })
   it('按用户选择的揭示章节提交人物修改，默认不推断提前可见', async () => {
     vi.mocked(booksApi.fetchChapters).mockResolvedValue([
       { id: 'c1', ordinal: 0, title: '第一章', start_cp: 0, end_cp: 100 },

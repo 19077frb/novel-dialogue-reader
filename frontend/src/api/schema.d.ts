@@ -273,6 +273,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/character-directory/{entry_id}/color": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 设置人物颜色或恢复自动配色（不调用模型） */
+        put: operations["set_character_color_route_api_books__book_id__character_directory__entry_id__color_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/character-directory/auto-merge/{job_id}": {
         parameters: {
             query?: never;
@@ -1555,6 +1572,15 @@ export interface components {
             /** Updated At */
             updated_at: string;
         };
+        /** CharacterColorIn */
+        CharacterColorIn: {
+            /** Book Version Id */
+            book_version_id?: string | null;
+            /** Color Index */
+            color_index?: number | null;
+            /** Expected Version */
+            expected_version: number;
+        };
         /** CharacterDirectoryOut */
         CharacterDirectoryOut: {
             /** Character Id */
@@ -1584,6 +1610,10 @@ export interface components {
              * @enum {string}
              */
             confirmation_source: "model" | "automatic" | "manual" | "legacy" | "imported";
+            /** Color Index */
+            color_index?: number | null;
+            /** Preferred Color Index */
+            preferred_color_index?: number | null;
             /**
              * Kind
              * @default book
@@ -4344,6 +4374,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_JobDetailOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_character_color_route_api_books__book_id__character_directory__entry_id__color_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CharacterColorIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CharacterDirectoryOut_"];
                 };
             };
             /** @description Validation Error */

@@ -22,6 +22,8 @@ class BookCharacterOut(ApiModel):
 
 
 class CharacterDirectoryOut(BookCharacterOut):
+    color_index: int | None = Field(default=None, ge=0)
+    preferred_color_index: int | None = Field(default=None, ge=0)
     kind: str = "book"
     version: int = 1
     chapter_count: int | None = Field(default=None, ge=0)
@@ -34,6 +36,12 @@ class CharacterEditIn(ApiModel):
     name: str = Field(min_length=1, max_length=128)
     aliases: list[str] = Field(default_factory=list, max_length=64)
     description: str = Field(default="", max_length=512)
+    expected_version: int = Field(ge=1)
+
+
+class CharacterColorIn(ApiModel):
+    book_version_id: str | None = None
+    color_index: int | None = Field(default=None, ge=0, le=1000000)
     expected_version: int = Field(ge=1)
 
 

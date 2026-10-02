@@ -7,6 +7,7 @@ import type {
   InferenceOptions,
   CharacterDirectoryOut,
   CharacterEditIn,
+  CharacterColorIn,
   CharacterMergeIn,
   CharacterAutoMergeIn,
   CharacterAutoMergeResultOut,
@@ -29,6 +30,12 @@ export function confirmCharacterAutoMerge(bookId: string, jobId: string, selecte
 export function editBookCharacter(bookId: string, entryId: string, body: CharacterEditIn) {
   return apiData<CharacterDirectoryOut>(
     `/api/books/${bookId}/character-directory/${encodeURIComponent(entryId)}`, { method: 'PUT', body },
+  )
+}
+
+export function setCharacterColor(bookId: string, entryId: string, body: CharacterColorIn) {
+  return apiData<CharacterDirectoryOut>(
+    `/api/books/${bookId}/character-directory/${encodeURIComponent(entryId)}/color`, { method: 'PUT', body },
   )
 }
 
