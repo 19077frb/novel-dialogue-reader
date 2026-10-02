@@ -257,18 +257,27 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
             messages = _messages(entries)
             estimated = sum(estimate_tokens(message["content"]) for message in messages)
             limit = json.loads(job.budget_json).get("max_total_tokens")
-            if limit is not None and estimated + MAX_OUTPUT_TOKENS > limit:
+            snapshot = json.loads(job.profile_snapshot_json)
+            output_tokens = int((snapshot.get("params") or {}).get("max_tokens", MAX_OUTPUT_TOKENS))
+            if output_tokens <= 0:
+                raise ValueError("模型配置的 max_tokens 必须为正整数")
+            if limit is not None and estimated >= limit:
                 job.state = JobState.BUDGET_EXHAUSTED
                 job.last_error = "Token 上限不足以容纳人物资料和合并方案，未调用模型"
                 return job.state, 0
-            snapshot = json.loads(job.profile_snapshot_json)
+            if limit is not None:
+                output_tokens = min(output_tokens, limit - estimated)
             adapter = (
                 adapter_factory(job, snapshot)
                 if adapter_factory
                 else _build_adapter(settings, credentials, snapshot)
             )
             job.progress_json = json.dumps(
-                {"stage": "analyzing", "estimated_input_tokens": estimated}
+                {
+                    "stage": "analyzing",
+                    "estimated_input_tokens": estimated,
+                    "requested_output_tokens": output_tokens,
+                }
             )
             run = InferenceRun(
                 job_id=job.id,
@@ -285,8 +294,8 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
                 {
                     "task": "character_merge",
                     "messages": messages,
-                    "max_tokens": MAX_OUTPUT_TOKENS,
-                    "max_tokens_override": MAX_OUTPUT_TOKENS,
+                    "max_tokens": output_tokens,
+                    "max_tokens_override": output_tokens,
                     "json_object": True,
                     "target_quote_ids": [],
                 }

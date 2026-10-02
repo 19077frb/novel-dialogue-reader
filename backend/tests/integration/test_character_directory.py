@@ -436,6 +436,37 @@ def test_auto_merge_does_not_hold_transaction_during_model_call_and_rechecks_sta
     assert result["usage"]["total_tokens"] == 40
 
 
+@pytest.mark.parametrize(
+    "configured,limit,expected",
+    [(128000, None, 128000), (2048, None, 2048), (None, None, 4096), (128000, 10000, None)],
+)
+def test_auto_merge_honours_profile_output_limit_and_optional_total_budget(
+    migrated_client, populated, configured, limit, expected
+):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids, max_total_tokens=limit)
+    with transaction(client.app.state.session_factory) as session:
+        stored = session.get(Job, job["id"])
+        snapshot = json.loads(stored.profile_snapshot_json)
+        snapshot["params"] = {"max_tokens": configured} if configured is not None else {}
+        stored.profile_snapshot_json = json.dumps(snapshot)
+    outcome, adapter = _run_merge(client, job, [])
+    assert outcome.state is JobState.COMPLETED
+    payload = adapter.calls[0]["payload"]
+    if expected is None:
+        assert 0 < payload["max_tokens_override"] < limit
+        from ndr.context.budget import estimate_tokens
+
+        assert (
+            payload["max_tokens_override"]
+            + sum(estimate_tokens(message["content"]) for message in payload["messages"])
+            == limit
+        )
+    else:
+        assert payload["max_tokens_override"] == expected
+    assert payload["max_tokens"] == payload["max_tokens_override"]
+
+
 def test_auto_merge_budget_prevents_call_and_low_confidence_is_not_merged(
     migrated_client, populated
 ):

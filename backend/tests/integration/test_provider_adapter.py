@@ -232,6 +232,30 @@ def test_empty_content_with_finish_reason_length_is_actionable() -> None:
     assert "max_tokens" in result.detail  # 告诉用户去哪里提高输出上限
 
 
+def test_generate_labels_reports_actual_output_limit_and_preserves_usage() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["max_tokens"] == 128000
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": "", "reasoning_content": "thinking"},
+                    }
+                ],
+                "usage": {"prompt_tokens": 8130, "completion_tokens": 4096, "total_tokens": 12226},
+            },
+        )
+
+    with pytest.raises(ProviderError) as caught:
+        _run(_adapter(handler).generate_labels({"messages": [], "max_tokens_override": 128000}))
+    assert "实际 max_tokens=128000" in caught.value.message
+    assert "4000" not in caught.value.message
+    assert caught.value.details["requested_max_tokens"] == 128000
+    assert caught.value.details["usage"]["total_tokens"] == 12226
+
+
 def test_generate_labels_empty_content_keeps_response_snippet() -> None:
     """标注链路同样要带原始片段与线索（任务错误信息会展示它）。"""
 
@@ -240,7 +264,10 @@ def test_generate_labels_empty_content_keeps_response_snippet() -> None:
             200,
             json={
                 "choices": [
-                    {"finish_reason": "length", "message": {"content": "", "reasoning_content": "x" * 30}}
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": "", "reasoning_content": "x" * 30},
+                    }
                 ]
             },
         )
@@ -309,12 +336,16 @@ def test_generate_labels_returns_parsed_object_and_surfaces_errors() -> None:
         return httpx.Response(
             200,
             json={
-                "choices": [{"message": {"content": json.dumps({"schema_version": "1.0", "labels": []})}}],
+                "choices": [
+                    {"message": {"content": json.dumps({"schema_version": "1.0", "labels": []})}}
+                ],
                 "usage": {"prompt_tokens": 3, "completion_tokens": 1},
             },
         )
 
-    parsed = _run(_adapter(handler).generate_labels({"messages": [{"role": "user", "content": "x"}]}))
+    parsed = _run(
+        _adapter(handler).generate_labels({"messages": [{"role": "user", "content": "x"}]})
+    )
     assert parsed["schema_version"] == "1.0"
     assert parsed["_usage"]["total_tokens"] == 4
 
@@ -338,11 +369,7 @@ def test_error_details_never_contain_the_key() -> None:
         return httpx.Response(401, text="unauthorized: Bearer sk-test-key is invalid")
 
     with pytest.raises(ProviderError) as excinfo:
-        _run(
-            _adapter(handler).generate_labels(
-                {"messages": [{"role": "user", "content": "x"}]}
-            )
-        )
+        _run(_adapter(handler).generate_labels({"messages": [{"role": "user", "content": "x"}]}))
     error = excinfo.value
     assert error.kind is ProviderErrorKind.AUTH
     assert "sk-test-key" not in json.dumps(error.details, ensure_ascii=False)
@@ -367,7 +394,9 @@ def test_connection_endpoint_with_fake_provider_records_run(
     assert created.status_code == 201, created.text
     profile_id = created.json()["data"]["id"]
 
-    response = fake_provider_client.post("/api/model-profiles/test", json={"profile_id": profile_id})
+    response = fake_provider_client.post(
+        "/api/model-profiles/test", json={"profile_id": profile_id}
+    )
     assert response.status_code == 200, response.text
     data = response.json()["data"]
 

@@ -186,9 +186,7 @@ class ChatCompletionsAdapter:
                 details={"body": sanitize(response.text)},
             ) from exc
         if not isinstance(data, dict):
-            raise ProviderError(
-                ProviderErrorKind.INVALID_OUTPUT, "提供方响应顶层不是对象"
-            )
+            raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, "提供方响应顶层不是对象")
         return data, elapsed_ms
 
     @staticmethod
@@ -258,7 +256,9 @@ class ChatCompletionsAdapter:
             if finish_reason == "length":
                 hint += (
                     "；finish_reason=length 表示输出预算被用完（推理模型常把 token 花在思考上），"
-                    "可在「模型配置 → 生成参数」里提高 max_tokens（例如 {\"max_tokens\": 4000}）"
+                    "请核对本次请求的输出上限与模型/网关支持的上限，"
+                    "必要时在「模型配置 → 生成参数」调整 max_tokens 或思考设置；"
+                    "本次累计 Token 限额与单次输出上限不是同一项"
                 )
             raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, hint, details=details)
         return text
@@ -357,6 +357,9 @@ class ChatCompletionsAdapter:
         except ProviderError as exc:
             # 请求已得到提供方响应时，内容异常也要保留真实 usage，供任务层结算。
             exc.details.setdefault("usage", usage)
+            if "max_tokens" in request:
+                exc.details.setdefault("requested_max_tokens", request["max_tokens"])
+                exc.message += f"；本次请求实际 max_tokens={request['max_tokens']}"
             raise
         try:
             # 与连接测试同一套解析：整段 JSON 或整段代码块都接受
