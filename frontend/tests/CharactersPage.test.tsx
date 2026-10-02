@@ -136,6 +136,7 @@ describe('CharactersPage', () => {
   it('保存姓名、别名和说明并携带并发版本', async () => {
     renderPage()
     const card = within(await screen.findByRole('article', { name: '人物 浅村悠太' }))
+    await waitFor(() => expect(card.getByLabelText('姓名')).toBeEnabled())
     await userEvent.clear(card.getByLabelText('姓名'))
     expect(card.getByRole('button', { name: '保存人物资料' })).toBeDisabled()
     expect(card.getByText('请填写人物姓名后再保存。')).toBeInTheDocument()

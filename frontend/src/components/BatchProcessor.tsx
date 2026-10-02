@@ -140,20 +140,20 @@ export async function restoreBatchProcessing(bookId: string) {
     totalSpent: saved.totalSpent, unknownRuns: saved.unknownRuns })
   batchRequests.set(bookId, saved.requests)
   accountedJobs.set(bookId, new Set(saved.accounted))
-  if (!saved.snapshot.running) return
   restoringBatches.add(bookId)
   try {
     await withWorkflowLock(`processing:${bookId}`, async () => {
       // Another tab may have finished while this tab waited for the lock.
       const latest = readJournal<SavedBatch>(`batch:${bookId}`)
-      if (!latest?.snapshot.running) {
-        if (latest) { batchSnapshots.set(bookId, latest.snapshot); batchListeners.forEach(listener => listener()) }
-        return
-      }
+      if (!latest) return
+      const resumeQueue = latest.snapshot.running
+      batchSnapshots.set(bookId, latest.snapshot)
       const book = await fetchBook(bookId)
       if (book.active_version_id !== latest.execution.bookVersionId) throw new Error('书籍版本已改变，未继续旧队列。')
       // Reconcile acknowledged and lost-ack submissions before dispatching anything new.
       for (const [taskId, request] of Object.entries(latest.requests)) {
+        const recorded = latest.snapshot.tasks.find(task => task.id === taskId)
+        if (recorded?.state === 'completed' && request.jobId && latest.accounted.includes(request.jobId)) continue
         let job = request.jobId ? await fetchJob(request.jobId) : (await fetchRecentJobs({ bookId,
           versionId: latest.execution.bookVersionId, idempotencyKey: request.input.idempotencyKey, limit: 1 }))[0]
         if (!job) continue
@@ -171,6 +171,16 @@ export async function restoreBatchProcessing(bookId: string) {
             }
           })
         }
+        // The backend may have finished after the old page last saved its snapshot.
+        // Reconcile already-terminal jobs too, not just jobs observed while polling.
+        const task = batchSnapshots.get(bookId)?.tasks.find(item => item.id === taskId)
+        if (task && TERMINAL_JOB_STATES.has(job.state)) {
+          updateBatchTask(bookId, taskId, job.state === 'COMPLETED' ? 'completed' : cancelled && job.state === 'PAUSED' ? 'cancelled' : 'failed', job.last_error ?? null)
+          const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
+          publishBatch(bookId, { tasks: current.tasks.map(item => item.id === taskId ? { ...item,
+            retryable: job.state === 'FAILED' && !(latest.execution.preferences.tokenLimit !== null && job.unknown_usage_runs > 0) } : item) })
+          if (job.state === 'COMPLETED' && task.type === 'dialogue' && task.state !== 'completed') recordCompletedWindow(bookId, task.chapterId)
+        }
         if (TERMINAL_JOB_STATES.has(job.state) && !latest.accounted.includes(job.id)) {
           const tokens = jobTokens(job)
           latest.spent += tokens; latest.totalSpent += tokens
@@ -180,6 +190,20 @@ export async function restoreBatchProcessing(bookId: string) {
       }
       // Keep stop/cancel changes made while the old requests were draining.
       latest.snapshot = readJournal<SavedBatch>(`batch:${bookId}`)?.snapshot ?? latest.snapshot
+      const chapters = await fetchChapters(bookId)
+      for (const chapter of chapters) {
+        const progress = latest.snapshot.chapterStates[chapter.id]
+        if (!progress) continue
+        const tasks = latest.snapshot.tasks.filter(task => task.chapterId === chapter.id)
+        const pending = tasks.filter(task => ['queued', 'running'].includes(task.state)).length
+        if (chapter.dialogue_processed && pending === 0) {
+          latest.snapshot.chapterStates[chapter.id] = { ...progress, state: 'processed', completedWindows: progress.totalWindows,
+            pendingTasks: 0, cancelRequested: false, error: null }
+          latest.snapshot.catalogRevision += 1
+        } else if (!resumeQueue && ['queued', 'roster', 'dialogue'].includes(progress.state)) {
+          latest.snapshot.chapterStates[chapter.id] = { ...progress, state: tasks.some(task => task.state === 'failed') ? 'failed' : 'stopped', pendingTasks: 0, cancelRequested: false }
+        }
+      }
       for (const [chapterId, progress] of Object.entries(latest.snapshot.chapterStates)) {
         if (!progress.cancelRequested && progress.state !== 'stopped') continue
         latest.snapshot.chapterStates[chapterId] = { ...progress, state: 'stopped', cancelRequested: false, pendingTasks: 0 }
@@ -191,6 +215,11 @@ export async function restoreBatchProcessing(bookId: string) {
         totalSpent: latest.totalSpent, unknownRuns: latest.unknownRuns })
       batchRequests.set(bookId, latest.requests)
       accountedJobs.set(bookId, new Set(latest.accounted))
+      if (!resumeQueue) {
+        batchSnapshots.set(bookId, latest.snapshot)
+        publishBatch(bookId, { tasks: latest.snapshot.tasks.map(task => ['queued', 'running'].includes(task.state) ? { ...task, state: 'cancelled' } : task) })
+        return
+      }
       if (latest.execution.preferences.tokenLimit !== null && latest.unknownRuns > 0) throw new Error('已有调用用量未知，不能可靠继续限额队列，请先检查任务详情。')
       if (latest.snapshot.stopRequested) {
         batchSnapshots.set(bookId, latest.snapshot)
@@ -203,7 +232,13 @@ export async function restoreBatchProcessing(bookId: string) {
         initialSpent: latest.spent, initialTotalSpent: latest.totalSpent, initialUnknownRuns: latest.unknownRuns })
     })
   } catch (error) {
-    publishBatch(bookId, { running: false, message: `任务恢复失败：${error instanceof Error ? error.message : String(error)}。原任务记录保留，请勿重复提交。` })
+    const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
+    publishBatch(bookId, { running: false,
+      tasks: current.tasks.map(task => task.state === 'running' ? { ...task, state: 'failed', retryable: false,
+        error: '任务状态未能核实，请查看任务详情；不要重复启动模型调用。' } : task.state === 'queued' ? { ...task, state: 'cancelled' } : task),
+      chapterStates: Object.fromEntries(Object.entries(current.chapterStates).map(([id, progress]) => [id,
+        ['queued', 'roster', 'dialogue'].includes(progress.state) ? { ...progress, state: 'stopped', pendingTasks: 0, cancelRequested: false } : progress])),
+      message: `任务恢复失败：${error instanceof Error ? error.message : String(error)}。原任务记录保留，请勿重复提交。` })
   } finally { restoringBatches.delete(bookId) }
 }
 

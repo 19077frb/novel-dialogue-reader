@@ -2,9 +2,9 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { SingleWorkflow } from '../src/processing/singleWorkflow'
 import type { JobDetailOut } from '../src/api/types'
 
-const api = vi.hoisted(() => ({ fetchBook: vi.fn(), fetchJob: vi.fn(), completeChapterProcessing: vi.fn(),
+const api = vi.hoisted(() => ({ fetchBook: vi.fn(), fetchJob: vi.fn(), fetchChapters: vi.fn(), completeChapterProcessing: vi.fn(),
   createJob: vi.fn(), fetchRecentJobs: vi.fn(), fetchRoster: vi.fn(), analyzeRoster: vi.fn(), confirmRoster: vi.fn(), pauseJob: vi.fn(), waitJob: vi.fn() }))
-vi.mock('../src/api/books', () => ({ ...api, fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn(), setChapterProcessingStatus: vi.fn() }))
+vi.mock('../src/api/books', () => ({ ...api, fetchProcessingStatus: vi.fn(), setChapterProcessingStatus: vi.fn() }))
 vi.mock('../src/api/jobs', () => ({ ...api, estimateRange: vi.fn(), freshIdempotencyKey: () => crypto.randomUUID() }))
 vi.mock('../src/api/characters', () => ({ fetchCharacterRoster: api.fetchRoster,
   analyzeCharacterRoster: api.analyzeRoster, confirmCharacterRoster: api.confirmRoster }))
@@ -18,6 +18,7 @@ const completed = (id: string, tokens = 10): JobDetailOut => ({ id, kind: 'INFER
 beforeEach(() => {
   vi.resetModules(); vi.resetAllMocks(); localStorage.clear()
   api.fetchBook.mockResolvedValue({ active_version_id: 'v1' })
+  api.fetchChapters.mockResolvedValue([])
   api.waitJob.mockImplementation(async (job, update) => { update(job); return job })
   api.fetchJob.mockImplementation(async id => completed(id))
   api.fetchRecentJobs.mockResolvedValue([])
@@ -92,6 +93,32 @@ it('restores a batch, keeps cumulative usage and does not repeat roster or ackno
   const saved = JSON.parse(localStorage.getItem('ndr:tasks:v1:batch:b1')!)
   expect(saved.spent).toBe(40); expect(saved.totalSpent).toBe(50)
   expect(saved.snapshot.running).toBe(false)
+})
+it('reconciles stale running rows even when the saved batch has already ended', async () => {
+  const saved = await seedBatch()
+  saved.snapshot.running = false
+  saved.snapshot.tasks = saved.snapshot.tasks.filter(task => task.id !== 'dialogue:c1:w2')
+  api.fetchChapters.mockResolvedValue([{ ...saved.execution.requested[0], dialogue_processed: true }])
+  localStorage.setItem('ndr:tasks:v1:batch:b1', JSON.stringify(saved))
+  const { restoreBatchProcessing } = await import('../src/components/BatchProcessor')
+  await restoreBatchProcessing('b1')
+  const restored = JSON.parse(localStorage.getItem('ndr:tasks:v1:batch:b1')!)
+  expect(restored.snapshot.chapterStates.c1.state).toBe('processed')
+  expect(restored.snapshot.tasks.every((task: { state: string }) => task.state === 'completed')).toBe(true)
+  expect(restored.snapshot.running).toBe(false)
+  expect(api.createJob).not.toHaveBeenCalled()
+})
+it('clears stale chapter activity when recovery stops on unknown usage', async () => {
+  const saved = await seedBatch()
+  saved.execution.preferences.tokenLimit = 100
+  localStorage.setItem('ndr:tasks:v1:batch:b1', JSON.stringify(saved))
+  api.fetchJob.mockResolvedValue({ ...completed('old'), unknown_usage_runs: 1 })
+  const { restoreBatchProcessing } = await import('../src/components/BatchProcessor')
+  await restoreBatchProcessing('b1')
+  const restored = JSON.parse(localStorage.getItem('ndr:tasks:v1:batch:b1')!)
+  expect(restored.snapshot.chapterStates.c1.state).toBe('stopped')
+  expect(restored.snapshot.tasks.find((task: { id: string }) => task.id === 'dialogue:c1:w1').state).toBe('completed')
+  expect(api.createJob).not.toHaveBeenCalled()
 })
 it('a saved stop prevents any queue dispatch after reload', async () => {
   await seedBatch(true)
