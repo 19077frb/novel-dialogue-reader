@@ -64,6 +64,7 @@ profile_output/
 # ---- Internal plans, work logs and performance retrospectives (never publish) ----
 /docs/internal/
 /docs/PERFORMANCE.md
+**/*影响报告*.md
 **/*修改计划*.md
 **/*开发计划*.md
 **/*工作记录*.md
