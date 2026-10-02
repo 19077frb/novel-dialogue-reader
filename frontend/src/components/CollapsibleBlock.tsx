@@ -20,9 +20,12 @@ export function CollapsibleBlock({ title, summary, children, defaultOpen = true,
   return <div className="ndr-collapsible-block">
     <div className="ndr-collapsible-heading">
       <h3 id={`${id}-heading`}>{title}</h3>
-      <button type="button" aria-expanded={expanded} aria-controls={`${id}-content`}
-        aria-label={`${expanded ? '收起' : '展开'}${title}`} onClick={toggle}>
-        {expanded ? '收起' : '展开'}
+      <button type="button" className="ndr-collapse-toggle" aria-expanded={expanded} aria-controls={`${id}-content`}
+        aria-label={`${expanded ? '收起' : '展开'}${title}`} title={`${expanded ? '收起' : '展开'}${title}`} onClick={toggle}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d={expanded ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} />
+        </svg>
       </button>
     </div>
     {summary != null && <div className="ndr-collapsible-summary">{summary}</div>}

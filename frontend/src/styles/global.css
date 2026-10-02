@@ -565,7 +565,8 @@ textarea:focus-visible {
   font-size: 0.75rem;
 }
 
-.ndr-chapter-status-legend span::before {
+.ndr-chapter-status-legend span::before,
+.ndr-volume-count::before {
   content: '';
   display: inline-block;
   width: 8px;
@@ -575,11 +576,15 @@ textarea:focus-visible {
   background: var(--ndr-muted);
 }
 
-.ndr-chapter-status-legend .queued::before { background: var(--ndr-st-queued); }
-.ndr-chapter-status-legend .roster::before { background: var(--ndr-st-roster); }
-.ndr-chapter-status-legend .dialogue::before { background: var(--ndr-st-dialogue); }
-.ndr-chapter-status-legend .processed::before { background: var(--ndr-st-processed); }
-.ndr-chapter-status-legend .failed::before { background: var(--ndr-st-failed); }
+.ndr-chapter-status-legend .queued::before, .ndr-volume-count.queued::before { background: var(--ndr-st-queued); }
+.ndr-chapter-status-legend .roster::before, .ndr-volume-count.roster::before { background: var(--ndr-st-roster); }
+.ndr-chapter-status-legend .dialogue::before, .ndr-volume-count.dialogue::before { background: var(--ndr-st-dialogue); }
+.ndr-chapter-status-legend .processed::before, .ndr-volume-count.processed::before { background: var(--ndr-st-processed); }
+.ndr-chapter-status-legend .failed::before, .ndr-volume-count.failed::before { background: var(--ndr-st-failed); }
+
+.ndr-volume-status { display: flex; align-items: center; flex-wrap: nowrap; gap: 10px; overflow-x: auto; white-space: nowrap; font-size: 0.75rem; }
+.ndr-volume-status > span { flex: 0 0 auto; }
+.ndr-volume-count { display: inline-flex; align-items: center; font-variant-numeric: tabular-nums; }
 
 .ndr-chapter {
   display: flex;
@@ -1476,10 +1481,11 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   margin: 12px 0;
 }
-.ndr-collapsible-heading h3 { margin: 0; overflow-wrap: anywhere; }
+.ndr-collapsible-heading h3 { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.ndr-collapse-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 36px; height: 36px; padding: 6px; border: 0; background: transparent; }
 .ndr-collapsible-summary { color: var(--ndr-muted); overflow-wrap: anywhere; }
 .ndr-collapsible-block > [hidden] { display: none; }

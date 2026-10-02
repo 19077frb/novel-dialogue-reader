@@ -36,6 +36,31 @@ const STATE_LABELS: Record<ChapterProcessingState, string> = {
   stopped: '已停止',
 }
 
+const SUMMARY_STATES = ['unprocessed', 'queued', 'roster', 'dialogue', 'processed', 'failed'] as const
+
+function VolumeProgressSummary({ volume, chapters, progressOf }: {
+  volume: string
+  chapters: ChapterOut[]
+  progressOf: (chapter: ChapterOut) => ChapterProcessingProgress
+}) {
+  const counts = { unprocessed: 0, queued: 0, roster: 0, dialogue: 0, processed: 0, failed: 0 }
+  for (const chapter of chapters) {
+    const state = progressOf(chapter).state
+    counts[state === 'stopped' ? 'failed' : state] += 1
+  }
+  const labelOf = (state: typeof SUMMARY_STATES[number]) => state === 'failed' ? '失败/已停止' : STATE_LABELS[state]
+  const summary = `共 ${chapters.length} 章；${SUMMARY_STATES.map(state => `${labelOf(state)} ${counts[state]} 章`).join('；')}`
+  return <div className="ndr-volume-status" role="group" aria-label={`${volume}：${summary}`} title={summary}>
+    <span className="ndr-volume-total">{chapters.length} 章</span>
+    {SUMMARY_STATES.filter(state => counts[state] > 0).map(state => (
+      <span key={state} className={`ndr-volume-count ${state}`} data-processing-state={state}
+        aria-label={`${labelOf(state)} ${counts[state]} 章`} title={`${labelOf(state)} ${counts[state]} 章`}>
+        {counts[state]}
+      </span>
+    ))}
+  </div>
+}
+
 function progressLabel(progress: ChapterProcessingProgress): string {
   if (progress.cancelRequested) return '正在取消，等待请求收尾…'
   if (progress.state === 'dialogue') {
@@ -157,9 +182,7 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
           </p>
           {groups.map(group => group.volume ? (
             <CollapsibleBlock key={group.key} title={group.volume}
-              summary={<>{group.chapters.length} 个章节 · {group.chapters.filter(chapter =>
-                ['queued', 'roster', 'dialogue'].includes(effectiveProgress(chapter).state)).length} 章排队/处理中 · {group.chapters.filter(chapter =>
-                ['failed', 'stopped'].includes(effectiveProgress(chapter).state)).length} 章失败/已停止</>}
+              summary={<VolumeProgressSummary volume={group.volume} chapters={group.chapters} progressOf={effectiveProgress} />}
               open={openVolumes[group.key] ?? group.key === activeGroup}
               onOpenChange={open => setOpenVolumes(current => ({ ...current, [group.key]: open }))}>
               {renderChapters(group.chapters, group.volume)}

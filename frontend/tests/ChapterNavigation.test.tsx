@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as batch from '../src/components/BatchProcessor'
 
@@ -34,7 +34,7 @@ describe('ChapterNavigation', () => {
       { ...CHAPTERS[1], title: '第二卷 · 第一章' }]
     render(<ChapterNavigation bookId="b1" chapters={chapters} activeChapterId="c1" onSelect={vi.fn()}
       processingStates={{ c2: { state: 'failed', completedWindows: 0, totalWindows: 1, error: '测试错误' } }} />)
-    expect(screen.getByText('1 个章节 · 0 章排队/处理中 · 1 章失败/已停止')).toBeVisible()
+    expect(screen.getByLabelText('失败/已停止 1 章')).toBeVisible()
     expect(screen.queryByRole('button', { name: '重试第二卷 · 第一章的任务' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '展开第二卷' }))
     expect(screen.getByRole('button', { name: '重试第二卷 · 第一章的任务' })).toBeEnabled()
@@ -44,6 +44,38 @@ describe('ChapterNavigation', () => {
     render(<ChapterNavigation chapters={CHAPTERS} activeChapterId="c1" onSelect={vi.fn()} onSetProcessingStatus={save} />)
     fireEvent.doubleClick(screen.getByText('第一章'))
     expect(save).not.toHaveBeenCalled()
+  })
+  it('卷摘要统计后端已完成章节和人工完成状态，不受旧失败干扰', () => {
+    const chapters = Array.from({ length: 12 }, (_, index) => ({ ...CHAPTERS[0],
+      id: `done-${index}`, ordinal: index, title: `第一卷 · 第${index + 1}章`,
+      dialogue_processed: index > 0, processing_status_override: index === 0 ? true : null }))
+    render(<ChapterNavigation chapters={chapters} activeChapterId={null} onSelect={vi.fn()}
+      processingStates={{ 'done-1': { state: 'failed', completedWindows: 0, totalWindows: 1, error: '旧失败' } }} />)
+    const summary = screen.getByRole('group', { name: /^第一卷：共 12 章/ })
+    expect(within(summary).getByLabelText('已完成 12 章')).toHaveClass('processed')
+    expect(within(summary).getByLabelText('已完成 12 章')).toHaveAttribute('title', '已完成 12 章')
+    expect(summary.querySelectorAll('[data-processing-state]')).toHaveLength(1)
+    expect(summary).not.toHaveTextContent('章排队/处理中')
+    expect(summary).toBeVisible()
+  })
+  it('卷摘要区分全部实时状态，停止与失败合并，并随更新变动', () => {
+    const states = ['unprocessed', 'queued', 'roster', 'dialogue', 'processed', 'failed', 'stopped'] as const
+    const chapters = states.map((state, index) => ({ ...CHAPTERS[0],
+      id: state, ordinal: index, title: `第一卷 · ${state}`, dialogue_processed: state === 'processed' }))
+    const processingStates = Object.fromEntries(states.map(state => [state,
+      { state, completedWindows: 0, totalWindows: 1, error: null }]))
+    const { rerender } = render(<ChapterNavigation chapters={chapters} activeChapterId={null}
+      onSelect={vi.fn()} processingStates={processingStates} />)
+    const summary = screen.getByRole('group', { name: /^第一卷：共 7 章/ })
+    for (const label of ['未处理 1 章', '排队中 1 章', '正在识别人物 1 章',
+      '人物已确认，正在处理对白 1 章', '已完成 1 章', '失败/已停止 2 章']) {
+      expect(within(summary).getByLabelText(label)).toBeVisible()
+    }
+    expect(summary.querySelectorAll('[data-processing-state]')).toHaveLength(6)
+    const updated = chapters.map(chapter => ({ ...chapter, dialogue_processed: true }))
+    rerender(<ChapterNavigation chapters={updated} activeChapterId={null} onSelect={vi.fn()} />)
+    expect(within(summary).getByLabelText('已完成 7 章')).toBeVisible()
+    expect(summary.querySelectorAll('[data-processing-state]')).toHaveLength(1)
   })
   it.each(['unprocessed', 'queued', 'roster', 'dialogue', 'failed', 'stopped'] as const)(
     '%s 先双击标为完成，再次双击改为未处理，实时进度不覆盖手动状态', async state => {

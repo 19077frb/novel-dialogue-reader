@@ -9,7 +9,10 @@ describe('shared UI design rules', () => {
   it('keeps collapsed content hidden and adapts block summaries with theme tokens', () => {
     expect(css).toMatch(/\.ndr-collapsible-block > \[hidden\]\s*\{[^}]*display:\s*none/)
     expect(css).toMatch(/\.ndr-collapsible-summary\s*\{[^}]*color:\s*var\(--ndr-muted\)/)
-    expect(css).toMatch(/\.ndr-collapsible-heading\s*\{[^}]*flex-wrap:\s*wrap/)
+    expect(css).toMatch(/\.ndr-collapsible-heading\s*\{[^}]*flex-wrap:\s*nowrap/)
+    expect(css).toMatch(/\.ndr-collapse-toggle\s*\{[^}]*flex:\s*0 0 auto/)
+    expect(css).toMatch(/\.ndr-volume-status\s*\{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto[^}]*white-space:\s*nowrap/)
+    expect(css).toMatch(/\.ndr-chapter-status-legend \.processed::before, \.ndr-volume-count\.processed::before\s*\{[^}]*var\(--ndr-st-processed\)/)
   })
   it('top-aligns batch configuration fields and limits desktop layout to three columns', () => {
     expect(css).toMatch(/\.ndr-range-grid\s*\{[^}]*align-items:\s*start/)
