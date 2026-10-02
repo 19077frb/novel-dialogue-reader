@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import socket
 import sqlite3
+import struct
 import sys
 
 import pytest
@@ -138,3 +139,26 @@ def test_release_workflow_requires_explicit_dispatch_and_does_not_overwrite():
     assert "--draft" in workflow and "--draft=false" in workflow
     assert "--clobber" not in workflow
     assert "sha256sum --check" in workflow
+
+
+def test_application_icon_contains_seven_rgba_png_frames():
+    source = REPO_ROOT / "assets/icons/app.png"
+    assert source.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    data = (REPO_ROOT / "assets/icons/app.ico").read_bytes()
+    assert struct.unpack_from("<HHH", data) == (0, 1, 7)
+    sizes = set()
+    for index in range(7):
+        width, height, _, _, planes, bits, length, offset = struct.unpack_from(
+            "<BBBBHHII", data, 6 + index * 16
+        )
+        size = (width or 256, height or 256)
+        sizes.add(size)
+        assert planes == 0 and bits == 32
+        frame = data[offset:offset + length]
+        assert len(frame) == length and frame.startswith(b"\x89PNG\r\n\x1a\n")
+        assert struct.unpack_from(">II", frame, 16) == size
+        assert frame[25] == 6  # PNG RGBA, not an opaque RGB image.
+    assert sizes == {(size, size) for size in (16, 24, 32, 48, 64, 128, 256)}
+    script = (REPO_ROOT / "scripts/build-portable.ps1").read_text(encoding="utf-8")
+    assert "'--icon', $appIcon" in script
+    assert "assets/icons/app.ico" in script

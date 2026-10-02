@@ -7,6 +7,7 @@ import json
 import os
 import re
 import socket
+import struct
 import subprocess
 import tempfile
 import time
@@ -30,6 +31,30 @@ def free_port() -> int:
         return int(listener.getsockname()[1])
 
 
+def check_exe_icon(exe: Path) -> None:
+    """Check embedded icon bytes, not just that an unrelated ICO was committed."""
+    import pefile
+
+    source = Path(__file__).resolve().parents[2] / "assets/icons/app.ico"
+    data = source.read_bytes()
+    reserved, kind, count = struct.unpack_from("<HHH", data)
+    assert (reserved, kind, count) == (0, 1, 7), "Invalid application ICO"
+    expected = set()
+    for index in range(count):
+        entry = struct.unpack_from("<BBBBHHII", data, 6 + index * 16)
+        length, offset = entry[-2:]
+        expected.add(data[offset:offset + length])
+    with pefile.PE(str(exe)) as pe:
+        embedded = set()
+        for resource in pe.DIRECTORY_ENTRY_RESOURCE.entries:
+            if resource.id == 3:  # RT_ICON
+                for image in resource.directory.entries:
+                    for language in image.directory.entries:
+                        record = language.data.struct
+                        embedded.add(pe.get_data(record.OffsetToData, record.Size))
+        assert expected <= embedded, "EXE does not embed all approved application icon frames"
+
+
 def check(zip_path: Path) -> None:
     if os.name != "nt":
         raise RuntimeError("The Windows EXE smoke test requires Windows.")
@@ -49,6 +74,7 @@ def check(zip_path: Path) -> None:
         archive.extractall(destination)
     exe = destination / "NovelDialogueReader" / "NovelDialogueReader.exe"
     assert exe.is_file(), "EXE missing"
+    check_exe_icon(exe)
     env = {key: value for key, value in os.environ.items() if not key.startswith("NDR_")}
     env.update({"PATH": "", "NDR_CREDENTIAL_BACKEND": "session", "PYTHONUTF8": "1"})
     env.pop("PYTHONPATH", None)

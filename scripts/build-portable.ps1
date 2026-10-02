@@ -7,6 +7,8 @@ if ($env:OS -ne 'Windows_NT' -or -not [Environment]::Is64BitProcess) {
     throw 'Build the portable edition on 64-bit Windows.'
 }
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$appIcon = Join-Path $repoRoot 'assets/icons/app.ico'
+if (-not (Test-Path -LiteralPath $appIcon)) { throw 'Application icon is missing: assets/icons/app.ico' }
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
 Push-Location $repoRoot
@@ -25,6 +27,7 @@ try {
     New-Item -ItemType Directory -Path $buildRoot | Out-Null
     $argsForBuild = @(
         '-m', 'PyInstaller', '--onedir', '--console', '--noupx', '--name', 'NovelDialogueReader',
+        '--icon', $appIcon,
         '--distpath', (Join-Path $buildRoot 'app'), '--workpath', (Join-Path $buildRoot 'work'),
         '--specpath', $buildRoot, '--paths', (Join-Path $repoRoot 'backend/src'),
         '--add-data', ((Join-Path $repoRoot 'frontend/dist') + ':frontend/dist'),

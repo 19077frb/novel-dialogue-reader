@@ -44,3 +44,15 @@ pwsh -File scripts/test-portable.ps1 -ZipPath "构建输出的ZIP路径"
 ```
 
 输出位于被忽略的 `dist/portable-随机标识/`，每次独立构建，不覆盖旧输出。第三方许可与 Python 许可随包保存；有新依赖时需检查其许可和打包钩子。
+
+## 应用图标
+
+EXE 使用 `assets/icons/app.ico` 中的蓝色书籍/对话气泡图标，含 16、24、32、48、64、128、256 像素的透明图层。源图 `assets/icons/app.png` 由图像生成工具生成，经过用户选定后保存在仓库；它们是设计资产，不是 EXE/ZIP 构建成品。构建会嵌入该 ICO，验收会逐帧核对 EXE 图标资源；缺少图标时构建失败，不回退到默认图标。
+
+替换源 PNG 后，可用独立工具环境重新转换（Pillow 仅用于转换，不是应用运行依赖）：
+
+```powershell
+uv run --no-project --with pillow==12.3.0 python backend/scripts/build_icon.py
+```
+
+转换保留透明度，要求方形源图至少 256 像素。浏览器标签页图标未在此流程中修改。Windows 可能缓存旧图标，更新后若仍显示旧图标，可重新解压至新目录并重新创建快捷方式。
