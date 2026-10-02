@@ -68,6 +68,15 @@ class CharacterAutoMergeConfirmIn(ApiModel):
     selected_target_ids: list[str] = Field(max_length=500)
 
 
+class CharacterMergeValidationIssueOut(ApiModel):
+    code: str
+    message: str
+    group_index: int | None = None
+    field: str | None = None
+    character_ref: str | None = None
+    related_group_index: int | None = None
+
+
 class CharacterAutoMergeResultOut(ApiModel):
     job_id: str
     state: JobState
@@ -79,6 +88,7 @@ class CharacterAutoMergeResultOut(ApiModel):
     usage: dict[str, int] = Field(default_factory=dict)
     unknown_usage_runs: int = 0
     last_error: str | None = None
+    validation_issues: list[CharacterMergeValidationIssueOut] = Field(default_factory=list)
     created_at: str
     updated_at: str
 

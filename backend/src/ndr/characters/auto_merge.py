@@ -21,10 +21,12 @@ from ..domain.characters import (
 from ..domain.enums import ErrorCode, InferenceRunState, JobKind, JobPurpose, JobState
 from ..jobs.roster import _build_adapter
 from ..jobs.service import digest_request, job_detail, profile_snapshot
+from ..llm.adapters import sanitize
 from ..llm.errors import ProviderError, ProviderErrorKind
 from ..storage.models import Book, BookCharacter, BookVersion, InferenceRun, Job
 from ..storage.transactions import transaction
 from .directory import _guard, directory, edit, merge
+from .merge_diagnostics import MergePlanError, character_refs, saved_model_groups
 from .names import GENERIC_NAMES, name_key, undecorated_name
 
 MAX_OUTPUT_TOKENS = 4096
@@ -33,8 +35,8 @@ MAX_INPUT_TOKENS = 64000
 
 class MergeGroup(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    target_id: str
-    source_ids: list[str] = Field(min_length=1)
+    target_id: str = Field(min_length=1, max_length=160)
+    source_ids: list[str] = Field(min_length=1, max_length=500)
     confidence: float = Field(ge=0, le=1)
     reason: str = Field(min_length=1, max_length=512)
     merged_description: str = Field(min_length=1, max_length=512)
@@ -82,6 +84,9 @@ def _name_candidates(entries):
 
 
 def _messages(entries):
+    refs = character_refs(entries)
+    short_ids = {value: key for key, value in refs.items()}
+    prompt_entries = [{**row, "character_id": short_ids[row["character_id"]]} for row in entries]
     return [
         {
             "role": "system",
@@ -105,7 +110,8 @@ def _messages(entries):
                 "merged_description 与合并依据 reason 分开：前者是保存后供读者查看的人物说明，"
                 "不是合并操作的理由。已有人工说明也须保留其中有效信息，新说明由用户预览确认后才替换。"
                 "每个人物 ID 最多属于一组，不允许循环、链式合并或新增 ID。"
-                '只返回 JSON：{"groups":[{"target_id":"已有ID","source_ids":["重复ID"],'
+                "人物引用只用输入提供的 C1、C2 等短引用，逐字复制；姓名不是引用，不能自造引用。"
+                '只返回 JSON：{"groups":[{"target_id":"C1","source_ids":["C2"],'
                 '"confidence":0.99,"reason":"中文身份依据","merged_description":"整理后的人物说明"}]}。'
                 "只建议置信度至少 0.95 且有明确依据的组；没有重复时返回空 groups。"
             ),
@@ -113,7 +119,8 @@ def _messages(entries):
         {
             "role": "user",
             "content": json.dumps(
-                {"characters": entries, "possible_name_matches": _name_candidates(entries)},
+                {"characters": prompt_entries,
+                 "possible_name_matches": _name_candidates(prompt_entries)},
                 ensure_ascii=False,
             ),
         },
@@ -191,6 +198,7 @@ def auto_merge_result(session, job) -> CharacterAutoMergeResultOut:
         usage=detail.usage,
         unknown_usage_runs=detail.unknown_usage_runs,
         last_error=job.last_error,
+        validation_issues=checkpoint.get("validation_issues", []),
         created_at=detail.created_at,
         updated_at=detail.updated_at,
     )
@@ -198,19 +206,62 @@ def auto_merge_result(session, job) -> CharacterAutoMergeResultOut:
 
 def _validate_plan(output: MergeOutput, entries):
     by_id = {row["character_id"]: row for row in entries}
-    seen = set()
-    for group in output.groups:
+    short_ids = {value: key for key, value in character_refs(entries).items()}
+    seen = {}
+    issues = []
+
+    def add(code, message, index, field=None, key=None, related=None):
+        if len(issues) < 50:
+            issues.append({"code": code, "message": message, "group_index": index,
+                           "field": field, "character_ref": short_ids.get(key, key),
+                           "related_group_index": related})
+
+    for index, group in enumerate(output.groups, 1):
         ids = [group.target_id, *group.source_ids]
-        if len(ids) != len(set(ids)) or any(key in seen or key not in by_id for key in ids):
-            raise ValueError("合并方案包含不存在、重复或相互依赖的人物 ID")
+        local = set()
+        for position, key in enumerate(ids):
+            field = "target_id" if position == 0 else f"source_ids[{position - 1}]"
+            role = "target" if position == 0 else "source"
+            ref = sanitize(short_ids.get(key, key), limit=160)
+            name = sanitize(by_id[key]["name"], limit=80) if key in by_id else "未提供的人物"
+            person = f"“{name}”（{ref}）"
+            if key not in by_id:
+                add("unknown_character", f"第{index}组引用了未提供的人物：{ref}",
+                    index, field, ref)
+            elif key in local:
+                code = "target_in_sources" if key == group.target_id else "duplicate_source"
+                message = ("保留人物又出现在并入名单" if code == "target_in_sources"
+                           else "并入人物重复出现")
+                add(code, f"第{index}组{message}：{person}", index, field, key)
+            elif key in seen:
+                previous_index, previous_role = seen[key]
+                dependent = previous_role != role
+                code = "dependent_groups" if dependent else "overlapping_groups"
+                message = ("既要被合并又被用作保留人物，形成相互依赖" if dependent
+                           else "同时出现在多个分组")
+                add(code, f"第{index}组与第{previous_index}组冲突：{person}{message}",
+                    index, field, key, previous_index)
+            local.add(key)
         if not group.reason.strip():
-            raise ValueError("合并方案必须有明确的中文身份依据")
-        if by_id[group.target_id]["kind"] == "speaker" and any(
-            by_id[key]["kind"] != "speaker" for key in group.source_ids
+            add("missing_reason", f"第{index}组缺少明确的中文合并依据", index, "reason")
+        if group.target_id in by_id and by_id[group.target_id]["kind"] == "speaker" and any(
+            key in by_id and by_id[key]["kind"] != "speaker" for key in group.source_ids
         ):
-            raise ValueError("已有全书人物不能合并到未关联说话人")
-        seen.update(ids)
+            add("invalid_target_kind", f"第{index}组不能把已有全书人物合并到未关联说话人",
+                index, "target_id", group.target_id)
+        for position, key in enumerate(ids):
+            seen.setdefault(key, (index, "target" if position == 0 else "source"))
+    if issues:
+        raise MergePlanError(issues)
     return by_id
+
+
+def _restore_plan_references(output: MergeOutput, entries) -> MergeOutput:
+    refs = character_refs(entries)
+    return MergeOutput(groups=[group.model_copy(update={
+        "target_id": refs.get(group.target_id, group.target_id),
+        "source_ids": [refs.get(key, key) for key in group.source_ids],
+    }) for group in output.groups])
 
 
 def _named_targets(output: MergeOutput, entries):
@@ -440,6 +491,7 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
             )
         )
         usage = raw.get("_usage") if isinstance(raw, dict) else None
+        payload = {key: value for key, value in dict(raw).items() if not key.startswith("_")}
         with transaction(factory) as session:
             run = session.get(InferenceRun, run_id)
             if run is None:
@@ -448,9 +500,13 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
             run.state = InferenceRunState.SUCCEEDED
             if isinstance(usage, dict) and not usage.get("unknown"):
                 run.usage_json = json.dumps(usage, ensure_ascii=False)
-        output = MergeOutput.model_validate(
-            {key: value for key, value in dict(raw).items() if not key.startswith("_")}
-        )
+            job = session.get(Job, job_id)
+            if job is not None:
+                checkpoint = json.loads(job.checkpoint_json or "{}")
+                checkpoint.update(saved_model_groups(payload),
+                                  character_refs=character_refs(entries))
+                job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+        output = _restore_plan_references(MergeOutput.model_validate(payload), entries)
         _validate_plan(output, entries)
         with transaction(factory) as session:
             job = session.get(Job, job_id)
@@ -475,14 +531,13 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
             output, unnamed_groups = _named_targets(output, entries)
             accepted = [group.model_dump() for group in output.groups if group.confidence >= 0.95]
             skipped = unnamed_groups + len(output.groups) - len(accepted)
-            job.checkpoint_json = json.dumps(
-                {
-                    "phase": "awaiting_confirmation",
-                    "merge_proposal": {"groups": accepted, "skipped_groups": skipped},
-                    "analysis_groups": analysis_groups,
-                },
-                ensure_ascii=False,
+            checkpoint = json.loads(job.checkpoint_json or "{}")
+            checkpoint.update(
+                phase="awaiting_confirmation",
+                merge_proposal={"groups": accepted, "skipped_groups": skipped},
+                analysis_groups=analysis_groups,
             )
+            job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
             job.progress_json = json.dumps(
                 {"stage": "awaiting_confirmation", "proposed_groups": len(accepted)}
             )
@@ -512,6 +567,27 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
                 job.state = JobState.NEEDS_RECONCILIATION if unknown else JobState.FAILED
                 job.last_error = error[:1024]
                 job.progress_json = json.dumps({"stage": "failed"})
+                if isinstance(exc, (MergePlanError, ValidationError)):
+                    checkpoint = json.loads(job.checkpoint_json or "{}")
+                    if isinstance(exc, MergePlanError):
+                        issues = exc.issues
+                    else:
+                        issues = []
+                        for item in exc.errors()[:50]:
+                            location = item["loc"]
+                            group_index = location[1] + 1 if len(location) > 1 and isinstance(
+                                location[1], int,
+                            ) else None
+                            field = ".".join(str(part) for part in location[2:])
+                            field = sanitize(field, limit=160)
+                            message = (f"第{group_index}组的 {field} 字段缺失或格式不符合要求"
+                                       if group_index else "合并方案格式不符合要求")
+                            issues.append({"code": "invalid_group_schema",
+                                           "group_index": group_index, "field": field,
+                                           "character_ref": None, "related_group_index": None,
+                                           "message": message})
+                    checkpoint["validation_issues"] = issues
+                    job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
             if run_id:
                 run = session.get(InferenceRun, run_id)
                 if run is None:

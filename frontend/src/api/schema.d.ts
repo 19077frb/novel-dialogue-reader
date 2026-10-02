@@ -1533,6 +1533,8 @@ export interface components {
             unknown_usage_runs: number;
             /** Last Error */
             last_error?: string | null;
+            /** Validation Issues */
+            validation_issues?: components["schemas"]["CharacterMergeValidationIssueOut"][];
             /** Created At */
             created_at: string;
             /** Updated At */
@@ -1605,6 +1607,21 @@ export interface components {
             reason: string;
             /** Merged Description */
             merged_description?: string | null;
+        };
+        /** CharacterMergeValidationIssueOut */
+        CharacterMergeValidationIssueOut: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Group Index */
+            group_index?: number | null;
+            /** Field */
+            field?: string | null;
+            /** Character Ref */
+            character_ref?: string | null;
+            /** Related Group Index */
+            related_group_index?: number | null;
         };
         /**
          * CharacterRosterStatus

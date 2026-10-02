@@ -4951,6 +4951,13 @@
             ],
             "title": "Last Error"
           },
+          "validation_issues": {
+            "items": {
+              "$ref": "#/components/schemas/CharacterMergeValidationIssueOut"
+            },
+            "type": "array",
+            "title": "Validation Issues"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -5142,6 +5149,69 @@
           "reason"
         ],
         "title": "CharacterMergeProposalOut"
+      },
+      "CharacterMergeValidationIssueOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "group_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Index"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "character_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Character Ref"
+          },
+          "related_group_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Group Index"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "CharacterMergeValidationIssueOut"
       },
       "CharacterRosterStatus": {
         "type": "string",

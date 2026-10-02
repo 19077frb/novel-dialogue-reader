@@ -51,6 +51,22 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('合并引用失败显示具体分组与可展开详情，不自动付费重试', async () => {
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue({
+      ...mergeResult, state: 'FAILED', merged_count: 0, merges: [],
+      last_error: '第2组与第1组冲突；已拒绝整份方案，未执行合并',
+      validation_issues: [{ code: 'dependent_groups', group_index: 2,
+        related_group_index: 1, field: 'source_ids[0]', character_ref: 'C3',
+        message: '第2组与第1组冲突：“悠太”（C3）形成相互依赖' }],
+    })
+    renderPage()
+    expect(await screen.findByRole('alert')).toHaveTextContent('第2组与第1组冲突')
+    expect(screen.getByText('查看校验详情（1 处）')).toBeInTheDocument()
+    expect(screen.getByText(/字段：source_ids\[0\]/)).toBeInTheDocument()
+    expect(screen.getByText(/不会自动再次调用模型/)).toBeInTheDocument()
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+    expect(api.confirmCharacterAutoMerge).not.toHaveBeenCalled()
+  })
   it('全选多组建议只提交一次，计数包含同组多个重复人物', async () => {
     const proposals = [
       { target: entries[1], sources: [entries[0], { ...entries[0], character_id: 'u3' }], confidence: 0.99, reason: '第一行\n第二行', merged_description: '主人公浅村悠太，在书店打工。' },

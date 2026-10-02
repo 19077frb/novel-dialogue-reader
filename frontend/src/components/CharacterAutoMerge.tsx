@@ -78,6 +78,13 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
           <OperationTimer startedAt={Date.parse(result.data.created_at)} finishedAt={busy ? null : Date.parse(result.data.updated_at)} />
           <p>已知消耗 {result.data.usage?.total_tokens ?? 0} Tokens{result.data.unknown_usage_runs > 0 ? `；另有 ${result.data.unknown_usage_runs} 次调用用量未知` : ''}</p>
           {result.data.last_error && <p className="status-error" role="alert">{result.data.last_error}</p>}
+          {Boolean(result.data.validation_issues?.length) && <details>
+            <summary>查看校验详情（{result.data.validation_issues?.length} 处）</summary>
+            <ul className="ndr-merge-text">{result.data.validation_issues?.map((issue, index) => <li key={index}>
+              {issue.message}{issue.field ? `；字段：${issue.field}` : ''}
+            </li>)}</ul>
+            <p className="hint">本次没有执行合并，不会自动再次调用模型。请核对问题后决定是否重新分析。</p>
+          </details>}
           {awaiting && <section className="ndr-merge-preview" aria-label="合并建议预览">
             <h3 className="ndr-step-heading"><span className="ndr-step-badge">2</span>预览并选择合并建议</h3>
             <p className="hint">默认不选中。请核对姓名、别名、依据和整理后的说明；确认后会用新说明替换保留人物的原说明，未选中的人物保持不变。确认后无法自动撤销，不会再次调用模型。</p>

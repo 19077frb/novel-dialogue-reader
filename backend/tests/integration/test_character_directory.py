@@ -502,8 +502,35 @@ def test_auto_merge_rejects_invalid_plan_atomically_and_keeps_usage(
         f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
     ).json()["data"]
     assert result["merged_count"] == 0 and result["usage"]["total_tokens"] == 40
+    assert result["validation_issues"]
+    detail = client.get(f"/api/jobs/{job['id']}").json()["data"]
+    assert len(detail["checkpoint"]["model_groups"]) == len(groups)
+    assert detail["checkpoint"]["character_refs"]
+    assert detail["checkpoint"]["validation_issues"] == result["validation_issues"]
+    if case != "extra":
+        assert "第" in result["last_error"] and "未执行合并" in result["last_error"]
     with transaction(client.app.state.session_factory) as session:
         assert session.get(BookCharacter, ids["source"]) is not None
+
+
+def test_auto_merge_short_refs_reach_preview_as_stable_ids(migrated_client, populated):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids)
+    with transaction(client.app.state.session_factory) as session:
+        entries = json.loads(session.get(Job, job["id"]).range_json)["entries"]
+    refs = {row["character_id"]: f"C{i + 1}" for i, row in enumerate(entries)}
+    outcome, adapter = _run_merge(client, job, [_merge_group(
+        ids, target_id=refs[ids["target"]], source_ids=[refs[ids["source"]]],
+    )], accept=False)
+    assert outcome.state is JobState.COMPLETED
+    payload = json.loads(adapter.calls[0]["payload"]["messages"][1]["content"])
+    assert all(row["character_id"].startswith("C") for row in payload["characters"])
+    base = f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    preview = client.get(base).json()["data"]
+    assert preview["proposals"][0]["target"]["character_id"] == ids["target"]
+    assert preview["proposals"][0]["sources"][0]["character_id"] == ids["source"]
+    assert client.post(f"{base}/confirm", json={"selected_target_ids": [ids["target"]]}).status_code == 200
+    assert len(adapter.calls) == 1
 
 
 @pytest.mark.parametrize("case", ["edited", "new_job", "stop"])
