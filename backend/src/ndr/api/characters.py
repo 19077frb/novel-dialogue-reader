@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..characters.auto_merge import auto_merge_result, create_auto_merge_job
+from ..characters.auto_merge import auto_merge_result, confirm_auto_merge, create_auto_merge_job
 from ..characters.directory import directory, edit, merge
 from ..characters.service import (
     confirm_roster,
@@ -20,6 +20,7 @@ from ..characters.service import (
 from ..domain.characters import (
     BookCharacterOut,
     ChapterRosterOut,
+    CharacterAutoMergeConfirmIn,
     CharacterAutoMergeIn,
     CharacterAutoMergeResultOut,
     CharacterDirectoryOut,
@@ -73,7 +74,7 @@ def latest_auto_merge_route(
     "/books/{book_id}/character-directory/auto-merge",
     status_code=202,
     response_model=DataEnvelope[JobDetailOut],
-    summary="模型判断并自动合并重复人物",
+    summary="模型分析重复人物并生成待确认建议",
 )
 def auto_merge_characters_route(
     request: Request,
@@ -121,6 +122,23 @@ def auto_merge_result_route(
     return DataEnvelope(
         data=auto_merge_result(session, job), request_id=current_request_id(request)
     )
+
+
+@router.post(
+    "/books/{book_id}/character-directory/auto-merge/{job_id}/confirm",
+    response_model=DataEnvelope[CharacterAutoMergeResultOut],
+    summary="接受所选合并建议或放弃本次结果",
+)
+def confirm_auto_merge_route(
+    request: Request, book_id: str, job_id: str, payload: CharacterAutoMergeConfirmIn
+) -> DataEnvelope[CharacterAutoMergeResultOut]:
+    with transaction(request.app.state.session_factory) as session:
+        _book_or_404(session, book_id)
+        job = session.get(Job, job_id)
+        if not job or job.book_id != book_id or job.kind is not JobKind.CHARACTER_MERGE:
+            raise ApiError.not_found("自动合并任务不存在")
+        result = confirm_auto_merge(session, job, payload.selected_target_ids)
+    return DataEnvelope(data=result, request_id=current_request_id(request))
 
 
 @router.get(

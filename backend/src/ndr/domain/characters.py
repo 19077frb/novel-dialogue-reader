@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, model_validator
 
 from .common import ApiModel
@@ -53,12 +55,25 @@ class AppliedCharacterMergeOut(ApiModel):
     reason: str
 
 
+class CharacterMergeProposalOut(ApiModel):
+    target: CharacterDirectoryOut
+    sources: list[CharacterDirectoryOut]
+    confidence: float
+    reason: str
+
+
+class CharacterAutoMergeConfirmIn(ApiModel):
+    selected_target_ids: list[str] = Field(max_length=500)
+
+
 class CharacterAutoMergeResultOut(ApiModel):
     job_id: str
     state: JobState
     merged_count: int = 0
     skipped_groups: int = 0
     merges: list[AppliedCharacterMergeOut] = Field(default_factory=list)
+    phase: Literal["awaiting_confirmation", "applied", "discarded"] | None = None
+    proposals: list[CharacterMergeProposalOut] = Field(default_factory=list)
     usage: dict[str, int] = Field(default_factory=dict)
     unknown_usage_runs: int = 0
     last_error: str | None = None

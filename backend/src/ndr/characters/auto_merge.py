@@ -1,4 +1,4 @@
-"""One-shot, audited model-assisted identity merges; model calls hold no DB transaction."""
+"""One-shot merge proposals with explicit acceptance; model calls hold no DB transaction."""
 
 from __future__ import annotations
 
@@ -117,13 +117,26 @@ def create_auto_merge_job(session, book, version, profile, payload: CharacterAut
 
 def auto_merge_result(session, job) -> CharacterAutoMergeResultOut:
     detail = job_detail(session, job)
-    result = (detail.checkpoint or {}).get("merge_result", {})
+    checkpoint = detail.checkpoint or {}
+    result = checkpoint.get("merge_result", {})
+    proposal = checkpoint.get("merge_proposal", {})
+    entries = {row["character_id"]: row for row in json.loads(job.range_json).get("entries", [])}
     return CharacterAutoMergeResultOut(
         job_id=job.id,
         state=job.state,
         merged_count=result.get("merged_count", 0),
-        skipped_groups=result.get("skipped_groups", 0),
+        skipped_groups=result.get("skipped_groups", proposal.get("skipped_groups", 0)),
         merges=result.get("merges", []),
+        phase=checkpoint.get("phase", "applied" if "merge_result" in checkpoint else None),
+        proposals=[
+            {
+                "target": entries[group["target_id"]],
+                "sources": [entries[key] for key in group["source_ids"]],
+                "confidence": group["confidence"],
+                "reason": group["reason"],
+            }
+            for group in proposal.get("groups", [])
+        ],
         usage=detail.usage,
         unknown_usage_runs=detail.unknown_usage_runs,
         last_error=job.last_error,
@@ -149,7 +162,7 @@ def _validate_plan(output: MergeOutput, entries):
     return by_id
 
 
-def _apply(session, job, output, entries):
+def _check_current(session, job, entries):
     version = session.get(BookVersion, job.book_version_id)
     book = session.get(Book, job.book_id)
     if not version or not book or book.active_version_id != version.id:
@@ -159,6 +172,11 @@ def _apply(session, job, output, entries):
         raise ApiError(
             ErrorCode.RESOURCE_CONFLICT, "人物资料在分析期间发生变化，未执行任何合并，请重新分析"
         )
+    return version
+
+
+def _apply(session, job, output, entries):
+    version = _check_current(session, job, entries)
     by_id = _validate_plan(output, entries)
     applied = []
     skipped = merged_count = 0
@@ -214,6 +232,47 @@ def _apply(session, job, output, entries):
             ).model_dump()
         )
     return {"merged_count": merged_count, "skipped_groups": skipped, "merges": applied}
+
+
+def confirm_auto_merge(session, job, selected_ids):
+    checkpoint = json.loads(job.checkpoint_json or "{}")
+    selected = sorted(selected_ids)
+    if len(selected) != len(set(selected)):
+        raise ApiError.validation("不能重复选择同一合并建议")
+    if checkpoint.get("phase") in {"applied", "discarded"}:
+        if checkpoint.get("selected_target_ids") == selected:
+            return auto_merge_result(session, job)
+        raise ApiError(ErrorCode.RESOURCE_CONFLICT, "本次合并建议已经确认或放弃，不能改变决定")
+    if job.state is not JobState.COMPLETED or checkpoint.get("phase") != "awaiting_confirmation":
+        raise ApiError.validation("本任务没有可确认的合并建议")
+    proposal = checkpoint["merge_proposal"]
+    groups = {group["target_id"]: group for group in proposal["groups"]}
+    if any(key not in groups for key in selected):
+        raise ApiError.validation("所选人物不属于本次合并建议")
+    # Claim the decision before checking/applying. Concurrent confirmations cannot
+    # apply the same proposal twice; a repeated identical decision returns its result.
+    claimed = session.execute(
+        update(Job)
+        .where(Job.id == job.id, Job.checkpoint_json == job.checkpoint_json)
+        .values(checkpoint_json=job.checkpoint_json),
+        execution_options={"synchronize_session": False},
+    )
+    if claimed.rowcount != 1:
+        session.refresh(job)
+        return confirm_auto_merge(session, job, selected)
+    result = {"merged_count": 0, "merges": [], "skipped_groups": proposal.get("skipped_groups", 0)}
+    if selected:
+        output = MergeOutput.model_validate({"groups": [groups[key] for key in selected]})
+        result = _apply(session, job, output, json.loads(job.range_json)["entries"])
+        result["skipped_groups"] += proposal.get("skipped_groups", 0)
+    checkpoint.update(
+        phase="applied" if selected else "discarded",
+        selected_target_ids=selected,
+        merge_result=result,
+    )
+    job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+    session.flush()
+    return auto_merge_result(session, job)
 
 
 def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_factory=None):
@@ -332,10 +391,27 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
                         "模型未返回用量或实际用量超过上限，未合并人物；已产生的调用用量仍保留"
                     )
                     return job.state, 1
-            result = _apply(session, job, output, entries)
-            job.checkpoint_json = json.dumps({"merge_result": result}, ensure_ascii=False)
+            _check_current(session, job, entries)
+            by_id = _validate_plan(output, entries)
+            accepted = []
+            for group in output.groups:
+                descriptions = dict.fromkeys(
+                    by_id[key]["description"].strip()
+                    for key in [group.target_id, *group.source_ids]
+                    if by_id[key]["description"].strip()
+                )
+                if group.confidence >= 0.95 and len("；".join(descriptions)) <= 512:
+                    accepted.append(group.model_dump())
+            skipped = len(output.groups) - len(accepted)
+            job.checkpoint_json = json.dumps(
+                {
+                    "phase": "awaiting_confirmation",
+                    "merge_proposal": {"groups": accepted, "skipped_groups": skipped},
+                },
+                ensure_ascii=False,
+            )
             job.progress_json = json.dumps(
-                {"stage": "completed", "merged_count": result["merged_count"]}
+                {"stage": "awaiting_confirmation", "proposed_groups": len(accepted)}
             )
             job.state = JobState.COMPLETED
             job.last_error = None

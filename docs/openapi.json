@@ -1029,7 +1029,7 @@
         "tags": [
           "characters"
         ],
-        "summary": "模型判断并自动合并重复人物",
+        "summary": "模型分析重复人物并生成待确认建议",
         "operationId": "auto_merge_characters_route_api_books__book_id__character_directory_auto_merge_post",
         "parameters": [
           {
@@ -1103,6 +1103,67 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_CharacterAutoMergeResultOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/character-directory/auto-merge/{job_id}/confirm": {
+      "post": {
+        "tags": [
+          "characters"
+        ],
+        "summary": "接受所选合并建议或放弃本次结果",
+        "operationId": "confirm_auto_merge_route_api_books__book_id__character_directory_auto_merge__job_id__confirm_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CharacterAutoMergeConfirmIn"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4747,6 +4808,24 @@
         ],
         "title": "ChapterRosterOut"
       },
+      "CharacterAutoMergeConfirmIn": {
+        "properties": {
+          "selected_target_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Selected Target Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "selected_target_ids"
+        ],
+        "title": "CharacterAutoMergeConfirmIn"
+      },
       "CharacterAutoMergeIn": {
         "properties": {
           "book_version_id": {
@@ -4825,6 +4904,29 @@
             },
             "type": "array",
             "title": "Merges"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "awaiting_confirmation",
+                  "applied",
+                  "discarded"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/CharacterMergeProposalOut"
+            },
+            "type": "array",
+            "title": "Proposals"
           },
           "usage": {
             "additionalProperties": {
@@ -4997,6 +5099,37 @@
           "expected_target_version"
         ],
         "title": "CharacterMergeIn"
+      },
+      "CharacterMergeProposalOut": {
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/CharacterDirectoryOut"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/CharacterDirectoryOut"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "target",
+          "sources",
+          "confidence",
+          "reason"
+        ],
+        "title": "CharacterMergeProposalOut"
       },
       "CharacterRosterStatus": {
         "type": "string",

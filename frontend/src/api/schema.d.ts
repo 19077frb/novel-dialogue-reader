@@ -265,7 +265,7 @@ export interface paths {
         /** 找回当前版本最近的自动合并任务 */
         get: operations["latest_auto_merge_route_api_books__book_id__character_directory_auto_merge_get"];
         put?: never;
-        /** 模型判断并自动合并重复人物 */
+        /** 模型分析重复人物并生成待确认建议 */
         post: operations["auto_merge_characters_route_api_books__book_id__character_directory_auto_merge_post"];
         delete?: never;
         options?: never;
@@ -284,6 +284,23 @@ export interface paths {
         get: operations["auto_merge_result_route_api_books__book_id__character_directory_auto_merge__job_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/books/{book_id}/character-directory/auto-merge/{job_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 接受所选合并建议或放弃本次结果 */
+        post: operations["confirm_auto_merge_route_api_books__book_id__character_directory_auto_merge__job_id__confirm_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1462,6 +1479,11 @@ export interface components {
              */
             version: number;
         };
+        /** CharacterAutoMergeConfirmIn */
+        CharacterAutoMergeConfirmIn: {
+            /** Selected Target Ids */
+            selected_target_ids: string[];
+        };
         /** CharacterAutoMergeIn */
         CharacterAutoMergeIn: {
             /** Book Version Id */
@@ -1496,6 +1518,10 @@ export interface components {
             skipped_groups: number;
             /** Merges */
             merges?: components["schemas"]["AppliedCharacterMergeOut"][];
+            /** Phase */
+            phase?: ("awaiting_confirmation" | "applied" | "discarded") | null;
+            /** Proposals */
+            proposals?: components["schemas"]["CharacterMergeProposalOut"][];
             /** Usage */
             usage?: {
                 [key: string]: number;
@@ -1567,6 +1593,16 @@ export interface components {
             expected_version: number;
             /** Expected Target Version */
             expected_target_version: number;
+        };
+        /** CharacterMergeProposalOut */
+        CharacterMergeProposalOut: {
+            target: components["schemas"]["CharacterDirectoryOut"];
+            /** Sources */
+            sources: components["schemas"]["CharacterDirectoryOut"][];
+            /** Confidence */
+            confidence: number;
+            /** Reason */
+            reason: string;
         };
         /**
          * CharacterRosterStatus
@@ -4264,6 +4300,42 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CharacterAutoMergeResultOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_auto_merge_route_api_books__book_id__character_directory_auto_merge__job_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CharacterAutoMergeConfirmIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

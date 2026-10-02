@@ -320,7 +320,7 @@ def _merge_group(ids, **overrides):
     }
 
 
-def _run_merge(client, job, groups, adapter=None):
+def _run_merge(client, job, groups, adapter=None, accept=True):
     adapter = adapter or FakeProviderAdapter(
         script=[{"groups": groups}], usage={"input_tokens": 30, "output_tokens": 10}
     )
@@ -330,7 +330,84 @@ def _run_merge(client, job, groups, adapter=None):
         job_id=job["id"],
         adapter_factory=lambda *_: adapter,
     )
+    if accept and outcome.state is JobState.COMPLETED:
+        base = f"/api/books/{job['book_id']}/character-directory/auto-merge/{job['id']}"
+        preview = client.get(base).json()["data"]
+        if preview["phase"] == "awaiting_confirmation":
+            response = client.post(
+                f"{base}/confirm",
+                json={
+                    "selected_target_ids": [
+                        group["target"]["character_id"] for group in preview["proposals"]
+                    ]
+                },
+            )
+            assert response.status_code == 200, response.text
     return outcome, adapter
+
+
+@pytest.mark.parametrize("decision", ["accept", "discard", "changed", "unknown"])
+def test_auto_merge_preview_requires_explicit_confirmation(migrated_client, populated, decision):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids)
+    outcome, adapter = _run_merge(client, job, [_merge_group(ids)], accept=False)
+    assert outcome.state is JobState.COMPLETED
+    base = f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    preview = client.get(base).json()["data"]
+    assert preview["phase"] == "awaiting_confirmation" and preview["merged_count"] == 0
+    assert preview["proposals"][0]["target"]["character_id"] == ids["target"]
+    assert preview["proposals"][0]["sources"][0]["aliases"] == ["哥哥"]
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["source"]) is not None
+        assert session.get(SpeakerGroup, ids["linked"]).character_id == ids["source"]
+        if decision == "changed":
+            session.get(BookCharacter, ids["source"]).description = "修改了人物资料"
+    body = {
+        "selected_target_ids": []
+        if decision == "discard"
+        else ["unknown" if decision == "unknown" else ids["target"]]
+    }
+    response = client.post(f"{base}/confirm", json=body)
+    if decision in {"changed", "unknown"}:
+        assert response.status_code in {400, 409, 422}
+        assert client.get(base).json()["data"]["phase"] == "awaiting_confirmation"
+    else:
+        assert response.status_code == 200, response.text
+        result = response.json()["data"]
+        assert result["phase"] == ("applied" if decision == "accept" else "discarded")
+        assert result["merged_count"] == (1 if decision == "accept" else 0)
+        assert client.post(f"{base}/confirm", json=body).json()["data"] == result
+        assert (
+            client.post(
+                f"{base}/confirm",
+                json={"selected_target_ids": [ids["target"]] if decision == "discard" else []},
+            ).status_code
+            == 409
+        )
+    assert len(adapter.calls) == 1
+    with transaction(client.app.state.session_factory) as session:
+        assert (session.get(BookCharacter, ids["source"]) is None) == (decision == "accept")
+
+
+def test_auto_merge_confirmation_applies_only_selected_groups(migrated_client, populated):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        target = BookCharacter(book_version_id=ids["version"], canonical_name="沙季")
+        source = BookCharacter(book_version_id=ids["version"], canonical_name="绫濑沙季")
+        session.add_all([target, source])
+        session.flush()
+        second_target, second_source = target.id, source.id
+    job, _ = _auto_job(client, ids)
+    second = _merge_group(ids, target_id=second_target, source_ids=[second_source])
+    _run_merge(client, job, [_merge_group(ids), second], accept=False)
+    response = client.post(
+        f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}/confirm",
+        json={"selected_target_ids": [ids["target"]]},
+    )
+    assert response.status_code == 200 and response.json()["data"]["merged_count"] == 1
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["source"]) is None
+        assert session.get(BookCharacter, second_source) is not None
 
 
 def test_auto_merge_applies_and_preserves_names_descriptions_references_usage(

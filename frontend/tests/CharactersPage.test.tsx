@@ -12,6 +12,7 @@ import { renderRoute } from './helpers'
 
 vi.mock('../src/api/characters', () => ({
   fetchCharacterDirectory: vi.fn(), editBookCharacter: vi.fn(), mergeBookCharacter: vi.fn(),
+  confirmCharacterAutoMerge: vi.fn(),
   startCharacterAutoMerge: vi.fn(), fetchLatestCharacterAutoMerge: vi.fn(),
 }))
 vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['profiles'] } }))
@@ -50,15 +51,55 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('找回合并建议时只预览，勾选后才能确认且确认不调用模型', async () => {
+    const preview = { ...mergeResult, phase: 'awaiting_confirmation' as const, merged_count: 0, merges: [],
+      proposals: [{ target: entries[1], sources: [entries[0]], confidence: 0.99, reason: '姓名与别名吻合' }] }
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(preview)
+    vi.mocked(api.confirmCharacterAutoMerge).mockImplementation(async () => {
+      const result = { ...mergeResult, phase: 'applied' as const }
+      vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(result)
+      return result
+    })
+    renderPage()
+    const panel = within(await screen.findByRole('region', { name: '合并建议预览' }))
+    const accept = panel.getByRole('checkbox', { name: '接受：悠太 → 浅村悠太' })
+    expect(accept).not.toBeChecked()
+    expect(panel.getByText(/姓名与别名吻合/)).toBeInTheDocument()
+    expect(panel.getByText(/男主角/)).toBeInTheDocument()
+    expect(api.confirmCharacterAutoMerge).not.toHaveBeenCalled()
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+    expect(panel.getByRole('button', { name: '确认合并所选 0 组' })).toBeDisabled()
+    await userEvent.click(accept)
+    await userEvent.click(panel.getByRole('button', { name: '确认合并所选 1 组' }))
+    await screen.findByText('合并了 1 个重复人物。')
+    expect(api.confirmCharacterAutoMerge).toHaveBeenCalledWith('b1', 'merge-1', ['u2'])
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+  })
+
+  it('可放弃全部建议，不修改人物且刷新后保留放弃结果', async () => {
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue({ ...mergeResult, phase: 'awaiting_confirmation', merged_count: 0, merges: [], proposals: [] })
+    vi.mocked(api.confirmCharacterAutoMerge).mockImplementation(async () => {
+      const discarded = { ...mergeResult, phase: 'discarded' as const, merged_count: 0, merges: [] }
+      vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(discarded)
+      return discarded
+    })
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: '放弃本次建议' }))
+    await screen.findByText('自动合并：本次建议已放弃')
+    expect(api.confirmCharacterAutoMerge).toHaveBeenCalledWith('b1', 'merge-1', [])
+    expect(api.mergeBookCharacter).not.toHaveBeenCalled()
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+  })
+
   it('自动合并默认关闭，确认后才派发模型任务并展示结果与用量', async () => {
     renderPage()
     await screen.findByText('共 3 个人物')
     expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByLabelText('自动合并人物（由模型判断并执行）'))
-    const start = screen.getByRole('button', { name: '开始自动合并' })
+    await userEvent.click(screen.getByLabelText('自动合并人物（先预览，再确认）'))
+    const start = screen.getByRole('button', { name: '分析合并建议' })
     expect(start).toBeDisabled()
     await userEvent.selectOptions(await screen.findByTestId('character-merge-profile'), 'p1')
-    await userEvent.click(screen.getByLabelText('我同意按模型判断直接合并，已知此操作无法自动撤销'))
+    await userEvent.click(screen.getByLabelText('我同意调用模型生成合并建议（会消耗 Tokens）'))
     vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
     await userEvent.click(start)
     expect(api.startCharacterAutoMerge).toHaveBeenCalledWith('b1', expect.objectContaining({
@@ -77,7 +118,7 @@ describe('CharactersPage', () => {
     } as never)
     const page = renderPage()
     await screen.findByText('自动合并：处理中')
-    expect(screen.getByRole('button', { name: '开始自动合并' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '分析合并建议' })).toBeDisabled()
     expect(screen.getAllByRole('button', { name: '保存人物资料' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true)
     expect(screen.getByRole('button', { name: '停止自动合并' })).toBeEnabled()
     expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
@@ -102,8 +143,8 @@ describe('CharactersPage', () => {
     vi.mocked(api.fetchLatestCharacterAutoMerge).mockRejectedValue(new Error('服务器暂时不可用'))
     renderPage()
     expect(await screen.findByRole('alert')).toHaveTextContent('服务器暂时不可用')
-    await userEvent.click(screen.getByLabelText('自动合并人物（由模型判断并执行）'))
-    expect(screen.getByRole('button', { name: '开始自动合并' })).toBeDisabled()
+    await userEvent.click(screen.getByLabelText('自动合并人物（先预览，再确认）'))
+    expect(screen.getByRole('button', { name: '分析合并建议' })).toBeDisabled()
     vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
     await userEvent.click(screen.getByRole('button', { name: '重新读取进度' }))
     await screen.findByText('合并了 1 个重复人物。')
@@ -113,11 +154,11 @@ describe('CharactersPage', () => {
   it('自动合并失败展示具体错误，不清空原有人物资料', async () => {
     renderPage()
     await screen.findByText('共 3 个人物')
-    await userEvent.click(screen.getByLabelText('自动合并人物（由模型判断并执行）'))
+    await userEvent.click(screen.getByLabelText('自动合并人物（先预览，再确认）'))
     vi.mocked(api.startCharacterAutoMerge).mockRejectedValue(new Error('本书有处理任务正在运行'))
     await screen.findByRole('option', { name: /合并模型/ })
-    await userEvent.click(screen.getByLabelText('我同意按模型判断直接合并，已知此操作无法自动撤销'))
-    await userEvent.click(screen.getByRole('button', { name: '开始自动合并' }))
+    await userEvent.click(screen.getByLabelText('我同意调用模型生成合并建议（会消耗 Tokens）'))
+    await userEvent.click(screen.getByRole('button', { name: '分析合并建议' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('本书有处理任务正在运行')
     expect(screen.getByRole('article', { name: '人物 浅村悠太' })).toBeInTheDocument()
   })

@@ -20,6 +20,11 @@ export function fetchCharacterDirectory(bookId: string, signal?: AbortSignal) {
   return apiData<CharacterDirectoryOut[]>(`/api/books/${bookId}/character-directory`, { signal })
 }
 
+export function confirmCharacterAutoMerge(bookId: string, jobId: string, selectedTargetIds: string[]) {
+  return apiData<CharacterAutoMergeResultOut>(`/api/books/${bookId}/character-directory/auto-merge/${jobId}/confirm`,
+    { method: 'POST', body: { selected_target_ids: selectedTargetIds } })
+}
+
 export function editBookCharacter(bookId: string, entryId: string, body: CharacterEditIn) {
   return apiData<CharacterDirectoryOut>(
     `/api/books/${bookId}/character-directory/${encodeURIComponent(entryId)}`, { method: 'PUT', body },
