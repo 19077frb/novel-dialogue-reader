@@ -31,9 +31,11 @@ describe('ChapterNavigation', () => {
       fireEvent.click(screen.getByText('第一章'), { detail: 1 })
       fireEvent.doubleClick(screen.getByText('第一章'))
       await waitFor(() => expect(screen.getByText('第一章').closest('button')).toHaveAttribute('data-processing-state', 'processed'))
+      expect(screen.queryByRole('button', { name: '取消第一章的任务' })).not.toBeInTheDocument()
       expect(save).toHaveBeenLastCalledWith(CHAPTERS[0], true)
       fireEvent.doubleClick(screen.getByText('第一章'))
       await waitFor(() => expect(screen.getByText('第一章').closest('button')).toHaveAttribute('data-processing-state', 'unprocessed'))
+      expect(screen.queryByRole('button', { name: '取消第一章的任务' })).not.toBeInTheDocument()
       expect(save).toHaveBeenLastCalledWith(CHAPTERS[0], false)
       expect(select).not.toHaveBeenCalled()
     })
@@ -45,6 +47,14 @@ describe('ChapterNavigation', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('数据库繁忙')
     expect(save).toHaveBeenCalledWith(expect.anything(), false)
     expect(screen.getByText('第一章').closest('button')).toHaveAttribute('data-processing-state', 'processed')
+  })
+  it('手动未处理重新入队后显示新队列和取消图标，不继续显示旧的未处理保护', () => {
+    render(<ChapterNavigation bookId="b1" chapters={[{ ...CHAPTERS[0], dialogue_processed: false, processing_status_override: false }]}
+      activeChapterId="c1" onSelect={vi.fn()} processingStates={{ c1: {
+        state: 'queued', completedWindows: 0, totalWindows: 2, pendingTasks: 3, error: null, manualStatusCleared: true,
+      } }} />)
+    expect(screen.getByText('第一章').closest('button')).toHaveAttribute('data-processing-state', 'queued')
+    expect(screen.getByRole('button', { name: '取消第一章的任务' })).toBeEnabled()
   })
   it('章节旁显示重试图标，点击只重试本章而不跳转阅读', async () => {
     const retry = vi.spyOn(batch, 'retryChapterProcessing').mockResolvedValue()

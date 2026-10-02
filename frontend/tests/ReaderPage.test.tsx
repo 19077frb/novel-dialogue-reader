@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as annotationsApi from '../src/api/annotations'
 import * as booksApi from '../src/api/books'
+import * as batch from '../src/components/BatchProcessor'
+import * as automatic from '../src/processing/autoProcessing'
 import type { BookOut, ChapterOut, ContentNodeOut } from '../src/api/types'
 import ReaderPage, { findCurrentStartCp } from '../src/pages/ReaderPage'
 import { renderRoute } from './helpers'
@@ -118,12 +120,14 @@ function quotesFor(chapterId: string) {
 
 describe('ReaderPage', () => {
   beforeEach(() => {
+    act(() => batch.clearBatchProgress('b1'))
     vi.mocked(booksApi.fetchBook).mockReset()
     vi.mocked(booksApi.fetchChapters).mockReset()
     vi.mocked(booksApi.fetchContent).mockReset()
     vi.mocked(booksApi.fetchQuotes).mockReset()
     vi.mocked(annotationsApi.fetchAnnotations).mockReset()
     vi.mocked(booksApi.saveReadingProgress).mockReset()
+    vi.mocked(booksApi.setChapterProcessingStatus).mockReset()
 
     vi.mocked(booksApi.fetchBook).mockResolvedValue(BOOK)
     vi.mocked(booksApi.fetchChapters).mockResolvedValue(CHAPTERS)
@@ -215,6 +219,33 @@ describe('ReaderPage', () => {
     expect(booksApi.fetchContent).toHaveBeenCalledTimes(contentCount)
     expect(annotationsApi.fetchAnnotations).toHaveBeenCalledTimes(annotationCount)
     act(() => updateGeneralSettings({ doubleClickChapterStatus: false }))
+  })
+
+  it('双击先撤销本章旧队列，再保存状态并通知自动处理重新检查', async () => {
+    const pending = vi.spyOn(batch, 'hasChapterQueueWork').mockReturnValue(true)
+    const cancel = vi.spyOn(batch, 'cancelChapterProcessing').mockResolvedValue()
+    const notify = vi.spyOn(automatic, 'notifyManualChapterStatus')
+    try {
+      updateGeneralSettings({ doubleClickChapterStatus: true })
+      vi.mocked(booksApi.setChapterProcessingStatus).mockImplementation(async (_book, id, _version, processed) => ({
+        ...CHAPTERS.find(chapter => chapter.id === id)!, dialogue_processed: Boolean(processed), processing_status_override: processed,
+      }))
+      renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
+      const title = await screen.findByText(CHAPTERS[0].title as string)
+      await userEvent.dblClick(title)
+      await waitFor(() => expect(title.closest('button')).toHaveAttribute('data-processing-state', 'processed'))
+      expect(cancel).toHaveBeenCalledWith('b1', 'c1')
+      expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(booksApi.setChapterProcessingStatus).mock.invocationCallOrder[0])
+      expect(notify).toHaveBeenLastCalledWith('b1', 'v1', 'c1', true)
+      pending.mockReturnValue(false)
+      await userEvent.dblClick(title)
+      await waitFor(() => expect(title.closest('button')).toHaveAttribute('data-processing-state', 'unprocessed'))
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(notify).toHaveBeenLastCalledWith('b1', 'v1', 'c1', false)
+    } finally {
+      pending.mockRestore(); cancel.mockRestore(); notify.mockRestore()
+      act(() => updateGeneralSettings({ doubleClickChapterStatus: false }))
+    }
   })
 
   it('按书签位置打开对应章节并渲染正文', async () => {

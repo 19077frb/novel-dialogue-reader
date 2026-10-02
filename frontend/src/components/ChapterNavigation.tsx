@@ -60,7 +60,7 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
   return (
     <nav className="ndr-chapter-nav" aria-label="章节导航">
       {error && <p className="status-error" role="alert">{error}</p>}
-      {canToggle && <p className="hint">双击章节名可切换未处理/已完成，仅改变完成标记。</p>}
+      {canToggle && <p className="hint">双击切换未处理/已完成，并撤销本章旧队列；未处理章节可重新自动入队。</p>}
       {chapters.length === 0 ? (
         <p className="hint">这本书还没有章节。</p>
       ) : (
@@ -79,7 +79,9 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
             const chapter = manual?.source === sourceChapter ? manual.saved : sourceChapter
             const active = chapter.id === activeChapterId
             const recorded = processingStates[chapter.id]
-            const progress = chapter.processing_status_override != null
+            const manualStatus = chapter.processing_status_override === true
+              || chapter.processing_status_override === false && !recorded?.manualStatusCleared
+            const progress = manualStatus
               ? { state: chapter.processing_status_override ? 'processed' as const : 'unprocessed' as const,
                 completedWindows: 0, totalWindows: 0, error: null }
               : chapter.dialogue_processed && !recorded?.cancelRequested && !(recorded?.pendingTasks ?? 0)
@@ -91,9 +93,9 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
               totalWindows: 0,
               error: null,
             }
-            const cancellable = recorded?.cancelRequested || (recorded?.pendingTasks ?? 0) > 0
+            const cancellable = !manualStatus && (recorded?.cancelRequested || (recorded?.pendingTasks ?? 0) > 0
               || ['queued', 'roster', 'dialogue'].includes(recorded?.state ?? '')
-              || progress.cancelRequested || (progress.pendingTasks ?? 0) > 0 || ['queued', 'roster', 'dialogue'].includes(progress.state)
+              || progress.cancelRequested || (progress.pendingTasks ?? 0) > 0 || ['queued', 'roster', 'dialogue'].includes(progress.state))
             const retryable = !cancellable && ['failed', 'stopped'].includes(progress.state)
             const label = `${cancellable ? '取消' : '重试'}${chapter.title ?? `第 ${chapter.ordinal + 1} 节`}的任务`
             return (

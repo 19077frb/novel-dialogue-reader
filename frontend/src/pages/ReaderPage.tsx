@@ -23,7 +23,11 @@ import {
   useBatchCatalogRevision,
   useBatchChapterProgress,
   useBatchMessage,
+  cancelChapterProcessing,
+  hasChapterQueueWork,
+  synchronizeManualChapterStatus,
 } from '../components/BatchProcessor'
+import { notifyManualChapterStatus } from '../processing/autoProcessing'
 import type { CandidateRange } from '../components/DocumentRenderer'
 import { DocumentRenderer } from '../components/DocumentRenderer'
 import { ExportDialog } from '../components/ExportDialog'
@@ -342,7 +346,10 @@ export default function ReaderPage() {
               onSetProcessingStatus={async (chapter, processed) => {
                 const versionId = book.data?.active_version_id
                 if (!bookId || !versionId) throw new Error('书籍版本尚未读取完成')
+                if (hasChapterQueueWork(bookId, chapter.id)) await cancelChapterProcessing(bookId, chapter.id)
                 const saved = await setChapterProcessingStatus(bookId, chapter.id, versionId, processed)
+                synchronizeManualChapterStatus(bookId, saved)
+                notifyManualChapterStatus(bookId, versionId, chapter.id, processed)
                 queryClient.setQueryData<ChapterOut[]>(queryKeys.chapters(bookId), previous =>
                   previous?.map(item => item.id === saved.id ? saved : item))
                 return saved
