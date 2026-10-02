@@ -11,8 +11,9 @@ export function WindowPicker({ windows, selectedIds, onChange, disabled = false 
   const tokens = selected.reduce((total, window) => total + Number(window.estimated_tokens || 0), 0)
   return (
     <CollapsibleBlock title="窗口列表" summary={`共 ${windows.length} 个窗口；已选 ${selected.length} 个；失败 ${windows.filter(window => window.processing_status === 'failed').length} 个`}>
-    <fieldset className="ndr-window-picker" data-testid="window-picker" disabled={disabled}>
+    <fieldset title={disabled ? '正在预览窗口或提交处理任务，请等待完成后再选择窗口。' : undefined} className="ndr-window-picker" data-testid="window-picker" disabled={disabled}>
       <legend>选择要处理的窗口（可多选）</legend>
+      {disabled && <p className="hint">正在预览窗口或提交处理任务，请等待完成后再选择窗口。</p>}
       <p className="hint">这里只限制对白归属窗口；人物识别仍会读取本章全文。默认选择未完成窗口，已完成窗口无需重复处理；也可手动重做。</p>
       <div className="ndr-form-actions">
         <button type="button" onClick={() => onChange(windows.filter(window => window.processing_status !== 'completed').map(window => String(window.window_id)))}>只选未完成窗口</button>

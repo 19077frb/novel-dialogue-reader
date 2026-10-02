@@ -89,6 +89,7 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
           type="button"
           onClick={() => refreshMutation.mutate()}
           disabled={refreshMutation.isPending}
+          title={refreshMutation.isPending ? '正在重新扫描，请等待完成后再刷新。' : undefined}
           data-testid="quote-normalization-refresh"
         >
           {refreshMutation.isPending ? '正在检测…' : '重新检测'}
@@ -151,11 +152,11 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
                   }} />
                 </label>
                 <div className="ndr-form-actions">
-                  <button disabled={offset <= 1} onClick={() => move(offset - 1)}>前移一字</button>
-                  <button disabled={offset >= chars.length} onClick={() => move(offset + 1)}>后移一字</button>
-                  <button disabled={offset <= 1} onClick={() => move(moveClosingPoint(item.original_text, offset, -1))}>上一个标点后</button>
-                  <button disabled={offset >= chars.length} onClick={() => move(moveClosingPoint(item.original_text, offset, 1))}>下一个标点后</button>
-                  <button disabled={offset === chars.length} onClick={() => move(chars.length)}>移到段尾</button>
+                  <button title={offset <= 1 ? '已到可用位置的最前端，不能再前移。' : undefined} disabled={offset <= 1} onClick={() => move(offset - 1)}>前移一字</button>
+                  <button title={offset >= chars.length ? '已到段尾，不能再后移。' : undefined} disabled={offset >= chars.length} onClick={() => move(offset + 1)}>后移一字</button>
+                  <button title={offset <= 1 ? '已到最前端，没有更早的可用标点位置。' : undefined} disabled={offset <= 1} onClick={() => move(moveClosingPoint(item.original_text, offset, -1))}>上一个标点后</button>
+                  <button title={offset >= chars.length ? '已到段尾，没有后续标点位置。' : undefined} disabled={offset >= chars.length} onClick={() => move(moveClosingPoint(item.original_text, offset, 1))}>下一个标点后</button>
+                  <button title={offset === chars.length ? '当前已在段尾，无需再移动。' : undefined} disabled={offset === chars.length} onClick={() => move(chars.length)}>移到段尾</button>
                 </div>
                 <p className="hint">预览只改变虚拟闭合位置；确认后点击“保存并重扫”。</p>
                 <code data-testid={`quote-normalization-preview-${item.id}`}>{chars.slice(0, offset).join('')}<mark className="ndr-context-target">{draft.replacement}</mark>{chars.slice(offset).join('')}</code>
@@ -196,6 +197,7 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
                     type="button"
                     className="ndr-primary"
                     disabled={!dirty || !valid || updateMutation.isPending}
+                    title={updateMutation.isPending ? '正在保存并重新扫描，请等待完成。' : !dirty ? '请先修改闭合位置、字符或状态。' : !valid ? '请先将闭合位置调整到当前段落内。' : undefined}
                     onClick={() => updateMutation.mutate({ id: item.id, draft })}
                   >
                     保存并重扫

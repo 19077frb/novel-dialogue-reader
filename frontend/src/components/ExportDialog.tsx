@@ -252,6 +252,7 @@ export function ExportDialog({
               disabled={generation.isPending}
               onClick={() => preview.data && generation.mutate(preview.data.snapshot_id)}
               data-testid="export-generate"
+              title={generation.isPending ? '正在生成导出文件，请等待生成完成。' : undefined}
             >
               {generation.isPending ? '正在生成…' : `生成 ${format.toUpperCase()}`}
             </button>

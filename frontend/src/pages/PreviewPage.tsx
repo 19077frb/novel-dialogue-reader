@@ -486,6 +486,7 @@ export default function PreviewPage() {
       </section>
 
       <ThinkingSettings disabled={batchProgress.running || singleRunning} profiles={profiles.data ?? []}
+        disabledReason="当前处理任务尚未结束；请等待完成或先停止任务，再切换处理方式及模型配置。"
         profileId={profileId} onProfileChange={setProfileId}
         profileTestId={processingMode === 'batch' ? 'batch-profile' : 'preview-profile'} />
 
@@ -528,6 +529,7 @@ export default function PreviewPage() {
                 && chapter.start_cp === range.startCp && chapter.end_cp === resolvedEnd) ? <p className="hint">
                 全部窗口已有标注，可直接同步章节状态，无需再次调用模型。
                 <button type="button" disabled={jobMutation.isPending || syncCompletion.isPending || estimateQuery.isFetching}
+                  title={jobMutation.isPending ? '窗口任务正在提交，请等待完成。' : syncCompletion.isPending ? '正在同步章节完成状态，请等待保存完成。' : estimateQuery.isFetching ? '正在读取窗口，请等待读取完成。' : undefined}
                   onClick={() => syncCompletion.mutate()}>同步章节完成状态（不调用模型）</button>
               </p> : null}
             {estimate && !estimateQuery.isFetching && (estimate.windows?.length ?? 0) === 0 && (
@@ -579,6 +581,7 @@ export default function PreviewPage() {
             onClick={() => void estimateQuery.refetch()}
             disabled={!rangeValid || estimateQuery.isFetching || jobMutation.isPending}
             data-testid="preview-estimate"
+            title={!rangeValid ? '请先选择有效的处理范围。' : estimateQuery.isFetching ? '正在生成窗口预览，请等待完成。' : jobMutation.isPending ? '正在提交窗口任务，请等待完成。' : undefined}
           >
             重新预览窗口与估算（不调用模型）
           </button>
@@ -587,6 +590,7 @@ export default function PreviewPage() {
             onClick={() => jobMutation.mutate('preview')}
             disabled={runDisabled}
             data-testid="preview-run"
+            title={runDisabled ? runBlockers.join('；') : undefined}
           >
             试运行预览（调用模型）
           </button>
@@ -596,6 +600,7 @@ export default function PreviewPage() {
             onClick={() => jobMutation.mutate('process')}
             disabled={runDisabled}
             data-testid="preview-process"
+            title={runDisabled ? runBlockers.join('；') : undefined}
           >
             按此范围正式处理
           </button>
@@ -662,6 +667,7 @@ export default function PreviewPage() {
               disabled={runDisabled}
               onClick={() => jobMutation.mutate('process')}
               data-testid="preview-recompute"
+              title={runDisabled ? runBlockers.join('；') : undefined}
             >
               用当前预算重新处理此范围（可能计费）
             </button>

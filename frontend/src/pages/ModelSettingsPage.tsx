@@ -334,11 +334,13 @@ export default function ModelSettingsPage() {
             <label className="ndr-field">默认思考强度
               <select data-testid="profile-thinking-effort" value={JSON.parse(form.paramsText).reasoning_effort ?? 'default'}
                 disabled={JSON.parse(form.paramsText).thinking?.type === 'disabled'}
+                title={JSON.parse(form.paramsText).thinking?.type === 'disabled' ? '默认思考已关闭，请先选择开启或自适应，再设置默认强度。' : undefined}
                 onChange={event => changeThinkingDefault('effort', event.target.value)}>
                 <option value="default">模型服务默认（不指定）</option>
                 <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
               </select>
             </label>
+            {JSON.parse(form.paramsText).thinking?.type === 'disabled' && <p className="hint">默认思考已关闭，强度设置不可用；先开启思考再调整强度。</p>}
             <p className="hint">处理页选择“沿用模型配置”时使用这里保存的默认值；模型服务默认表示不指定参数，并不等于关闭思考。
               思考功能需要模型服务支持。关闭思考会清除默认强度，开启思考可能增加用量与等待时间。</p>
           </fieldset>
@@ -411,12 +413,13 @@ export default function ModelSettingsPage() {
           </fieldset>
 
           <div className="ndr-form-actions">
-            <button type="submit" className="ndr-primary" data-testid="profile-save" disabled={save.isPending}>
+            <button title={save.isPending ? '正在保存模型配置，请等待保存完成。' : undefined} type="submit" className="ndr-primary" data-testid="profile-save" disabled={save.isPending}>
               {editingId ? '保存修改' : '新建配置'}
             </button>
             <button
               type="button"
               data-testid="profile-test-draft"
+              title={connectionTest.isPending ? '连接测试正在进行，请等待本次测试结束。' : undefined}
               disabled={connectionTest.isPending}
               onClick={() => {
                 const params = parseParams()
@@ -538,6 +541,7 @@ export default function ModelSettingsPage() {
                   disabled={connectionTest.isPending}
                   onClick={() => connectionTest.mutate({ profileId: profile.id })}
                   data-testid={`profile-test-${profile.id}`}
+                  title={connectionTest.isPending ? '连接测试正在进行，请等待本次测试结束。' : undefined}
                 >
                   测试连接
                 </button>

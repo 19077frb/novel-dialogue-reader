@@ -211,6 +211,19 @@ export function CharacterRosterPanel({
       .filter((item) => item.accepted)
       .every((item) => Boolean(item.character_id || item.canonical_name.trim()))
 
+  const analyzeBlocker = disabled ? '本书处理任务正在运行，请等待结束或先停止任务。'
+    : analyze.isPending ? '正在创建人物分析任务，请等待提交完成。'
+    : textlessCompleted ? '本章没有正文文字，已完成，无需再分析人物。'
+    : recent.isPending ? '正在读取已有的人物任务，读取完成后再分析。'
+    : recent.isError ? '已有任务读取失败，请先点击“重新读取任务”。'
+    : job.data && !TERMINAL_JOB_STATES.has(job.data.state) ? '人物分析尚未结束，请等待完成或先停止任务。'
+    : !profileId ? '请先在上方选择模型配置，再分析本章人物。' : null
+  const confirmBlocker = confirm.isPending ? '正在保存人物名单，请等待保存完成。'
+    : textlessCompleted ? '无文字章节无需确认人物或主人公，不必为了启用按钮而添加人物。'
+    : acceptedCount === 0 ? '请先分析或手动添加人物，并勾选至少一个“确认本章出现”。'
+    : !drafts.some(item => item.accepted && item.temp_ref === povTempRef) ? '请先为已勾选的人物选择“本章第一视角主人公”。'
+    : !canConfirm ? '请为已勾选的人物填写姓名，或选择已有全书人物，再确认名单。' : null
+
   const updateDraft = (tempRef: string, patch: Partial<DraftCandidate>) => {
     setDrafts((current) =>
       current.map((item) => (item.temp_ref === tempRef ? { ...item, ...patch } : item)),
@@ -288,6 +301,7 @@ export function CharacterRosterPanel({
             }}
             disabled={disabled || profileId === '' || analyze.isPending || textlessCompleted || recent.isPending || recent.isError || Boolean(job.data && !TERMINAL_JOB_STATES.has(job.data.state))}
             data-testid="roster-analyze"
+            title={analyzeBlocker ?? undefined}
           >
             分析本章人物
           </button>
@@ -296,6 +310,8 @@ export function CharacterRosterPanel({
           </button>
         </div>
       </div>
+
+      {analyzeBlocker && !textlessCompleted && <p className="hint" role="status">{analyzeBlocker}</p>}
 
       {textlessCompleted && <p className="hint">本章没有正文文字，已完成，无需人物识别或对白处理，不消耗模型 Token。</p>}
       {roster.isPending && (
@@ -406,6 +422,7 @@ export function CharacterRosterPanel({
                   checked={povTempRef === item.temp_ref}
                   onChange={() => setPovTempRef(item.temp_ref)}
                   disabled={!item.accepted}
+                  title={!item.accepted ? '请先勾选该人物“确认本章出现”，再设为主人公。' : undefined}
                 />
                 <span>本章第一视角主人公</span>
               </label>
@@ -427,10 +444,12 @@ export function CharacterRosterPanel({
           onClick={() => confirm.mutate()}
           disabled={!canConfirm || confirm.isPending}
           data-testid="roster-confirm"
+          title={confirmBlocker ?? undefined}
         >
           确认人物与主人公
         </button>
       </div>
+      {confirmBlocker && <p className="hint" role="status">{confirmBlocker}</p>}
     </section>
   )
 }

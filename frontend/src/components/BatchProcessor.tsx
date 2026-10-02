@@ -415,6 +415,7 @@ export function BatchRetryControls({ bookId, taskId }: { bookId: string; taskId?
   if (!tasks.length) return null
   return <div className="ndr-form-actions">
     {tasks.map(task => <button key={task.id} type="button" disabled={busy || progress.running}
+      title={busy ? '正在准备重试，请等待完成。' : progress.running ? '本书已有任务正在运行，请等待结束或先停止，再重试失败任务。' : undefined}
       onClick={() => { setBusy(true); setError(null); void retryBatchTask(bookId, task.id)
         .catch(reason => setError(reason instanceof Error ? reason.message : '重试失败'))
         .finally(() => setBusy(false)) }}>
@@ -1345,6 +1346,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
             type="button"
             className="ndr-danger"
             disabled={batchProgress.stopRequested}
+            title={batchProgress.stopRequested ? '停止请求已提交，请等待已发出的模型请求安全收尾。' : undefined}
             onClick={() => requestBatchStop(bookId)}
             data-testid="batch-stop"
           >
@@ -1459,10 +1461,11 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       )}
       <p className="hint">并发数同时约束人物识别和对白窗口；设为 1 即按顺序处理，建议从 2 开始。</p>
       <div className="ndr-form-actions">
-        <button type="button" className="ndr-primary" disabled={running || estimating || !validRange || !profileId || !bookVersionId} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
+        <button type="button" className="ndr-primary" title={running ? '批量处理正在运行，请等待结束或先停止任务。' : estimating ? '正在估算 Token，请等待估算完成。' : !bookVersionId ? '书籍版本尚未读取，请先重新读取书籍。' : !validRange ? '请选择有效的开始和结束章节，结束章节不能早于开始章节。' : !profileId ? '请先选择模型配置，再估算和启动批量处理。' : undefined} disabled={running || estimating || !validRange || !profileId || !bookVersionId} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
           {running ? '批量处理中…' : estimating ? '正在估算…' : estimatedTokens === null ? '预估 Token' : '确认并开始批量处理'}
         </button>
       </div>
+      {(running || estimating || !bookVersionId) && <p className="hint" role="status">{running ? '批量处理正在运行，请等待结束或先停止任务。' : estimating ? '正在估算 Token，请等待估算完成后再启动。' : '书籍版本尚未读取，请重新读取书籍后再启动。'}</p>}
       {estimatedTokens !== null && (
         <p className="hint" data-testid="batch-estimate">
           整批预计约 {estimatedTokens.toLocaleString()} tokens（包含逐章人物识别预留与对白归属估算）。

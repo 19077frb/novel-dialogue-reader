@@ -31,7 +31,7 @@ export function SpeakerLegend({ legend, onFocus }: SpeakerLegendProps) {
               className="ndr-legend-button"
               onClick={onFocus ? () => onFocus(item) : undefined}
               disabled={!onFocus}
-              title={item.description ? `${item.label}：${item.description}` : item.label}
+              title={`${item.description ? `${item.label}：${item.description}` : item.label}${!onFocus ? '；这里只展示人物信息，不提供定位对白操作。' : ''}`}
             >
               <span
                 className="ndr-legend-swatch"

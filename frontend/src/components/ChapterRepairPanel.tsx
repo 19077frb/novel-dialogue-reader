@@ -35,7 +35,7 @@ export function ChapterRepairPanel({ bookId, bookVersionId }: { bookId: string; 
   return <section className="card" data-testid="chapter-repair-panel">
     <h3>章节名与边界修复</h3>
     <p className="hint">导入时已自动检查并修复明显的正文式标题与相邻重复标题。可检查结果、改名，或将误识别的章节并入上一章，不调用模型。已有人物名单或标注的章节只能改名。</p>
-    <button disabled={busy || suggestions.isFetching} onClick={() => { void suggestions.refetch(); void chapters.refetch() }}>重新检查章节</button>
+    <button title={busy ? '正在保存章节修复，请等待完成。' : suggestions.isFetching ? '正在检查章节，请等待读取完成。' : undefined} disabled={busy || suggestions.isFetching} onClick={() => { void suggestions.refetch(); void chapters.refetch() }}>重新检查章节</button>
     {chapters.isError && <ReadErrorNotice label="目录读取失败" error={chapters.error} retrying={chapters.isFetching} onRetry={() => void chapters.refetch()} />}
     {suggestions.isError && <ReadErrorNotice label="章节建议读取失败" error={suggestions.error} retrying={suggestions.isFetching} onRetry={() => void suggestions.refetch()} />}
     {chapters.isPending && <p className="hint">正在读取目录…</p>}
@@ -46,10 +46,11 @@ export function ChapterRepairPanel({ bookId, bookVersionId }: { bookId: string; 
       const change = (patch: Partial<typeof draft>) => setDrafts(current => ({ ...current, [chapter.id]: { ...draft, ...patch } }))
       return <details className="card" key={chapter.id}>
         <summary>{chapter.title || `第 ${index + 1} 节`}{suggestion ? ' · 建议检查' : ''}</summary>
-        {suggestion && <p className="hint">{suggestion.reason}<button disabled={busy} onClick={() => change({ title: suggestion.suggested_title, merge: suggestion.merge_previous })}>采用建议（待保存）</button></p>}
+        {suggestion && <p className="hint">{suggestion.reason}<button title={busy ? '正在保存章节修复，请等待完成后再采用其他建议。' : undefined} disabled={busy} onClick={() => change({ title: suggestion.suggested_title, merge: suggestion.merge_previous })}>采用建议（待保存）</button></p>}
         <label className="ndr-field">章节名<input value={draft.title} maxLength={512} disabled={busy} onChange={event => change({ title: event.target.value })} /></label>
-        <label><input type="checkbox" checked={draft.merge} disabled={busy || index === 0 || chapter.dialogue_processed} onChange={event => change({ merge: event.target.checked })} />并入上一章（以上方名称命名合并后的章节）</label>
-        <button className="ndr-primary" disabled={busy || !bookVersionId || !drafts[chapter.id] || !draft.title.trim()} onClick={() => void save(chapter.id, chapter.title ?? null)}>保存章节修复</button>
+        <label title={busy ? '正在保存，请等待完成。' : index === 0 ? '这是第一章，没有上一章可合并。' : chapter.dialogue_processed ? '本章已处理，为保护已有标注这里只允许改名。' : undefined}><input type="checkbox" checked={draft.merge} disabled={busy || index === 0 || chapter.dialogue_processed} onChange={event => change({ merge: event.target.checked })} />并入上一章（以上方名称命名合并后的章节）</label>
+        {(index === 0 || chapter.dialogue_processed) && <p className="hint">{index === 0 ? '第一章没有上一章，不能执行合并。' : '本章已处理，合并已锁定以保护标注；仍可修改章节名。'}</p>}
+        <button title={busy ? '正在保存章节修复，请等待完成。' : !bookVersionId ? '请先重新读取书籍版本。' : !draft.title.trim() ? '请先填写章节名。' : !drafts[chapter.id] ? '请先修改章节名或采用建议，再保存。' : undefined} className="ndr-primary" disabled={busy || !bookVersionId || !drafts[chapter.id] || !draft.title.trim()} onClick={() => void save(chapter.id, chapter.title ?? null)}>保存章节修复</button>
         {!drafts[chapter.id] && <p className="hint">修改章节名或采用建议后即可保存。</p>}
       </details>
     })}

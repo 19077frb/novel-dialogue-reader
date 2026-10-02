@@ -349,7 +349,7 @@ function NodeView({
     ? <span className="ndr-paragraph" data-paragraph-start={node.start_cp} data-paragraph-end={nodeEnd}>
         {renderRange(node.start_cp, nodeEnd)}
         {node.text.trim() && <button type="button" className="ndr-paragraph-bookmark" disabled={bookmarkPending}
-          aria-label={`保存书签：${node.text.trim().slice(0, 40)}`} title="保存这段话为书签"
+          aria-label={`保存书签：${node.text.trim().slice(0, 40)}`} title={bookmarkPending ? '正在保存书签，请等待本次保存完成。' : '保存这段话为书签'}
           onClick={event => { event.stopPropagation(); onBookmark(node.start_cp, node.text) }} />}
       </span>
     : renderRange(node.start_cp, nodeEnd)

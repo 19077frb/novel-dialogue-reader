@@ -104,7 +104,7 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
                   type="button"
                   className={`ndr-chapter ndr-chapter-${progress.state}${active ? ' active' : ''}`}
                   data-processing-state={progress.state}
-                  title={progress.error ?? undefined}
+                  title={Boolean(busy[chapter.id]) && statusLocks.current.has(chapter.id) ? '正在保存章节完成状态，请等待保存完成后再操作。' : progress.error ?? undefined}
                   aria-current={active ? 'true' : undefined}
                   disabled={Boolean(busy[chapter.id]) && statusLocks.current.has(chapter.id)}
                   onClick={event => {
@@ -122,7 +122,7 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
                 </button>
                 {bookId && (cancellable || retryable) && <button type="button"
                   className={`ndr-chapter-action${cancellable ? ' ndr-danger' : ''}`}
-                  title={progress.cancelRequested ? '正在取消本章，等待在途请求收尾' : label}
+                  title={progress.cancelRequested ? '正在取消本章，请等待在途请求收尾。' : busy[chapter.id] ? '正在提交本章操作，请等待完成后再重试或取消。' : label}
                   aria-label={label} disabled={busy[chapter.id] || progress.cancelRequested}
                   onClick={() => act(chapter, Boolean(cancellable))}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">

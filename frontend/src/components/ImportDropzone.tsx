@@ -36,6 +36,7 @@ export function ImportDropzone({ onFile, disabled = false }: ImportDropzoneProps
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={disabled}
+        title={disabled ? '文件正在导入，请等待完成后再选择新文件。' : undefined}
       >
         选择文件
       </button>

@@ -83,6 +83,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
       </p>
       {recent.isPending && <p className="hint">正在读取已有复核任务…</p>}
       <ThinkingSettings disabled={running} profiles={profiles.data ?? []} profileId={effectiveProfileId}
+        disabledReason={recent.isError ? '已有复核任务读取失败，请先点击“重新读取任务”。' : recent.isPending ? '正在读取已有复核任务，请等待读取完成。' : '局部复核正在提交或执行，请等待完成或先停止任务再调整配置。'}
         onProfileChange={profileId => updatePreferences({ profileId })} profileTestId="recheck-profile" />
       <label className="ndr-field">
         输入 token 上限
@@ -103,6 +104,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
         onClick={start}
         disabled={running}
         data-testid="recheck-start"
+        title={running ? '请先等待现有任务状态读取或复核完成；读取失败时点击“重新读取任务”。' : undefined}
       >
         {busy ? '正在创建任务…' : '开始局部复核（调用模型）'}
       </button>

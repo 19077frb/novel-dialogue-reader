@@ -152,7 +152,7 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
                   disabled={action.isPending || item.action === 'wait'}
                   onClick={() => action.mutate(item.action)}
                   data-testid={`job-action-${item.action}`}
-                  title={item.detail}
+                  title={action.isPending ? '任务操作正在提交，请等待提交完成。' : item.detail}
                 >
                   {item.label}
                   {item.paid ? '（可能计费）' : ''}

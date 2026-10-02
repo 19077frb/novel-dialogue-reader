@@ -8,6 +8,7 @@ import type { CharacterDirectoryOut } from '../api/types'
 import { useBatchProgress } from '../components/BatchProcessor'
 import { CharacterAutoMerge } from '../components/CharacterAutoMerge'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
+import { DisabledHint } from '../components/DisabledHint'
 
 function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFromCp }: {
   item: CharacterDirectoryOut
@@ -41,9 +42,11 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
     onSuccess: onSaved,
   })
   const busy = disabled || save.isPending || merge.isPending
+  const lockReason = disabled ? '本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。' : save.isPending || merge.isPending ? '正在保存人物资料或合并人物，请等待完成。' : undefined
   const error = save.error ?? merge.error
   return <article className="ndr-character-card" aria-label={`人物 ${item.name}`}>
     <h3>{item.name}</h3>
+    <DisabledHint reason={lockReason} />
     {item.chapter_count != null && item.dialogue_count != null && <p className="hint">
       出现 {item.chapter_count} 章 · {item.dialogue_count} 句对白
     </p>}
@@ -54,7 +57,7 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
     <label>姓名<input value={name} maxLength={128} onChange={(e) => setName(e.target.value)} disabled={busy} /></label>
     <label>别名（用、分隔）<input value={aliases} onChange={(e) => setAliases(e.target.value)} disabled={busy} /></label>
     <label>说明<textarea value={description} maxLength={512} rows={3} onChange={(e) => setDescription(e.target.value)} disabled={busy} /></label>
-    <button type="button" className="ndr-primary" disabled={busy || !name.trim()} onClick={() => { setMessage(''); save.mutate() }}>保存人物资料</button>
+    <button title={lockReason ?? (!name.trim() ? '请先填写人物姓名。' : undefined)} type="button" className="ndr-primary" disabled={busy || !name.trim()} onClick={() => { setMessage(''); save.mutate() }}>保存人物资料</button>
     {!name.trim() && <p className="hint">请填写人物姓名后再保存。</p>}
     <label>合并到全书人物<select value={targetId} disabled={busy} onChange={(e) => { setTargetId(e.target.value); setConfirmMerge(false) }}>
       <option value="">请选择合并目标</option>
@@ -62,11 +65,11 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
     </select></label>
     {target && <p className="hint">目标说明：{target.description || '暂无说明'}</p>}
     {!target && <p className="hint">请选择合并目标后再合并。</p>}
-    {!confirmMerge ? <button type="button" disabled={busy || !target} onClick={() => setConfirmMerge(true)}>合并人物…</button> :
+    {!confirmMerge ? <button title={lockReason ?? (!target ? '请先选择另一个全书人物作为合并目标。' : undefined)} type="button" disabled={busy || !target} onClick={() => setConfirmMerge(true)}>合并人物…</button> :
       <div role="alert">
         <p>将“{item.name}”合并到“{target?.name}”？全部已有对白和章节名单将改为目标人物；原姓名及别名保留为别名，使用目标说明。此操作无法自动撤销，未保存的编辑不会应用。</p>
-        <button type="button" className="ndr-danger" disabled={busy} onClick={() => merge.mutate()}>确认合并</button>
-        <button type="button" disabled={busy} onClick={() => setConfirmMerge(false)}>取消</button>
+        <button title={lockReason} type="button" className="ndr-danger" disabled={busy} onClick={() => merge.mutate()}>确认合并</button>
+        <button title={lockReason} type="button" disabled={busy} onClick={() => setConfirmMerge(false)}>取消</button>
       </div>}
     {error && <p role="alert" className="status-error">{error instanceof Error ? error.message : '操作失败，请重新读取后重试'}</p>}
     {message && <p role="status">{message}</p>}
@@ -128,6 +131,7 @@ export default function CharactersPage() {
     <section className="card">
       <label className="ndr-field">本次人物修改从哪一章起可见（初读）
         <select value={visibleFromCp ?? ''} disabled={batchProgress.running || autoMergeBusy}
+          title={batchProgress.running || autoMergeBusy ? '本书任务或合并决定正在执行，请等待结束或先停止任务，再调整可见章节。' : undefined}
           onChange={event => setVisibleFromCp(event.target.value === '' ? null : Number(event.target.value))}>
           <option value="">全书末尾（默认，避免提前透露身份）</option>
           {(chapters.data ?? []).map(chapter => <option key={chapter.id} value={chapter.end_cp}>
@@ -146,7 +150,7 @@ export default function CharactersPage() {
       {message && <p role="status">{message}</p>}
       <div className="ndr-toolbar">
         <label className="ndr-field">搜索人物<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="姓名、别名或说明" /></label>
-        <button type="button" disabled={directory.isFetching} onClick={() => void directory.refetch()}>重新读取</button>
+        <button title={directory.isFetching ? '正在读取人物资料，请等待完成。' : undefined} type="button" disabled={directory.isFetching} onClick={() => void directory.refetch()}>重新读取</button>
       </div>
       {directory.isPending && <p>正在读取全书人物…</p>}
       <p className="hint">按出现章节数从多到少排列，章节数相同时按对白数排列。仅统计已识别章节和当前有效的对白归属，未处理章节不计入。</p>

@@ -15,7 +15,7 @@ export function ReadErrorNotice({ label, error, retrying = false, onRetry, testI
   return (
     <div className="status-error ndr-read-error" role="alert" data-testid={testId}>
       <span>{label}：{errorMessage(error)}</span>
-      <button type="button" onClick={onRetry} disabled={retrying}>
+      <button title={retrying ? '正在重新读取，请等待本次读取完成。' : undefined} type="button" onClick={onRetry} disabled={retrying}>
         {retrying ? '正在重试…' : '重新读取'}
       </button>
     </div>

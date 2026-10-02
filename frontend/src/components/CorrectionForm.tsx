@@ -64,6 +64,10 @@ export function CorrectionForm({
     busy ||
     (action === 'assign_existing' && (!speakerRef || sceneGroups.length === 0)) ||
     (action === 'set_kind' && !kind)
+  const disabledReason = busy ? '正在提交更正，请等待完成。'
+    : action === 'assign_existing' && (!speakerRef || sceneGroups.length === 0)
+      ? '请先选择已有说话人；如果本场景没有说话人，请改用新建说话人。'
+    : action === 'set_kind' && !kind ? '请先选择对白分类，再确认更正。' : undefined
 
   const submit = () => {
     onSubmit({
@@ -171,9 +175,11 @@ export function CorrectionForm({
         disabled={disabled}
         onClick={submit}
         data-testid="correction-submit"
+        title={disabledReason}
       >
         {busy ? '提交中…' : '确认更正（不调用模型）'}
       </button>
+      {disabledReason && <p className="hint" role="status">{disabledReason}</p>}
     </div>
   )
 }

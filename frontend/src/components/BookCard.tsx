@@ -59,6 +59,7 @@ export function BookCard({ book, onDelete, deleting = false }: {
           type="button"
           className="ndr-danger"
           disabled={deleting}
+          title={deleting ? '删除正在进行，请等待书籍清理完成，不要重复删除。' : undefined}
           onClick={() => onDelete(book)}
           data-testid={`delete-book-${book.id}`}
         >{deleting ? '正在删除…' : '删除'}</button>}

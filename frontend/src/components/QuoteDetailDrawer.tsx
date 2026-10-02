@@ -258,7 +258,7 @@ export function QuoteDetailDrawer({
               disabled={busy || !lastCorrectionId}
               onClick={() => lastCorrectionId && undo.mutate(lastCorrectionId)}
               data-testid="drawer-undo"
-              title={lastCorrectionId ? '撤销刚才的更正' : '先做一次更正再撤销'}
+              title={busy ? '正在保存当前操作，请等待完成后再撤销。' : lastCorrectionId ? '撤销刚才的更正' : '先做一次更正再撤销'}
             >
               撤销刚才的更正
             </button>
@@ -267,6 +267,7 @@ export function QuoteDetailDrawer({
               disabled={busy || Boolean(reviewItemId)}
               onClick={() => flag.mutate()}
               data-testid="drawer-flag"
+              title={busy ? '正在保存当前操作，请等待完成。' : reviewItemId ? '这句对白已在待确认队列中，无需重复标记。' : undefined}
             >
               标记为待确认
             </button>
@@ -275,6 +276,7 @@ export function QuoteDetailDrawer({
               disabled={busy || !reviewItemId}
               onClick={() => defer.mutate()}
               data-testid="drawer-defer"
+              title={busy ? '正在保存当前操作，请等待完成。' : !reviewItemId ? '这句对白尚未加入待确认队列，请先标记为待确认。' : undefined}
             >
               跳过（延后）
             </button>

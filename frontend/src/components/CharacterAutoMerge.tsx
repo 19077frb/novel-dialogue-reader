@@ -71,8 +71,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     {open && <>
       <h3 className="ndr-step-heading"><span className="ndr-step-badge">1</span>分析重复人物与姓名</h3>
       <p className="hint">仅分析已保存的人物姓名、别名和说明，请先保存编辑。也会检查代称是否已有明确姓名，生成更名建议。分析会消耗 Tokens，但不会修改人物。模型可能误判，完成后由你选择接受哪些建议；确认后更新已有对白与导出，不改正文或章节完成状态。</p>
-      {blockedReason && <p className="hint" role="status">{blockedReason}</p>}
-      <ThinkingSettings disabled={blocked} profiles={profiles.data ?? []} profileId={preferences.profileId}
+      <ThinkingSettings disabled={blocked} disabledReason={blockedReason ?? undefined} profiles={profiles.data ?? []} profileId={preferences.profileId}
         onProfileChange={profileId => update({ profileId })} profileTestId="character-merge-profile" />
       {profiles.isError && <p role="alert" className="status-error">模型配置读取失败：{profiles.error.message}</p>}
       <label className="ndr-field">本次 Token 使用上限（留空不限）<input type="number" min={1}
@@ -83,6 +82,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
       <label className="ndr-field"><span><input type="checkbox" checked={confirmed} disabled={blocked}
         onChange={event => setConfirmed(event.target.checked)} /> 我同意调用模型生成合并建议（会消耗 Tokens）</span></label>
       <button disabled={blocked || !versionId || count < 1 || !profileReady || !confirmed}
+        title={blockedReason ?? (!versionId ? '请先重新读取书籍版本。' : count < 1 ? '请先识别或添加人物。' : !profileReady ? '请先选择可用的模型配置。' : !confirmed ? '请先勾选同意调用模型。' : undefined)}
         onClick={() => start.mutate()}>分析合并建议</button>
       {disabled && <p className="hint">请先停止本书处理任务再自动合并。</p>}
       {count < 1 && <p className="hint">至少有一个人物才能分析合并或更名建议。</p>}
@@ -109,8 +109,8 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
             <p className="hint">默认不选中。请核对姓名、别名、依据和整理后的说明；确认后会用新说明替换保留人物的原说明，未选中的人物保持不变。确认后无法自动撤销，不会再次调用模型。</p>
             <p>共 {proposals.length} 组建议，涉及 {duplicateCount} 条重复人物记录；已选 {selected.length} 组。</p>
             <div className="ndr-form-actions">
-              <button disabled={disabled || busy || !proposals.length} onClick={() => setSelected(proposals.map(group => group.target.character_id))}>全选合并建议</button>
-              <button disabled={disabled || busy || !selected.length} onClick={() => setSelected([])}>清空选择</button>
+              <button title={disabled || busy ? blockedReason ?? undefined : !proposals.length ? '没有可选择的合并建议。' : undefined} disabled={disabled || busy || !proposals.length} onClick={() => setSelected(proposals.map(group => group.target.character_id))}>全选合并建议</button>
+              <button title={disabled || busy ? blockedReason ?? undefined : !selected.length ? '尚未选择建议，无需清空。' : undefined} disabled={disabled || busy || !selected.length} onClick={() => setSelected([])}>清空选择</button>
             </div>
             {!result.data.proposals?.length && <p>没有可接受的合并建议。</p>}
             <CollapsibleBlock title="合并建议明细" summary={`共 ${proposals.length} 组建议；已选 ${selected.length} 组`}>
@@ -132,8 +132,8 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
             </CollapsibleBlock>
             {result.data.skipped_groups > 0 && <p>另有 {result.data.skipped_groups} 组未纳入建议，原人物保持不变。</p>}
             <div className="ndr-form-actions">
-              <button className="ndr-primary" disabled={disabled || busy || selected.length === 0 || missingDescription} onClick={() => accept.mutate(selected)}>确认合并所选 {selected.length} 组</button>
-              <button disabled={disabled || busy} onClick={() => accept.mutate([])}>放弃本次建议</button>
+              <button title={disabled || busy ? blockedReason ?? undefined : !selected.length ? '请先选择至少一组合并建议。' : missingDescription ? '所选旧建议缺少人物说明，请放弃后重新分析。' : undefined} className="ndr-primary" disabled={disabled || busy || selected.length === 0 || missingDescription} onClick={() => accept.mutate(selected)}>确认合并所选 {selected.length} 组</button>
+              <button title={disabled || busy ? blockedReason ?? undefined : undefined} disabled={disabled || busy} onClick={() => accept.mutate([])}>放弃本次建议</button>
             </div>
             {selected.length === 0 && <p className="hint">请至少选择一组建议后确认合并，也可以放弃本次结果。</p>}
           </section>}
@@ -145,7 +145,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
             </li>)}</ul>
             </CollapsibleBlock>
           </>}
-          {busy && <button className="ndr-danger" disabled={stop.isPending || result.data.state === 'PAUSING'} onClick={() => stop.mutate()}>停止自动合并</button>}
+          {busy && <button title={stop.isPending || result.data.state === 'PAUSING' ? '停止请求已提交，请等待模型调用安全收尾。' : undefined} className="ndr-danger" disabled={stop.isPending || result.data.state === 'PAUSING'} onClick={() => stop.mutate()}>停止自动合并</button>}
         </>}
       </div>}
     </>}

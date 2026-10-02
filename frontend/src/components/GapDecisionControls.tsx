@@ -28,6 +28,7 @@ export function GapDecisionControls({ gap, busy = false, onDecide }: GapDecision
             <button
               type="button"
               disabled={busy || gap.decision === item.value}
+              title={busy ? '正在保存当前决定，请等待完成。' : gap.decision === item.value ? '当前已采用此决定，无需重复选择。' : undefined}
               onClick={() => onDecide(item.value)}
               data-testid={`gap-decision-${item.value}`}
             >

@@ -160,6 +160,7 @@ export default function LibraryPage() {
             type="button"
             className="ndr-primary"
             disabled={!file || importMutation.isPending}
+            title={importMutation.isPending ? '文件正在导入，请等待解析完成。' : !file ? '请先选择 TXT 或 EPUB 文件。' : undefined}
             onClick={() => file && importMutation.mutate({ file, encoding })}
             data-testid="import-submit"
           >

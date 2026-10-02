@@ -42,7 +42,7 @@ export function AutomaticProcessing({ bookId, bookVersionId, chapterId }: { book
     <OperationTimer startedAt={progress.startedAt} finishedAt={progress.finishedAt}
       completed={progress.tasks.filter(task => task.state === 'completed').length} total={progress.tasks.length} />
     <button className="ndr-danger" onClick={() => { stopAutomaticProcessing(); updateGeneralSettings({ autoProcessing: false }) }}>停止自动处理</button>
-    <button disabled={busy} onClick={() => { resetAutomaticProcessing(bookId); setMessage('已刷新额度和重试记录，等待自动处理。') }}>刷新额度并重试</button>
+    <button title={busy ? '请等待当前自动处理结束，或先停止处理，再刷新额度并重试。' : undefined} disabled={busy} onClick={() => { resetAutomaticProcessing(bookId); setMessage('已刷新额度和重试记录，等待自动处理。') }}>刷新额度并重试</button>
     {busy && <p className="hint">刷新额度前请等待当前自动处理结束，或先停止处理。</p>}
   </section>
 }
