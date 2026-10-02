@@ -12,13 +12,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from .budget import CONTEXT_POLICY_CONSERVATIVE, BudgetPolicy
 from .source_selection import COMPRESSION_OMIT_REASON
 
-RECHECK_POLICY_VERSION = "recheck-1"
+RECHECK_POLICY_VERSION = "recheck-2"
 ROUTING_POLICY_VERSION = "routing-1"
 HARD_TARGET_THRESHOLD = 4
 
@@ -66,6 +67,7 @@ def plan_recheck(
     policy: BudgetPolicy,
     window,  # noqa: ANN001 - ProcessingWindow
     unresolved_target_ids,  # noqa: ANN001 - Iterable[str]
+    target_priorities: Mapping[str, int] | None = None,
 ) -> RecheckDecision:
     """给出复核决策：只取「未解决且属于本窗口」的目标，并按 ``recheck_max_targets`` 截断。"""
 
@@ -75,10 +77,13 @@ def plan_recheck(
     ordered = [quote_id for quote_id in window.target_quote_ids if quote_id in unresolved]
     if not ordered:
         return RecheckDecision(enabled=False, reason=NO_UNRESOLVED_TARGETS)
+    priorities = target_priorities or {}
+    selected = set(sorted(ordered, key=lambda quote_id: priorities.get(quote_id, 1))
+                   [: policy.recheck_max_targets])
     return RecheckDecision(
         enabled=True,
         reason=UNRESOLVED_TARGETS,
-        targets=tuple(ordered[: policy.recheck_max_targets]),
+        targets=tuple(quote_id for quote_id in ordered if quote_id in selected),
         restore_evidence=dropped_compressed_evidence(window),
     )
 

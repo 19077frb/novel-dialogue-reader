@@ -1434,7 +1434,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         <label>
           每个窗口最多复核的待定对白数
           <input type="number" min={0} value={maxRechecks} onChange={(event) => { setMaxRechecks(nonNegativeInteger(event.target.value)); resetEstimate() }} disabled={running} data-testid="batch-max-rechecks" />
-          <span className="hint">只复核有效结果中的待定对白；0 关闭。不是校验失败的重试次数。</span>
+          <span className="hint">只复核有效结果中的待定对白；0 关闭。优先补齐缺失证据，纯省略号优先级较低；不超过此数量。不是校验失败的重试次数。</span>
         </label>
         <FormatRetrySetting value={maxFormatRetries} disabled={running}
           onChange={value => { setPreferences({ maxFormatRetries: value }); resetEstimate() }} testId="batch-format-retries" />

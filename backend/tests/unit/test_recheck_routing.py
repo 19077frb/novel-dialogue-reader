@@ -47,6 +47,14 @@ def test_recheck_is_disabled_by_default() -> None:
     assert decision.targets == ()
 
 
+def test_recheck_priority_keeps_cap_and_returns_selected_targets_in_document_order() -> None:
+    decision = plan_recheck(policy=BudgetPolicy(recheck_max_targets=2),
+        window=_Window(("silence", "unknown", "missing1", "missing2")),
+        unresolved_target_ids=["silence", "unknown", "missing1", "missing2"],
+        target_priorities={"silence": 2, "unknown": 1, "missing1": 0, "missing2": 0})
+    assert decision.targets == ("missing1", "missing2")
+
+
 def test_recheck_skips_windows_without_unresolved_targets() -> None:
     policy = BudgetPolicy(recheck_max_targets=2)
     decision = plan_recheck(policy=policy, window=_Window(("q1", "q2")), unresolved_target_ids=[])

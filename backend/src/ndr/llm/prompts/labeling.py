@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from ..schemas import output_json_schema
 
-LABELING_PROMPT_VERSION = "labeling-15"
+LABELING_PROMPT_VERSION = "labeling-16"
 DATA_DELIMITER = "<<<NDR_DATA>>>"
 ESCAPED_DELIMITER = "<<<NDR_DATA_ESCAPED>>>"
 
@@ -84,6 +84,12 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
     character_id 相同，first_quote_id 为揭示姓名的目标对白，aliases 补充新称呼并给出证据。
     real_name填写原文明示姓名，否则null。该声明补充同一身份的姓名，
     不代表出现另一个人；程序只把未由用户指定的代称升级为明确姓名，不改已有具体姓名。
+21. DIRECT 不是“我认为判断很确定”：必须引用目标自身之外、明确说明谁开口的片段。
+    例如对白后有“绫濑同学立刻吐槽”，应引用包含这句叙述的 G/E；不能省略 evidence_refs。
+    问答承接用 RESPONSE_LINK 并引用相关对白，指代或动作关联用 COREFERENCE 并引用相关片段。
+    输出前检查：不得整段把有候选人物的对白写成 DIRECT + 空证据。
+    同一次输出新声明的人物首次出现必须用 NEW，之后才用 EXISTING 引用其 temp_ref。
+    复核时旧候选只是待验证建议，不是答案；优先补充缺失证据，证据不足仍保留 UNKNOWN。
 """.strip()
 
 

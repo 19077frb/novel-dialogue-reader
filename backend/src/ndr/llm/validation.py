@@ -186,6 +186,32 @@ def repair_undeclared_speakers(
     return repaired, warnings
 
 
+def repair_declared_first_speakers(
+    output: LlmOutput, targets: LabelingTargets
+) -> tuple[LlmOutput, list[str]]:
+    """Normalize only a unique, explicit declaration at its actual first use."""
+    declarations = {speaker.temp_ref: speaker for speaker in output.new_speakers}
+    counts = {ref: sum(s.temp_ref == ref for s in output.new_speakers)
+              for ref in declarations}
+    positions = {ref: index for index, ref in enumerate(targets.quote_ids)}
+    replacements = {}
+    warnings = []
+    for ref, speaker in declarations.items():
+        uses = [label for label in output.labels if label.speaker_ref == ref
+                and label.kind is QuoteKind.SPEECH]
+        if not uses or counts[ref] != 1 or ref in targets.speaker_refs:
+            continue
+        first = min(uses, key=lambda label: positions.get(label.quote_id, len(positions)))
+        if (first.assignment is Assignment.EXISTING
+                and first.quote_id == speaker.first_quote_id
+                and first.quote_id in positions and first.scene_ref == speaker.scene_ref
+                and all(label.scene_ref == speaker.scene_ref for label in uses)):
+            replacements[first.quote_id] = first.model_copy(update={"assignment": Assignment.NEW})
+            warnings.append(f"repaired_declared_first_speaker:{ref}:{first.quote_id}")
+    return output.model_copy(update={"labels": [replacements.get(label.quote_id, label)
+                                               for label in output.labels]}), warnings
+
+
 def repair_confirmed_speakers_after_break(
     output: LlmOutput, targets: LabelingTargets
 ) -> tuple[LlmOutput, list[str]]:
@@ -427,6 +453,20 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
             )
 
     # 4) 对白标签：覆盖、唯一、引用合法
+    positions = {ref: index for index, ref in enumerate(targets.quote_ids)}
+    for speaker in output.new_speakers:
+        uses = [label for label in output.labels if label.speaker_ref == speaker.temp_ref
+                and label.kind is QuoteKind.SPEECH]
+        if not uses or speaker.temp_ref in allowed_speakers:
+            continue  # Name supplements need not create a second group.
+        first = min(uses, key=lambda label: positions.get(label.quote_id, len(positions)))
+        if (first.assignment is not Assignment.NEW
+                or first.quote_id != speaker.first_quote_id):
+            issues.append(ValidationIssue(
+                "speaker_used_before_creation",
+                f"人物 {speaker.temp_ref} 的首次引用必须与声明一致并使用 NEW",
+                first.quote_id,
+            ))
     seen_quotes: set[str] = set()
     accepted: list[QuoteLabel] = []
     for label in output.labels:
@@ -585,6 +625,8 @@ def parse_and_validate(
     output, warnings = repair_undeclared_speakers(output, targets)
     output, scene_warnings = repair_confirmed_speakers_after_break(output, targets)
     warnings.extend(scene_warnings)
+    output, first_warnings = repair_declared_first_speakers(output, targets)
+    warnings.extend(first_warnings)
     report = validate_output(output, targets)
     if not warnings:
         return report

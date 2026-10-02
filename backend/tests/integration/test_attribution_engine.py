@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -18,9 +19,16 @@ from ndr.context.window_builder import WindowInputs, plan_windows
 from ndr.domain.enums import (
     AnnotationSource,
     AnnotationStatus,
+    Assignment,
     IdentityOperation,
+    InferenceRunState,
+    JobKind,
+    JobState,
     QuoteKind,
+    ReviewQueueStatus,
     ReviewReason,
+    ReviewTargetType,
+    SpeakerBasis,
 )
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.llm.validation import RetryPolicy
@@ -34,6 +42,9 @@ from ndr.storage.models import (
     BookCharacter,
     BookVersion,
     IdentityRevision,
+    InferenceRun,
+    Job,
+    ResultCache,
     ReviewItem,
     Scene,
     SceneMembership,
@@ -710,3 +721,134 @@ def test_plan_range_still_covers_whole_book(
 
     covered, targets = _with_session(migrated_settings, body)
     assert covered == targets
+
+
+def test_model_review_reasons_follow_current_result_and_preserve_manual_flags(
+    migrated_client: TestClient, migrated_settings: Settings,
+) -> None:
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        target = _targets(inputs)[0]
+        window = _window(inputs, [target])
+        state = SceneState()
+        assert _run(session, script=[], window=window, state=state, inputs=inputs).ok
+        manual = ReviewItem(target_type=ReviewTargetType.QUOTE, quote_id=target,
+            reason=ReviewReason.USER_FLAGGED, candidates_json='{"note":"请再次核对"}',
+            queue_status=ReviewQueueStatus.PENDING)
+        session.add(manual)
+        manual_reason = ReviewItem(target_type=ReviewTargetType.QUOTE, quote_id=target,
+            reason=ReviewReason.LOW_CONFIDENCE, candidates_json='{"note":"用户要求保留"}',
+            queue_status=ReviewQueueStatus.PENDING)
+        session.add(manual_reason)
+        payload = {"schema_version": "1.0", "new_speakers": [{"temp_ref": "new1",
+            "scene_ref": state.scene_ref, "first_quote_id": target, "name": "少女", "description": "拿伞的少女"}],
+            "labels": [_speech(target, assignment="NEW", speaker_ref="new1", basis="STYLE_ONLY")]}
+        assert _run(session, script=[payload], window=window, state=state, inputs=inputs).ok
+        unknown = session.scalar(select(ReviewItem).where(ReviewItem.reason == ReviewReason.UNKNOWN_SPEAKER))
+        assert unknown.queue_status is ReviewQueueStatus.RESOLVED
+        low = session.scalar(select(ReviewItem).where(ReviewItem.reason == ReviewReason.LOW_CONFIDENCE))
+        assert low.candidates_json == '{"note":"用户要求保留"}'
+        payload = {"schema_version": "1.0", "labels": [_speech(target,
+            assignment="EXISTING", speaker_ref="S1", evidence_ref=inputs.gaps[0].gap_id)]}
+        assert _run(session, script=[payload], window=window, state=state, inputs=inputs).ok
+        assert low.queue_status is ReviewQueueStatus.PENDING
+        assert manual.queue_status is ReviewQueueStatus.PENDING
+    _with_session(migrated_settings, body)
+
+
+def test_valid_but_weaker_recheck_does_not_erase_previous_candidate(
+    migrated_client: TestClient, migrated_settings: Settings,
+) -> None:
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        target = _targets(inputs)[0]
+        window = _window(inputs, [target])
+        state = SceneState()
+        payload = {"schema_version": "1.0", "new_speakers": [{"temp_ref": "new1",
+            "scene_ref": state.scene_ref, "first_quote_id": target, "name": "少女", "description": "拿伞的少女"}],
+            "labels": [_speech(target, assignment="NEW", speaker_ref="new1", basis="STYLE_ONLY")]}
+        assert _run(session, script=[payload], window=window, state=state, inputs=inputs).ok
+        annotation = session.scalar(select(Annotation).where(Annotation.quote_id == target))
+        before = (annotation.version, annotation.speaker_id, annotation.visible_from_cp)
+        positions, gaps, evidence = _positions(inputs, window)
+        result = apply_window(session, book_version_id=version.id, window=window, state=state,
+            output={"schema_version": "1.0", "labels": [_label(target)]},
+            quote_positions=positions, gap_positions=gaps, evidence_positions=evidence,
+            preserve_existing_candidates=True)
+        assert result.validation_ok
+        assert (annotation.version, annotation.speaker_id, annotation.visible_from_cp) == before
+        assert annotation.status is AnnotationStatus.PROVISIONAL
+        assert not list(session.scalars(select(AnnotationHistory)))
+    _with_session(migrated_settings, body)
+
+
+def test_offline_cache_repair_is_guarded_non_model_and_idempotent(
+    migrated_client: TestClient, migrated_settings: Settings,
+) -> None:
+    from ndr.scenes.repair_reviews import repair_book_reviews
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        target = _targets(inputs)[0]
+        window = _window(inputs, [target])
+        character = BookCharacter(book_version_id=version.id, canonical_name="绫濑沙季")
+        session.add(character)
+        session.flush()
+        state = SceneState(confirmed_characters=[ConfirmedCharacter(character.id, "绫濑沙季")])
+        evidence = next(fragment.fragment_id for fragment in window.fragments
+                        if fragment.kind.value in {"inner_gap", "outer_gap"})
+        payload = {"schema_version": "1.0", "new_speakers": [{"temp_ref": "new1",
+            "scene_ref": state.scene_ref, "first_quote_id": target, "name": "绫濑沙季",
+            "description": "拿伞的少女", "character_id": character.id, "evidence_refs": [evidence]}],
+            "labels": [_speech(target, assignment="NEW", speaker_ref="new1", evidence_ref=evidence)]}
+        first = _run(session, script=[payload], window=window, state=state, inputs=inputs)
+        assert first.ok and first.attempts == 1
+        annotation = session.scalar(select(Annotation).where(Annotation.quote_id == target))
+        annotation.status = AnnotationStatus.UNKNOWN
+        annotation.assignment = Assignment.UNKNOWN
+        annotation.basis = SpeakerBasis.INSUFFICIENT
+        annotation.speaker_id = None
+        review = ReviewItem(target_type=ReviewTargetType.QUOTE, quote_id=target,
+            reason=ReviewReason.UNKNOWN_SPEAKER, annotation_version=1,
+            candidates_json='{"reason":"insufficient_evidence"}', queue_status=ReviewQueueStatus.PENDING)
+        session.add(review)
+        job = Job(book_id=version.book_id, book_version_id=version.id, kind=JobKind.INFERENCE,
+                  state=JobState.COMPLETED)
+        session.add(job)
+        session.flush()
+        run = InferenceRun(job_id=job.id, state=InferenceRunState.SUCCEEDED,
+            profile_snapshot_json="{}", request_fingerprint="repair-fixture")
+        session.add(run)
+        session.flush()
+        session.add(ResultCache(cache_key="repair-fixture", schema_version="1.0",
+                                result_json=json.dumps(payload), created_run_id=run.id))
+        session.flush()
+        preview = repair_book_reviews(session, version.book_id)
+        assert preview["restored_quotes"] == 1
+        assert annotation.status is AnnotationStatus.UNKNOWN and annotation.version == 1
+        annotation.user_locked = True
+        session.flush()
+        assert repair_book_reviews(session, version.book_id)["restored_quotes"] == 0
+        annotation.user_locked = False
+        original_evidence = annotation.evidence_refs_json
+        annotation.evidence_refs_json = "[]"
+        session.flush()
+        assert repair_book_reviews(session, version.book_id)["restored_quotes"] == 0
+        annotation.evidence_refs_json = original_evidence
+        job.state = JobState.RUNNING
+        session.flush()
+        with pytest.raises(ValueError, match="排队或运行任务"):
+            repair_book_reviews(session, version.book_id, apply=True)
+        job.state = JobState.COMPLETED
+        session.flush()
+        result = repair_book_reviews(session, version.book_id, apply=True)
+        assert result["restored_quotes"] == 1 and result["resolved_reason_records"] == 1
+        assert annotation.status is AnnotationStatus.ACCEPTED
+        assert annotation.speaker_id and annotation.version == 2
+        assert review.queue_status is ReviewQueueStatus.RESOLVED
+        assert len(list(session.scalars(select(AnnotationHistory)))) == 1
+        assert repair_book_reviews(session, version.book_id, apply=True)["restored_quotes"] == 0
+        assert job.state is JobState.COMPLETED
+    _with_session(migrated_settings, body)

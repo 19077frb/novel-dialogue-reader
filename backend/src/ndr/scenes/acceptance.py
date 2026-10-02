@@ -26,7 +26,7 @@ from ..domain.enums import (
 )
 from ..llm.schemas import QuoteLabel
 
-ACCEPTANCE_POLICY_VERSION = "acceptance-3"
+ACCEPTANCE_POLICY_VERSION = "acceptance-4"
 
 
 @dataclass(frozen=True)

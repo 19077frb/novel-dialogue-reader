@@ -279,7 +279,9 @@ def _messages_for(
             {
                 "role": "user",
                 "content": (
-                    "上一次输出无效：" + correction + "。请重新只输出符合 schema 的 JSON 对象，"
+                    (correction if correction.startswith("复核说明：")
+                     else "上一次输出无效：" + correction)
+                    + "。请重新只输出符合 schema 的 JSON 对象，"
                     "不要包含任何解释或额外文本。"
                 ),
             },

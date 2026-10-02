@@ -81,6 +81,29 @@ def test_valid_output_passes() -> None:
     assert report.error_codes == []
 
 
+def test_explicit_first_existing_reference_is_normalized_without_guessing() -> None:
+    output = _valid_output()
+    output["labels"][1]["assignment"] = "EXISTING"
+    report = parse_and_validate(output, TARGETS)
+    assert report.ok
+    assert report.output.labels[1].assignment.value == "NEW"
+    assert any("repaired_declared_first_speaker" in warning for warning in report.warnings)
+
+
+def test_first_reference_repair_respects_document_order_and_rejects_conflict() -> None:
+    output = _valid_output()
+    output["labels"][0].update(assignment="EXISTING", speaker_ref="new1")
+    output["labels"][1]["assignment"] = "EXISTING"
+    output["labels"].reverse()
+    assert "speaker_used_before_creation" in parse_and_validate(output, TARGETS).error_codes
+    output["new_speakers"][0]["first_quote_id"] = "q1"
+    report = parse_and_validate(output, TARGETS)
+    assert report.ok
+    assert next(label for label in report.output.labels if label.quote_id == "q1").assignment.value == "NEW"
+    output["new_speakers"][0]["scene_ref"] = "other_scene"
+    assert not parse_and_validate(output, TARGETS).ok
+
+
 def test_bad_json_is_rejected_without_fragment_hunting() -> None:
     report = parse_and_validate("抱歉，我无法完成。是 {不是 JSON}", TARGETS)
     assert report.ok is False

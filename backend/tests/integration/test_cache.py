@@ -114,6 +114,19 @@ def test_runtime_speaker_state_changes_cache_key() -> None:
         job=job, version=version, window=window, snapshot=snapshot, state=state_b
     )
     assert key_a != key_b
+    hinted_key = _cache_key_for(
+        job=job, version=version, window=window, snapshot=snapshot, state=state_a,
+        prompt_hint="复核说明：旧候选是父亲",
+    )
+    assert hinted_key != key_a
+    assert hinted_key == _cache_key_for(
+        job=job, version=version, window=window, snapshot=snapshot, state=state_a,
+        prompt_hint="复核说明：旧候选是父亲",
+    )
+    assert hinted_key != _cache_key_for(
+        job=job, version=version, window=window, snapshot=snapshot, state=state_a,
+        prompt_hint="复核说明：旧候选是叙述者",
+    )
     assert _cache_key_for(
         job=job,
         version=version,

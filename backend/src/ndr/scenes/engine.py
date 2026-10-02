@@ -53,6 +53,7 @@ from ..storage.models import (
     SpeakerGroup,
 )
 from .acceptance import compute_visible_from_cp, decide_acceptance
+from .review_sync import ENGINE_REASONS, MODEL_REASONS, sync_attribution_reviews
 from .state import SCENE_STATE_VERSION, ConfirmedCharacter, SceneState
 
 ENGINE_VERSION = "attribution-engine-1"
@@ -105,6 +106,8 @@ def _annotation_snapshot(annotation: Annotation) -> dict[str, Any]:
         "visible_from_cp": annotation.visible_from_cp,
         "stale": annotation.stale,
         "user_locked": annotation.user_locked,
+        "evidence_refs_json": annotation.evidence_refs_json,
+        "dependency_hash": annotation.dependency_hash,
         "version": annotation.version,
     }
 
@@ -363,7 +366,17 @@ def _upsert_review_item(
         select(ReviewItem).where(ReviewItem.reason == reason, *target_filter)
     ).scalar_one_or_none()
     if existing is not None:
+        if quote_id and reason in MODEL_REASONS:
+            try:
+                previous_candidates = json.loads(existing.candidates_json)
+            except (ValueError, TypeError):
+                previous_candidates = {}
+            if (not isinstance(previous_candidates, dict)
+                    or previous_candidates.get("reason") not in ENGINE_REASONS):
+                return existing.id  # Do not repurpose a manually created reason.
         existing.queue_status = ReviewQueueStatus.PENDING
+        existing.annotation_version = annotation_version
+        existing.resolved_by_correction_id = None
         if candidates is not None:
             existing.candidates_json = json.dumps(candidates, ensure_ascii=False)
         session.flush()
@@ -415,6 +428,7 @@ def apply_window(
     cold_start: bool = True,
     run_id: str | None = None,
     update_dependency_hash: bool = True,
+    preserve_existing_candidates: bool = False,
 ) -> WindowApplication:
     """应用一次模型输出：校验 → 锁定检查 → 可见时点 → 接受策略 → 落库。"""
 
@@ -619,6 +633,15 @@ def apply_window(
                 }
             )
         decision_out = decide_acceptance(stored_label, cold_start=cold_start)
+        if preserve_existing_candidates and decision_out.status is AnnotationStatus.UNKNOWN:
+            previous = session.scalar(select(Annotation).where(
+                Annotation.quote_id == label.quote_id))
+            if (previous is not None and not previous.stale and previous.speaker_id
+                    and previous.scene_id == scene_id
+                    and previous.status in {
+                        AnnotationStatus.PROVISIONAL, AnnotationStatus.ACCEPTED}):
+                application.warnings.append(f"recheck_candidate_kept:{label.quote_id}")
+                continue
 
         annotation, replaced = _record_annotation(
             session,
@@ -642,6 +665,7 @@ def apply_window(
             scene_id=scene_id,
             revision=state.version,
         )
+        sync_attribution_reviews(session, annotation, current_reason=decision_out.review_reason)
         if decision_out.needs_review and decision_out.review_reason is not None:
             review_id = _upsert_review_item(
                 session,
