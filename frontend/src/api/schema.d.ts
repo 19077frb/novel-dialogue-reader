@@ -1603,6 +1603,8 @@ export interface components {
             confidence: number;
             /** Reason */
             reason: string;
+            /** Merged Description */
+            merged_description?: string | null;
         };
         /**
          * CharacterRosterStatus

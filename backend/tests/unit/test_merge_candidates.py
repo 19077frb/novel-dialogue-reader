@@ -17,6 +17,9 @@ def test_merge_hints_cover_multiple_identities_without_auto_acceptance():
         ("c", "d"),
     }
     messages = _messages(entries)
+    assert "merged_description" in messages[0]["content"]
+    assert "不得逐段拼接" in messages[0]["content"]
+    assert "若事实有冲突" in messages[0]["content"]
     assert "一次返回全部" in messages[0]["content"]
     assert "不是合并结论" in messages[0]["content"]
     payload = json.loads(messages[1]["content"])

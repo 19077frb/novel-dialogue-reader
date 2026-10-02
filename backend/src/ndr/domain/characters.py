@@ -60,6 +60,8 @@ class CharacterMergeProposalOut(ApiModel):
     sources: list[CharacterDirectoryOut]
     confidence: float
     reason: str
+    # Legacy proposals did not contain a synthesized description and must be reanalysed.
+    merged_description: str | None = Field(default=None, max_length=512)
 
 
 class CharacterAutoMergeConfirmIn(ApiModel):

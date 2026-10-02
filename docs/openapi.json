@@ -5119,6 +5119,18 @@
           "reason": {
             "type": "string",
             "title": "Reason"
+          },
+          "merged_description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merged Description"
           }
         },
         "additionalProperties": false,

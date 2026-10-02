@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import select, update
 
 from ..api.errors import ApiError
@@ -37,6 +37,14 @@ class MergeGroup(BaseModel):
     source_ids: list[str] = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)
     reason: str = Field(min_length=1, max_length=512)
+    merged_description: str = Field(min_length=1, max_length=512)
+
+    @field_validator("merged_description")
+    @classmethod
+    def description_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("合并后的说明不能为空")
+        return value.strip()
 
 
 class MergeOutput(BaseModel):
@@ -89,9 +97,16 @@ def _messages(entries):
                 "亲属、同事、搭档是不同人。不确定则不合并，不可虚构正文证据。"
                 "目标优先选择具有简短完整人名、明确说明的已有全书人物；只有同组全为未关联说话人时才用其中一项为目标。"
                 "姓名为空的已有记录只能作为并入人物，不能作为保留目标；整组都没有可用姓名时不建议合并。"
+                "每组必须同时生成 merged_description：阅读组内全部说明，"
+                "按身份、关系、特征等整理成自然中文，"
+                "去除重复与冗余的场景措辞，保留不同记录中的有效事实，不得逐段拼接，不得虚构或扩大确定性。"
+                "后来明确的姓名可解释早期称呼；若事实有冲突，保留冲突及不确定性，不要擅自选一方。"
+                "说明应简洁且非空，最多512字；原说明合计超过512字不是放弃合并的理由，应归纳压缩。"
+                "merged_description 与合并依据 reason 分开：前者是保存后供读者查看的人物说明，"
+                "不是合并操作的理由。已有人工说明也须保留其中有效信息，新说明由用户预览确认后才替换。"
                 "每个人物 ID 最多属于一组，不允许循环、链式合并或新增 ID。"
                 '只返回 JSON：{"groups":[{"target_id":"已有ID","source_ids":["重复ID"],'
-                '"confidence":0.99,"reason":"中文身份依据"}]}。'
+                '"confidence":0.99,"reason":"中文身份依据","merged_description":"整理后的人物说明"}]}。'
                 "只建议置信度至少 0.95 且有明确依据的组；没有重复时返回空 groups。"
             ),
         },
@@ -169,6 +184,7 @@ def auto_merge_result(session, job) -> CharacterAutoMergeResultOut:
                 "sources": [entries[key] for key in group["source_ids"]],
                 "confidence": group["confidence"],
                 "reason": group["reason"],
+                "merged_description": group.get("merged_description"),
             }
             for group in proposal.get("groups", [])
         ],
@@ -249,17 +265,10 @@ def _apply(session, job, output, entries):
     applied = []
     skipped = merged_count = 0
     for group in output.groups:
-        descriptions = list(
-            dict.fromkeys(
-                row["description"].strip()
-                for row in [by_id[key] for key in [group.target_id, *group.source_ids]]
-                if row["description"].strip()
-            )
-        )
-        description = "；".join(descriptions)
-        if group.confidence < 0.95 or len(description) > 512:
+        if group.confidence < 0.95:
             skipped += 1
             continue
+        description = group.merged_description
         target_id = group.target_id
         if by_id[target_id]["kind"] == "speaker":
             target_id = edit(
@@ -317,6 +326,8 @@ def confirm_auto_merge(session, job, selected_ids):
     groups = {group["target_id"]: group for group in proposal["groups"]}
     if any(key not in groups for key in selected):
         raise ApiError.validation("所选人物不属于本次合并建议")
+    if any(not (groups[key].get("merged_description") or "").strip() for key in selected):
+        raise ApiError.validation("旧合并建议没有整理后的人物说明，请放弃本次建议并重新分析")
     # Claim the decision before checking/applying. Concurrent confirmations cannot
     # apply the same proposal twice; a repeated identical decision returns its result.
     claimed = session.execute(
@@ -460,22 +471,15 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
                     )
                     return job.state, 1
             _check_current(session, job, entries)
+            analysis_groups = output.model_dump()["groups"]
             output, unnamed_groups = _named_targets(output, entries)
-            by_id = _validate_plan(output, entries)
-            accepted = []
-            for group in output.groups:
-                descriptions = dict.fromkeys(
-                    by_id[key]["description"].strip()
-                    for key in [group.target_id, *group.source_ids]
-                    if by_id[key]["description"].strip()
-                )
-                if group.confidence >= 0.95 and len("；".join(descriptions)) <= 512:
-                    accepted.append(group.model_dump())
+            accepted = [group.model_dump() for group in output.groups if group.confidence >= 0.95]
             skipped = unnamed_groups + len(output.groups) - len(accepted)
             job.checkpoint_json = json.dumps(
                 {
                     "phase": "awaiting_confirmation",
                     "merge_proposal": {"groups": accepted, "skipped_groups": skipped},
+                    "analysis_groups": analysis_groups,
                 },
                 ensure_ascii=False,
             )
@@ -494,7 +498,10 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
             exc.message
             if isinstance(exc, (ProviderError, ApiError))
             else (
-                str(exc)
+                "模型未提供有效的整理后人物说明（需为1–512字），未执行任何合并，请重新分析"
+                if isinstance(exc, ValidationError) and any(
+                    "merged_description" in error["loc"] for error in exc.errors()
+                ) else str(exc)
                 if isinstance(exc, ValueError) and not isinstance(exc, ValidationError)
                 else "模型合并方案未通过校验，未执行任何合并"
             )

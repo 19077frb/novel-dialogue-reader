@@ -316,6 +316,7 @@ def _merge_group(ids, **overrides):
         "source_ids": [ids["source"]],
         "confidence": 0.99,
         "reason": "姓名及哥哥别名指向同一人物",
+        "merged_description": "悠太，别名哥哥，与原记录中的浅村悠太为同一人物。",
         **overrides,
     }
 
@@ -444,6 +445,7 @@ def test_auto_merge_applies_and_preserves_names_descriptions_references_usage(
 ):
     client, ids = migrated_client, populated
     with transaction(client.app.state.session_factory) as session:
+        session.get(BookCharacter, ids["target"]).description = "用户确认的主人公"
         session.get(BookCharacter, ids["source"]).description = "书店店员"
     job, payload = _auto_job(client, ids)
     # A queued merge locks manual writes and creates no provider usage yet.
@@ -456,7 +458,8 @@ def test_auto_merge_applies_and_preserves_names_descriptions_references_usage(
         },
     )
     assert blocked.status_code == 409
-    outcome, adapter = _run_merge(client, job, [_merge_group(ids)])
+    summary = "悠太，故事的主人公，在书店打工，别名哥哥。"
+    outcome, adapter = _run_merge(client, job, [_merge_group(ids, merged_description=summary)])
     assert outcome.state is JobState.COMPLETED
     result = client.get(f"{base}/auto-merge/{job['id']}").json()["data"]
     assert result["merged_count"] == 1
@@ -465,7 +468,7 @@ def test_auto_merge_applies_and_preserves_names_descriptions_references_usage(
     assert client.get(f"{base}/auto-merge").json()["data"] == result
     rows = client.get(base).json()["data"]
     target = next(row for row in rows if row["character_id"] == ids["target"])
-    assert target["description"] == "目标说明；书店店员"
+    assert target["description"] == summary
     assert {"浅村悠太", "哥哥"}.issubset(target["aliases"])
     with transaction(client.app.state.session_factory) as session:
         assert session.get(BookCharacter, ids["source"]) is None
@@ -654,7 +657,7 @@ def test_auto_merge_missing_or_excess_actual_usage_with_limit_does_not_apply(
         assert session.get(BookCharacter, ids["source"]) is not None
 
 
-def test_auto_merge_retains_group_if_combined_description_would_lose_data(
+def test_auto_merge_synthesizes_long_original_descriptions_without_skipping(
     migrated_client, populated
 ):
     client, ids = migrated_client, populated
@@ -667,14 +670,128 @@ def test_auto_merge_retains_group_if_combined_description_would_lose_data(
         json={**payload, "idempotency_key": "overlapping-merge"},
     )
     assert duplicate.status_code == 409
-    outcome, _ = _run_merge(client, job, [_merge_group(ids)])
+    summary = "人物的甲类特征与乙类经历共同构成同一身份。"
+    outcome, adapter = _run_merge(client, job, [_merge_group(ids, merged_description=summary)],
+                                  accept=False)
     assert outcome.state is JobState.COMPLETED
     result = client.get(
         f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
     ).json()["data"]
-    assert result["skipped_groups"] == 1 and result["merged_count"] == 0
+    assert result["skipped_groups"] == 0 and result["merged_count"] == 0
+    assert result["proposals"][0]["merged_description"] == summary
+    # Preview leaves both original descriptions intact until explicit approval.
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["target"]).description == "甲" * 270
+        assert session.get(BookCharacter, ids["source"]).description == "乙" * 270
+    response = client.post(
+        f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}/confirm",
+        json={"selected_target_ids": [ids["target"]]},
+    )
+    assert response.status_code == 200 and response.json()["data"]["merged_count"] == 1
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["target"]).description == summary
+    assert len(adapter.calls) == 1
     recovery = client.get(f"/api/jobs/{job['id']}/recovery").json()["data"]
     assert recovery["actions"] == []
+
+
+@pytest.mark.parametrize("summary", [None, "", "   ", "甲" * 513])
+def test_auto_merge_rejects_invalid_synthesized_description_without_data_loss(
+    migrated_client, populated, summary,
+):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids)
+    group = _merge_group(ids, merged_description=summary)
+    if summary is None:
+        group.pop("merged_description")
+    outcome, adapter = _run_merge(client, job, [group])
+    assert outcome.state is JobState.FAILED
+    result = client.get(
+        f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}",
+    ).json()["data"]
+    assert "整理后人物说明" in result["last_error"]
+    assert result["usage"]["total_tokens"] == 40
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["target"]).description == "目标说明"
+        assert session.get(BookCharacter, ids["source"]) is not None
+    assert len(adapter.calls) == 1
+
+
+def test_old_merge_preview_requires_reanalysis_not_concatenation(migrated_client, populated):
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids)
+    _run_merge(client, job, [_merge_group(ids)], accept=False)
+    with transaction(client.app.state.session_factory) as session:
+        row = session.get(Job, job["id"])
+        checkpoint = json.loads(row.checkpoint_json)
+        checkpoint["merge_proposal"]["groups"][0].pop("merged_description")
+        row.checkpoint_json = json.dumps(checkpoint)
+    base = f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    assert client.get(base).json()["data"]["proposals"][0]["merged_description"] is None
+    response = client.post(f"{base}/confirm", json={"selected_target_ids": [ids["target"]]})
+    assert response.status_code == 422
+    assert "重新分析" in response.text
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["source"]) is not None
+    assert client.post(f"{base}/confirm", json={"selected_target_ids": []}).status_code == 200
+
+
+def test_ten_fujinami_records_merge_with_one_synthesized_description(migrated_client, populated):
+    client, ids = migrated_client, populated
+    descriptions = [
+        "暑期班坐在悠太隔壁的女生，身高约一百八十公分，在补习班认识；在高尔夫练习场再会并自我介绍为藤波夏帆。即前文名为高个子女生的同一人物。",
+        "补习班学生，坐在自习室最后一排；读定时制高中，白天不去学校，喜欢打高尔夫；原文称她藤波同学，亦称夏帆同学，与浅村悠太一起买午餐并聊天。",
+        "与浅村悠太深夜在涩谷散步并对话的女生；原文明示称呼为藤波同学，和悠太聊到涩谷暗巷、自己的过去等；在本片段中持续发言，是补习班认识的高个女生。",
+        "藤波夏帆，补习班同学，邀悠太夜游；原文称藤波同学，全名藤波夏帆。此前被称作高个子女生，两人也在高尔夫练习场碰面；这里描述同一人的不同场景。",
+        "在涩谷与浅村悠太对话，被称作藤波同学；双亲去世，曾被叔母抚养，现与养母同住，谈论心意与期待。与前文补习班坐在悠太旁边、喜欢高尔夫的女生对应。",
+        "补习班坐在悠太旁边、让悠太觉得眼熟的高个女生，被叙述称为藤波同学，主动找悠太搭话并聊到涩谷与万圣夜。身份对应前文自报姓名的藤波夏帆。",
+        "补习班同学，与悠太在教室对话；叙述明确说完，藤波同学扬起嘴角，指向其发言。她是早期的高个子女生，喜欢高尔夫，和悠太在涩谷有过夜游经历。",
+        "藤波夏帆，补习班同学，带悠太在涩谷夜游；原文称藤波同学，也使用夏帆同学的称呼。她是定时制高中的学生，初见时原文只以高个子女生称呼她。",
+    ]
+    with transaction(client.app.state.session_factory) as session:
+        target = session.get(BookCharacter, ids["target"])
+        source = session.get(BookCharacter, ids["source"])
+        target.canonical_name, target.description = "高个子女生", "补习班坐在悠太旁边的高个女生。"
+        source.canonical_name, source.description = "藤波同学", "回忆中被称为藤波同学的女生。"
+        scene_id = session.get(SpeakerGroup, ids["linked"]).scene_id
+        groups = [SpeakerGroup(scene_id=scene_id, display_label=f"D{i}",
+                               canonical_name="藤波夏帆" if i < 3 else "藤波同学",
+                               description=description)
+                  for i, description in enumerate(descriptions)]
+        session.add_all(groups)
+        relatives = [BookCharacter(book_version_id=target.book_version_id,
+                                   canonical_name=name, aliases_json="[]")
+                     for name in ["藤波夏帆的养母", "藤波夏帆的叔母"]]
+        session.add_all(relatives)
+        session.flush()
+        source_ids = [ids["source"], *[f"speaker:{group.id}" for group in groups]]
+        group_ids = [group.id for group in groups]
+        relative_ids = [row.id for row in relatives]
+    assert len("；".join(descriptions)) > 512
+    summary = (
+        "藤波夏帆，早期称高个子女生、藤波同学或夏帆同学。身高约一百八十公分，"
+        "就读定时制高中，是浅村悠太的补习班同学，喜欢高尔夫，曾与悠太在涩谷夜游。"
+        "双亲去世后曾由叔母抚养，现在与养母同住。"
+    )
+    job, _ = _auto_job(client, ids)
+    outcome, adapter = _run_merge(client, job, [_merge_group(
+        ids, source_ids=source_ids, merged_description=summary,
+        reason="自我介绍及补习班、高尔夫、涩谷经历共同指向同一人物，亲属不是本人。",
+    )], accept=False)
+    assert outcome.state is JobState.COMPLETED
+    base = f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    preview = client.get(base).json()["data"]
+    assert len(preview["proposals"]) == 1 and preview["skipped_groups"] == 0
+    assert len(preview["proposals"][0]["sources"]) == 9
+    assert preview["proposals"][0]["merged_description"] == summary
+    response = client.post(f"{base}/confirm", json={"selected_target_ids": [ids["target"]]})
+    assert response.status_code == 200 and response.json()["data"]["merged_count"] == 9
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["target"]).description == summary
+        assert all(session.get(SpeakerGroup, key).character_id == ids["target"] for key in group_ids)
+        assert all(session.get(BookCharacter, key) is not None for key in relative_ids)
+        assert len(json.loads(session.get(Job, job["id"]).checkpoint_json)["analysis_groups"]) == 1
+    assert len(adapter.calls) == 1
 
 
 @pytest.mark.parametrize(

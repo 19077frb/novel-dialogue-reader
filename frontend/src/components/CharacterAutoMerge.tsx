@@ -45,6 +45,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
   const blocked = disabled || busy || result.isError || awaiting
   const proposals = result.data?.proposals ?? []
   const duplicateCount = proposals.reduce((sum, group) => sum + group.sources.length, 0)
+  const missingDescription = proposals.some(group => selected.includes(group.target.character_id) && !group.merged_description?.trim())
   return <section className="card ndr-character-merge" aria-label="自动合并人物">
     <label className="ndr-field"><span><input type="checkbox" checked={open} disabled={busy}
       onChange={event => setOpen(event.target.checked)} /> 自动合并人物（先预览，再确认）</span></label>
@@ -79,7 +80,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
           {result.data.last_error && <p className="status-error" role="alert">{result.data.last_error}</p>}
           {awaiting && <section className="ndr-merge-preview" aria-label="合并建议预览">
             <h3 className="ndr-step-heading"><span className="ndr-step-badge">2</span>预览并选择合并建议</h3>
-            <p className="hint">默认不选中。请核对姓名、别名、说明和依据；未选中的人物保持不变。确认后无法自动撤销，不会再次调用模型。</p>
+            <p className="hint">默认不选中。请核对姓名、别名、依据和整理后的说明；确认后会用新说明替换保留人物的原说明，未选中的人物保持不变。确认后无法自动撤销，不会再次调用模型。</p>
             <p>共 {proposals.length} 组建议，涉及 {duplicateCount} 条重复人物记录；已选 {selected.length} 组。</p>
             <div className="ndr-form-actions">
               <button disabled={disabled || busy || !proposals.length} onClick={() => setSelected(proposals.map(group => group.target.character_id))}>全选合并建议</button>
@@ -91,21 +92,24 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
                 onChange={event => setSelected(ids => event.target.checked ? [...ids, group.target.character_id] : ids.filter(id => id !== group.target.character_id))} />
                 接受：{group.sources.map(source => source.name).join('、')} → {group.target.name}</span></label>
               <p className="ndr-merge-text">合并依据：{group.reason}（模型置信度 {Math.round(group.confidence * 100)}%）</p>
+              {group.merged_description?.trim()
+                ? <div className="ndr-merge-text"><strong>合并后的人物说明</strong><p>{group.merged_description}</p></div>
+                : <p className="status-error">旧建议没有整理后的人物说明，请放弃本次建议并重新分析。</p>}
               <dl className="ndr-merge-people">{[group.target, ...group.sources].map((person, index) => <div key={person.character_id}>
                 <dt>{index === 0 ? '保留人物' : '并入人物'}：{person.name}</dt>
                 <dd>别名：{person.aliases?.join('、') || '无'}</dd>
                 <dd>说明：{person.description || '暂无说明'}</dd>
               </div>)}</dl>
             </article>)}
-            {result.data.skipped_groups > 0 && <p>另有 {result.data.skipped_groups} 组因依据不足、姓名缺失或说明过长未纳入建议。</p>}
+            {result.data.skipped_groups > 0 && <p>另有 {result.data.skipped_groups} 组未纳入建议，原人物保持不变。</p>}
             <div className="ndr-form-actions">
-              <button className="ndr-primary" disabled={disabled || busy || selected.length === 0} onClick={() => accept.mutate(selected)}>确认合并所选 {selected.length} 组</button>
+              <button className="ndr-primary" disabled={disabled || busy || selected.length === 0 || missingDescription} onClick={() => accept.mutate(selected)}>确认合并所选 {selected.length} 组</button>
               <button disabled={disabled || busy} onClick={() => accept.mutate([])}>放弃本次建议</button>
             </div>
             {selected.length === 0 && <p className="hint">请至少选择一组建议后确认合并，也可以放弃本次结果。</p>}
           </section>}
           {result.data.state === 'COMPLETED' && !awaiting && result.data.phase !== 'discarded' && <>
-            <p role="status">合并了 {result.data.merged_count} 个重复人物{result.data.skipped_groups ? `；保留 ${result.data.skipped_groups} 组（依据不足、姓名缺失或说明合并后过长）` : ''}。</p>
+            <p role="status">合并了 {result.data.merged_count} 个重复人物{result.data.skipped_groups ? `；保留 ${result.data.skipped_groups} 组未合并` : ''}。</p>
             <ul className="ndr-merge-text">{(result.data.merges ?? []).map(group => <li key={group.target_character_id}>
               {group.source_names.join('、')} → {group.target_name}：{group.reason}
             </li>)}</ul>
