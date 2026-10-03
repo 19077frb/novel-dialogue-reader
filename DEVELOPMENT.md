@@ -120,13 +120,15 @@ pwsh -File scripts/verify.ps1
 - 前端 API 类型与 `docs/openapi.json` 一致。
 - 导出正文与原文一致，未处理对白保持原样。
 
-Git 提交格式和自动化修改要求见 [AGENTS.md](AGENTS.md)。
+仓库修改先创建或复用中文Issue，规范描述目标与验收条件；在独立分支提出关联PR，最新GitHub检查及前端生产构建成功后再合并主分支，不直接推送main。完整协作与提交约束见 [AGENTS.md](AGENTS.md)。这是贡献流程，不代表远端已启用服务器端分支保护。
 
 ### 测试隔离与CI耗时
 
 普通数据库测试从每个pytest进程中真实迁移得到的空库模板生成独立副本，不共享可写数据库或应用对象。已有测试库不会被空模板覆盖；空库初始化、历史升级、迁移回退及离线维护测试仍执行真实迁移。模板仅在临时目录中存在，不存入仓库、书库或Actions缓存。
 
 数据库回归Actions保留全部后端测试，分为 `unit`、`database`、`integration-1`、`integration-2` 四组，最多四组并行。分组脚本和测试保证文件不遗漏、不重复；其中一组失败不会取消其他组，原 `database` 汇总检查必须在静态检查和全部测试组通过后才能通过。同一分支或PR的新提交会取消该回归工作流的旧运行，不取消独立的发布工作流；行为遵循 [GitHub并发规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)。实际并行数仍受账号可用runner限制。
+
+所有PR（包括仅修改文档的PR）都会执行该验证，不按修改路径跳过；主分支推送前端、后端或验证依赖也会触发检查。任务分支不另开push检查，避免同一修改因push和PR重复执行。前端在独立并行任务中执行类型、API一致性、单元测试及生产构建，`database` 总检查也必须等待前端成功。PR新增提交后需重新等待最新结果，不能使用旧提交或本地结果替代。这里的生产构建生成前端资源，不自动打包EXE或发布Release；免安装发布仍按 [发布指南](docs/RELEASING.md) 显式执行。
 
 本地默认 `verify.ps1` 仍执行全量检查，并输出最慢的20项测试阶段（包括准备、执行和清理）。从项目根目录复现某组：
 

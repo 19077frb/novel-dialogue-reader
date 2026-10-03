@@ -2,19 +2,15 @@ name: Database regression checks
 
 on:
   push:
+    branches: [main]
     paths:
       - 'backend/**'
+      - 'frontend/**'
       - 'AGENTS.md'
       - 'scripts/verify.ps1'
       - 'docs/openapi.json'
       - '.github/workflows/schema-indexes.yml'
   pull_request:
-    paths:
-      - 'backend/**'
-      - 'AGENTS.md'
-      - 'scripts/verify.ps1'
-      - 'docs/openapi.json'
-      - '.github/workflows/schema-indexes.yml'
   workflow_dispatch:
 
 permissions:
@@ -83,9 +79,32 @@ jobs:
           path: test-results/*.xml
           retention-days: 7
 
+  frontend:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked frontend dependencies
+        run: npm --prefix frontend ci
+      - name: Check frontend types
+        run: npm --prefix frontend run typecheck
+      - name: Check frontend API consistency
+        run: npm --prefix frontend run check:api
+      - name: Run frontend tests
+        run: npm --prefix frontend run test
+      - name: Build frontend production assets
+        run: npm --prefix frontend run build
+
   database:
     # Keep the original overall check name; success requires every group.
-    needs: [checks, tests]
+    needs: [checks, tests, frontend]
     if: always()
     runs-on: windows-latest
     timeout-minutes: 5
@@ -94,7 +113,8 @@ jobs:
         env:
           CHECKS_RESULT: ${{ needs.checks.result }}
           TESTS_RESULT: ${{ needs.tests.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
         run: |
-          if ($env:CHECKS_RESULT -ne 'success' -or $env:TESTS_RESULT -ne 'success') {
-            throw "Backend checks: $env:CHECKS_RESULT; test groups: $env:TESTS_RESULT"
+          if ($env:CHECKS_RESULT -ne 'success' -or $env:TESTS_RESULT -ne 'success' -or $env:FRONTEND_RESULT -ne 'success') {
+            throw "Backend checks: $env:CHECKS_RESULT; test groups: $env:TESTS_RESULT; frontend build: $env:FRONTEND_RESULT"
           }
