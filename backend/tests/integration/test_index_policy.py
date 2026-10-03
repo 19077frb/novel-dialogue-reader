@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import ast
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
-from sqlalchemy import UniqueConstraint, inspect, text
+from alembic import command
+from sqlalchemy import UniqueConstraint, inspect, select, text
+from sqlalchemy.orm import Session
 
+from ndr.ingest.service import import_txt
 from ndr.storage.base import Base
+from ndr.storage.engine import create_db_engine
+from ndr.storage.maintenance import _logical_digest
+from ndr.storage.migrate import build_alembic_config, run_migrations
+from ndr.storage.models import Annotation, Quote, Scene
 
 # Pure FK indexes are justified by referential checks/deletion. Every other read
 # index requires a real query consumer AND an unforced representative query plan.
@@ -28,7 +37,6 @@ QUERY_USES = {
     "ix_text_mappings_version_canonical": ("SELECT id FROM text_mappings WHERE book_version_id='v' AND canonical_start_cp<100 AND canonical_end_cp>0", "quotes/service.py", "TextMapping.canonical_start_cp"),
     "ix_text_mappings_version_ordinal": ("SELECT id FROM text_mappings WHERE book_version_id='v' ORDER BY ordinal LIMIT 10", "quotes/service.py", "TextMapping.ordinal"),
     "ix_gaps_version_start": ("SELECT id FROM gaps WHERE book_version_id='v' AND start_cp>100 ORDER BY start_cp LIMIT 10", "quotes/service.py", "Gap.start_cp"),
-    "ix_annotations_scene_dependency": ("SELECT id FROM annotations WHERE scene_id='s' AND dependency_hash='d'", "corrections/invalidator.py", "Annotation.dependency_hash"),
     "ix_review_items_created_id": ("SELECT id FROM review_items ORDER BY created_at,id LIMIT 10", "corrections/review.py", "ReviewItem.created_at"),
     "ix_review_items_queue_status": ("SELECT count(*) FROM review_items WHERE queue_status='PENDING'", "corrections/review.py", "ReviewItem.queue_status"),
 }
@@ -58,6 +66,11 @@ def test_every_read_index_has_a_query_or_fk_purpose(migrated_engine) -> None:
     documented = set()
     inspector = inspect(migrated_engine)
     for table in Base.metadata.sorted_tables:
+        actual_indexes = sorted((tuple(index["column_names"]), bool(index["unique"]))
+                                for index in inspector.get_indexes(table.name))
+        expected_indexes = sorted((tuple(col.name for col in index.columns), bool(index.unique))
+                                  for index in table.indexes)
+        assert actual_indexes == expected_indexes, f"{table.name}: missing or extra index definitions"
         # Historical migrations used different constraint names in a few tables.
         # Compare semantics/count, not cosmetic names; do not rebuild users' tables.
         actual_unique = sorted(tuple(key["column_names"]) for key in inspector.get_unique_constraints(table.name))
@@ -86,3 +99,59 @@ def test_query_indexes_still_have_real_consumers_and_are_used(migrated_engine) -
             assert "INDEXED BY" not in sql.upper(), "Do not force an unused index to pass its plan test"
             plan = " ".join(str(row) for row in connection.execute(text("EXPLAIN QUERY PLAN " + sql)))
             assert index_name in plan, f"{index_name} not used: {plan}"
+
+
+def test_annotation_scene_index_keeps_real_scene_queries_and_fk_coverage(migrated_engine):
+    root = Path(__file__).parents[2] / "src" / "ndr"
+    consumer = (root / "corrections/identity.py").read_text(encoding="utf-8")
+    assert "Annotation.scene_id == scene_id" in consumer
+    with migrated_engine.connect() as connection:
+        indexes = {index["name"]: index["column_names"]
+                   for index in inspect(connection).get_indexes("annotations")}
+        assert indexes["ix_annotations_scene_id"] == ["scene_id"]
+        assert "ix_annotations_scene_dependency" not in indexes
+        plan = " ".join(str(row) for row in connection.execute(text(
+            "EXPLAIN QUERY PLAN SELECT id FROM annotations WHERE scene_id='scene'",
+        )))
+        assert "ix_annotations_scene_id" in plan
+
+
+def test_annotation_index_upgrade_downgrade_preserves_data_and_is_repeatable(tmp_settings):
+    run_migrations(tmp_settings, revision="0019")
+    engine = create_db_engine(tmp_settings)
+    try:
+        with Session(engine) as session:
+            outcome = import_txt(session, tmp_settings, filename="scene.txt",
+                                 raw="第一章\n\n「你好。」\n".encode())
+            quote = session.scalar(select(Quote).where(Quote.book_version_id == outcome.version.id))
+            assert quote is not None
+            scene = Scene(book_version_id=outcome.version.id, start_cp=0, status="OPEN")
+            session.add(scene)
+            session.flush()
+            session.add(Annotation(quote_id=quote.id, scene_id=scene.id, kind="speech",
+                status="UNKNOWN", source="USER", user_locked=True, stale=True,
+                dependency_hash="historical-dependency", evidence_refs_json='["evidence"]',
+                visible_from_cp=quote.end_cp))
+            session.commit()
+        with closing(sqlite3.connect(tmp_settings.database_path)) as db:
+            digest = _logical_digest(db)
+        old_indexes = inspect(engine).get_indexes("annotations")
+        assert "ix_annotations_scene_dependency" in {i["name"] for i in old_indexes}
+        run_migrations(tmp_settings)
+        run_migrations(tmp_settings)
+        with closing(sqlite3.connect(tmp_settings.database_path)) as db:
+            assert _logical_digest(db) == digest
+            assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+        current = inspect(engine).get_indexes("annotations")
+        assert "ix_annotations_scene_dependency" not in {i["name"] for i in current}
+        assert "ix_annotations_scene_id" in {i["name"] for i in current}
+        command.downgrade(build_alembic_config(tmp_settings), "0019")
+        assert inspect(engine).get_indexes("annotations") == old_indexes
+        with closing(sqlite3.connect(tmp_settings.database_path)) as db:
+            assert _logical_digest(db) == digest
+        run_migrations(tmp_settings)
+        assert inspect(engine).get_indexes("annotations") == current
+        with closing(sqlite3.connect(tmp_settings.database_path)) as db:
+            assert _logical_digest(db) == digest
+    finally:
+        engine.dispose()

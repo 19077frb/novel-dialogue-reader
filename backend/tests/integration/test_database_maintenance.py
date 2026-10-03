@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from ndr.ingest.service import import_txt
 from ndr.portable import LibraryInUseError, LibraryLock
-from ndr.storage.engine import create_db_engine
+from ndr.storage.engine import create_db_engine, head_revision
 from ndr.storage.maintenance import _logical_digest, compact_database, inspect_database
 from ndr.storage.migrate import build_alembic_config, run_migrations
 
@@ -62,7 +62,7 @@ def test_migration_compaction_and_backup_preserve_all_business_data(tmp_settings
         assert db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall() == old_indexes
     with closing(sqlite3.connect(tmp_settings.database_path)) as db:
         assert _logical_digest(db) == digest
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0019",)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (head_revision(),)
     config = build_alembic_config(tmp_settings)
     command.downgrade(config, "0018")
     with closing(sqlite3.connect(tmp_settings.database_path)) as db:
