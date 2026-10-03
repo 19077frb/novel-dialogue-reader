@@ -53,7 +53,7 @@ Invoke-Check 'ruff check' {
 }
 
 Invoke-Check 'pytest' {
-    & $backend.Exe @($backend.Prefix + @('-m', 'pytest', 'backend/tests'))
+    & $backend.Exe @($backend.Prefix + @('-m', 'pytest', 'backend/tests', '--durations=20', '--durations-min=0.05'))
 }
 
 Invoke-Check 'openapi 与 docs/openapi.json 一致' {

@@ -5,21 +5,29 @@ on:
     paths:
       - 'backend/**'
       - 'AGENTS.md'
+      - 'scripts/verify.ps1'
+      - 'docs/openapi.json'
       - '.github/workflows/schema-indexes.yml'
   pull_request:
     paths:
       - 'backend/**'
       - 'AGENTS.md'
+      - 'scripts/verify.ps1'
+      - 'docs/openapi.json'
       - '.github/workflows/schema-indexes.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  database:
+  checks:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,5 +41,60 @@ jobs:
           cache-dependency-glob: backend/uv.lock
       - name: Install locked dependencies
         run: uv sync --project backend --locked --group dev
-      - name: Check backend and database regressions
-        run: ./scripts/verify.ps1 -SkipFrontend
+      - name: Check backend code
+        run: uv run --project backend python -m ruff check backend/src backend/tests backend/scripts
+      - name: Check OpenAPI consistency
+        env:
+          PYTHONUTF8: '1'
+        run: uv run --project backend python backend/scripts/export_openapi.py --output docs/openapi.json --check
+
+  tests:
+    name: Tests (${{ matrix.group }})
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        group: [unit, database, integration-1, integration-2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install locked dependencies
+        run: uv sync --project backend --locked --group dev
+      - name: Run complete test group with timing report
+        env:
+          PYTHONUTF8: '1'
+          TEST_GROUP: ${{ matrix.group }}
+        run: uv run --project backend python backend/scripts/run_test_group.py --group $env:TEST_GROUP --junitxml "test-results/$env:TEST_GROUP.xml"
+      - name: Upload timing and failure report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-tests-${{ matrix.group }}
+          path: test-results/*.xml
+          retention-days: 7
+
+  database:
+    # Keep the original overall check name; success requires every group.
+    needs: [checks, tests]
+    if: always()
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all backend and database checks to pass
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+        run: |
+          if ($env:CHECKS_RESULT -ne 'success' -or $env:TESTS_RESULT -ne 'success') {
+            throw "Backend checks: $env:CHECKS_RESULT; test groups: $env:TESTS_RESULT"
+          }

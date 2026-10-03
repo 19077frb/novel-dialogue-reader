@@ -122,6 +122,23 @@ pwsh -File scripts/verify.ps1
 
 Git 提交格式和自动化修改要求见 [AGENTS.md](AGENTS.md)。
 
+### 测试隔离与CI耗时
+
+普通数据库测试从每个pytest进程中真实迁移得到的空库模板生成独立副本，不共享可写数据库或应用对象。已有测试库不会被空模板覆盖；空库初始化、历史升级、迁移回退及离线维护测试仍执行真实迁移。模板仅在临时目录中存在，不存入仓库、书库或Actions缓存。
+
+数据库回归Actions保留全部后端测试，分为 `unit`、`database`、`integration-1`、`integration-2` 四组，最多四组并行。分组脚本和测试保证文件不遗漏、不重复；其中一组失败不会取消其他组，原 `database` 汇总检查必须在静态检查和全部测试组通过后才能通过。同一分支或PR的新提交会取消该回归工作流的旧运行，不取消独立的发布工作流；行为遵循 [GitHub并发规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)。实际并行数仍受账号可用runner限制。
+
+本地默认 `verify.ps1` 仍执行全量检查，并输出最慢的20项测试阶段（包括准备、执行和清理）。从项目根目录复现某组：
+
+```powershell
+uv run --project backend python backend/scripts/run_test_group.py --group database
+uv run --project backend python backend/scripts/run_test_group.py --group integration-1 --collect-only
+```
+
+每个CI组也输出耗时，并提供保留7天的JUnit附件，便于定位慢测试和失败，不代表真实模型质量。选择分组不依据本次修改文件；发布工作流继续执行全量验收，不绕过迁移或索引检查。
+
+分组脚本可用 `--junitxml` 指定本地报告位置，用 `--basetemp` 指定隔离测试目录；pytest会清理指定的临时目录，务必使用专用空目录，不能指向书库、仓库或已有资料目录。
+
 ## 8. 配置与离线维护
 
 用户页面操作见 [用户使用指南](docs/USER_GUIDE.md)。下面的命令面向源码部署和维护，不是日常阅读步骤。

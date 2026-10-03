@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
+from fixtures.database import initialize_test_database
 from ndr.app import create_app
 from ndr.config import Settings
 from ndr.storage.engine import create_db_engine
@@ -22,11 +23,20 @@ def tmp_settings(tmp_path: Path) -> Settings:
 
 
 @pytest.fixture()
-def migrated_settings(tmp_settings: Settings) -> Settings:
+def migrated_settings(tmp_settings: Settings, migrated_database_template: Path) -> Settings:
     """已迁移到 head 的隔离数据库配置。"""
 
-    run_migrations(tmp_settings)
+    initialize_test_database(tmp_settings, migrated_database_template)
     return tmp_settings
+
+
+@pytest.fixture(scope="session")
+def migrated_database_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """One real migration per pytest process; clients never write to this database."""
+    settings = Settings(data_dir=tmp_path_factory.mktemp("migrated-template"),
+                        credential_backend="session")
+    run_migrations(settings)
+    return settings.database_path
 
 
 @pytest.fixture()
@@ -61,7 +71,9 @@ def migrated_client(migrated_settings: Settings) -> Iterator[TestClient]:
         yield test_client
 
 @pytest.fixture()
-def fake_provider_client(tmp_path: Path) -> Iterator[TestClient]:
+def fake_provider_client(
+    tmp_path: Path, migrated_database_template: Path,
+) -> Iterator[TestClient]:
     """显式启用 FakeProvider 的隔离客户端（仅测试用；不发任何网络请求）。"""
 
     settings = Settings(
@@ -69,7 +81,7 @@ def fake_provider_client(tmp_path: Path) -> Iterator[TestClient]:
         credential_backend="session",
         allow_fake_provider=True,
     )
-    run_migrations(settings)
+    initialize_test_database(settings, migrated_database_template)
     app = create_app(settings)
     with TestClient(app) as test_client:
         yield test_client
