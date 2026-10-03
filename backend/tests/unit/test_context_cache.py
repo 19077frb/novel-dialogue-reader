@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -77,8 +78,9 @@ def _version_with_canonical(
     return session, version
 
 
+@pytest.mark.parametrize("changed_metadata", ["mtime", "size"])
 def test_canonical_text_cache_reuses_and_invalidates_on_change(
-    sandbox_settings: Settings, monkeypatch: pytest.MonkeyPatch
+    sandbox_settings: Settings, monkeypatch: pytest.MonkeyPatch, changed_metadata: str,
 ) -> None:
     relative = "books/b2/canonical.txt"
     path = sandbox_settings.data_dir / relative
@@ -99,8 +101,20 @@ def test_canonical_text_cache_reuses_and_invalidates_on_change(
     assert load_canonical_text(sandbox_settings, version) == "第一版"
     assert len(calls) == 1  # 第二次命中缓存
 
-    path.write_text("第二版", encoding="utf-8")
-    assert load_canonical_text(sandbox_settings, version) == "第二版"
+    before = path.stat()
+    replacement = "第二版" if changed_metadata == "mtime" else "第二版更长"
+    path.write_text(replacement, encoding="utf-8")
+    # Rapid same-size writes need not advance mtime on Windows. Explicitly
+    # exercise each part of the documented cache key, without timing sleeps.
+    timestamp = before.st_mtime_ns + 2_000_000_000 if changed_metadata == "mtime" else before.st_mtime_ns
+    os.utime(path, ns=(before.st_atime_ns, timestamp))
+    after = path.stat()
+    if changed_metadata == "mtime":
+        assert after.st_mtime_ns != before.st_mtime_ns and after.st_size == before.st_size
+    else:
+        assert after.st_mtime_ns == before.st_mtime_ns and after.st_size != before.st_size
+    assert load_canonical_text(sandbox_settings, version) == replacement
+    assert load_canonical_text(sandbox_settings, version) == replacement
     assert len(calls) == 2  # 文件变化后重新读取
 
 
