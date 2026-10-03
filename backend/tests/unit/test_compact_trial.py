@@ -81,10 +81,23 @@ def test_invalid_response_keeps_provider_usage():
 
 
 def test_no_model_success_fallback_after_retry_limit():
-    adapter = Adapter([{"labels": []}, {"labels": []}, valid()])
+    adapter = Adapter(
+        [
+            {"labels": [], "_usage": {"total_tokens": 10}},
+            {"labels": [], "_usage": {"total_tokens": 10}},
+            valid(),
+        ]
+    )
     result = asyncio.run(run_trial(adapter, task()))
     assert not result["ok"] and result["output"] is None
-    assert result["unknown_usage_calls"] == 2 and len(adapter.requests) == 2
+    assert result["known_tokens"] == 20 and len(adapter.requests) == 2
+
+
+def test_unknown_usage_stops_format_retries_until_reconciled():
+    adapter = Adapter([{"labels": []}, valid()])
+    result = asyncio.run(run_trial(adapter, task()))
+    assert not result["ok"] and result["reconciliation_required"]
+    assert result["unknown_usage_calls"] == 1 and len(adapter.requests) == 1
 
 
 def test_budget_and_legacy_pair_are_explicit():

@@ -80,6 +80,11 @@ async def run_trial(
             }
         record["elapsed_seconds"] = time.perf_counter() - began
         records.append(record)
+        # Unknown usage is a reconciliation boundary even for an otherwise
+        # retryable JSON error. Do not spend again before accounting for it.
+        if record["usage"].get("total_tokens") is None or record["usage"].get("unknown", False):
+            can_retry = False
+            result["reconciliation_required"] = True
         if result["ok"] or not can_retry:
             break
         if attempt < max_format_retries:

@@ -10,15 +10,29 @@
 
 初读输入必须显式指定可见范围，拒绝超范围原文及候选身份；调用者仍须核查名字、别名和说明各自的揭示时间，单一可见字段不能证明资料没有未来信息。重读允许显式提供更宽资料。指纹包含协议/提示版本、原文、引用映射、人物稳定ID、场景和阅读范围；本入口不共用生产缓存。
 
+## 证据检索与关联复核
+
+`ndr.evaluation.evidence.EvidenceIndex` 接收固定正文快照和稳定人物列表。`IdentityFact` 将姓名、别名、说明、关系分别记录可见位置、来源和可选原文范围；关系不作为别名，同名人物不合并。证据不能晚于资料的可见时点或越出正文。初读逐条过滤资料与原文；没有可靠资料历史时不能把整章名单伪装成初读安全名单。
+
+按目标附近姓名命中选择候选，保留指定参与者和POV，按每个人的数量上限返回外部原文锚点；8/16/32条窗口仅是实验档位，并非已证明的最佳值。姓名命中、发言动词、称呼和进出场提示都是检索线索，不是身份结论。目标、间隔、证据保留原字符坐标。
+
+`ndr.evaluation.risk.detect_risks` 覆盖已接受项的分层抽检、窗口边缘、未知与非对白类型、缺少外部证据、DIRECT关系未核实、新身份、共用证据冲突、未知依赖和称呼冲突。`review_blocks` 将附近目标合为关联片段；`risk_scores` 依据标准答案分别计算错误召回率和正确项复核比例，不把UNKNOWN当作正确项。这些规则尚不是校准过的正确性概率，不能凭触发或未触发宣称归属正确。
+
+`ndr.evaluation.review.run_linked_review` 显式选择独立判断或展示旧候选；独立输入不追加旧回答，候选输入标明旧答案不是事实。`reconcile` 保留人工锁定及未收到有效复核的原结果；分歧不会默认采用第二次答案。可提供有外部证据的第三次判断进行佐证，仍有冲突则保留UNKNOWN。证据存在也不代表语义充分，须测纠正数、误改数与增量消耗。匿名身份按调用隔离，不因相同称呼跨调用合并。
+
+`compile_decisions` 将完整结果重新编译，程序重建首次出现及场景内编号，不逐句修补生产状态。调用者必须显式提供批准的场景边界、匿名声明及复核引用的完整原文；身份或证据不在快照时拒绝编译。以上入口只返回提案，不写实际书库，也没有自动接入现有整窗复核或后台任务。
+
 ## 离线验证与模型对照
 
 从项目根目录运行原创夹具回归（不联网）：
 
 ```powershell
-uv run --project backend python -m pytest backend/tests/unit/test_compact_attribution.py backend/tests/unit/test_compact_trial.py
+uv run --project backend python -m pytest backend/tests/unit/test_compact_attribution.py backend/tests/unit/test_compact_trial.py backend/tests/unit/test_evidence_retrieval.py backend/tests/unit/test_attribution_risk.py backend/tests/unit/test_linked_review.py
 ```
 
 模型对照由维护者显式提供适配器，调用`ndr.evaluation.compact_trial.run_trial`。短协议默认使用task.messages()；旧协议需同时提供legacy_messages和legacy_targets。返回原输出、完整编译结果、每次尝试的用量/失败原因/时间、首次合法率和未知用量次数。每窗最多额外0～5次格式重试，默认1；超时、限流、鉴权或网络错误不自动重发。每次输出上限显式固定，重试不暗换模型、思考设置、文本或上限。没有任何隐式强模型兜底。
+
+未知用量即使发生在格式错误时也会停止后续重试，并返回`reconciliation_required`；调用者须停止新增窗口并对账，不能把未知消耗记成零后继续。此标记不是自动恢复或持久化机制。
 
 此函数不保存数据库或运行记录；调用者须在每窗之后持久化内部结果、禁止静默覆盖旧实验/重复发费，核对提供方实际模型及thinking参数。请求会发送提供的原文，真实运行需明确授权数据和端点，并另外约束总调用数及费用；该离线命令不代表已授权付费。
 
