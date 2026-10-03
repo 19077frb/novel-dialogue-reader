@@ -374,6 +374,43 @@ describe('PreviewPage', () => {
     ] as never)
   })
 
+  it('手动人物确认后重新读取与再次进入仍显示姓名说明和主人公', async () => {
+    let current = ROSTER
+    vi.mocked(charactersApi.fetchCharacterRoster).mockImplementation(async () => current)
+    vi.mocked(charactersApi.confirmCharacterRoster).mockImplementation(async (_book, _chapter, input) => {
+      const candidates = input.candidates.filter(item => item.accepted).map((item, index) => ({
+        temp_ref: item.temp_ref,
+        character_id: item.character_id ?? `manual-char-${index}`,
+        canonical_name: item.canonical_name,
+        aliases: item.aliases ?? [],
+        description: item.description ?? '',
+        evidence_refs: [],
+        pov_candidate: item.temp_ref === input.povTempRef,
+      }))
+      current = { ...current, version: current.version + 1, candidates,
+        pov_character_id: candidates.find(item => item.pov_candidate)!.character_id }
+      return current
+    })
+    const mounted = renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('roster-name-c1')
+    await userEvent.click(screen.getByTestId('roster-add-character'))
+    const card = screen.getByTestId('roster-candidates').querySelectorAll('article')[1]
+    await userEvent.type(within(card as HTMLElement).getByRole('textbox', { name: '姓名' }), '手动人物')
+    await userEvent.type(within(card as HTMLElement).getByRole('textbox', { name: '说明' }), '手动说明')
+    await userEvent.click(within(card as HTMLElement).getByRole('radio'))
+    await userEvent.click(screen.getByTestId('roster-confirm'))
+    await waitFor(() => expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(charactersApi.fetchCharacterRoster).toHaveBeenCalledTimes(2))
+    const manualRef = current.candidates![1].temp_ref
+    await waitFor(() => expect(screen.getByTestId(`roster-name-${manualRef}`)).toHaveValue('手动人物'))
+    mounted.unmount()
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    const restored = (await screen.findByTestId(`roster-name-${manualRef}`)).closest('article')!
+    expect(within(restored).getByRole('textbox', { name: '说明' })).toHaveValue('手动说明')
+    expect(within(restored).getByRole('radio')).toBeChecked()
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
+  })
+
   it('显示当前模型的思考默认值，任务可覆盖默认关闭模式', async () => {
     const profiles = await profilesApi.fetchProfiles()
     vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([{ ...profiles[0], params: { thinking: { type: 'disabled' } } }])

@@ -16,8 +16,149 @@ from ndr.jobs.scheduler import run_job
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.llm.schemas import RosterOutput
 from ndr.storage.engine import create_db_engine, create_session_factory
-from ndr.storage.models import BookCharacter, BookVersion, Chapter, InferenceRun
+from ndr.storage.models import (
+    BookCharacter,
+    BookVersion,
+    Chapter,
+    ChapterCharacterRoster,
+    InferenceRun,
+)
 from ndr.storage.transactions import transaction
+
+
+@pytest.mark.parametrize("analyzed", [False, True])
+def test_manual_roster_candidates_survive_save_reload_and_reconfirmation(migrated_client, analyzed):
+    client = migrated_client
+    imported = client.post("/api/books/import", files={
+        "file": ("manual.txt", "第一章\n「你好。」".encode(), "text/plain"),
+    }).json()["data"]
+    base = f"/api/books/{imported['book_id']}"
+    chapter_id = client.get(f"{base}/chapters").json()["data"][0]["id"]
+    if analyzed:
+        with transaction(client.app.state.session_factory) as session:
+            store_roster_candidates(
+                session, version=session.get(BookVersion, imported["book_version_id"]),
+                chapter=session.get(Chapter, chapter_id), job_id=None,
+                output=RosterOutput.model_validate({"characters": [{
+                    "temp_ref": "c1", "name": "原候选", "description": "原说明",
+                    "evidence_refs": ["L1"], "pov_candidate": True,
+                }]}),
+            )
+    path = f"{base}/chapters/{chapter_id}/character-roster"
+    initial = client.get(path).json()["data"]
+    manual = {"temp_ref": "user-new", "canonical_name": "手动人物",
+              "aliases": ["小明"], "description": "手动说明"}
+    candidates = [manual]
+    if analyzed:
+        old = initial["candidates"][0]
+        candidates.insert(0, {"temp_ref": old["temp_ref"], "character_id": old["character_id"],
+                             "canonical_name": "编辑后的名字", "aliases": ["原候选"],
+                             "description": "编辑后的说明"})
+    response = client.put(path, json={"candidates": candidates, "pov_temp_ref": "user-new",
+                                      "expected_version": initial["version"]})
+    assert response.status_code == 200, response.text
+    saved = response.json()["data"]
+    assert client.get(path).json()["data"] == saved
+    assert [c["temp_ref"] for c in saved["candidates"]] == [c["temp_ref"] for c in candidates]
+    added = saved["candidates"][-1]
+    assert added["canonical_name"] == "手动人物"
+    assert added["aliases"] == ["小明"] and added["description"] == "手动说明"
+    assert added["pov_candidate"] and saved["pov_character_id"] == added["character_id"]
+    if analyzed:
+        edited = saved["candidates"][0]
+        assert edited["canonical_name"] == "编辑后的名字"
+        assert edited["description"] == "编辑后的说明" and edited["evidence_refs"] == ["L1"]
+        assert not edited["pov_candidate"]
+    # Reconfirm the refetched snapshot without creating another identity.
+    accepted = [{key: c[key] for key in (
+        "temp_ref", "character_id", "canonical_name", "aliases", "description",
+    )} for c in saved["candidates"]]
+    again = client.put(path, json={"candidates": accepted, "pov_temp_ref": "user-new",
+                                   "expected_version": saved["version"]})
+    assert again.status_code == 200, again.text
+    assert again.json()["data"]["pov_character_id"] == added["character_id"]
+    assert len(again.json()["data"]["confirmed_characters"]) == len(candidates)
+    with transaction(client.app.state.session_factory) as session:
+        roster = session.scalar(select(ChapterCharacterRoster).where(
+            ChapterCharacterRoster.chapter_id == chapter_id,
+        ))
+        assert [c["temp_ref"] for c in json.loads(roster.candidates_json)] == [
+            c["temp_ref"] for c in candidates
+        ]
+    if analyzed:
+        deselected = client.put(path, json={
+            "candidates": [accepted[0], {**accepted[1], "accepted": False}],
+            "pov_temp_ref": accepted[0]["temp_ref"],
+            "expected_version": again.json()["data"]["version"],
+        })
+        assert deselected.status_code == 200, deselected.text
+        assert [c["temp_ref"] for c in deselected.json()["data"]["candidates"]] == ["c1"]
+        with transaction(client.app.state.session_factory) as session:
+            assert session.get(BookCharacter, added["character_id"]) is not None
+
+
+def test_legacy_confirmed_roster_restores_missing_manual_candidate_without_db_write(migrated_client):
+    client = migrated_client
+    imported = client.post("/api/books/import", files={
+        "file": ("legacy.txt", "第一章\n「你好。」".encode(), "text/plain"),
+    }).json()["data"]
+    base = f"/api/books/{imported['book_id']}"
+    chapter_id = client.get(f"{base}/chapters").json()["data"][0]["id"]
+    path = f"{base}/chapters/{chapter_id}/character-roster"
+    saved = client.put(path, json={"candidates": [{"temp_ref": "user-old",
+        "canonical_name": "旧手动人物", "description": "已有说明"}],
+        "pov_temp_ref": "user-old", "expected_version": 1}).json()["data"]
+    with transaction(client.app.state.session_factory) as session:
+        roster = session.scalar(select(ChapterCharacterRoster).where(
+            ChapterCharacterRoster.chapter_id == chapter_id,
+        ))
+        roster.candidates_json = "[]"
+    restored = client.get(path).json()["data"]
+    candidate = restored["candidates"][0]
+    assert candidate["character_id"] == saved["pov_character_id"]
+    assert candidate["canonical_name"] == "旧手动人物" and candidate["pov_candidate"]
+    assert candidate["evidence_refs"] == []
+    assert client.get(path).json()["data"] == restored
+    with transaction(client.app.state.session_factory) as session:
+        roster = session.scalar(select(ChapterCharacterRoster).where(
+            ChapterCharacterRoster.chapter_id == chapter_id,
+        ))
+        assert roster.candidates_json == "[]" and roster.version == saved["version"]
+    # Saving the reconstructed legacy candidate must reuse the same identity.
+    accepted = {key: candidate[key] for key in (
+        "temp_ref", "character_id", "canonical_name", "aliases", "description",
+    )}
+    again = client.put(path, json={"candidates": [accepted],
+        "pov_temp_ref": candidate["temp_ref"], "expected_version": restored["version"]})
+    assert again.status_code == 200, again.text
+    assert again.json()["data"]["pov_character_id"] == saved["pov_character_id"]
+    assert again.json()["data"]["candidates"][0]["temp_ref"] == candidate["temp_ref"]
+
+
+def test_manual_confirmation_rejection_rolls_back_and_unchecked_candidates_stay_out(migrated_client):
+    client = migrated_client
+    imported = client.post("/api/books/import", files={
+        "file": ("reject.txt", "第一章\n「你好。」".encode(), "text/plain"),
+    }).json()["data"]
+    base = f"/api/books/{imported['book_id']}"
+    chapter_id = client.get(f"{base}/chapters").json()["data"][0]["id"]
+    path = f"{base}/chapters/{chapter_id}/character-roster"
+    candidates = [{"temp_ref": "keep", "canonical_name": "保留人物"},
+                  {"temp_ref": "reject", "canonical_name": "不选人物", "accepted": False}]
+    for extra in [{"pov_temp_ref": "reject"}, {"expected_version": 2},
+                  {"confirmation_mode": "automatic"}]:
+        invalid = client.put(path, json={"candidates": candidates, "pov_temp_ref": "keep",
+                                        "expected_version": 1, **extra})
+        assert invalid.status_code in {404, 422}, invalid.text
+        assert client.get(path).json()["data"]["status"] == "DRAFT"
+        with transaction(client.app.state.session_factory) as session:
+            assert session.scalar(select(BookCharacter).where(
+                BookCharacter.book_version_id == imported["book_version_id"],
+            )) is None
+    saved = client.put(path, json={"candidates": candidates, "pov_temp_ref": "keep",
+                                  "expected_version": 1})
+    assert saved.status_code == 200, saved.text
+    assert [c["temp_ref"] for c in saved.json()["data"]["candidates"]] == ["keep"]
 
 
 @pytest.mark.parametrize("allow", [False, True])

@@ -117,6 +117,25 @@ def _roster_out(
         for character_id in character_ids
         if (character := by_id.get(character_id)) is not None
     ]
+    if row.status is CharacterRosterStatus.CONFIRMED:
+        # Older confirmations saved identities but not the edited candidate snapshot.
+        # Reconcile without rewriting the database or inventing model evidence.
+        saved_by_id = {item.character_id: item for item in candidates}
+        candidates = []
+        for character_id in dict.fromkeys(character_ids):
+            character = by_id.get(character_id)
+            if character is None:
+                continue
+            saved = saved_by_id.get(character_id)
+            candidates.append(RosterCharacterCandidate(
+                temp_ref=saved.temp_ref if saved else f"confirmed-{character_id}",
+                character_id=character_id,
+                canonical_name=character.canonical_name,
+                aliases=_json_list(character.aliases_json),
+                description=character.description or "",
+                evidence_refs=saved.evidence_refs if saved else [],
+                pov_candidate=character_id == row.pov_character_id,
+            ))
     return ChapterRosterOut(
         chapter_id=row.chapter_id,
         book_version_id=row.book_version_id,
@@ -467,7 +486,12 @@ def confirm_roster(
 ) -> ChapterRosterOut:
     roster = _roster_for_chapter(session, chapter.id)
     if roster is None:
-        raise ApiError.not_found("该章节还没有人物分析结果", chapter_id=chapter.id)
+        if payload.confirmation_mode != "manual":
+            raise ApiError.not_found("该章节还没有人物分析结果", chapter_id=chapter.id)
+        roster = ChapterCharacterRoster(
+            chapter_id=chapter.id, book_version_id=version.id, version=1,
+        )
+        session.add(roster)
     if roster.version != payload.expected_version:
         raise ApiError.validation(
             "人物名单已被修改，请刷新后重试",
@@ -485,6 +509,7 @@ def confirm_roster(
         analysis_job.range_json or "{}"
     ).get("allow_overwrite_manual", False))
     confirmed_ids: list[str] = []
+    confirmed_candidates: list[dict[str, Any]] = []
     character_by_ref: dict[str, BookCharacter] = {}
     for item in payload.candidates:
         source = current.get(item.temp_ref)
@@ -511,6 +536,15 @@ def confirm_roster(
         )
         confirmed_ids.append(character.id)
         character_by_ref[item.temp_ref] = character
+        confirmed_candidates.append({
+            "temp_ref": item.temp_ref,
+            "character_id": character.id,
+            "canonical_name": character.canonical_name,
+            "aliases": _json_list(character.aliases_json),
+            "description": character.description or "",
+            "evidence_refs": (source or {}).get("evidence_refs", []),
+            "pov_candidate": item.temp_ref == payload.pov_temp_ref,
+        })
 
     if not confirmed_ids:
         raise ApiError.validation("至少确认一个人物")
@@ -522,6 +556,7 @@ def confirm_roster(
             pov_temp_ref=payload.pov_temp_ref,
         )
 
+    roster.candidates_json = json.dumps(confirmed_candidates, ensure_ascii=False)
     roster.confirmed_character_ids_json = json.dumps(confirmed_ids, ensure_ascii=False)
     roster.pov_character_id = pov_character.id
     roster.status = CharacterRosterStatus.CONFIRMED
