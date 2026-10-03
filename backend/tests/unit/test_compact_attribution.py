@@ -127,3 +127,25 @@ def test_exact_identity_scores_reject_swap_and_count_missing_unknown():
         {"q1": "A", "q2": "B", "q3": "C"}, {"q1": "A", "q2": None, "extra": "D"}
     )
     assert (score["correct"], score["unknown"], score["missing"], score["extra"]) == (1, 1, 1, 1)
+
+
+def test_input_cannot_alias_different_people_to_one_existing_group():
+    with pytest.raises(ValueError, match="share"):
+        replace(
+            task(),
+            candidates=(
+                Candidate("C1", "a", "林舟", existing_ref="S1"),
+                Candidate("C2", "b", "周遥", existing_ref="S1"),
+            ),
+        )
+
+
+def test_explicit_scene_plan_is_checked_against_original_positions():
+    context = tuple(
+        {**row, "start_cp": pos} for row, pos in zip(task().context, [0, 10, 15], strict=True)
+    )
+    valid = replace(task(), context=context)
+    with pytest.raises(ValueError, match="next target"):
+        replace(valid, gap_next_quote={"G1": "Q1"})
+    with pytest.raises(ValueError, match="next target"):
+        replace(valid, gap_next_quote={"G1": None})

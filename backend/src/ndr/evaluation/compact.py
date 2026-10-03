@@ -79,6 +79,9 @@ class CompactTask:
         identities = [c.character_id for c in self.candidates if c.character_id]
         if len(refs) != len(set(refs)) or len(identities) != len(set(identities)):
             raise ValueError("Duplicate candidate reference or stable identity")
+        existing = [c.existing_ref for c in self.candidates if c.existing_ref]
+        if len(existing) != len(set(existing)):
+            raise ValueError("Two candidates cannot share one existing scene slot")
         if any(not ref.startswith("C") or not ref[1:].isdigit() for ref in refs):
             raise ValueError("Candidate references must use C<number>")
         if len(self.quote_ids) != len(set(self.quote_ids)):
@@ -95,6 +98,17 @@ class CompactTask:
         context_refs = [row["ref"] for row in self.context]
         if len(context_refs) != len(set(context_refs)) or set(context_refs) != set(self.references):
             raise ValueError("Context must supply exactly the mapped original evidence")
+        positions = {row["ref"]: row for row in self.context}
+        for gap, successor in self.gap_next_quote.items():
+            row = positions[gap]
+            if "kind" in row and row["kind"] not in {"inner_gap", "outer_gap"}:
+                raise ValueError("Scene boundary must refer to a gap")
+            # Validate caller-provided plans, never repair a guessed successor.
+            if "start_cp" in row and all("start_cp" in positions[q] for q in self.quote_ids):
+                following = [q for q in self.quote_ids if positions[q]["start_cp"] >= row["end_cp"]]
+                expected = following[0] if following else None
+                if successor != expected:
+                    raise ValueError("Gap successor must be the next target in original text")
         if self.reading_mode == "initial":
             if self.visible_horizon_cp is None:
                 raise ValueError("Initial reading requires an explicit evidence horizon")
