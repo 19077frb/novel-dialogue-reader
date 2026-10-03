@@ -15,7 +15,7 @@ from ..llm.schemas import LlmOutput
 from .compact import CompactTask, compile_output
 from .compact_trial import run_trial
 
-REVIEW_VERSION = "linked-review-1"
+REVIEW_VERSION = "linked-review-2"
 
 
 @dataclass(frozen=True)
@@ -142,7 +142,12 @@ def reconcile(
             result[quote_id], reasons[quote_id] = base, "review_unavailable"
             continue
         if base.signature() == second.signature():
-            result[quote_id], reasons[quote_id] = second, "agreement"
+            if base.supported(quote_id) and not second.supported(quote_id):
+                # Same identity is not a new proof. A weaker repeated answer
+                # must not erase the existing admissible original evidence.
+                result[quote_id], reasons[quote_id] = base, "agreement_kept_supported_base"
+            else:
+                result[quote_id], reasons[quote_id] = second, "agreement"
             continue
         third = adjudicated.get(quote_id)
         if third is not None:

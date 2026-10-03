@@ -256,6 +256,7 @@ class CallJournal:
                 "calls": len(rows),
                 "known_tokens": sum(r["tokens"] or 0 for r in rows),
                 "unknown_calls": sum(r["state"] in {"unknown", "dispatched"} for r in rows),
+                "unresolved_calls": sum(r["state"] == "unknown" for r in rows),
                 "reserved_tokens": sum(r["reserved"] for r in rows if r["state"] == "dispatched"),
             }
 

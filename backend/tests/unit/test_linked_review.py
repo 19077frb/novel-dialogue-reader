@@ -47,6 +47,23 @@ def test_disagreement_is_not_automatically_replaced_by_second_answer():
     assert result["q1"].basis == "insufficient"
 
 
+@pytest.mark.parametrize("weak", [d(evidence=(), basis="style_only"), d(evidence=("q1",))])
+def test_agreement_does_not_erase_existing_external_evidence_with_weaker_review(weak):
+    base = d()
+    result, why = reconcile({"q1": base}, {"q1": weak})
+    assert result["q1"] == base
+    assert why["q1"] == "agreement_kept_supported_base"
+
+
+def test_agreement_can_use_supported_review_but_never_invents_support_for_two_weak_answers():
+    weak = d(evidence=(), basis="style_only")
+    strong = d(evidence=("new_original_proof",))
+    result, why = reconcile({"q1": weak}, {"q1": strong})
+    assert result["q1"] == strong and why["q1"] == "agreement"
+    result, _ = reconcile({"q1": weak}, {"q1": weak})
+    assert not result["q1"].supported("q1")
+
+
 def test_evidence_corroboration_can_fix_or_retain_but_self_citation_is_not_enough():
     result, why = reconcile({"q1": d()}, {"q1": d("b")}, adjudicated={"q1": d("b")})
     assert result["q1"].character_id == "b" and why["q1"] == "evidence_corroborated"
