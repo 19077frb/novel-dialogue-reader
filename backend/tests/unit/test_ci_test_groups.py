@@ -30,7 +30,24 @@ def test_workflow_matrix_matches_runner_and_keeps_full_results():
     assert strategy["max-parallel"] == 4
     assert "github.workflow" in workflow["concurrency"]["group"]
     assert workflow["concurrency"]["cancel-in-progress"] is True
-    assert set(workflow["jobs"]["database"]["needs"]) == {"checks", "tests"}
+    assert set(workflow["jobs"]["database"]["needs"]) == {"checks", "tests", "frontend"}
+
+
+def test_all_pull_requests_require_frontend_validation_and_production_build():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/schema-indexes.yml").read_text(encoding="utf-8"))
+    # PyYAML's YAML 1.1 parser treats the unquoted GitHub key "on" as True.
+    events = workflow.get("on", workflow.get(True))
+    assert "pull_request" in events
+    assert events["pull_request"] is None or not set(events["pull_request"]) & {"paths", "paths-ignore"}
+    assert "frontend/**" in events["push"]["paths"]
+    assert events["push"]["branches"] == ["main"]
+    commands = [step["run"] for step in workflow["jobs"]["frontend"]["steps"] if "run" in step]
+    for command in ("ci", "run typecheck", "run check:api", "run test", "run build"):
+        assert f"npm --prefix frontend {command}" in commands
+    summary = workflow["jobs"]["database"]
+    assert summary["if"] == "always()"
+    assert any("$env:FRONTEND_RESULT -ne 'success'" in step.get("run", "")
+               for step in summary["steps"])
 
 
 def test_unknown_test_directory_fails_instead_of_skipping(tmp_path):
