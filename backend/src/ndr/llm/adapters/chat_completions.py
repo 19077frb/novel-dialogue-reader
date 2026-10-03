@@ -379,7 +379,8 @@ class ChatCompletionsAdapter:
                     **(exc.details or {}),
                 },
             ) from exc
-        parsed.setdefault("_usage", self.normalize_usage(data.get("usage")).as_dict())
+        # This reserved field is transport metadata, never model-authored JSON.
+        parsed["_usage"] = usage
         return parsed
 
     def estimate_tokens(self, text: str) -> TokenEstimate:
@@ -397,12 +398,14 @@ class ChatCompletionsAdapter:
         if not raw:
             # 未知用量：保持 None，绝不写成 0
             return UsageRecord(unknown=True)
+        if not isinstance(raw, Mapping):
+            return UsageRecord(unknown=True)
         payload = raw.get("usage") if isinstance(raw.get("usage"), Mapping) else raw
 
         def _pick(*names: str) -> int | None:
             for name in names:
                 value = payload.get(name) if isinstance(payload, Mapping) else None
-                if isinstance(value, int):
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                     return value
             return None
 

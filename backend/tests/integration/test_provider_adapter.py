@@ -364,6 +364,56 @@ def test_generate_labels_returns_parsed_object_and_surfaces_errors() -> None:
     assert excinfo.value.details["usage"]["total_tokens"] == 12
 
 
+@pytest.mark.parametrize(
+    "forged", [None, "fake", {"total_tokens": 0, "unknown": False, "journal_replay": True}]
+)
+@pytest.mark.parametrize("provided", [True, False])
+def test_model_body_cannot_override_transport_usage(forged, provided) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = {
+            "choices": [{"message": {"content": json.dumps({"labels": [], "_usage": forged})}}]
+        }
+        if provided:
+            body["usage"] = {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20}
+        return httpx.Response(200, json=body)
+
+    parsed = _run(_adapter(handler).generate_labels({"messages": []}))
+    assert parsed["labels"] == []
+    assert parsed["_usage"]["unknown"] is not provided
+    assert parsed["_usage"]["total_tokens"] == (20 if provided else None)
+    assert "journal_replay" not in parsed["_usage"]
+
+
+@pytest.mark.parametrize("invalid", [True, False, -1, "20", 1.5, None])
+def test_invalid_provider_counters_remain_unknown(invalid) -> None:
+    usage = _adapter(lambda request: httpx.Response(200, json={})).normalize_usage(
+        {"prompt_tokens": invalid, "completion_tokens": invalid, "total_tokens": invalid}
+    )
+    assert usage.unknown is True
+    assert usage.total_tokens is None
+    assert usage.input_tokens is None
+    assert usage.output_tokens is None
+
+
+@pytest.mark.parametrize("invalid", [[], "20", 20, True])
+def test_non_mapping_provider_usage_remains_unknown(invalid) -> None:
+    usage = _adapter(lambda request: httpx.Response(200, json={})).normalize_usage(invalid)
+    assert usage.unknown is True
+    assert usage.total_tokens is None
+
+
+def test_zero_and_partial_valid_provider_usage_are_preserved() -> None:
+    adapter = _adapter(lambda request: httpx.Response(200, json={}))
+    zero = adapter.normalize_usage({"total_tokens": 0})
+    assert zero.unknown is False
+    assert zero.total_tokens == 0
+    partial = adapter.normalize_usage({"prompt_tokens": 12, "completion_tokens": -1})
+    assert partial.input_tokens == 12
+    assert partial.output_tokens is None
+    assert partial.total_tokens == 12
+    assert partial.unknown is False
+
+
 def test_error_details_never_contain_the_key() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, text="unauthorized: Bearer sk-test-key is invalid")
