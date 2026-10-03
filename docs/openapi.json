@@ -3089,6 +3089,48 @@
         }
       }
     },
+    "/api/books/{book_id}/review-items/cleanup-dependencies": {
+      "post": {
+        "tags": [
+          "corrections"
+        ],
+        "summary": "清理历史局部更正误触发的重新确认记录（不调用模型）",
+        "operationId": "cleanup_dependency_reviews_route_api_books__book_id__review_items_cleanup_dependencies_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_StaleReviewCleanupOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/books/{book_id}/review-items": {
       "get": {
         "tags": [
@@ -6895,6 +6937,25 @@
         ],
         "title": "DataEnvelope[SpeakerRevisionOut]"
       },
+      "DataEnvelope_StaleReviewCleanupOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StaleReviewCleanupOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[StaleReviewCleanupOut]"
+      },
       "DataEnvelope_UndoOut_": {
         "properties": {
           "data": {
@@ -10462,6 +10523,31 @@
           "scene_version"
         ],
         "title": "SpeakerRevisionOut"
+      },
+      "StaleReviewCleanupOut": {
+        "properties": {
+          "resolved_records": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Resolved Records",
+            "default": 0
+          },
+          "restored_quotes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Restored Quotes",
+            "default": 0
+          },
+          "preserved_records": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Preserved Records",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StaleReviewCleanupOut"
       },
       "UndoOut": {
         "properties": {

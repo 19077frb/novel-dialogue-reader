@@ -10,7 +10,7 @@ import { Link, useParams } from 'react-router-dom'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
 
 import { fetchBook, fetchChapters, fetchGaps, queryKeys } from '../api/books'
-import { fetchReviewQueue, submitGapCorrection, type ReviewFilters } from '../api/review'
+import { cleanupDependencyReviews, fetchReviewQueue, submitGapCorrection, type ReviewFilters } from '../api/review'
 import type {
   GapDecision,
   GapOut,
@@ -39,7 +39,7 @@ const REASON_LABELS: Record<ReviewReason, string> = {
   UNKNOWN_SPEAKER: '无法确定说话人',
   POSSIBLE_NEW_SPEAKER: '可能是新说话人',
   SCENE_BOUNDARY: '场景边界待确认',
-  STALE_DEPENDENCY: '上游修改后需重新确认',
+  STALE_DEPENDENCY: '人物或场景调整后需复核',
   USER_FLAGGED: '用户标记',
   OTHER: '其他',
 }
@@ -147,6 +147,22 @@ export default function ReviewPage() {
     },
   })
 
+  const cleanup = useMutation({
+    mutationFn: () => cleanupDependencyReviews(bookId!),
+    onSuccess: () => {
+      setCursor(null)
+      setPages(previous => previous.slice(0, 1))
+      void queryClient.invalidateQueries({ queryKey: ['review-items', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['annotations', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['review-item'] })
+      void queryClient.invalidateQueries({ queryKey: ['quote-detail'] })
+    },
+  })
+  const cleanupBlocker = cleanup.isPending ? '正在清理记录，请等待完成。'
+    : book.isError ? '书籍读取失败，请先重新读取书籍。'
+    : !book.data ? '正在读取书籍，请稍候。'
+    : !book.data.active_version_id ? '本书还没有可用正文，请先完成导入。' : null
+
   if (!bookId) return <p className="status-error">缺少书籍 ID。</p>
 
   return (
@@ -166,6 +182,17 @@ export default function ReviewPage() {
           <Link to="/library">返回书架</Link>
         </nav>
       </header>
+
+      <section className="card">
+        <button type="button" onClick={() => cleanup.mutate()} disabled={Boolean(cleanupBlocker)}
+          title={cleanupBlocker ?? undefined} data-testid="cleanup-dependency-reviews">
+          清理历史误触发的重新确认
+        </button>
+        <p className="hint">清理本书因改单句而连带产生的历史待确认记录，不改变人物归属、不调用模型。真实不确定项、结构调整及来源不明的记录会保留；有任务运行时不能清理。</p>
+        {cleanupBlocker && <p className="hint" role="status">{cleanupBlocker}</p>}
+        {cleanup.data && <p role="status">已清理 {cleanup.data.resolved_records} 条误触发记录，恢复 {cleanup.data.restored_quotes} 句正常显示；保留 {cleanup.data.preserved_records} 条需继续检查的记录。</p>}
+        {cleanup.isError && <p className="status-error" role="alert">清理失败：{cleanup.error.message}</p>}
+      </section>
 
       <section className="card ndr-review-filters">
         <label>

@@ -8,7 +8,7 @@
 - 更正：`POST /api/quotes/{id}/corrections`、`POST /api/gaps/{id}/corrections`、
   `POST /api/scenes/{id}/speaker-revisions`、`POST /api/corrections/{id}/undo`。
 
-这些接口**不调用模型**：只写更正/历史/队列，并标记下游 stale。
+这些接口**不调用模型**：局部更正只影响选中对白，结构调整标记实际受影响范围。
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlalchemy.orm import Session
 
+from ..corrections.cleanup import cleanup_local_edit_reviews
 from ..corrections.identity import apply_speaker_revision, speaker_revision_out
 from ..corrections.review import (
     defer_review_item,
@@ -52,6 +53,7 @@ from ..domain.corrections import (
     ReviewQueueResponse,
     SpeakerRevisionIn,
     SpeakerRevisionOut,
+    StaleReviewCleanupOut,
     UndoOut,
 )
 from ..domain.enums import (
@@ -90,6 +92,19 @@ def _active_version_or_409(session: Session, book_id: str):  # noqa: ANN202
             status_code=409,
         )
     return book, version
+
+@book_router.post(
+    "/{book_id}/review-items/cleanup-dependencies",
+    response_model=DataEnvelope[StaleReviewCleanupOut],
+    summary="清理历史局部更正误触发的重新确认记录（不调用模型）",
+)
+def cleanup_dependency_reviews_route(
+    request: Request, book_id: str,
+) -> DataEnvelope[StaleReviewCleanupOut]:
+    with transaction(request.app.state.session_factory) as session:
+        result = cleanup_local_edit_reviews(session, book_id)
+    return DataEnvelope(data=result, request_id=current_request_id(request))
+
 
 @book_router.get(
     "/{book_id}/review-items",

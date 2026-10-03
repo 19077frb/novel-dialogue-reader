@@ -864,6 +864,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/books/{book_id}/review-items/cleanup-dependencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 清理历史局部更正误触发的重新确认记录（不调用模型） */
+        post: operations["cleanup_dependency_reviews_route_api_books__book_id__review_items_cleanup_dependencies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/books/{book_id}/review-items": {
         parameters: {
             query?: never;
@@ -2260,6 +2277,15 @@ export interface components {
         /** DataEnvelope[SpeakerRevisionOut] */
         DataEnvelope_SpeakerRevisionOut_: {
             data: components["schemas"]["SpeakerRevisionOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[StaleReviewCleanupOut] */
+        DataEnvelope_StaleReviewCleanupOut_: {
+            data: components["schemas"]["StaleReviewCleanupOut"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -3719,6 +3745,24 @@ export interface components {
             updated_review_counts?: {
                 [key: string]: number;
             };
+        };
+        /** StaleReviewCleanupOut */
+        StaleReviewCleanupOut: {
+            /**
+             * Resolved Records
+             * @default 0
+             */
+            resolved_records: number;
+            /**
+             * Restored Quotes
+             * @default 0
+             */
+            restored_quotes: number;
+            /**
+             * Preserved Records
+             * @default 0
+             */
+            preserved_records: number;
         };
         /** UndoOut */
         UndoOut: {
@@ -5707,6 +5751,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_AnnotationsResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cleanup_dependency_reviews_route_api_books__book_id__review_items_cleanup_dependencies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_StaleReviewCleanupOut_"];
                 };
             };
             /** @description Validation Error */

@@ -1,13 +1,14 @@
 """集成测试：人工更正、待确认队列与撤销。
 
 覆盖：普通对白（含未处理）详情与主动标记、四种说话人更正、跨场景误关联拒绝、
-并发旧版本冲突、撤销越过新修订、下游 stale、模型不覆盖人工锁定、Gap BREAK 与撤销。
+并发旧版本冲突、局部更正不扩散、历史误触发清理、锁定保护、Gap BREAK 与撤销。
 """
 
 from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -21,6 +22,15 @@ from fixtures.corrections import (
     session_scope,
 )
 from ndr.config import Settings
+from ndr.corrections.history import annotation_snapshot
+from ndr.corrections.invalidator import mark_stale, upsert_review_item
+from ndr.domain.enums import (
+    AnnotationSource,
+    CorrectionAction,
+    CorrectionTargetType,
+    ReviewQueueStatus,
+    ReviewReason,
+)
 from ndr.storage.models import (
     Annotation,
     AnnotationHistory,
@@ -209,7 +219,7 @@ def test_quote_detail_exposes_confirmed_speaker_names(
     assert current["canonical_name"] == "绫濑沙季"
     assert "description" in current
 
-def test_assign_existing_locks_quote_without_model_call_and_marks_downstream(
+def test_assign_existing_locks_quote_without_model_call_or_invalidating_others(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
     data = _prepare(fake_provider_client, migrated_settings)
@@ -223,6 +233,8 @@ def test_assign_existing_locks_quote_without_model_call_and_marks_downstream(
 
     second = items[1]
     before = _annotation_state(migrated_settings, second["quote_id"])
+    other_states = {item["quote_id"]: _annotation_state(migrated_settings, item["quote_id"])
+                    for item in items if item["quote_id"] != second["quote_id"]}
     counts_before = _counts(migrated_settings)
 
     response = fake_provider_client.post(
@@ -249,11 +261,10 @@ def test_assign_existing_locks_quote_without_model_call_and_marks_downstream(
     assert after["user_locked"] is True
     assert after["assignment"] == "EXISTING"
 
-    # 下游：同一窗口的其它对白被标为 stale，并建立 STALE_DEPENDENCY 待确认项
-    assert payload["stale_quote_ids"], payload
-    for quote_id in payload["stale_quote_ids"]:
-        assert _annotation_state(migrated_settings, quote_id)["stale"] is True
-    assert payload["stale_window_ids"]
+    assert payload["stale_quote_ids"] == []
+    assert payload["stale_window_ids"] == []
+    for quote_id, old_state in other_states.items():
+        assert _annotation_state(migrated_settings, quote_id) == old_state
 
     counts_after = _counts(migrated_settings)
     assert counts_after["runs"] == counts_before["runs"]  # 人工更正不产生模型调用
@@ -272,6 +283,129 @@ def test_assign_existing_locks_quote_without_model_call_and_marks_downstream(
     snapshot = json.loads(history[0].snapshot_json)
     assert snapshot["source"] == "MODEL" and snapshot["user_locked"] is False
     assert snapshot["status"] == before["status"]
+
+
+@pytest.mark.parametrize("action, extra", [
+    ("mark_unknown", {}), ("set_kind", {"kind": "thought"}),
+    ("create_speaker", {"description": "另一个说话人"}),
+])
+def test_local_correction_and_undo_leave_other_quotes_unchanged(
+    fake_provider_client, migrated_settings, action, extra,
+):
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings)
+    ids = quote_ids(client, data["book_id"])
+    before = {quote_id: _annotation_state(migrated_settings, quote_id) for quote_id in ids}
+    result = client.post(f"/api/quotes/{ids[0]}/corrections", json={
+        "action": action, "expected_version": before[ids[0]]["version"], **extra,
+    })
+    assert result.status_code == 201, result.text
+    assert result.json()["data"]["stale_quote_ids"] == []
+    undone = client.post(f"/api/corrections/{result.json()['data']['correction_id']}/undo")
+    assert undone.status_code == 201, undone.text
+    assert undone.json()["data"]["stale_quote_ids"] == []
+    for quote_id in ids[1:]:
+        assert _annotation_state(migrated_settings, quote_id) == before[quote_id]
+
+
+def test_multi_quote_correction_only_changes_explicit_selection(
+    fake_provider_client, migrated_settings,
+):
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings)
+    ids = quote_ids(client, data["book_id"])
+    before = {quote_id: _annotation_state(migrated_settings, quote_id) for quote_id in ids}
+    selected = ids[:2]
+    response = client.post(f"/api/quotes/{selected[0]}/corrections", json={
+        "action": "mark_unknown", "quote_ids": selected,
+        "expected_version": before[selected[0]]["version"],
+    })
+    assert response.status_code == 201, response.text
+    result = response.json()["data"]
+    assert set(result["affected_quote_ids"]) == set(selected)
+    assert result["stale_quote_ids"] == []
+    for quote_id in selected:
+        assert _annotation_state(migrated_settings, quote_id)["user_locked"] is True
+    for quote_id in ids[2:]:
+        assert _annotation_state(migrated_settings, quote_id) == before[quote_id]
+
+
+def test_cleanup_only_resolves_proven_legacy_cascades_and_is_idempotent(
+    fake_provider_client, migrated_settings,
+):
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings)
+    ids = quote_ids(client, data["book_id"])
+    assert len(ids) == 8
+    original = _annotation_state(migrated_settings, ids[0])
+    corrected = client.post(f"/api/quotes/{ids[0]}/corrections", json={
+        "action": "mark_unknown", "expected_version": original["version"],
+    }).json()["data"]
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        annotations = {a.quote_id: a for a in session.scalars(select(Annotation))}
+        structural = Correction(target_type=CorrectionTargetType.SCENE,
+            target_id=annotations[ids[4]].scene_id, action=CorrectionAction.UNDO)
+        session.add(structural)
+        session.flush()
+        session.add(AnnotationHistory(annotation_id=annotations[ids[4]].id,
+            revision=annotations[ids[4]].version,
+            snapshot_json=json.dumps(annotation_snapshot(annotations[ids[4]])),
+            correction_id=structural.id))
+        annotations[ids[4]].version += 1
+        # Simulate an old local cascade overwriting a previous structural cause.
+        mark_stale(session, [annotations[q] for q in ids[1:]],
+                   correction_id=corrected["correction_id"])
+        annotations[ids[2]].version += 1  # A newer result cannot be blindly restored.
+        annotations[ids[3]].source = AnnotationSource.USER
+        annotations[ids[6]].user_locked = True
+        stale_items = {r.quote_id: r for r in session.scalars(select(ReviewItem).where(
+            ReviewItem.reason == ReviewReason.STALE_DEPENDENCY))}
+        stale_items[ids[5]].queue_status = ReviewQueueStatus.DEFERRED
+        stale_items[ids[7]].candidates_json = '{"correction_id":"missing"}'
+        for reason in (ReviewReason.LOW_CONFIDENCE, ReviewReason.UNKNOWN_SPEAKER,
+                       ReviewReason.USER_FLAGGED):
+            upsert_review_item(session, quote_id=ids[1], reason=reason,
+                               candidates={"reason": "real uncertainty"})
+    before = {quote_id: _annotation_state(migrated_settings, quote_id) for quote_id in ids}
+    counts = _counts(migrated_settings)
+    endpoint = f"/api/books/{data['book_id']}/review-items/cleanup-dependencies"
+    response = client.post(endpoint)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == {
+        "resolved_records": 1, "restored_quotes": 1, "preserved_records": 6,
+    }
+    restored = _annotation_state(migrated_settings, ids[1])
+    assert restored == {**before[ids[1]], "stale": False,
+                        "version": before[ids[1]]["version"] + 1}
+    for quote_id in [ids[0], *ids[2:]]:
+        assert _annotation_state(migrated_settings, quote_id) == before[quote_id]
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        for reason in (ReviewReason.LOW_CONFIDENCE, ReviewReason.UNKNOWN_SPEAKER,
+                       ReviewReason.USER_FLAGGED):
+            row = session.scalar(select(ReviewItem).where(
+                ReviewItem.quote_id == ids[1], ReviewItem.reason == reason))
+            assert row.queue_status is ReviewQueueStatus.PENDING
+    after = _counts(migrated_settings)
+    assert after["runs"] == counts["runs"] and after["history"] == counts["history"] + 1
+    repeated = client.post(endpoint)
+    assert repeated.json()["data"] == {
+        "resolved_records": 0, "restored_quotes": 0, "preserved_records": 6,
+    }
+    assert _counts(migrated_settings) == after
+
+
+def test_cleanup_refuses_active_tasks_without_modifying_data(fake_provider_client, migrated_settings):
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings)
+    job = client.post("/api/jobs", json={"book_id": data["book_id"],
+        "profile_id": create_fake_profile(client, name="cleanup-busy-profile"),
+        "mode": "process", "range": {},
+        "idempotency_key": "cleanup-busy", "run_now": False})
+    assert job.status_code == 202, job.text
+    before = _counts(migrated_settings)
+    response = client.post(f"/api/books/{data['book_id']}/review-items/cleanup-dependencies")
+    assert response.status_code == 409 and "任务" in response.json()["error"]["message"]
+    assert _counts(migrated_settings) == before
 
 
 def test_old_expected_version_is_rejected_and_changes_nothing(

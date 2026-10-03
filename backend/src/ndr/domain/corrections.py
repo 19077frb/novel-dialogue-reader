@@ -255,6 +255,12 @@ class ReviewQueueResponse(ApiModel):
     counts: ReviewItemCountsOut
 
 
+class StaleReviewCleanupOut(ApiModel):
+    resolved_records: int = Field(default=0, ge=0)
+    restored_quotes: int = Field(default=0, ge=0)
+    preserved_records: int = Field(default=0, ge=0)
+
+
 class UndoOut(ApiModel):
     correction_id: str = Field(description="被撤销的更正记录 ID")
     undo_correction_id: str

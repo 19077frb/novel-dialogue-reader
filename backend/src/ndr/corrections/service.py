@@ -6,7 +6,7 @@
 2. 写 `corrections`（前值/后值/期望版本/实际版本）。
 3. 写 `annotation_history` 旧快照（撤销靠它，历史永不硬删除）。
 4. 改当前投影（`USER_CONFIRMED` / `UNKNOWN`）并 `user_locked=true`。
-5. 解决该目标上的待确认项，把下游标注标为 `stale` + 建 `STALE_DEPENDENCY` 项。
+5. 解决选中目标上的待确认项；单句更正不否定其他对白。
 6. 不做任何模型调用（本模块不导入任何适配器）。
 """
 
@@ -54,7 +54,6 @@ from .history import annotation_snapshot, apply_snapshot, write_annotation_histo
 from .invalidator import (
     mark_stale,
     resolve_review_items,
-    same_window_downstream,
     upsert_review_item,
 )
 from .review import review_count_map, review_counts
@@ -265,9 +264,7 @@ def apply_quote_correction(
         check_version(scene, payload.expected_scene_version)
 
     outcome = QuoteCorrectionOutcome(action=action, scene_id=scene.id)
-    downstream: list[Annotation] = []
     reuse_group_id: str | None = None
-    exclude = set(ordered)
     for index, quote_id in enumerate(ordered):
         quote = session.get(Quote, quote_id)
         assert quote is not None
@@ -310,26 +307,11 @@ def apply_quote_correction(
         outcome.resolved_review_item_ids.extend(
             resolve_review_items(session, quote_id=quote.id, correction_id=correction.id)
         )
-        if index == 0:
-            downstream = same_window_downstream(
-                session,
-                annotation=annotation,
-                exclude_quote_ids=exclude,
-                previous_speaker_id=before.get("speaker_id"),
-            )
 
     if outcome.created_group_ids:
         # 参与者结构变了：场景版本递增，供场景级并发校验使用
         scene.version = int(scene.version) + 1
         session.flush()
-    impact = mark_stale(
-        session,
-        downstream,
-        correction_id=outcome.correction_ids[0] if outcome.correction_ids else None,
-        exclude_quote_ids=exclude,
-    )
-    outcome.stale_quote_ids = impact.quote_ids
-    outcome.stale_window_ids = impact.window_ids
     outcome.scene_version = scene.version
     return outcome
 
@@ -670,19 +652,6 @@ def undo_correction(session: Session, *, correction: Correction) -> UndoOutcome:
         outcome.restored = before
         outcome.affected_quote_ids = [annotation.quote_id]
         resolve_review_items(session, quote_id=annotation.quote_id, correction_id=undo_row.id)
-        if annotation.scene_id:
-            impact = mark_stale(
-                session,
-                same_window_downstream(
-                    session,
-                    annotation=annotation,
-                    exclude_quote_ids={annotation.quote_id},
-                    previous_speaker_id=None,
-                ),
-                correction_id=undo_row.id,
-            )
-            outcome.stale_quote_ids = impact.quote_ids
-            outcome.stale_window_ids = impact.window_ids
         session.flush()
         return outcome
 

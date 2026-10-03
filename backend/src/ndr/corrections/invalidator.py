@@ -1,6 +1,6 @@
 """依赖失效器。
 
-人工更正会改变同一推理窗口内的联合判断：把受影响的下游标注标为 `stale`，
+结构更正只把实际受影响的标注标为 `stale`，
 并建立 `STALE_DEPENDENCY` 待确认项，让待确认队列能看到「需要重新确认」的对白。
 
 不会做的事：不删除标注、不改写历史、不动 `user_locked` 的对白、不自动重新推理。
@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..domain.enums import ReviewQueueStatus, ReviewReason, ReviewTargetType
@@ -98,54 +98,6 @@ def resolve_review_items(
     if resolved:
         session.flush()
     return resolved
-
-
-def same_window_downstream(
-    session: Session,
-    *,
-    annotation: Annotation,
-    exclude_quote_ids: set[str],
-    previous_speaker_id: str | None = None,
-) -> list[Annotation]:
-    """同一个场景里、同一推理窗口（或同一旧分组）产生的下游标注。
-
-    - 只考虑同一窗口（`dependency_hash` 相同）的模型结果：它们与本次更正是同一批联合判断。
-    - 若旧分组存在，也纳入仍指向该分组的对白——人工改了一个分组，它的成员需要重新确认。
-    - 人工锁定的对白永不改动；调用方仍会再过滤一次。
-    """
-
-    if not annotation.scene_id:
-        return []
-    conditions = []
-    if annotation.dependency_hash is not None:
-        conditions.append(Annotation.dependency_hash == annotation.dependency_hash)
-    if previous_speaker_id is not None:
-        conditions.append(Annotation.speaker_id == previous_speaker_id)
-    if not conditions:
-        return []
-    rows = list(
-        session.execute(
-            select(Annotation).where(
-                Annotation.scene_id == annotation.scene_id,
-                Annotation.user_locked.is_(False),
-                or_(*conditions),
-            )
-        ).scalars()
-    )
-    result: list[Annotation] = []
-    for row in rows:
-        if row.quote_id in exclude_quote_ids or row.quote_id == annotation.quote_id:
-            continue
-        if row.user_locked:
-            continue
-        same_window = (
-            annotation.dependency_hash is not None
-            and row.dependency_hash == annotation.dependency_hash
-        )
-        same_group = previous_speaker_id is not None and row.speaker_id == previous_speaker_id
-        if same_window or same_group:
-            result.append(row)
-    return result
 
 
 def mark_stale(

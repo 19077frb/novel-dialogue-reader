@@ -44,6 +44,7 @@ vi.mock('../src/api/review', () => ({
     ],
   },
   fetchReviewQueue: vi.fn(),
+  cleanupDependencyReviews: vi.fn(),
   fetchReviewItemDetail: vi.fn(),
   submitGapCorrection: vi.fn(),
   submitQuoteCorrection: vi.fn(),
@@ -223,6 +224,27 @@ describe('ReviewPage', () => {
 
     renderRoute('/books/:bookId/review', <ReviewPage />, '/books/b1/review')
     expect(await screen.findByTestId('review-empty')).toHaveTextContent('不等于')
+  })
+
+  it('清理误触发记录后重新读取队列，保留真实问题并显示统计', async () => {
+    vi.mocked(reviewApi.cleanupDependencyReviews).mockResolvedValue({
+      resolved_records: 100, restored_quotes: 100, preserved_records: 2,
+    })
+    renderRoute('/books/:bookId/review', <ReviewPage />, '/books/b1/review')
+    const beforeRows = await screen.findAllByTestId('review-item')
+    await userEvent.click(screen.getByTestId('cleanup-dependency-reviews'))
+    expect(reviewApi.cleanupDependencyReviews).toHaveBeenCalledWith('b1')
+    expect(await screen.findByText(/已清理 100 条误触发记录/)).toHaveTextContent('保留 2 条')
+    await waitFor(() => expect(reviewApi.fetchReviewQueue).toHaveBeenCalledTimes(2))
+    expect(screen.getAllByTestId('review-item')).toHaveLength(beforeRows.length)
+  })
+
+  it('清理被运行任务阻止时显示真实原因', async () => {
+    vi.mocked(reviewApi.cleanupDependencyReviews).mockRejectedValue(new Error('请等待本书任务结束'))
+    renderRoute('/books/:bookId/review', <ReviewPage />, '/books/b1/review')
+    await screen.findAllByTestId('review-item')
+    await userEvent.click(screen.getByTestId('cleanup-dependency-reviews'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('请等待本书任务结束')
   })
 
   it('Gap 项走 Gap 更正接口（不能误用说话人确认）', async () => {

@@ -2,7 +2,7 @@
  * 待确认队列与人工更正。
  *
  * 除 `recheckQuote` 外，这些接口**都不调用模型**（不产生费用）：
- * 它们只写更正/历史/队列，并标记下游 stale。
+ * 局部更正只影响选中对白；结构调整只标记实际受影响范围。
  */
 import { apiData } from './client'
 import type {
@@ -19,6 +19,7 @@ import type {
   ReviewQueueStatus,
   ReviewReason,
   SpeakerRevisionOut,
+  StaleReviewCleanupOut,
   UndoOut,
 } from './types'
 
@@ -36,6 +37,12 @@ export const reviewKeys = {
   detail: (itemId: string) => ['review-item', itemId] as const,
   quoteDetail: (quoteId: string, contextWindowCp: number) =>
     ['quote-detail', quoteId, contextWindowCp] as const,
+}
+
+export function cleanupDependencyReviews(bookId: string): Promise<StaleReviewCleanupOut> {
+  return apiData<StaleReviewCleanupOut>(`/api/books/${bookId}/review-items/cleanup-dependencies`, {
+    method: 'POST',
+  })
 }
 
 function filterParams(filters: ReviewFilters): URLSearchParams {
