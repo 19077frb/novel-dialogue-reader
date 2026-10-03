@@ -19,7 +19,7 @@ from ..llm.errors import InvalidModelOutput
 from ..llm.schemas import GapDecisionOut, LlmOutput, NewSpeaker, QuoteLabel, SceneUpdate
 from ..llm.validation import LabelingTargets, load_json_object, validate_output
 
-PROTOCOL_VERSION = "compact-attribution-1"
+PROTOCOL_VERSION = "compact-attribution-2"
 PROMPT_VERSION = "compact-prompt-2"
 
 
@@ -208,6 +208,10 @@ def compile_output(payload: str | dict[str, Any], task: CompactTask) -> LlmOutpu
     labels = {label.q: label for label in output.labels}
     if len(labels) != len(output.labels) or set(labels) != set(task.quote_ids):
         raise InvalidModelOutput("Compact labels must cover each target exactly once")
+    if len(set(output.needs_context)) != len(output.needs_context) or (
+        set(output.needs_context) - set(task.quote_ids)
+    ):
+        raise InvalidModelOutput("Context requests must cite distinct target Q references")
     if len(set(output.breaks)) != len(output.breaks):
         raise InvalidModelOutput("Duplicate scene break")
     discoveries = {c.ref: c for c in output.new_characters}
@@ -309,7 +313,7 @@ def compile_output(payload: str | dict[str, Any], task: CompactTask) -> LlmOutpu
                 evidence_refs=[task.references[e] for e in label.evidence],
             )
         )
-    compiled.needs_context = [task.references.get(q, q) for q in output.needs_context]
+    compiled.needs_context = [task.references[q] for q in output.needs_context]
     targets = LabelingTargets(
         quote_ids=tuple(task.references[q] for q in task.quote_ids),
         gap_ids=tuple(task.references[g] for g in task.gap_next_quote),

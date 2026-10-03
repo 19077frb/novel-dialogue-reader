@@ -35,6 +35,12 @@ def test_compiler_owns_first_use_and_preserves_identity():
     assert result.labels[0].evidence_refs == ["gap1"]
 
 
+@pytest.mark.parametrize("requests", [["Q9"], ["G1"], ["quote1"], ["Q1", "Q1"]])
+def test_context_requests_cannot_bypass_target_reference_contract(requests):
+    with pytest.raises(InvalidModelOutput, match="Context requests"):
+        compile_output({"labels": [speech(), speech("Q2")], "needs_context": requests}, task())
+
+
 def test_boundary_recreates_local_group_not_global_identity():
     result = compile_output({"labels": [speech(), speech("Q2")], "breaks": ["G1"]}, task())
     assert len(result.new_speakers) == 2

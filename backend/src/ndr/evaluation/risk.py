@@ -9,7 +9,7 @@ from ..domain.enums import Assignment, QuoteKind, SpeakerBasis
 from ..llm.schemas import LlmOutput
 from .compact import CompactTask
 
-RISK_VERSION = "evidence-risk-1"
+RISK_VERSION = "evidence-risk-2"
 
 
 @dataclass(frozen=True)
@@ -40,9 +40,14 @@ def detect_risks(
                 evidence_users.setdefault(evidence, set()).add(label.speaker_ref)
     result = []
     targets = tuple(task.references[q] for q in task.quote_ids)
+    requested = set(output.needs_context)
+    if requested - set(targets):
+        raise ValueError("Context request refers to an unsent target")
     for index, quote_id in enumerate(targets):
         label = labels.get(quote_id)
         reasons = []
+        if quote_id in requested:
+            reasons.append("requested_context")
         if label is None:
             reasons.append("missing_label")
         else:
@@ -74,7 +79,11 @@ def detect_risks(
                 reasons.append("shared_evidence_conflict")
             for evidence in external:
                 dependency = labels.get(evidence)
-                if dependency and dependency.assignment is Assignment.UNKNOWN:
+                if dependency and (
+                    dependency.assignment is Assignment.UNKNOWN
+                    or dependency.kind is QuoteKind.UNKNOWN
+                    or dependency.basis in {SpeakerBasis.STYLE_ONLY, SpeakerBasis.INSUFFICIENT}
+                ):
                     reasons.append("uncertain_evidence_chain")
             quote_text = context.get(quote_id, {}).get("text", "")
             if (

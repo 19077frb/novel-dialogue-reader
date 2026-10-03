@@ -96,6 +96,35 @@ def test_review_blocks_merge_neighbours_and_bound_dependency_blocks():
         review_blocks(t, [QuoteRisk("Q99", ("test",))])
 
 
+def test_context_request_reviews_accepted_target_without_changing_its_answer():
+    t = task()
+    output = compile_output(
+        {"labels": [speech("Q1"), speech("Q2"), speech("Q3")], "needs_context": ["Q2"]}, t
+    )
+    before = output.model_dump()
+    selected = {r.quote_id: r.reasons for r in detect_risks(t, output)}
+    assert "requested_context" in selected["Q2"]
+    assert "requested_context" not in selected["Q1"]
+    assert output.model_dump() == before
+    output.needs_context = ["unknown_quote"]
+    with pytest.raises(ValueError, match="unsent"):
+        detect_risks(t, output)
+
+
+def test_weak_accepted_evidence_dependency_is_reviewed():
+    r = reasons(
+        task(),
+        {
+            "labels": [
+                speech("Q1", basis="style_only"),
+                speech("Q2", basis="response_link", evidence=["Q1"]),
+                speech("Q3"),
+            ]
+        },
+    )
+    assert "uncertain_evidence_chain" in r["Q2"]
+
+
 def test_error_recall_and_unnecessary_review_are_gold_based_not_confidence_based():
     score = risk_scores({"bad1", "bad2"}, {"ok1", "ok2"}, {"bad1", "ok1", "unknown"})
     assert score["error_recall"] == score["unnecessary_review_rate"] == 0.5
