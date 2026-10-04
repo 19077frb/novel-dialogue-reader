@@ -28,6 +28,8 @@
 
 `ndr.evaluation.scene_plan.validate_scene_plan` 验证调用者显式提供的 `scenes`（每组含 `scene`、`windows`、`depends_on`），按原文有序覆盖每个窗口一次。场景内窗口顺序依赖前窗，跨场景依赖只能引用先前场景；结构有效不证明语义独立。`comparison_plan` 单独生成独立窗与全连续窗对照，不自动推测场景。这些纯函数本身不启动后台任务，也不保证实测吞吐。
 
+`ndr.evaluation.scene_planner.run_scene_planner`通过调用者提供的授权适配器显式生成计划，只输入固定原文及有序窗口字符范围，不包含人物归属答案。默认规划输出上限4096、最多一次格式重试，仍由上述验证器检查完整覆盖与依赖；无效计划不会自动替换成串行或独立计划。模型若只提出一条连续链也保留该结果，不为提高并发反复规划。提供方失败或未知用量停止，已知格式失败费用保留；使用`planner_fingerprint`（模型/思考签名、原文、窗口、策略与版本）配合独立`JournaledAdapter`可恢复已付费响应。规划成本与墙钟必须单列并计入计划并行方案的完整成本，结构通过不能证明场景语义正确或实际加速。初读调用者须显式只提供允许范围，入口不自行读取其他章节或资料。
+
 `ndr.evaluation.pipeline.execute_pipeline` 显式接收授权适配器、独立调用账本、完整原文、窗口与依赖计划。`PipelinePolicy`固定模型/思考设置签名、策略版本、输出上限、格式重试及1～2并发；原文、人物、计划及版本共同进入`pipeline_fingerprint`，不共用生产缓存。运行前核对全部片段与原文一致、目标不重叠、同链顺序；独立链可并行，失败父窗只阻塞其依赖链。
 
 `ndr.evaluation.scene_state`为独立计划场景分配确定性命名空间，同链后窗承接前窗最后目标所在场景的已知人物槽位。稳定身份相同才复用；本窗人物姓名、别名、说明与可见时点不从前窗覆盖。前窗发生切场景时只承接末场景，匿名或未映射人物不根据相同名字自动关联。输入显式槽位与前窗状态矛盾时拒绝运行。此状态衔接与是否展示原文接力候选分别控制：关闭`relay`不会将同链已有稳定人物重新声明为NEW，也不代表程序自动确认前窗身份判断正确。版本变化须使用新账本，不能将旧实验的恢复记录作为新策略效果。
@@ -40,6 +42,7 @@
 
 ```powershell
 uv run --project backend python -m pytest backend/tests/unit/test_window_relay.py
+uv run --project backend python -m pytest backend/tests/unit/test_scene_planning_trial.py
 uv run --project backend python -m pytest backend/tests/unit/test_compact_scene_state.py backend/tests/unit/test_dependency_pipeline.py backend/tests/unit/test_window_review_pipeline.py
 ```
 
