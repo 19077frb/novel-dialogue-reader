@@ -135,6 +135,9 @@ class TurnFrameAdapter:
     def compile_payload(self, payload: dict) -> tuple[dict, list[dict]]:
         return compile_turn_frames(payload, self.task)
 
+    def prepare_request(self, request: dict) -> dict:
+        return request
+
     async def generate_labels(self, request: dict) -> dict:
         messages = request.get("messages")
         if not isinstance(messages, list) or len(messages) < 2:
@@ -156,7 +159,7 @@ class TurnFrameAdapter:
                     "content": FRAME_RETRY_POLICY + json.dumps(self.last_error, ensure_ascii=False),
                 }
             )
-        raw = await self.adapter.generate_labels(prepared)
+        raw = await self.adapter.generate_labels(self.prepare_request(prepared))
         candidate = deepcopy(raw)
         usage = candidate.pop("_usage", {"unknown": True, "total_tokens": None})
         try:
