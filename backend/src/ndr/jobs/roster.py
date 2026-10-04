@@ -54,6 +54,22 @@ def _job_range(job: Job) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _attempt_usage_json(raw: Any, error: Exception | None = None) -> str | None:
+    """Keep adapter-reported charges even when the proposal fails validation."""
+    usage = raw.get("_usage") if isinstance(raw, dict) else None
+    if usage is None and isinstance(error, ProviderError):
+        usage = error.details.get("usage")
+    if not isinstance(usage, dict) or usage.get("unknown"):
+        return None
+    counts = [usage.get(key) for key in ("input_tokens", "output_tokens", "total_tokens")]
+    if not any(value is not None for value in counts) or any(
+        value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0)
+        for value in counts
+    ):
+        return None
+    return json.dumps(usage, ensure_ascii=False)
+
+
 def _build_adapter(settings: Settings, credentials, snapshot: dict[str, Any]):  # noqa: ANN001
     profile_id = str(snapshot.get("profile_id", ""))
     credential_mode = CredentialMode(
@@ -172,6 +188,8 @@ def run_character_roster_job(
         chapter_id_value = chapter.id
 
     started = time.monotonic()
+    raw = None
+    outcome.calls = 1
     try:
         raw = asyncio.run(
             adapter.generate_labels(
@@ -209,10 +227,11 @@ def run_character_roster_job(
                 run.state = InferenceRunState.FAILED
                 run.error_code = "INVALID_MODEL_OUTPUT"
                 run.elapsed_ms = int((time.monotonic() - started) * 1000)
+                run.usage_json = _attempt_usage_json(raw, exc)
             if job is not None:
                 job.state = JobState.FAILED
                 job.last_error = f"人物分析失败：{exc}"
-                job.progress_json = json.dumps({"stage": "failed"}, ensure_ascii=False)
+                job.progress_json = json.dumps({"stage": "failed", "calls": 1}, ensure_ascii=False)
                 session.commit()
             outcome.state = JobState.FAILED
             outcome.errors.append("invalid_model_output")
@@ -234,13 +253,11 @@ def run_character_roster_job(
             job_id=job.id,
             allow_overwrite_manual=bool(_job_range(job).get("allow_overwrite_manual", False)),
         )
-        usage = raw.get("_usage") if isinstance(raw, dict) else None
         run = session.get(InferenceRun, run_id)
         if run is not None:
             run.state = InferenceRunState.SUCCEEDED
             run.elapsed_ms = int((time.monotonic() - started) * 1000)
-            if isinstance(usage, dict) and not usage.get("unknown"):
-                run.usage_json = json.dumps(usage, ensure_ascii=False)
+            run.usage_json = _attempt_usage_json(raw)
         job.state = JobState.COMPLETED
         job.checkpoint_json = json.dumps(
             {
