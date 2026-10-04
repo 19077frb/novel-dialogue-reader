@@ -8,7 +8,7 @@ from ndr.evaluation.cold_roster import ColdRosterTask, compile_roster, run_cold_
 from ndr.evaluation.compact import compile_output
 from ndr.evaluation.evidence import EVIDENCE_VERSION, EvidenceIndex, EvidencePerson, IdentityFact
 from ndr.evaluation.journal import CallJournal, SnapshotChanged
-from ndr.llm.errors import InvalidModelOutput
+from ndr.llm.errors import InvalidModelOutput, ProviderError, ProviderErrorKind
 
 
 def test_truly_unnamed_first_person_can_have_a_supported_designation_and_compile():
@@ -241,6 +241,53 @@ def test_format_retry_receives_precise_feedback_not_new_source_or_guessed_name()
     result = asyncio.run(run_cold_roster(Adapter(), task, max_format_retries=1))
     assert result["ok"] and result["known_tokens"] == 20 and len(result["attempts"]) == 2
     assert requests[1]["messages"][:2] == task.messages()
+    prior = json.loads(requests[1]["messages"][-2]["content"])
+    assert requests[1]["messages"][-2]["role"] == "assistant"
+    assert prior["people"][0]["facts"][0]["value"] == "叙述者"
+    assert "_usage" not in prior
     feedback = requests[1]["messages"][-1]["content"]
     assert "R1 designation" in feedback and "叙述者" in feedback and "L1" in feedback
     assert "沈宁" not in json.dumps(requests, ensure_ascii=False)
+
+
+def test_unparsed_known_failure_does_not_invent_an_assistant_proposal():
+    requests = []
+
+    class Adapter:
+        async def generate_labels(self, request):
+            requests.append(request)
+            if len(requests) == 1:
+                raise ProviderError(
+                    ProviderErrorKind.INVALID_OUTPUT,
+                    "Not JSON",
+                    details={"usage": {"total_tokens": 7, "unknown": False}},
+                )
+            return {"people": [], "pov": None, "_usage": {"total_tokens": 9, "unknown": False}}
+
+    task = ColdRosterTask("空屋。", 3)
+    result = asyncio.run(run_cold_roster(Adapter(), task))
+    assert result["ok"] and result["known_tokens"] == 16
+    assert [m["role"] for m in requests[1]["messages"]] == ["system", "user", "user"]
+
+
+def test_replayed_bad_fact_is_still_rejected_and_not_silently_removed():
+    requests = []
+
+    class Adapter:
+        async def generate_labels(self, request):
+            requests.append(request)
+            return {
+                "people": [
+                    {"ref": "R1", "facts": [{"kind": "name", "value": "沈宁", "evidence": ["L1"]}]}
+                ],
+                "pov": "R1",
+                "_usage": {"total_tokens": 10, "unknown": False},
+            }
+
+    result = asyncio.run(run_cold_roster(Adapter(), ColdRosterTask("我在门口。", 5)))
+    assert not result["ok"] and result["people"] is None and result["known_tokens"] == 20
+    assert len(requests) == 2
+    assert (
+        json.loads(requests[1]["messages"][-2]["content"])["people"][0]["facts"][0]["value"]
+        == "沈宁"
+    )

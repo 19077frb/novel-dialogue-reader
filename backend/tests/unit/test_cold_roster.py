@@ -83,7 +83,7 @@ def test_original_designation_is_a_name_without_revealing_future_real_name():
 
 
 def test_roster_prompt_requires_designations_and_unique_facts_without_relaxing_validation():
-    assert COLD_ROSTER_VERSION == "original-fact-roster-4"
+    assert COLD_ROSTER_VERSION == "original-fact-roster-5"
     system = task().messages()[0]["content"]
     assert "不能只有alias" in system and "无实名不等于没有人物" in system
     assert "同种kind、同一个value只列一次" in system
