@@ -6,10 +6,38 @@ import pytest
 from ndr.evaluation import type_basis_cues
 from ndr.evaluation.journal import CallJournal, JournaledAdapter
 from ndr.evaluation.type_basis_cues import (
+    TYPE_ACTIVITY_POLICY,
     TYPE_BASIS_POLICY,
+    SpeechActivityCueAdapter,
     TypeBasisCueAdapter,
+    type_activity_fingerprint,
     type_basis_fingerprint,
 )
+
+
+def test_type_only_policy_does_not_add_basis_or_test_work_specific_rules():
+    assert "自言自语" in TYPE_ACTIVITY_POLICY and "说着" in TYPE_ACTIVITY_POLICY
+    assert all(v not in TYPE_ACTIVITY_POLICY for v in ["direct", "response_link", "浅村", "绫濑"])
+    assert type_activity_fingerprint("source") != type_basis_fingerprint("source")
+    assert type_activity_fingerprint("source") != type_activity_fingerprint("changed")
+
+
+def test_type_only_adapter_keeps_actual_source_params_usage_and_old_policy():
+    backend = Recording()
+    request = {
+        "messages": [
+            {"role": "system", "content": "Strict"},
+            {"role": "user", "content": "original"},
+        ],
+        "max_tokens": 500,
+    }
+    before = deepcopy(request)
+    result = asyncio.run(SpeechActivityCueAdapter(backend).generate_labels(request))
+    assert result is backend.response and request == before
+    assert backend.requests[0]["messages"][0]["content"] == "Strict\n\n" + TYPE_ACTIVITY_POLICY
+    assert backend.requests[0]["messages"][1] == request["messages"][1]
+    assert backend.requests[0]["max_tokens"] == 500
+    assert TypeBasisCueAdapter(backend).policy == TYPE_BASIS_POLICY
 
 
 class Recording:

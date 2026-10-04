@@ -7,6 +7,16 @@ import json
 from copy import deepcopy
 
 TYPE_BASIS_VERSION = "type-basis-cues-1"
+TYPE_ACTIVITY_VERSION = "speech-activity-cues-1"
+TYPE_ACTIVITY_POLICY = """
+类型由发声事件判断，不由引号位置或排版判断：
+speech是人物实际发声，包含自言自语。独处、第一人称、没人回应或没听清，
+不能单独证明thought，也不能单独证明已经发声；thought须有未说出口的心理依据。
+叙述明确说出、说着或喊出的台词，即使嵌在叙述内、连列多个引号，也不能仅因
+被叙述引用就改成quotation。quotation用于引用措辞、术语或没有实际发声的假想话术；
+准备说但没说的内容不能当成已发声。核对前后反应是否真正针对这句话，
+省略号可表示沉默。证据不足保留unknown，不强判人物，不改变说话依据或编号。
+""".strip()
 TYPE_BASIS_POLICY = """
 类型与证据类别先按可见原文区分，不增加JSON字段或输出推理过程：
 1. speech表示故事里实际发声，自言自语也可以是speech。第一人称叙述、独处、
@@ -33,11 +43,23 @@ def type_basis_fingerprint(source_fingerprint: str) -> str:
     ).hexdigest()
 
 
+def type_activity_fingerprint(source_fingerprint: str) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            [TYPE_ACTIVITY_VERSION, TYPE_ACTIVITY_POLICY, source_fingerprint], ensure_ascii=False
+        ).encode()
+    ).hexdigest()
+
+
 class TypeBasisCueAdapter:
     """Wrap a journaled adapter; actual modified requests are cached/accounted."""
 
     def __init__(self, adapter):
         self.adapter = adapter
+
+    @property
+    def policy(self) -> str:
+        return TYPE_BASIS_POLICY
 
     async def generate_labels(self, request: dict) -> dict:
         messages = request.get("messages")
@@ -51,5 +73,13 @@ class TypeBasisCueAdapter:
         if systems != [0]:
             raise ValueError("Type/basis cues require exactly one leading system message")
         prepared = deepcopy(request)
-        prepared["messages"][0]["content"] += "\n\n" + TYPE_BASIS_POLICY
+        prepared["messages"][0]["content"] += "\n\n" + self.policy
         return await self.adapter.generate_labels(prepared)
+
+
+class SpeechActivityCueAdapter(TypeBasisCueAdapter):
+    """Separate type-only ablation, without the basis rules of the original."""
+
+    @property
+    def policy(self) -> str:
+        return TYPE_ACTIVITY_POLICY
