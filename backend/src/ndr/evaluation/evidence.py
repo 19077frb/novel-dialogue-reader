@@ -8,13 +8,13 @@ from typing import Literal
 
 from .compact import Candidate, CompactTask
 
-EVIDENCE_VERSION = "evidence-index-1"
+EVIDENCE_VERSION = "evidence-index-2"
 
 
 @dataclass(frozen=True)
 class IdentityFact:
     value: str
-    kind: Literal["name", "alias", "description", "relation"]
+    kind: Literal["name", "alias", "designation", "description", "relation"]
     visible_from_cp: int
     evidence_spans: tuple[tuple[int, int], ...] = ()
     source: Literal["user", "model", "source"] = "source"
@@ -22,7 +22,7 @@ class IdentityFact:
     def __post_init__(self) -> None:
         if not self.value.strip() or self.visible_from_cp < 0:
             raise ValueError("Identity facts require a value and nonnegative visibility")
-        if self.kind not in {"name", "alias", "description", "relation"}:
+        if self.kind not in {"name", "alias", "designation", "description", "relation"}:
             raise ValueError("Invalid identity fact kind")
         if self.source not in {"user", "model", "source"}:
             raise ValueError("Invalid identity fact source")
@@ -42,12 +42,16 @@ class EvidencePerson:
     def visible_candidate(self, ref: str, horizon: int) -> Candidate | None:
         facts = [f for f in self.facts if f.visible_from_cp <= horizon]
         names = [f for f in facts if f.kind == "name"]
-        if not names:
+        designations = [f for f in facts if f.kind == "designation"]
+        if not names and not designations:
             return None
-        name = max(names, key=lambda f: f.visible_from_cp)
+        # A later repeated role label must not obscure an already revealed name.
+        name = max(names or designations, key=lambda f: f.visible_from_cp)
         aliases = tuple(
             dict.fromkeys(
-                f.value for f in facts if f.kind in {"name", "alias"} and f.value != name.value
+                f.value
+                for f in facts
+                if f.kind in {"name", "alias", "designation"} and f.value != name.value
             )
         )
         descriptions = [f.value for f in facts if f.kind == "description"]
@@ -83,7 +87,9 @@ class EvidenceIndex:
         names = [
             f.value
             for f in person.facts
-            if f.kind in {"name", "alias"} and f.visible_from_cp <= horizon and f.value
+            if f.kind in {"name", "alias", "designation"}
+            and f.visible_from_cp <= horizon
+            and f.value
         ]
         hits = []
         for start, end, line in self.lines:
