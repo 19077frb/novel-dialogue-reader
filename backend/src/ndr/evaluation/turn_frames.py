@@ -132,6 +132,9 @@ class TurnFrameAdapter:
         self.proposals: list[list[dict]] = []
         self.last_error: str | None = None
 
+    def compile_payload(self, payload: dict) -> tuple[dict, list[dict]]:
+        return compile_turn_frames(payload, self.task)
+
     async def generate_labels(self, request: dict) -> dict:
         messages = request.get("messages")
         if not isinstance(messages, list) or len(messages) < 2:
@@ -157,7 +160,7 @@ class TurnFrameAdapter:
         candidate = deepcopy(raw)
         usage = candidate.pop("_usage", {"unknown": True, "total_tokens": None})
         try:
-            stripped, frames = compile_turn_frames(candidate, self.task)
+            stripped, frames = self.compile_payload(candidate)
         except (ValidationError, InvalidModelOutput) as exc:
             # Use ProviderError, not its InvalidModelOutput subclass: run_trial
             # must retain known usage even though this adapter rejected raw data.
