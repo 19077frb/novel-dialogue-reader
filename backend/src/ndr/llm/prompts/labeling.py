@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from ..schemas import output_json_schema
 
-LABELING_PROMPT_VERSION = "labeling-16"
+LABELING_PROMPT_VERSION = "labeling-17"
 DATA_DELIMITER = "<<<NDR_DATA>>>"
 ESCAPED_DELIMITER = "<<<NDR_DATA_ESCAPED>>>"
 
@@ -68,8 +68,8 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
 18. 每个 new_speakers[].name 必须填写简短姓名或称呼（不超过32字）。有明确姓名时只写姓名；
     没有姓名时写“轻浮男客”“女同学”“门外的男声”等可区分称呼。不得填 null、空字符串、
     S1/S2、new1、“未知人物”或整句描述。详细身份、动作、关系只写在 description。
-    例如 name="读卖栞"、description="书店女店员，悠太的打工前辈"；
-    name="浅村悠太"，而不是“浅村悠太（本章第一人称叙述者，书店店员）”；
+    例如 name="周遥"、description="书店女店员，林舟的打工前辈"；
+    name="林舟"，而不是“林舟（本章第一人称叙述者，书店店员）”；
     name="轻浮男客"，而不是“在书店向女店员搭讪的轻浮男客”。称呼不等于真实身份已确认。
 19. 在声明新人物前，必须先逐一核对 existing_speakers、confirmed_chapter_characters 和
     known_book_characters、known_chapter_characters 的姓名、别名与描述。
@@ -78,14 +78,14 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
     即使本章名单遗漏，也可引用 known_book_characters 中的人物。不另造
     “姓名+身份描述”的人物；本场景已出现则用 EXISTING，跨场景首次出现仍用 NEW，
     复用 character_id；姓名可沿用已知称呼或填写原文揭示的新姓名。
-    不得仅因同叫“男同学”就合并；关系描述如“悠太的父亲”不代表该人就是悠太。
+    不得仅因同叫“男同学”就合并；关系描述如“林舟的父亲”不代表该人就是林舟。
 20. 当前场景已有人物后来揭示姓名时，labels 仍用 EXISTING 和原 speaker_ref；
     另在 new_speakers 提供该人物的姓名补充声明，character_id 必须与该 speaker_ref 的
     character_id 相同，first_quote_id 为揭示姓名的目标对白，aliases 补充新称呼并给出证据。
     real_name填写原文明示姓名，否则null。该声明补充同一身份的姓名，
     不代表出现另一个人；程序只把未由用户指定的代称升级为明确姓名，不改已有具体姓名。
 21. DIRECT 不是“我认为判断很确定”：必须引用目标自身之外、明确说明谁开口的片段。
-    例如对白后有“绫濑同学立刻吐槽”，应引用包含这句叙述的 G/E；不能省略 evidence_refs。
+    例如对白后有“周遥立刻吐槽”，应引用包含这句叙述的 G/E；不能省略 evidence_refs。
     问答承接用 RESPONSE_LINK 并引用相关对白，指代或动作关联用 COREFERENCE 并引用相关片段。
     输出前检查：不得整段把有候选人物的对白写成 DIRECT + 空证据。
     同一次输出新声明的人物首次出现必须用 NEW，之后才用 EXISTING 引用其 temp_ref。
