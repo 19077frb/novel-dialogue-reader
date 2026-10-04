@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass
 from ..llm.schemas import LlmOutput
 from ..llm.validation import LabelingTargets, validate_output
 from .compact import Candidate, CompactTask
-from .compact_trial import run_trial
+from .compact_trial import TRIAL_VERSION, run_trial
 from .journal import (
     CallJournal,
     JournaledAdapter,
@@ -21,6 +21,7 @@ from .journal import (
     SnapshotChanged,
     TrialStopped,
 )
+from .partial_retry import PARTIAL_RETRY_VERSION
 from .relay import RELAY_VERSION, attach_relay
 from .review import REVIEW_VERSION
 from .risk import RISK_VERSION
@@ -136,6 +137,8 @@ def pipeline_fingerprint(
         "risk": RISK_VERSION,
         "review": REVIEW_VERSION,
         "scene_state": SCENE_STATE_VERSION,
+        "trial": TRIAL_VERSION,
+        "partial_retry": PARTIAL_RETRY_VERSION,
         "policy": asdict(policy),
         "original": hashlib.sha256(text.encode()).hexdigest(),
         "tasks": [(key, task.fingerprint()) for key, task in tasks.items()],

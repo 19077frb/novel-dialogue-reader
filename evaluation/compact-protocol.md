@@ -49,9 +49,14 @@ uv run --project backend python -m pytest backend/tests/unit/test_compact_scene_
 
 ```powershell
 uv run --project backend python -m pytest backend/tests/unit/test_compact_attribution.py backend/tests/unit/test_compact_trial.py backend/tests/unit/test_evidence_retrieval.py backend/tests/unit/test_attribution_risk.py backend/tests/unit/test_linked_review.py
+uv run --project backend python -m pytest backend/tests/unit/test_partial_attribution_retry.py
 ```
 
 模型对照由维护者显式提供适配器，调用`ndr.evaluation.compact_trial.run_trial`。短协议默认使用task.messages()；旧协议需同时提供legacy_messages和legacy_targets。返回原输出、完整编译结果、每次尝试的用量/失败原因/时间、首次合法率和未知用量次数。每窗最多额外0～5次格式重试，默认1；超时、限流、鉴权或网络错误不自动重发。每次输出上限显式固定，重试不暗换模型、思考设置、文本或上限。没有任何隐式强模型兜底。
+
+短协议默认启用`targeted_retries`：可定位的结构错误只重试受影响目标及其依赖闭包。引用该目标的证据链、共用的新人物声明及声明自身引用的目标证据一起隔离；已独立通过结构校验的标签暂存，不视为已确认正确。所有原文、候选资料与可见范围保留，不新增上下文或逐句调用。重复/缺失/未知目标、无法定位声明、无效场景等整体错误仍整窗重试。局部回复不能更改原场景建议或复用保留的新人物引用，不根据相同姓名合并匿名人物。
+
+后续回复与保留提案合成后仍须通过完整窗口的严格编译，才返回成功；耗尽重试或用量未知不返回部分输出。`requested_targets`、`retained_targets`记录每次实际请求范围，`final_payload`保留最终合成提案，原始失败回复仍在`attempts.raw`。首次合法率与失败消耗不因修复成功而重写。显式设`targeted_retries=False`可做整窗对照，旧协议始终保持整窗重试；调用策略及版本需进入调用者恢复指纹，不能用旧账本冒充新策略。
 
 未知用量即使发生在格式错误时也会停止后续重试，并返回`reconciliation_required`；调用者须停止新增窗口并对账，不能把未知消耗记成零后继续。此标记不是自动恢复或持久化机制。
 
