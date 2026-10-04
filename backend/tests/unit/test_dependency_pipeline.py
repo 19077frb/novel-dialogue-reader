@@ -133,6 +133,45 @@ def test_same_chain_reuses_slots_independently_of_answer_relay(tmp_path, relay):
     )
 
 
+def test_cross_scene_dependency_transfers_evidence_candidates_not_scene_slots(tmp_path):
+    text, tasks, _, policy, _ = setup(tmp_path)
+    plan = validate_scene_plan(
+        {
+            "scenes": [
+                {"scene": "a", "windows": ["W1"], "depends_on": []},
+                {"scene": "b", "windows": ["W2"], "depends_on": ["a"]},
+                {"scene": "c", "windows": ["W3"], "depends_on": []},
+                {"scene": "d", "windows": ["W4"], "depends_on": ["b", "c"]},
+            ]
+        },
+        tuple(tasks),
+    )
+    ledger = CallJournal(
+        tmp_path / "cross.trial.sqlite3",
+        dependency_fingerprint=pipeline_fingerprint(text, tasks, plan, policy),
+        max_calls=20,
+        max_tokens=100000,
+    )
+    adapter = Adapter()
+    result = run(adapter, (text, tasks, plan, policy, ledger))
+    observed = {quote(r): r for r in adapter.seen}
+    assert "previous_turn_candidates" not in observed["「丙。」"]
+    assert len(observed["「乙。」"]["previous_turn_candidates"]) == 1
+    assert len(observed["「丁。」"]["previous_turn_candidates"]) == 2
+    assert all(
+        v["status"] == "unconfirmed" for v in observed["「丁。」"]["previous_turn_candidates"]
+    )
+    windows = result["windows"]
+    assert windows["W2"]["result"]["output"]["labels"][0]["assignment"] == "NEW"
+    assert (
+        windows["W2"]["result"]["output"]["labels"][0]["scene_ref"]
+        != windows["W1"]["result"]["output"]["labels"][0]["scene_ref"]
+    )
+    replay = Adapter()
+    restored = run(replay, (text, tasks, plan, policy, ledger))
+    assert restored["paid_calls_this_invocation"] == 0 and not replay.seen
+
+
 def test_resume_complete_pipeline_has_no_provider_calls_or_incremental_tokens(tmp_path):
     fixture = setup(tmp_path)
     first = run(Adapter(), fixture)

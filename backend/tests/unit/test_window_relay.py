@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 
 from ndr.evaluation.compact import Candidate, CompactTask, compile_output
-from ndr.evaluation.relay import attach_relay
+from ndr.evaluation.relay import attach_dependency_relay, attach_relay
 from ndr.evaluation.scene_plan import comparison_plan, validate_scene_plan
 
 
@@ -30,6 +30,49 @@ def fixtures():
         ]
     }
     return prior, current, payload
+
+
+def test_multiple_parents_share_limits_and_prefer_recent_original_turns():
+    prior, current, payload = fixtures()
+    middle = replace(
+        prior,
+        references={"Q1": "middle_quote", "E1": "middle_proof"},
+        context=tuple(
+            {**row, "start_cp": row["start_cp"] + 8, "end_cp": row["end_cp"] + 8}
+            for row in prior.context
+        ),
+    )
+    current = replace(
+        current,
+        context=tuple(
+            {**row, "start_cp": row["start_cp"] + 10, "end_cp": row["end_cp"] + 10}
+            for row in current.context
+        ),
+    )
+    predecessors = (
+        (prior, compile_output(payload, prior)),
+        (middle, compile_output(payload, middle)),
+    )
+    result = attach_dependency_relay(current, predecessors)
+    assert len(result.relay) == 2
+    assert [result.references[t["ref"]] for t in result.relay] == ["old_quote", "middle_quote"]
+    assert result.candidates == current.candidates and result.scene_ref == current.scene_ref
+    limited = attach_dependency_relay(current, predecessors, max_turns=1, max_added_chars=5)
+    assert len(limited.relay) == 1 and limited.references[limited.relay[0]["ref"]] == "middle_quote"
+    assert (
+        sum(len(row["text"]) for row in limited.context if row["ref"] not in current.references)
+        <= 5
+    )
+    empty = attach_dependency_relay(current, predecessors, max_turns=0)
+    assert empty == current
+    with pytest.raises(ValueError, match="repeat target"):
+        attach_dependency_relay(current, (predecessors[0], predecessors[0]))
+    with pytest.raises(ValueError, match="complete"):
+        attach_dependency_relay(
+            current,
+            ((prior, compile_output(payload, prior).model_copy(update={"labels": []})),),
+            max_added_chars=0,
+        )
 
 
 def test_relay_remaps_identity_and_carries_original_text_not_confirmed_truth():

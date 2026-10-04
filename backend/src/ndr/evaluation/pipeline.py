@@ -22,13 +22,13 @@ from .journal import (
     TrialStopped,
 )
 from .partial_retry import PARTIAL_RETRY_VERSION
-from .relay import RELAY_VERSION, attach_relay
+from .relay import RELAY_VERSION, attach_dependency_relay
 from .review import REVIEW_VERSION
 from .risk import RISK_VERSION
 from .scene_plan import WindowDependency
 from .scene_state import SCENE_STATE_VERSION, continue_scene, root_scene
 
-PIPELINE_VERSION = "dependency-execution-2"
+PIPELINE_VERSION = "dependency-execution-3"
 WindowProcessor = Callable[[JournaledAdapter, CompactTask], Awaitable[dict]]
 
 
@@ -239,12 +239,21 @@ async def execute_pipeline(
             prior_task = restore_task(source["compiled_task"])
             prior_output = LlmOutput.model_validate(source["result"]["output"])
             prepared = continue_scene(prepared, prior_task, prior_output)
-            if policy.relay:
-                prepared = attach_relay(prepared, prior_task, prior_output)
         else:
             prepared = root_scene(
                 prepared,
                 node.scene,
+            )
+        if policy.relay and node.depends_on:
+            prepared = attach_dependency_relay(
+                prepared,
+                tuple(
+                    (
+                        restore_task(completed[p]["compiled_task"]),
+                        LlmOutput.model_validate(completed[p]["result"]["output"]),
+                    )
+                    for p in node.depends_on
+                ),
             )
         fingerprint = prepared.fingerprint()
         key = f"window:{node.window}"

@@ -9,7 +9,7 @@ from ..llm.validation import LabelingTargets, validate_output
 from .compact import CompactTask
 from .review import decisions
 
-RELAY_VERSION = "original-turn-relay-1"
+RELAY_VERSION = "original-turn-relay-2"
 
 
 def _rows(task: CompactTask) -> dict[str, dict]:
@@ -144,3 +144,65 @@ def attach_relay(
             }
         )
     return replace(task, references=refs, context=tuple(context), relay=tuple(reversed(relay)))
+
+
+def attach_dependency_relay(
+    task: CompactTask,
+    predecessors: tuple[tuple[CompactTask, LlmOutput], ...],
+    *,
+    max_turns: int = 8,
+    max_evidence_per_turn: int = 3,
+    max_added_chars: int = 4000,
+) -> CompactTask:
+    """Share one bounded original-text budget across explicit dependency parents.
+
+    Only answer/evidence candidates transfer; scene slots and identity facts do
+    not. Most recent parents get budget first, then turns are displayed in text
+    order. Every parent is validated even when the budget omits all its turns.
+    """
+    if (
+        not isinstance(max_turns, int)
+        or isinstance(max_turns, bool)
+        or not 0 <= max_turns <= 8
+        or not isinstance(max_evidence_per_turn, int)
+        or isinstance(max_evidence_per_turn, bool)
+        or not 0 <= max_evidence_per_turn <= 3
+        or not isinstance(max_added_chars, int)
+        or isinstance(max_added_chars, bool)
+        or max_added_chars < 0
+        or len(task.relay) > max_turns
+    ):
+        raise ValueError("Invalid shared dependency relay limits")
+    ordered, targets = [], set()
+    for prior_task, output in predecessors:
+        attach_relay(task, prior_task, output, max_turns=0)
+        rows = _rows(prior_task)
+        stable = [prior_task.references[q] for q in prior_task.quote_ids]
+        if set(stable) & targets:
+            raise ValueError("Dependency relay parents repeat target identities")
+        targets.update(stable)
+        ordered.append((max(rows[q]["end_cp"] for q in stable), prior_task, output))
+    prepared, original_refs, turns = task, set(task.references.values()), list(task.relay)
+    for _, prior_task, output in sorted(ordered, key=lambda value: value[0], reverse=True):
+        added_chars = sum(
+            len(row["text"])
+            for row in prepared.context
+            if prepared.references[row["ref"]] not in original_refs
+        )
+        added = attach_relay(
+            prepared,
+            prior_task,
+            output,
+            max_turns=max_turns - len(turns),
+            max_evidence_per_turn=max_evidence_per_turn,
+            max_added_chars=max_added_chars - added_chars,
+        )
+        # attach_relay only returns this parent's turns, so merge explicitly.
+        if max_turns - len(turns) > 0:
+            if {turn["ref"] for turn in turns} & {turn["ref"] for turn in added.relay}:
+                raise ValueError("Dependency relay repeats an existing turn")
+            turns.extend(added.relay)
+        prepared = replace(added, relay=())
+    rows = {row["ref"]: row for row in prepared.context}
+    turns.sort(key=lambda turn: rows[turn["ref"]]["start_cp"])
+    return replace(prepared, relay=tuple(turns))
