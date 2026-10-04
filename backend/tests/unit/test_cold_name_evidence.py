@@ -1,9 +1,10 @@
+import asyncio
 import json
 from dataclasses import asdict
 
 import pytest
 
-from ndr.evaluation.cold_roster import ColdRosterTask, compile_roster
+from ndr.evaluation.cold_roster import ColdRosterTask, compile_roster, run_cold_roster
 from ndr.evaluation.compact import compile_output
 from ndr.evaluation.evidence import EVIDENCE_VERSION, EvidenceIndex, EvidencePerson, IdentityFact
 from ndr.evaluation.journal import CallJournal, SnapshotChanged
@@ -64,7 +65,7 @@ def test_pronoun_facts_are_rejected_not_bound_to_pov_by_program(kind, value):
         ],
         "pov": "R1",
     }
-    with pytest.raises(InvalidModelOutput, match="not a pronoun"):
+    with pytest.raises(InvalidModelOutput, match="not be a pronoun"):
         compile_roster(payload, ColdRosterTask(text, len(text)))
 
 
@@ -185,3 +186,61 @@ def test_new_evidence_policy_has_a_distinct_cold_roster_dependency(tmp_path, mon
     monkeypatch.setattr("ndr.evaluation.cold_roster.EVIDENCE_VERSION", "evidence-index-2")
     with pytest.raises(SnapshotChanged):
         CallJournal(path, dependency_fingerprint=task.fingerprint(), max_calls=2, max_tokens=20000)
+
+
+@pytest.mark.parametrize("value", ["叙述者", "第一人称叙述者", "本章男生"])
+def test_invalid_display_feedback_identifies_the_actual_fact_without_relaxing_validation(value):
+    payload = {
+        "people": [
+            {"ref": "R7", "facts": [{"kind": "designation", "value": value, "evidence": ["L1"]}]}
+        ],
+        "pov": "R7",
+    }
+    with pytest.raises(InvalidModelOutput) as caught:
+        compile_roster(payload, ColdRosterTask("我在门口。", 5))
+    error = str(caught.value)
+    assert "R7 designation" in error and value in error and "L1" in error
+    assert "invalid display name" in error and "pronoun" not in error
+
+
+def test_literal_evidence_feedback_identifies_name_and_its_supplied_proof():
+    payload = {
+        "people": [{"ref": "R3", "facts": [{"kind": "name", "value": "沈宁", "evidence": ["L1"]}]}],
+        "pov": None,
+    }
+    with pytest.raises(InvalidModelOutput) as caught:
+        compile_roster(payload, ColdRosterTask("门卫站在门口。", 7))
+    error = str(caught.value)
+    assert all(v in error for v in ["R3 name", "沈宁", "L1", "literal evidence"])
+
+
+def test_format_retry_receives_precise_feedback_not_new_source_or_guessed_name():
+    task = ColdRosterTask("我在门口。\n后来名叫沈宁。", 6)
+    requests = []
+
+    class Adapter:
+        async def generate_labels(self, request):
+            requests.append(request)
+            return {
+                "people": [
+                    {
+                        "ref": "R1",
+                        "facts": [
+                            {
+                                "kind": "designation",
+                                "value": "叙述者" if len(requests) == 1 else "讲述人",
+                                "evidence": ["L1"],
+                            }
+                        ],
+                    }
+                ],
+                "pov": "R1",
+                "_usage": {"total_tokens": 10, "unknown": False},
+            }
+
+    result = asyncio.run(run_cold_roster(Adapter(), task, max_format_retries=1))
+    assert result["ok"] and result["known_tokens"] == 20 and len(result["attempts"]) == 2
+    assert requests[1]["messages"][:2] == task.messages()
+    feedback = requests[1]["messages"][-1]["content"]
+    assert "R1 designation" in feedback and "叙述者" in feedback and "L1" in feedback
+    assert "沈宁" not in json.dumps(requests, ensure_ascii=False)

@@ -15,7 +15,7 @@ from ..domain.common import ApiModel
 from ..llm.errors import InvalidModelOutput, ProviderError, ProviderErrorKind
 from .evidence import EVIDENCE_VERSION, EvidencePerson, IdentityFact
 
-COLD_ROSTER_VERSION = "original-fact-roster-3"
+COLD_ROSTER_VERSION = "original-fact-roster-4"
 PERSONAL_PRONOUNS = frozenset(
     {
         "我",
@@ -84,6 +84,8 @@ class ColdRosterTask:
             "designation是尚未具名时可区分的简短身份称呼，可按所引原文角色概括，如门口保安、讲述人；"
             "不要编造姓名、年龄、性别或身份。关系不能当别名，说明不能当姓名。"
             "我/你/他/她等人称代词不能作name、alias或designation。"
+            "称呼最多32字符，不能含括号、逗号、句号或说明性词本章/第一人称/叙述者；"
+            "未知姓名的讲述角色可用designation=讲述人，不用叙述者或第一人称叙述者。"
             "对于第一人称叙述者，检查其他人物是否直接以姓名称呼他，记录该名字及原文依据；"
             "不能仅凭别人对白的我就认为是叙述者，也不能仅根据常识猜叙述者姓名。"
             "有明确姓名后用name，不继续只用代称；保留先前designation事实及自己的原文证据。"
@@ -142,12 +144,18 @@ def compile_roster(
             raise InvalidModelOutput("Duplicate fact in identity")
         facts = []
         for fact in person.facts:
-            if fact.kind in {"name", "alias", "designation"} and (
-                fact.value.strip() in PERSONAL_PRONOUNS or not valid_display_name(fact.value)
-            ):
-                raise InvalidModelOutput(
-                    "Identity display requires a name or distinct role, not a pronoun"
-                )
+            location = (
+                f"{person.ref} {fact.kind} value={json.dumps(fact.value, ensure_ascii=False)} "
+                f"evidence={json.dumps(fact.evidence)}"
+            )
+            if fact.kind in {"name", "alias", "designation"}:
+                if fact.value.strip() in PERSONAL_PRONOUNS:
+                    raise InvalidModelOutput(f"{location}: identity display must not be a pronoun")
+                if not valid_display_name(fact.value):
+                    raise InvalidModelOutput(
+                        f"{location}: invalid display name; use a short name or distinct role, "
+                        "not explanatory words such as 叙述者/第一人称"
+                    )
             if len(fact.evidence) != len(set(fact.evidence)) or any(
                 ref not in lines for ref in fact.evidence
             ):
@@ -157,7 +165,9 @@ def compile_roster(
                 not valid_display_name(fact.value)
                 or not any(fact.value in line["text"] for line in proof)
             ):
-                raise InvalidModelOutput("Name/alias requires its own original literal evidence")
+                raise InvalidModelOutput(
+                    f"{location}: name/alias requires its own original literal evidence"
+                )
             facts.append(
                 IdentityFact(
                     fact.value,
