@@ -25,8 +25,9 @@ from .relay import RELAY_VERSION, attach_relay
 from .review import REVIEW_VERSION
 from .risk import RISK_VERSION
 from .scene_plan import WindowDependency
+from .scene_state import SCENE_STATE_VERSION, continue_scene, root_scene
 
-PIPELINE_VERSION = "dependency-execution-1"
+PIPELINE_VERSION = "dependency-execution-2"
 WindowProcessor = Callable[[JournaledAdapter, CompactTask], Awaitable[dict]]
 
 
@@ -134,6 +135,7 @@ def pipeline_fingerprint(
         "relay": RELAY_VERSION,
         "risk": RISK_VERSION,
         "review": REVIEW_VERSION,
+        "scene_state": SCENE_STATE_VERSION,
         "policy": asdict(policy),
         "original": hashlib.sha256(text.encode()).hexdigest(),
         "tasks": [(key, task.fingerprint()) for key, task in tasks.items()],
@@ -229,12 +231,17 @@ async def execute_pipeline(
         parent = next(
             (p for p in reversed(node.depends_on) if completed[p]["scene"] == node.scene), None
         )
-        if policy.relay and parent:
+        if parent:
             source = completed[parent]
-            prepared = attach_relay(
+            prior_task = restore_task(source["compiled_task"])
+            prior_output = LlmOutput.model_validate(source["result"]["output"])
+            prepared = continue_scene(prepared, prior_task, prior_output)
+            if policy.relay:
+                prepared = attach_relay(prepared, prior_task, prior_output)
+        else:
+            prepared = root_scene(
                 prepared,
-                restore_task(source["compiled_task"]),
-                LlmOutput.model_validate(source["result"]["output"]),
+                node.scene,
             )
         fingerprint = prepared.fingerprint()
         key = f"window:{node.window}"

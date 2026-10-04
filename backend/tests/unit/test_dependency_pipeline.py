@@ -115,6 +115,24 @@ def test_serial_limit_and_disabled_relay_do_not_invent_memory(tmp_path):
     assert all("previous_turn_candidates" not in r for r in adapter.seen)
 
 
+@pytest.mark.parametrize("relay", [False, True])
+def test_same_chain_reuses_slots_independently_of_answer_relay(tmp_path, relay):
+    fixture = setup(tmp_path, relay=relay)
+    completed = run(Adapter(), fixture)
+    windows = completed["windows"]
+    for first, second in [("W1", "W2"), ("W3", "W4")]:
+        left, right = windows[first]["result"]["output"], windows[second]["result"]["output"]
+        assert left["labels"][0]["assignment"] == "NEW"
+        assert right["labels"][0]["assignment"] == "EXISTING"
+        assert not right["new_speakers"]
+        assert left["labels"][0]["speaker_ref"] == right["labels"][0]["speaker_ref"]
+        assert left["labels"][0]["scene_ref"] == right["labels"][0]["scene_ref"]
+    assert (
+        windows["W1"]["result"]["output"]["labels"][0]["scene_ref"]
+        != windows["W3"]["result"]["output"]["labels"][0]["scene_ref"]
+    )
+
+
 def test_resume_complete_pipeline_has_no_provider_calls_or_incremental_tokens(tmp_path):
     fixture = setup(tmp_path)
     first = run(Adapter(), fixture)

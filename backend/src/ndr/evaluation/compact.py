@@ -21,6 +21,7 @@ from ..llm.validation import LabelingTargets, load_json_object, validate_output
 
 PROTOCOL_VERSION = "compact-attribution-2"
 PROMPT_VERSION = "compact-prompt-2"
+COMPILER_VERSION = "scene-local-compiler-2"
 
 
 class Speech(ApiModel):
@@ -194,7 +195,12 @@ class CompactTask:
         # Stable identities and mapping are deliberately included, not only visible names.
         from dataclasses import asdict
 
-        payload = {"protocol": PROTOCOL_VERSION, "prompt": PROMPT_VERSION, "task": asdict(self)}
+        payload = {
+            "protocol": PROTOCOL_VERSION,
+            "prompt": PROMPT_VERSION,
+            "compiler": COMPILER_VERSION,
+            "task": asdict(self),
+        }
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
         ).hexdigest()
@@ -237,10 +243,22 @@ def compile_output(payload: str | dict[str, Any], task: CompactTask) -> LlmOutpu
     slots: dict[tuple[str, str], str] = {
         (scene, c.ref): c.existing_ref for c in task.candidates if c.existing_ref
     }
+    namespace = task.fingerprint()
+    reserved_scenes = {task.scene_ref}
+    reserved_slots = set(slots.values())
+
+    def fresh_ref(prefix: str, number: int, reserved: set[str]) -> str:
+        ref = f"{prefix}_{namespace}_{number}"
+        while ref in reserved:
+            number += 1
+            ref = f"{prefix}_{namespace}_{number}"
+        reserved.add(ref)
+        return ref
+
     for q in task.quote_ids:
         if q in successor_breaks:
             gap = successor_breaks[q]
-            scene = f"compact_scene_{len(compiled.scene_updates) + 1}"
+            scene = fresh_ref("compact_scene", len(compiled.scene_updates) + 1, reserved_scenes)
             compiled.gap_decisions.append(
                 GapDecisionOut(gap_id=task.references[gap], decision=GapDecision.BREAK)
             )
@@ -281,7 +299,7 @@ def compile_output(payload: str | dict[str, Any], task: CompactTask) -> LlmOutpu
         assignment = Assignment.EXISTING
         if key not in slots:
             assignment = Assignment.NEW
-            ref = f"compact_new_{len(compiled.new_speakers) + 1}"
+            ref = fresh_ref("compact_new", len(compiled.new_speakers) + 1, reserved_slots)
             slots[key] = ref
             person = known.get(label.character)
             discovery = discoveries.get(label.character)
