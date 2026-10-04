@@ -131,6 +131,7 @@ class TurnFrameAdapter:
         )
         self.proposals: list[list[dict]] = []
         self.last_error: str | None = None
+        self.last_payload: dict | None = None
 
     def compile_payload(self, payload: dict) -> tuple[dict, list[dict]]:
         return compile_turn_frames(payload, self.task)
@@ -159,9 +160,11 @@ class TurnFrameAdapter:
                     "content": FRAME_RETRY_POLICY + json.dumps(self.last_error, ensure_ascii=False),
                 }
             )
+        self.last_payload = None
         raw = await self.adapter.generate_labels(self.prepare_request(prepared))
         candidate = deepcopy(raw)
         usage = candidate.pop("_usage", {"unknown": True, "total_tokens": None})
+        self.last_payload = deepcopy(candidate)
         try:
             stripped, frames = self.compile_payload(candidate)
         except (ValidationError, InvalidModelOutput) as exc:

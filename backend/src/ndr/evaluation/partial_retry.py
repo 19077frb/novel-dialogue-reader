@@ -12,6 +12,7 @@ from ..llm.errors import InvalidModelOutput
 from .compact import CompactOutput, CompactTask, DiscoveredCharacter, compile_output
 
 PARTIAL_RETRY_VERSION = "dependency-block-retry-1"
+SEEDED_RETRY_VERSION = "explicit-dependency-seeds-1"
 
 
 def _shape(payload: dict, targets: tuple[str, ...]) -> dict[str, dict] | None:
@@ -79,6 +80,33 @@ class RetainedBlock:
 
 
 def isolate_failed_block(payload: dict, task: CompactTask) -> RetainedBlock | None:
+    return _isolate_failed_block(payload, task, (), ())
+
+
+def isolate_seeded_block(
+    payload: dict,
+    task: CompactTask,
+    *,
+    failed_targets: tuple[str, ...],
+    dependency_edges: tuple[tuple[str, str], ...] = (),
+) -> RetainedBlock | None:
+    """Explicit validator failures, never gold-selected or inferred identities."""
+    targets = set(task.quote_ids)
+    if len(set(failed_targets)) != len(failed_targets) or set(failed_targets) - targets:
+        raise ValueError("Failure seeds must be distinct provided targets")
+    if any(len(edge) != 2 or set(edge) - targets for edge in dependency_edges):
+        raise ValueError("Dependency edges must connect provided targets")
+    if not failed_targets:
+        return None
+    return _isolate_failed_block(payload, task, failed_targets, dependency_edges)
+
+
+def _isolate_failed_block(
+    payload: dict,
+    task: CompactTask,
+    failed_targets: tuple[str, ...],
+    dependency_edges: tuple[tuple[str, str], ...],
+) -> RetainedBlock | None:
     """Return only a structurally proven partial proposal; otherwise retry all.
 
     Dependants of a bad label/declaration are quarantined together, including
@@ -129,6 +157,9 @@ def isolate_failed_block(payload: dict, task: CompactTask) -> RetainedBlock | No
             bad_declarations.add(ref)
 
     edges = {q: set() for q in task.quote_ids}
+    for left, right in dependency_edges:
+        edges[left].add(right)
+        edges[right].add(left)
     uses = {ref: [] for ref in declarations}
     for q, row in labels.items():
         evidence = row.get("evidence", [])
@@ -154,7 +185,7 @@ def isolate_failed_block(payload: dict, task: CompactTask) -> RetainedBlock | No
         for q in members:
             edges[q].update(members)
 
-    failed = set()
+    failed = set(failed_targets)
     for q, row in labels.items():
         character = row.get("character")
         if isinstance(character, str) and character in bad_declarations:
