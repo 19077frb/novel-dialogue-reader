@@ -4,9 +4,14 @@ from copy import deepcopy
 
 import pytest
 
-from ndr.evaluation.cold_roster import ColdRosterTask, compile_roster, run_cold_roster
+from ndr.evaluation.cold_roster import (
+    COLD_ROSTER_VERSION,
+    ColdRosterTask,
+    compile_roster,
+    run_cold_roster,
+)
 from ndr.evaluation.evidence import EvidenceIndex
-from ndr.evaluation.journal import CallJournal, JournaledAdapter
+from ndr.evaluation.journal import CallJournal, JournaledAdapter, SnapshotChanged
 from ndr.llm.errors import InvalidModelOutput
 
 TEXT = "女旅人进门。\n女旅人说：「我叫云岚。」\n云岚是林舟的姐姐。\n后来沈宁到来。"
@@ -60,6 +65,42 @@ def test_initial_roster_request_has_empty_directory_and_no_future_source():
         initial.fingerprint()
         == ColdRosterTask(TEXT[:horizon] + "不同的未来", horizon).fingerprint()
     )
+
+
+def test_original_designation_is_a_name_without_revealing_future_real_name():
+    initial = ColdRosterTask(TEXT, len("女旅人进门。\n"))
+    people, pov = compile_roster(
+        {
+            "people": [
+                {"ref": "R1", "facts": [{"kind": "name", "value": "女旅人", "evidence": ["L1"]}]}
+            ],
+            "pov": None,
+        },
+        initial,
+    )
+    assert pov is None and people[0].visible_candidate("C1", initial.horizon).name == "女旅人"
+    assert "云岚" not in json.dumps(initial.messages(), ensure_ascii=False)
+
+
+def test_roster_prompt_requires_designations_and_unique_facts_without_relaxing_validation():
+    assert COLD_ROSTER_VERSION == "original-fact-roster-2"
+    system = task().messages()[0]["content"]
+    assert "不能只有alias" in system and "无实名不等于没有人物" in system
+    assert "同种kind、同一个value只列一次" in system
+    assert "只有原文确实无人时people=[]" in system
+
+
+def test_changed_roster_version_cannot_reuse_an_old_dependency_ledger(tmp_path, monkeypatch):
+    monkeypatch.setattr("ndr.evaluation.cold_roster.COLD_ROSTER_VERSION", "original-fact-roster-1")
+    old_fingerprint = task().fingerprint()
+    path = tmp_path / "roster.trial.sqlite3"
+    CallJournal(path, dependency_fingerprint=old_fingerprint, max_calls=4, max_tokens=100000)
+    monkeypatch.setattr("ndr.evaluation.cold_roster.COLD_ROSTER_VERSION", "original-fact-roster-2")
+    assert task().fingerprint() != old_fingerprint
+    with pytest.raises(SnapshotChanged):
+        CallJournal(
+            path, dependency_fingerprint=task().fingerprint(), max_calls=4, max_tokens=100000
+        )
 
 
 def test_compiled_roster_integrates_with_existing_initial_evidence_index():

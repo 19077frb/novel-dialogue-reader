@@ -15,7 +15,7 @@ from ..domain.common import ApiModel
 from ..llm.errors import InvalidModelOutput, ProviderError, ProviderErrorKind
 from .evidence import EVIDENCE_VERSION, EvidencePerson, IdentityFact
 
-COLD_ROSTER_VERSION = "original-fact-roster-1"
+COLD_ROSTER_VERSION = "original-fact-roster-2"
 
 
 class RosterFact(ApiModel):
@@ -62,10 +62,12 @@ class ColdRosterTask:
             "顶层people和pov；people中每项仅ref(R1等)和facts，facts每项仅kind/value/evidence。"
             "kind只可name/alias/description/relation，每项都有提供的原文L引用。"
             "每个人至少一个name，只写简短姓名或原文出现的可区分代称，姓名/别名必须在所引原文中出现。"
+            "没有实名也要把原文代称写成name，不能只有alias；无实名不等于没有人物。"
+            "同一个人物的同种kind、同一个value只列一次，重复出现的依据合并到该项evidence且引用不重复。"
             "不要猜真名、把说明当姓名、把全章说明当某次称呼的证据。后来出现姓名时保留旧name，"
             "以新的name事实和自己的证据记录揭示。描述/关系分开概括，各自提供原文证据。"
             "同一人多种称呼只有明确同一人证据才放同一ref；同名或相似描述不足以合并。"
-            "pov填写有原文依据的第一人称叙述者ref，不确定null；无人people=[]、pov=null。"
+            "pov填写有原文依据的第一人称叙述者ref，不确定null；只有原文确实无人时people=[]、pov=null。"
             "不要把格式示例当本章答案："
             '{"people":[{"ref":"R1","facts":[{"kind":"name","value":"林舟",'
             '"evidence":["L1"]},{"kind":"description","value":"书店店员",'
