@@ -10,8 +10,10 @@ from ndr.evaluation import inert_nulls
 from ndr.evaluation.compact import CompactOutput
 from ndr.evaluation.inert_nulls import (
     InertNullAdapter,
+    kind_echo_fingerprint,
     normalization_fingerprint,
     normalize_inert_nulls,
+    normalize_kind_echoes,
 )
 from ndr.evaluation.journal import CallJournal, JournaledAdapter
 
@@ -128,3 +130,38 @@ def test_errors_are_not_swallowed_or_retried():
     with pytest.raises(RuntimeError, match="provider failed"):
         asyncio.run(InertNullAdapter(Failing()).generate_labels({}))
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("kind", sorted(inert_nulls.NON_SPEECH))
+def test_kind_echo_is_a_separate_policy_without_changing_type_or_v1(kind):
+    raw = {
+        "labels": [{"q": "Q1", "kind": kind, "character": None, "basis": kind, "evidence": None}]
+    }
+    saved = deepcopy(raw)
+    assert normalize_inert_nulls(raw)["labels"][0]["basis"] == kind
+    result = normalize_kind_echoes(raw)
+    assert raw == saved and result == {"labels": [{"q": "Q1", "kind": kind}]}
+    CompactOutput.model_validate(result)
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"q": "Q1", "kind": "thought", "basis": "quotation"},
+        {"q": "Q1", "kind": "thought", "basis": "direct"},
+        {"q": "Q1", "kind": "thought", "basis": "thought", "character": "C1"},
+        {"q": "Q1", "kind": "thought", "basis": "thought", "evidence": []},
+        {"q": "Q1", "kind": "speech", "basis": "speech", "character": None, "evidence": []},
+    ],
+)
+def test_kind_echo_does_not_suppress_contradictions(row):
+    result = normalize_kind_echoes({"labels": [row]})
+    with pytest.raises(ValidationError):
+        CompactOutput.model_validate(result)
+
+
+def test_kind_echo_fingerprint_is_distinct_and_versioned(monkeypatch):
+    old = kind_echo_fingerprint("task")
+    assert old != normalization_fingerprint("task")
+    monkeypatch.setattr(inert_nulls, "KIND_ECHO_VERSION", "new")
+    assert old != kind_echo_fingerprint("task")
