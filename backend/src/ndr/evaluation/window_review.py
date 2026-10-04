@@ -10,7 +10,7 @@ from .compact_trial import run_trial
 from .review import Decision, compile_decisions, decisions, reconcile, run_linked_review
 from .risk import RISK_VERSION, detect_risks, review_blocks
 
-WINDOW_REVIEW_VERSION = "complete-linked-window-2"
+WINDOW_REVIEW_VERSION = "complete-linked-window-3"
 
 
 def expanded_review_task(
@@ -54,7 +54,9 @@ def expanded_review_task(
         task,
         quote_ids=selected,
         references=references,
-        context=tuple(context),
+        context=tuple(
+            sorted(context, key=lambda row: (row["start_cp"], row["end_cp"], row["ref"]))
+        ),
         gap_next_quote=gaps,
         evidence_hints=(),
         relay=(),
@@ -79,7 +81,11 @@ def union_review_context(base: CompactTask, reviews: list[CompactTask]) -> Compa
             added = {**row, "ref": ref, "kind": "overlap"}
             rows.append(added)
             existing[stable] = added
-    return replace(base, references=references, context=tuple(rows))
+    return replace(
+        base,
+        references=references,
+        context=tuple(sorted(rows, key=lambda row: (row["start_cp"], row["end_cp"], row["ref"]))),
+    )
 
 
 async def refine_window(

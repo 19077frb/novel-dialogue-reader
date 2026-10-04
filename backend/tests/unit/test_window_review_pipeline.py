@@ -9,10 +9,47 @@ from ndr.evaluation.journal import CallJournal, ReconciliationRequired
 from ndr.evaluation.pipeline import PipelinePolicy, execute_pipeline, pipeline_fingerprint
 from ndr.evaluation.review import Decision
 from ndr.evaluation.scene_plan import comparison_plan
-from ndr.evaluation.window_review import expanded_review_task, refine_window
+from ndr.evaluation.window_review import expanded_review_task, refine_window, union_review_context
 from ndr.llm.schemas import LlmOutput
 
 TEXT = "林舟说：「甲。」\n周遥走近。「乙。」\n以后他们会认识江雨。"
+
+
+def test_expanded_review_preserves_narrative_reading_order_and_literal_text():
+    source = task()
+    before = source.fingerprint()
+    expanded = expanded_review_task(TEXT, source, source.quote_ids, margin=0)
+    positions = [(r["start_cp"], r["end_cp"]) for r in expanded.context]
+    assert positions == sorted(positions)
+    assert "".join(r["text"] for r in expanded.context) == TEXT[:18]
+    assert expanded.quote_ids == source.quote_ids
+    for ref in source.quote_ids:
+        assert expanded.references[ref] == source.references[ref]
+    assert expanded.candidates == source.candidates
+    assert expanded.pov_ref == source.pov_ref and expanded.scene_ref == source.scene_ref
+    assert source.fingerprint() == before
+
+
+def test_union_keeps_original_refs_and_orders_new_evidence_without_rewriting():
+    source = task()
+    expanded = expanded_review_task(TEXT, source, ("Q2",), margin=1)
+    united = union_review_context(source, [expanded])
+    positions = [(r["start_cp"], r["end_cp"]) for r in united.context]
+    assert positions == sorted(positions)
+    for ref, stable in source.references.items():
+        assert united.references[ref] == stable
+    for row in united.context:
+        assert row["text"] == TEXT[row["start_cp"]:row["end_cp"]]
+    assert united.quote_ids == source.quote_ids and united.candidates == source.candidates
+
+
+def test_initial_review_chronology_does_not_extend_the_visible_horizon():
+    source = replace(task(), reading_mode="initial", visible_horizon_cp=18)
+    expanded = expanded_review_task(TEXT, source, source.quote_ids, margin=1000)
+    assert expanded.reading_mode == "initial" and expanded.visible_horizon_cp == 18
+    assert all(r["end_cp"] <= 18 for r in expanded.context)
+    main = [r for r in expanded.context if not r["ref"].startswith("ER_anchor")]
+    assert "".join(r["text"] for r in main) == TEXT[:18]
 
 
 def task():
