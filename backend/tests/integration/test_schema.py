@@ -38,7 +38,7 @@ from ndr.storage.engine import (
     head_revision,
     migration_status,
 )
-from ndr.storage.migrate import run_migrations
+from ndr.storage.migrate import build_alembic_config, run_migrations
 from ndr.storage.models import (
     Annotation,
     Book,
@@ -62,6 +62,47 @@ def test_empty_database_migrates_to_head(tmp_settings: Settings) -> None:
         assert status.state is DatabaseState.READY
         assert status.revision == head_revision()
         assert "review_items" in set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
+def test_identity_facts_migration_keeps_old_metadata_without_guessing_reveal_times(tmp_settings):
+    run_migrations(tmp_settings, revision="0020")
+    engine = create_db_engine(tmp_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            book = Book(title="事实迁移", format=BookFormat.TXT, source_sha256="a" * 64)
+            session.add(book)
+            session.flush()
+            version = BookVersion(book_id=book.id, encoding="utf-8", parser_version="test",
+                normalization_version="test", canonical_sha256="b" * 64, canonical_length_cp=100)
+            session.add(version)
+            session.flush()
+            session.execute(text(
+                "INSERT INTO book_characters (id, book_version_id, canonical_name, aliases_json,"
+                " description, source, user_confirmed, name_locked, confirmation_source,"
+                " presentation_history_json, created_at, updated_at, version)"
+                " VALUES ('old-facts', :version, '旧姓名', '[\"旧别名\"]', '旧说明', 'MODEL',"
+                " 0, 0, 'model', '[]', :now, :now, 7)"
+            ), {"version": version.id, "now": utcnow()})
+        indexes = inspect(engine).get_indexes("book_characters")
+        run_migrations(tmp_settings)
+        run_migrations(tmp_settings)
+        with transaction(factory) as session:
+            person = session.get(BookCharacter, "old-facts")
+            assert person.identity_facts_json == "[]"
+            assert person.canonical_name == "旧姓名" and person.aliases_json == '["旧别名"]'
+            assert person.description == "旧说明" and person.version == 7
+            assert person.presentation_history_json == "[]" and not person.user_confirmed
+        assert inspect(engine).get_indexes("book_characters") == indexes
+        command.downgrade(build_alembic_config(tmp_settings), "0020")
+        assert "identity_facts_json" not in {c["name"] for c in inspect(engine).get_columns("book_characters")}
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT canonical_name, version FROM book_characters WHERE id='old-facts'")).one() == ("旧姓名", 7)
+        run_migrations(tmp_settings)
+        with transaction(factory) as session:
+            assert session.get(BookCharacter, "old-facts").identity_facts_json == "[]"
     finally:
         engine.dispose()
 

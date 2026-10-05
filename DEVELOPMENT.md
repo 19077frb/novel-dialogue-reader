@@ -79,6 +79,8 @@ pwsh -File scripts/verify.ps1
 
 内部`run_window(expression_task=...)`可显式使用短表达协议：任务正文、目标、片段类型和边界必须与实际窗口一致，候选人物须来自当前状态；初读候选字段必须匹配范围内的身份事实。`compile_expression_output()`返回完整1.1输出与独立的接受上限，二者须一起应用；仅取`output`会丢失复核限制。调用方完整的`owner_approvals`表只能降低接受性，不能批准缺乏依据的归属。该路径保留每次原始响应及用量；用量未知时不自动重复格式失败请求，鉴权/限流/超时也不在此重发。内部入口不代表Job调度器、缓存、预算和刷新恢复已经接入。编译测试另见`backend/tests/unit/test_expression_compiler.py`。
 
+`ndr.characters.facts`提供绑定不可变原文的逐事实持久化与按位置读取。`OriginalIdentitySnapshot`先核对整份原文哈希，可在一次事务内复用，避免每位人物重复计算；事实更新由调用方负责锁定与事务，返回内容指纹供未来任务快照与缓存使用。旧资料没有事实时返回空，不回填首见位置。启用实际生产写入前必须接通人工编辑、合并、初读投影及导出回导，不能仅添加存储列就宣称完成防剧透。离线回归：`uv run --project backend python -m pytest backend/tests/unit/test_character_facts.py backend/tests/integration/test_character_facts_storage.py backend/tests/integration/test_schema.py backend/tests/integration/test_index_policy.py`。
+
 - `backend/src/ndr/api/`：HTTP 路由和请求/响应转换。
 - `backend/src/ndr/domain/`：Pydantic schema 与枚举，是 API 类型的权威来源。
 - `backend/src/ndr/ingest/`：TXT/EPUB 导入。
@@ -175,7 +177,7 @@ uv run --project backend python -m ndr.storage.maintenance
 uv run --project backend python -m ndr.storage.maintenance --apply
 ```
 
-可用 `--data-dir "实际书库目录"` 指定其他书库。维护会先生成校验过的 `backups/before-compact-*.sqlite3.gz` 备份，再升级索引、压缩并核对业务数据；数据库被占用、存在未结束任务或空间不足时拒绝执行。不会清理旧备份、回收文件或模型缓存，完成前不要启动服务。
+可用 `--data-dir "实际书库目录"` 指定其他书库。维护会先生成校验过的 `backups/before-compact-*.sqlite3.gz` 备份，再升级数据库并压缩。升级事务提交前核对原有全部业务表与字段，缺失或内容变化则拒绝并回滚；压缩前后另核对升级后的完整业务数据，包括新增字段，避免将合法新增列误报为数据变化。数据库被占用、存在未结束任务或空间不足时拒绝执行。不会清理旧备份、回收文件或模型缓存，完成前不要启动服务。
 
 免安装版没有维护按钮；维护其书库前，须准备与当前迁移版本匹配的 EXE，旧 EXE 可能无法打开升级后的书库。恢复备份时先停服，解压为独立文件并检查后再替换，不能在服务运行中覆盖数据库或手改迁移版本。
 

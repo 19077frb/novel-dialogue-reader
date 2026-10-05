@@ -43,22 +43,40 @@ def inspect_database(settings: Settings) -> dict[str, int]:
         return _usage(db)
 
 
-def _logical_digest(db: sqlite3.Connection) -> str:
-    """Compare all business fields, excluding only the expected migration revision change."""
-    digest = hashlib.sha256()
+def _business_columns(db: sqlite3.Connection) -> dict[str, tuple[str, ...]]:
     tables = db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' "
         "AND name NOT LIKE 'sqlite_%' AND name!='alembic_version' ORDER BY name"
     ).fetchall()
-    for (table,) in tables:
+    return {
+        table: tuple(row[1] for row in db.execute(
+            'PRAGMA table_info("' + table.replace('"', '""') + '")',
+        ))
+        for (table,) in tables
+    }
+
+
+def _logical_digest(
+    db: sqlite3.Connection, *, columns_by_table: dict[str, tuple[str, ...]] | None = None,
+) -> str:
+    """All business fields by default; explicit old schema only for migration comparison."""
+    digest = hashlib.sha256()
+    available_tables = _business_columns(db)
+    tables = available_tables if columns_by_table is None else columns_by_table
+    for table, columns in sorted(tables.items()):
         quoted = '"' + table.replace('"', '""') + '"'
-        columns = db.execute(f"PRAGMA table_info({quoted})").fetchall()
-        keys = [row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5]]
-        if not keys:
-            keys = [row[1] for row in columns]
+        # Quote selected identifiers explicitly; missing old columns must error, not
+        # become SQLite's double-quoted string literals.
+        available = available_tables.get(table, ())
+        if not set(columns) <= set(available) or table not in available_tables:
+            raise RuntimeError("维护迁移删除了原有业务表或字段")
+        selected = ",".join('"' + key.replace('"', '""') + '"' for key in columns)
+        info = db.execute(f"PRAGMA table_info({quoted})").fetchall()
+        keys = [row[1] for row in sorted(info, key=lambda row: row[5])
+                if row[5] and row[1] in columns] or columns
         order = ",".join('"' + key.replace('"', '""') + '"' for key in keys)
-        digest.update(repr((table, [row[1] for row in columns])).encode())
-        for row in db.execute(f"SELECT * FROM {quoted} ORDER BY {order}"):
+        digest.update(repr((table, list(columns))).encode())
+        for row in db.execute(f"SELECT {selected} FROM {quoted} ORDER BY {order}"):
             digest.update(repr(row).encode("utf-8"))
     return digest.hexdigest()
 
@@ -132,7 +150,8 @@ def compact_database(
                 raise RuntimeError("磁盘空闲空间不足，请预留数据库大小的三倍空间用于备份和压缩。")
             _check(db)
             progress("正在核对原有数据并创建压缩备份…")
-            digest = _logical_digest(db)
+            old_columns = _business_columns(db)
+            digest = _logical_digest(db, columns_by_table=old_columns)
             _checkpoint(db)
             backup = _backup(settings)
             progress(f"备份已保存：{backup}")
@@ -140,12 +159,15 @@ def compact_database(
             with engine.connect() as connection:
                 connection.exec_driver_sql("BEGIN EXCLUSIVE")
                 run_migrations(settings, connection=connection)
+                if _logical_digest(db, columns_by_table=old_columns) != digest:
+                    raise RuntimeError("升级前后的原有业务数据不一致，迁移未提交")
                 connection.commit()
+            upgraded_digest = _logical_digest(db)
             progress("正在压缩数据库，请勿启动服务…")
             db.execute("VACUUM")
             _checkpoint(db)
             _check(db, full=True)
-            if _logical_digest(db) != digest:
+            if _logical_digest(db) != upgraded_digest:
                 raise RuntimeError("维护前后的业务数据不一致，请勿启动服务，先检查备份。")
             after = _usage(db)
             return {

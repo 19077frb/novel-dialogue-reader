@@ -137,8 +137,10 @@ def test_annotation_index_upgrade_downgrade_preserves_data_and_is_repeatable(tmp
             digest = _logical_digest(db)
         old_indexes = inspect(engine).get_indexes("annotations")
         assert "ix_annotations_scene_dependency" in {i["name"] for i in old_indexes}
-        run_migrations(tmp_settings)
-        run_migrations(tmp_settings)
+        # This regression isolates the index-only 0019 -> 0020 migration.
+        # Later migrations may legitimately add columns to the logical digest.
+        run_migrations(tmp_settings, revision="0020")
+        run_migrations(tmp_settings, revision="0020")
         with closing(sqlite3.connect(tmp_settings.database_path)) as db:
             assert _logical_digest(db) == digest
             assert db.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -149,7 +151,7 @@ def test_annotation_index_upgrade_downgrade_preserves_data_and_is_repeatable(tmp
         assert inspect(engine).get_indexes("annotations") == old_indexes
         with closing(sqlite3.connect(tmp_settings.database_path)) as db:
             assert _logical_digest(db) == digest
-        run_migrations(tmp_settings)
+        run_migrations(tmp_settings, revision="0020")
         assert inspect(engine).get_indexes("annotations") == current
         with closing(sqlite3.connect(tmp_settings.database_path)) as db:
             assert _logical_digest(db) == digest
