@@ -108,3 +108,15 @@ uv run --project backend python -m pytest backend/tests/unit/test_trial_journal.
 对照保持模型、思考、候选名单、文本、窗口、并发和重试额度相同；先比较协议，后加检索、风险复核及接力，不能一次改变所有变量。固定名单实验只隔离对白模块，不代表空名单完整人物流程。旧失败输出重放只测解析，不能冒充新调用效果。
 
 `identity_scores`按目标引用与稳定人物身份逐项对照，计入错误、UNKNOWN和缺失；人物A/B全交换也算错。与[匿名分组指标](ablations.md)并列报告，不能相互替代。实际总Tokens、失败消耗、未知用量、调用秒、墙钟、窗口完成率、正确覆盖与错误率都应报告；来源核查、开发集与独立人工金标准要分开标明，单章单次不作总体能力或非劣承诺。
+
+## 表达人物归属的隔离入口
+
+`ndr.evaluation.expression_owner.ExplicitOwnerProtocol`提供独立的表达归属协议：发声、心声、引用均可携带明确人物、依据和原文引用，类型判断不会自动删除人物。引文归原文能支持的原表达者；术语或没有明确人物的引文保持未知，不能自动归给叙述者。它复用完整覆盖、实际非空引用、候选和新人物的严格编译，不因类型不同绕过证据检查。返回值保留原类型和可接受性，**不是生产QuoteLabel，禁止直接提交任务或写入书库**；现有任务、阅读和人工更正契约尚未因此替换。
+
+`ndr.evaluation.owner_scoring.score_owners`要求调用者提供明确人物Gold及已验证的可接受性。三种类型归给正确人物均计正确；类型差异应另外统计。未知、错误、未返回目标仍进入分母；没有明确人物的Gold不能根据POV补上再计分。合法引用不证明语义正确，程序编译通过不等于模型质量通过。新入口本身不加载凭据、不发送请求、不默认开启思考，也不实现生产刷新恢复。
+
+相关原创离线回归：
+
+```powershell
+uv run --project backend python -m pytest backend/tests/unit/test_expression_owner.py
+```
