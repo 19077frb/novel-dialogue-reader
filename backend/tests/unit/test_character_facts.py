@@ -8,9 +8,11 @@ from pydantic import ValidationError
 
 from ndr.characters.facts import (
     CharacterIdentityFact,
+    IdentityLink,
     OriginalIdentitySnapshot,
     append_identity_facts,
     identity_facts_fingerprint,
+    prepare_merged_identity_facts,
     visible_identity_profile,
 )
 from ndr.storage.models import BookCharacter, BookVersion
@@ -189,3 +191,150 @@ def test_user_assertion_keeps_explicit_reveal_without_fabricating_original_evide
     append_identity_facts(character, version, (manual,))
     assert visible_identity_profile(character, version, horizon=len(TEXT) - 1)["name"] is None
     assert visible_identity_profile(character, version, horizon=len(TEXT))["facts"] == (manual,)
+
+
+def merge_objects():
+    source, version, original = objects()
+    source.id = "source"
+    target = BookCharacter(
+        id="target",
+        book_version_id=version.id,
+        canonical_name="未来姓名",
+        identity_facts_json="[]",
+        version=1,
+    )
+    append_identity_facts(source, version, (fact(), fact("alias", "小舟")), original=original)
+    link = IdentityLink(
+        source_id=source.id,
+        target_id=target.id,
+        visible_from_cp=len(TEXT) - 1,
+        source="user",
+        source_ref="merge:test",
+        accepted=True,
+    )
+    return source, target, version, original, link
+
+
+def test_merge_keeps_original_reveal_and_proof_with_separate_identity_gate():
+    source, target, version, original, link = merge_objects()
+    before = source.identity_facts_json
+    prepared = prepare_merged_identity_facts(source, target, version, link=link, original=original)
+    assert source.identity_facts_json == before and target.identity_facts_json == "[]"
+    assert source.version == 2 and target.version == 1
+    target.identity_facts_json = prepared
+    assert (
+        visible_identity_profile(target, version, horizon=link.visible_from_cp - 1)["name"] is None
+    )
+    visible = visible_identity_profile(target, version, horizon=link.visible_from_cp)
+    assert visible["name"] == "林舟" and visible["aliases"] == ("小舟",)
+    transferred = visible["facts"][0]
+    assert transferred.model_dump(exclude={"identity_links"}) == fact().model_dump(
+        exclude={"identity_links"}
+    )
+    assert transferred.identity_links == (link,)
+    assert transferred.visible_from_cp < link.visible_from_cp
+
+
+def test_repeated_merge_cannot_backdate_previous_identity_association():
+    source, target, version, original, link = merge_objects()
+    target.identity_facts_json = prepare_merged_identity_facts(
+        source, target, version, link=link, original=original
+    )
+    final = BookCharacter(
+        id="final", book_version_id=version.id, identity_facts_json="[]", version=1
+    )
+    earlier_link = IdentityLink(
+        source_id=target.id,
+        target_id=final.id,
+        visible_from_cp=2,
+        source="model",
+        source_ref="merge:second",
+        accepted=True,
+    )
+    final.identity_facts_json = prepare_merged_identity_facts(
+        target, final, version, link=earlier_link, original=original
+    )
+    assert (
+        visible_identity_profile(final, version, horizon=link.visible_from_cp - 1)["name"] is None
+    )
+    profile = visible_identity_profile(final, version, horizon=len(TEXT))
+    assert profile["name"] == "林舟" and profile["facts"][0].identity_links == (link, earlier_link)
+
+
+def test_transferred_names_and_descriptions_do_not_override_own_visible_facts():
+    source, target, version, original, link = merge_objects()
+    append_identity_facts(
+        target,
+        version,
+        (fact("name", "陆欣"), fact("description", "陆欣的说明", evidence_value="陆欣")),
+        original=original,
+    )
+    append_identity_facts(source, version, (fact("description", "学生会长"),), original=original)
+    target.identity_facts_json = prepare_merged_identity_facts(
+        source, target, version, link=link, original=original
+    )
+    visible = visible_identity_profile(target, version, horizon=len(TEXT))
+    assert visible["name"] == "陆欣" and visible["description"] == "陆欣的说明"
+    assert visible["aliases"] == ("林舟", "小舟")
+
+
+def test_unaccepted_link_does_not_promote_accepted_source_facts():
+    source, target, version, original, link = merge_objects()
+    target.identity_facts_json = prepare_merged_identity_facts(
+        source, target, version, link=link.model_copy(update={"accepted": False}), original=original
+    )
+    assert visible_identity_profile(target, version, horizon=len(TEXT))["facts"] == ()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"source_id": "other"},
+        {"target_id": "other"},
+        {"accepted": 1},
+        {"visible_from_cp": True},
+        {"visible_from_cp": len(TEXT) + 1},
+        {"source_ref": " "},
+    ],
+)
+def test_invalid_merge_is_atomic(change):
+    source, target, version, original, link = merge_objects()
+    before = source.identity_facts_json
+    with pytest.raises(ValueError):
+        prepare_merged_identity_facts(
+            source, target, version, link=link.model_copy(update=change), original=original
+        )
+    assert source.identity_facts_json == before and target.identity_facts_json == "[]"
+
+
+def test_legacy_empty_merge_does_not_guess_name_or_reveal():
+    source, target, version, original, link = merge_objects()
+    source.identity_facts_json = "[]"
+    assert (
+        prepare_merged_identity_facts(source, target, version, link=link, original=original) == "[]"
+    )
+
+
+@pytest.mark.parametrize("mode", ["discontinuous", "cyclic", "wrong_owner", "future"])
+def test_corrupt_persisted_identity_chain_is_rejected(mode):
+    source, target, version, original, link = merge_objects()
+    target.identity_facts_json = prepare_merged_identity_facts(
+        source, target, version, link=link, original=original
+    )
+    payload = json.loads(target.identity_facts_json)
+    chain = payload[0]["identity_links"]
+    if mode == "wrong_owner":
+        chain[0]["target_id"] = "elsewhere"
+    elif mode == "future":
+        chain[0]["visible_from_cp"] = len(TEXT) + 1
+    else:
+        chain.append(
+            {
+                **chain[0],
+                "source_id": "disconnected" if mode == "discontinuous" else target.id,
+                "target_id": "final" if mode == "discontinuous" else source.id,
+            }
+        )
+    target.identity_facts_json = json.dumps(payload)
+    with pytest.raises(ValueError):
+        visible_identity_profile(target, version, horizon=len(TEXT))

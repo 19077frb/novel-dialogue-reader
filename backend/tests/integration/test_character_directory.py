@@ -117,6 +117,131 @@ def populated(migrated_client: TestClient):
     return ids
 
 
+@pytest.mark.parametrize("mode", ["manual", "model"])
+def test_merge_preserves_sourced_facts_with_separate_identity_reveal(
+    migrated_client, migrated_settings, populated, mode,
+):
+    from ndr.characters.facts import (
+        CharacterIdentityFact,
+        append_identity_facts,
+        read_identity_facts,
+        visible_identity_profile,
+    )
+
+    client, ids = migrated_client, populated
+    originals = {}
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, ids["version"])
+        for key, value in (("source", "浅村悠太"), ("target", "悠太")):
+            row = session.get(BookCharacter, ids[key])
+            fact = CharacterIdentityFact(kind="name", value=value, visible_from_cp=0,
+                canonical_sha256=version.canonical_sha256, source="user",
+                source_ref=f"manual:{key}", accepted=True)
+            append_identity_facts(row, version, (fact,))
+            originals[key] = fact
+    base = f"/api/books/{ids['book']}/character-directory"
+    boundary = 5
+    if mode == "manual":
+        response = client.post(f"{base}/{ids['source']}/merge", json={
+            "target_character_id": ids["target"], "expected_version": 2,
+            "expected_target_version": 2, "visible_from_cp": boundary,
+        })
+    else:
+        job, _ = _auto_job(client, ids)
+        _run_merge(client, job, [_merge_group(ids)], accept=False)
+        response = client.post(f"{base}/auto-merge/{job['id']}/confirm", json={
+            "selected_target_ids": [ids["target"]], "visible_from_cp": boundary,
+        })
+    assert response.status_code == 200, response.text
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, ids["version"])
+        target = session.get(BookCharacter, ids["target"])
+        assert session.get(BookCharacter, ids["source"]) is None
+        assert target.version == 3
+        assert target.user_confirmed is (mode == "manual")
+        early = visible_identity_profile(target, version, horizon=boundary - 1)
+        late = visible_identity_profile(target, version, horizon=boundary)
+        assert early["name"] == late["name"] == "悠太"
+        assert early["aliases"] == () and late["aliases"] == ("浅村悠太",)
+        merged = read_identity_facts(target, version)[1]
+        assert merged.visible_from_cp == originals["source"].visible_from_cp == 0
+        assert merged.source_ref == originals["source"].source_ref
+        link = merged.identity_links[0]
+        assert (link.source_id, link.target_id) == (ids["source"], ids["target"])
+        assert link.source == ("user" if mode == "manual" else "model")
+        assert link.visible_from_cp == boundary and link.accepted
+
+
+def test_multi_source_auto_merge_reuses_one_validated_original(
+    migrated_client, populated, monkeypatch,
+):
+    from ndr.characters import directory as directory_module
+    from ndr.characters.facts import (
+        CharacterIdentityFact,
+        append_identity_facts,
+        read_identity_facts,
+    )
+
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, ids["version"])
+        extra = BookCharacter(book_version_id=version.id, canonical_name="哥哥")
+        session.add(extra)
+        session.flush()
+        extra_id = extra.id
+        for row in (session.get(BookCharacter, ids["source"]), extra):
+            append_identity_facts(row, version, (CharacterIdentityFact(
+                kind="name", value=row.canonical_name, visible_from_cp=0,
+                canonical_sha256=version.canonical_sha256, source="user",
+                source_ref=f"manual:{row.id}", accepted=True,
+            ),))
+    calls = []
+    real_load = directory_module.load_canonical_text
+
+    def counted_load(settings, version):
+        calls.append(version.id)
+        return real_load(settings, version)
+
+    monkeypatch.setattr(directory_module, "load_canonical_text", counted_load)
+    job, _ = _auto_job(client, ids)
+    _run_merge(client, job, [_merge_group(ids, source_ids=[ids["source"], extra_id])], accept=False)
+    response = client.post(
+        f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}/confirm",
+        json={"selected_target_ids": [ids["target"]], "visible_from_cp": 5},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["merged_count"] == 2
+    assert calls == [ids["version"]]
+    with transaction(client.app.state.session_factory) as session:
+        target = session.get(BookCharacter, ids["target"])
+        assert target.version == 3 and not target.user_confirmed
+        facts = read_identity_facts(target, session.get(BookVersion, ids["version"]))
+        assert {fact.value for fact in facts} == {"浅村悠太", "哥哥"}
+        assert all(fact.identity_links[-1].target_id == target.id for fact in facts)
+
+
+@pytest.mark.parametrize("invalid_key", ["source", "target"])
+def test_corrupt_identity_facts_refuse_merge_without_deleting_source(
+    migrated_client, populated, invalid_key,
+):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        session.get(BookCharacter, ids[invalid_key]).identity_facts_json = '{"not":"facts"}'
+    response = client.post(
+        f"/api/books/{ids['book']}/character-directory/{ids['source']}/merge",
+        json={"target_character_id": ids["target"], "expected_version": 1,
+              "expected_target_version": 1},
+    )
+    assert response.status_code == 422, response.text
+    assert "人物身份资料未通过校验" in response.text
+    with transaction(client.app.state.session_factory) as session:
+        source = session.get(BookCharacter, ids["source"])
+        target = session.get(BookCharacter, ids["target"])
+        assert source.canonical_name == "浅村悠太" and source.version == 1
+        assert target.canonical_name == "悠太" and target.version == 1
+        assert target.aliases_json == "[]"
+
+
 def test_color_is_independent_persistent_and_matches_reader(migrated_client, populated):
     client, ids = migrated_client, populated
     base = f"/api/books/{ids['book']}/character-directory"

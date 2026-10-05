@@ -153,6 +153,7 @@ def confirm_auto_merge_route(
             raise ApiError.not_found("自动合并任务不存在")
         result = confirm_auto_merge(
             session, job, payload.selected_target_ids, payload.visible_from_cp,
+            settings=request.app.state.settings,
         )
     return DataEnvelope(data=result, request_id=current_request_id(request))
 
@@ -202,7 +203,7 @@ def merge_character_route(
 ) -> DataEnvelope[CharacterDirectoryOut]:
     with transaction(request.app.state.session_factory) as session:
         version = _version_or_400(session, _book_or_404(session, book_id), payload.book_version_id)
-        result = merge(session, version, entry_id, payload)
+        result = merge(session, version, entry_id, payload, settings=request.app.state.settings)
     return DataEnvelope(data=result, request_id=current_request_id(request))
 
 

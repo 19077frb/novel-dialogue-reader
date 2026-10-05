@@ -15,6 +15,27 @@ FACTS_VERSION = "identity-facts-1"
 Position = Annotated[StrictInt, Field(ge=0)]
 
 
+class IdentityLink(ApiModel):
+    """An accepted merge event, not proof that two identities truly are the same."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_id: str = Field(min_length=1, max_length=160)
+    target_id: str = Field(min_length=1, max_length=160)
+    visible_from_cp: Position
+    source: Literal["user", "model"]
+    source_ref: str = Field(min_length=1, max_length=160)
+    accepted: StrictBool = False
+
+    @model_validator(mode="after")
+    def check_link(self):
+        if any(not value.strip() for value in (self.source_id, self.target_id, self.source_ref)):
+            raise ValueError("Identity link identifiers must be nonblank")
+        if self.source_id == self.target_id:
+            raise ValueError("Identity link must join distinct identities")
+        return self
+
+
 class CharacterIdentityFact(ApiModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -27,6 +48,7 @@ class CharacterIdentityFact(ApiModel):
     source: Literal["user", "model", "source"]
     source_ref: str = Field(min_length=1, max_length=160)
     accepted: StrictBool = False
+    identity_links: tuple[IdentityLink, ...] = ()
 
     @model_validator(mode="after")
     def check_proof(self):
@@ -40,6 +62,13 @@ class CharacterIdentityFact(ApiModel):
             raise ValueError("Duplicate identity evidence")
         if any(a >= b or b > self.visible_from_cp for a, b in self.evidence_spans):
             raise ValueError("Identity evidence must precede its reveal position")
+        visited = set()
+        for index, link in enumerate(self.identity_links):
+            if index and self.identity_links[index - 1].target_id != link.source_id:
+                raise ValueError("Identity link chain must be continuous")
+            if link.source_id in visited or link.target_id in visited:
+                raise ValueError("Identity link chain cannot revisit an identity")
+            visited.add(link.source_id)
         return self
 
 
@@ -76,7 +105,15 @@ def read_identity_facts(
             or fact.visible_from_cp > version.canonical_length_cp
         ):
             raise ValueError("Identity fact does not belong to the immutable original")
+        _validate_links(fact, character, version)
     return facts
+
+
+def _validate_links(fact, character, version):
+    if any(link.visible_from_cp > version.canonical_length_cp for link in fact.identity_links):
+        raise ValueError("Identity link is outside the immutable original")
+    if fact.identity_links and fact.identity_links[-1].target_id != character.id:
+        raise ValueError("Identity link does not lead to its current character")
 
 
 def append_identity_facts(
@@ -98,6 +135,7 @@ def append_identity_facts(
     for supplied in facts:
         # Revalidate even already constructed objects instead of trusting bypassed models.
         fact = CharacterIdentityFact.model_validate(supplied.model_dump())
+        _validate_links(fact, character, version)
         if (
             fact.canonical_sha256 != version.canonical_sha256
             or fact.visible_from_cp > version.canonical_length_cp
@@ -137,7 +175,9 @@ def visible_identity_facts(
     return tuple(
         f
         for f in read_identity_facts(character, version)
-        if f.accepted and f.visible_from_cp <= horizon
+        if f.accepted
+        and f.visible_from_cp <= horizon
+        and all(link.accepted and link.visible_from_cp <= horizon for link in f.identity_links)
     )
 
 
@@ -146,16 +186,20 @@ def visible_identity_profile(
 ) -> dict:
     facts = visible_identity_facts(character, version, horizon=horizon)
     names = [f for f in facts if f.kind == "name"]
+    own_names = [f for f in names if not f.identity_links]
     designations = [f for f in facts if f.kind == "designation"]
     chosen = max(
-        enumerate(names or designations),
+        enumerate(own_names or names or designations),
         key=lambda item: (item[1].visible_from_cp, item[0]),
         default=None,
     )
     name = chosen[1].value if chosen else None
     descriptions = [f for f in facts if f.kind == "description"]
+    own_descriptions = [f for f in descriptions if not f.identity_links]
     description = max(
-        enumerate(descriptions), key=lambda item: (item[1].visible_from_cp, item[0]), default=None
+        enumerate(own_descriptions or descriptions),
+        key=lambda item: (item[1].visible_from_cp, item[0]),
+        default=None,
     )
     return {
         "character_id": character.id,
@@ -171,6 +215,36 @@ def visible_identity_profile(
         "relations": tuple(f for f in facts if f.kind == "relation"),
         "facts": facts,
     }
+
+
+def prepare_merged_identity_facts(
+    source: BookCharacter,
+    target: BookCharacter,
+    version: BookVersion,
+    *,
+    link: IdentityLink,
+    original: OriginalIdentitySnapshot,
+) -> str:
+    """Keep original proof and reveal time; gate transferred facts on every merge."""
+    checked_link = IdentityLink.model_validate(link.model_dump())
+    if checked_link.source_id != source.id or checked_link.target_id != target.id:
+        raise ValueError("Identity merge link does not match its source and target")
+    if checked_link.visible_from_cp > version.canonical_length_cp:
+        raise ValueError("Identity link is outside the immutable original")
+    source_facts = read_identity_facts(source, version)
+    target_facts = read_identity_facts(target, version)
+    transferred = tuple(
+        fact.model_copy(update={"identity_links": (*fact.identity_links, checked_link)})
+        for fact in source_facts
+    )
+    prepared = BookCharacter(
+        id=target.id,
+        book_version_id=target.book_version_id,
+        identity_facts_json="[]",
+        version=1,
+    )
+    append_identity_facts(prepared, version, (*target_facts, *transferred), original=original)
+    return prepared.identity_facts_json
 
 
 def identity_facts_fingerprint(character: BookCharacter, version: BookVersion) -> str:

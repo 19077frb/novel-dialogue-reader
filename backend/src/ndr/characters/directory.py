@@ -22,6 +22,7 @@ from ..domain.enums import (
     JobState,
     QuoteKind,
 )
+from ..ingest.query import load_canonical_text
 from ..storage.models import (
     Annotation,
     BookCharacter,
@@ -34,6 +35,12 @@ from ..storage.models import (
 )
 from ..storage.transactions import check_version
 from .colors import color_projection
+from .facts import (
+    IdentityLink,
+    OriginalIdentitySnapshot,
+    prepare_merged_identity_facts,
+    read_identity_facts,
+)
 from .service import _character_out, _json_list, list_book_characters
 from .visibility import baseline, capture, position
 
@@ -344,6 +351,8 @@ def merge(
     *,
     active_job_id: str | None = None,
     model_decision: bool = False,
+    settings=None,
+    identity_originals: dict[str, OriginalIdentitySnapshot] | None = None,
 ) -> CharacterDirectoryOut:
     _guard(session, version, active_job_id)
     cp = position(version, payload.visible_from_cp)
@@ -357,6 +366,32 @@ def merge(
         raise ApiError.validation("请选择另一个已有的全书人物作为合并目标")
     check_version(source, payload.expected_version)
     check_version(target, payload.expected_target_version)
+    try:
+        source_facts = (
+            read_identity_facts(source, version) if isinstance(source, BookCharacter) else ()
+        )
+        read_identity_facts(target, version)
+        if source_facts:
+            # Validate and prepare the entire block before changing live references.
+            if settings is None:
+                raise ApiError.validation("人物包含原文身份资料，合并需要核对当前书库原文")
+            originals = identity_originals if identity_originals is not None else {}
+            if version.id not in originals:
+                originals[version.id] = OriginalIdentitySnapshot(
+                    version.id, version.canonical_sha256, load_canonical_text(settings, version),
+                )
+            original = originals[version.id]
+            target.identity_facts_json = prepare_merged_identity_facts(
+                source, target, version,
+                link=IdentityLink(
+                    source_id=source.id, target_id=target.id, visible_from_cp=cp,
+                    source="model" if model_decision else "user",
+                    source_ref=f"merge:{source.id}:{target.id}", accepted=True,
+                ),
+                original=original,
+            )
+    except ValueError as exc:
+        raise ApiError.validation("人物身份资料未通过校验，未执行合并") from exc
     baseline(target)
     aliases = [*_json_list(target.aliases_json), source.canonical_name or ""]
     if isinstance(source, BookCharacter):

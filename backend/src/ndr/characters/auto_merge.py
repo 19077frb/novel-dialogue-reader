@@ -363,11 +363,12 @@ def _confirmation_source(entry):
     return "model"
 
 
-def _apply(session, job, output, entries, visible_from_cp=None):
+def _apply(session, job, output, entries, visible_from_cp=None, *, settings=None):
     version = _check_current(session, job, entries)
     cp = visibility_position(version, visible_from_cp)
     by_id = _validate_plan(output, entries)
     applied = []
+    identity_originals = {}
     skipped = merged_count = 0
     for group in output.groups:
         if group.confidence < 0.95:
@@ -419,6 +420,8 @@ def _apply(session, job, output, entries, visible_from_cp=None):
                 ),
                 active_job_id=job.id,
                 model_decision=True,
+                settings=settings,
+                identity_originals=identity_originals,
             )
             merged_count += 1
         applied.append(
@@ -433,7 +436,7 @@ def _apply(session, job, output, entries, visible_from_cp=None):
     return {"merged_count": merged_count, "skipped_groups": skipped, "merges": applied}
 
 
-def confirm_auto_merge(session, job, selected_ids, visible_from_cp=None):
+def confirm_auto_merge(session, job, selected_ids, visible_from_cp=None, *, settings=None):
     checkpoint = json.loads(job.checkpoint_json or "{}")
     selected = sorted(selected_ids)
     if len(selected) != len(set(selected)):
@@ -461,12 +464,13 @@ def confirm_auto_merge(session, job, selected_ids, visible_from_cp=None):
     )
     if claimed.rowcount != 1:
         session.refresh(job)
-        return confirm_auto_merge(session, job, selected, visible_from_cp)
+        return confirm_auto_merge(session, job, selected, visible_from_cp, settings=settings)
     result = {"merged_count": 0, "merges": [], "skipped_groups": proposal.get("skipped_groups", 0)}
     if selected:
         output = MergeOutput.model_validate({"groups": [groups[key] for key in selected]})
         result = _apply(
             session, job, output, json.loads(job.range_json)["entries"], visible_from_cp,
+            settings=settings,
         )
         result["skipped_groups"] += proposal.get("skipped_groups", 0)
     checkpoint.update(
