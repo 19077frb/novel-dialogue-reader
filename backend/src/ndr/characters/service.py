@@ -271,8 +271,11 @@ def store_roster_candidates(
         roster = ChapterCharacterRoster(
             chapter_id=chapter.id,
             book_version_id=version.id,
+            version=2,  # Version 1 is the empty GET placeholder before analysis.
         )
         session.add(roster)
+    else:
+        roster.version += 1
 
     records: list[dict[str, Any]] = []
     existing = list_book_characters(session, version)

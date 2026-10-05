@@ -26,6 +26,39 @@ from ndr.storage.models import (
 from ndr.storage.transactions import transaction
 
 
+def test_successful_roster_analysis_advances_placeholder_and_existing_revision(migrated_client):
+    client = migrated_client
+    imported = client.post("/api/books/import", files={
+        "file": ("revision.txt", "第一章\n「你好。」".encode(), "text/plain"),
+    }).json()["data"]
+    base = f"/api/books/{imported['book_id']}"
+    chapter_id = client.get(f"{base}/chapters").json()["data"][0]["id"]
+    path = f"{base}/chapters/{chapter_id}/character-roster"
+    assert client.get(path).json()["data"]["version"] == 1
+    for expected in (2, 3):
+        with transaction(client.app.state.session_factory) as session:
+            stored = store_roster_candidates(
+                session, version=session.get(BookVersion, imported["book_version_id"]),
+                chapter=session.get(Chapter, chapter_id), job_id=None,
+                output=RosterOutput.model_validate({"characters": [{
+                    "temp_ref": "p1", "name": "林舟", "description": "原文人物",
+                    "evidence_refs": ["L1"], "pov_candidate": True,
+                }]}),
+            )
+            assert stored.version == expected
+        saved = client.get(path).json()["data"]
+        assert saved["version"] == expected and len(saved["candidates"]) == 1
+        assert client.get(path).json()["data"] == saved  # Read does not advance revision.
+    candidate = saved["candidates"][0]
+    payload = {"candidates": [{"temp_ref": "p1", "character_id": candidate["character_id"]}],
+               "pov_temp_ref": "p1", "expected_version": 2}
+    assert client.put(path, json=payload).status_code == 422
+    assert client.get(path).json()["data"]["version"] == 3
+    accepted = client.put(path, json={**payload, "expected_version": 3})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["data"]["version"] == 4
+
+
 @pytest.mark.parametrize("analyzed", [False, True])
 def test_manual_roster_candidates_survive_save_reload_and_reconfirmation(migrated_client, analyzed):
     client = migrated_client
