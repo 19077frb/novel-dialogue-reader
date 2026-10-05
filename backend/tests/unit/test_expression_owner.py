@@ -1,12 +1,14 @@
 """Original fixtures for the opt-in expression-owner compiler, not model quality."""
 
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from ndr.evaluation.compact import Candidate, CompactTask
+from ndr.evaluation.evidence import EvidenceIndex, EvidencePerson, IdentityFact
 from ndr.evaluation.expression_owner import ExplicitOwnerProtocol
 from ndr.evaluation.owner_constraints import ConstrainedOwnerProtocol
 from ndr.evaluation.owner_scoring import score_owners
@@ -146,3 +148,62 @@ def test_constrained_protocol_does_not_mutate_v1_or_reuse_its_fingerprint():
     data["labels"][0]["evidence"] = ["UNSENT"]
     with pytest.raises(InvalidModelOutput):
         constrained.compile(data)
+
+
+@pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
+def test_initial_owner_view_filters_all_later_identity_facts(kind):
+    visible = "门口的女店员招呼顾客。\n「请进。」\n\n"
+    later = "女店员名叫许晴，昵称小晴，认识店长江遥。\n"
+    text = visible + later
+    first_line_end = visible.index("\n") + 1
+    person = EvidencePerson(
+        "person",
+        (
+            IdentityFact("女店员", "designation", first_line_end, ((0, first_line_end),)),
+            IdentityFact("许晴", "name", len(text), ((len(visible), len(text)),)),
+            IdentityFact("小晴", "alias", len(text), ((len(visible), len(text)),)),
+            IdentityFact("认识店长江遥", "relation", len(text), ((len(visible), len(text)),)),
+            IdentityFact(
+                "在门口工作的许晴", "description", len(text), ((len(visible), len(text)),)
+            ),
+        ),
+    )
+    index = EvidenceIndex(text, (person,))
+    span = ((visible.index("「"), visible.index("」") + 1),)
+    initial_task = index.task(span, margin=0, reading_mode="initial", horizon=len(visible))
+    reread_task = index.task(span, margin=0, reading_mode="reread")
+    initial = ConstrainedOwnerProtocol(initial_task)
+    reread = ConstrainedOwnerProtocol(reread_task)
+    initial_message = str(initial.messages())
+    for future in ("许晴", "小晴", "江遥", later.strip()):
+        assert future not in initial_message
+        assert future in str(reread.messages())
+    assert initial_task.candidates[0].name == "女店员"
+    assert initial_task.candidates[0].aliases == ()
+    assert initial_task.candidates[0].description == ""
+    assert {fact["kind"] for fact in initial_task.identity_facts} == {"designation"}
+    assert "认识店长江遥" not in reread_task.candidates[0].aliases
+    assert initial.fingerprint() != reread.fingerprint()
+    proof = next(row["ref"] for row in initial_task.context if row["kind"] == "overlap")
+    result = initial.compile(
+        {
+            "labels": [
+                {
+                    "q": "Q1",
+                    "kind": kind,
+                    "character": "C1",
+                    "basis": "direct",
+                    "evidence": [proof],
+                }
+            ]
+        }
+    )
+    assert result["rows"][0]["character_id"] == "person"
+    assert result["rows"][0]["kind"] == kind
+    with pytest.raises(ValueError, match="Future identity in initial-reading candidates"):
+        replace(
+            initial_task,
+            candidates=(replace(initial_task.candidates[0], visible_from_cp=len(text)),),
+        )
+    with pytest.raises(ValueError, match="Future identity fact in initial-reading context"):
+        replace(initial_task, identity_facts=reread_task.identity_facts)
