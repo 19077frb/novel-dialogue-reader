@@ -30,10 +30,13 @@ from ndr.domain.enums import (
     ReviewTargetType,
     SpeakerBasis,
 )
+from ndr.evaluation.compact import CompactTask
 from ndr.llm.adapters.fake import FakeProviderAdapter
+from ndr.llm.errors import InvalidModelOutput, ProviderError, ProviderErrorKind
+from ndr.llm.expression_compiler import compile_expression_output
 from ndr.llm.validation import RetryPolicy
 from ndr.scenes.engine import apply_window
-from ndr.scenes.runner import run_window
+from ndr.scenes.runner import _reference_aliases, run_window
 from ndr.scenes.state import ConfirmedCharacter, SceneState
 from ndr.storage.engine import create_db_engine, create_session_factory
 from ndr.storage.models import (
@@ -62,6 +65,187 @@ SAMPLE = (
     "「明天也来这里吧。」少年忽然说。\n"
     "「嗯。」少女点了点头。\n"
 )
+
+
+def _expression_task(window):
+    aliases, references = _reference_aliases(window)
+    targets = [f for f in window.fragments if f.fragment_id in window.target_quote_ids]
+    targets.sort(key=lambda f: f.start_cp)
+    return CompactTask(
+        tuple(aliases[q] for q in window.target_quote_ids), references,
+        tuple({"ref": aliases[f.fragment_id], "kind": f.kind.value, "text": f.text,
+               "start_cp": f.start_cp, "end_cp": f.end_cp} for f in window.fragments),
+        (),
+        {aliases[f.fragment_id]: next((aliases[q.fragment_id] for q in targets
+                                      if q.start_cp >= f.end_cp), None)
+         for f in window.fragments if f.kind.value in {"inner_gap", "outer_gap"}},
+    )
+
+
+def _short_output(task, kind="speech", known=True):
+    evidence = next(r["ref"] for r in task.context
+                    if r["ref"] not in task.quote_ids and r["text"].strip())
+    return {"labels": [{"q": q, "kind": kind, "character": "N1" if known else None,
+                        "basis": "direct" if known else "insufficient",
+                        "evidence": [evidence] if known else []} for q in task.quote_ids],
+            "new_characters": [{"ref": "N1", "name": "少女", "description": "原文中的少女",
+                                "evidence": [evidence]}] if known else []}
+
+
+@pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
+def test_short_window_executes_and_preserves_programme_acceptance(
+    migrated_client, migrated_settings, kind,
+):
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        ids = _targets(inputs)[:2]
+        window = _window(inputs, ids)
+        task = _expression_task(window)
+        result = _run(session, script=[_short_output(task, kind)], window=window,
+                      state=SceneState(), inputs=inputs, expression_task=task,
+                      owner_approvals={ids[0]: False, ids[1]: True})
+        assert result.ok, result.application.warnings
+        assert result.attempts == 1 and result.compiler_fingerprint
+        rows = {r.quote_id: r for r in session.scalars(select(Annotation))}
+        assert {r.kind for r in rows.values()} == {QuoteKind(kind)}
+        assert rows[ids[0]].status is AnnotationStatus.PROVISIONAL
+        assert rows[ids[1]].status is AnnotationStatus.ACCEPTED
+        assert rows[ids[0]].basis is SpeakerBasis.DIRECT
+        assert rows[ids[0]].speaker_id == rows[ids[1]].speaker_id
+        assert session.scalar(select(ReviewItem)).reason is ReviewReason.LOW_CONFIDENCE
+        assert not result.application.scene_state.recent_turns if kind != "speech" else True
+        assert '"q": "Q1"' in result.raw_outputs[0]
+        compiled = compile_expression_output(_short_output(task, kind), task,
+                                             owner_approvals={ids[0]: False, ids[1]: False})
+        held = _apply(session, output=compiled.output, window=window,
+                      state=result.application.scene_state, inputs=inputs,
+                      expected_schema_version="1.1", acceptance_ceilings=compiled.acceptance_ceilings,
+                      preserve_existing_candidates=True)
+        assert held.validation_ok
+        assert rows[ids[1]].status is AnnotationStatus.PROVISIONAL
+        original = rows[ids[0]]
+        original.user_locked = True
+        original.status = AnnotationStatus.USER_CONFIRMED
+        original.source = AnnotationSource.USER
+        speaker = original.speaker_id
+        rerun = _run(session, script=[_short_output(task, kind, known=False)], window=window,
+                     state=result.application.scene_state, inputs=inputs, expression_task=task,
+                     locked_quote_ids={ids[0]})
+        assert rerun.ok and rerun.application.skipped_locked_quote_ids == [ids[0]]
+        assert original.status is AnnotationStatus.USER_CONFIRMED
+        assert original.speaker_id == speaker and original.kind is QuoteKind(kind)
+
+    _with_session(migrated_settings, body)
+
+
+@pytest.mark.parametrize("known_usage", [False, True])
+def test_short_window_format_retry_requires_known_usage(
+    migrated_client, migrated_settings, known_usage,
+):
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        window = _window(inputs, _targets(inputs)[:2])
+        task = _expression_task(window)
+        bad = _short_output(task)
+        bad["labels"][0]["evidence"] = ["UNSENT"]
+        if known_usage:
+            bad["_usage"] = {"total_tokens": 30, "input_tokens": 20, "output_tokens": 10}
+        good = _short_output(task)
+        good["_usage"] = {"total_tokens": 40, "input_tokens": 25, "output_tokens": 15}
+        result = _run(session, script=[bad, good], window=window, state=SceneState(),
+                      inputs=inputs, expression_task=task)
+        assert result.ok is known_usage
+        assert result.attempts == (2 if known_usage else 1)
+        assert len(result.raw_outputs) == result.attempts
+        if known_usage:
+            assert sum(u["total_tokens"] for u in result.usage_records) == 70
+            assert result.error_code is None
+            assert len(list(session.scalars(select(Annotation)))) == 2
+        else:
+            assert result.error_code == "INVALID_MODEL_OUTPUT"
+            assert not list(session.scalars(select(Annotation)))
+            assert not list(session.scalars(select(SpeakerGroup)))
+
+    _with_session(migrated_settings, body)
+
+
+@pytest.mark.parametrize("failure", ["known_format", "unknown_format", "timeout"])
+def test_short_window_provider_failure_keeps_usage_and_does_not_resend_unknown(
+    migrated_client, migrated_settings, failure,
+):
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        window = _window(inputs, _targets(inputs)[:1])
+        task = _expression_task(window)
+        details = {"body": "original invalid response"}
+        if failure == "known_format":
+            details["usage"] = {"total_tokens": 19}
+        error = (ProviderError(ProviderErrorKind.TIMEOUT, "timeout", details=details)
+                 if failure == "timeout" else InvalidModelOutput("invalid", details=details))
+        result = _run(session, script=[error, _short_output(task, known=False)], window=window,
+                      state=SceneState(), inputs=inputs, expression_task=task)
+        assert result.ok is (failure == "known_format")
+        assert result.attempts == (2 if failure == "known_format" else 1)
+        assert result.raw_outputs[0] == details["body"]
+        if failure == "known_format":
+            assert result.usage_records[0]["total_tokens"] == 19
+            row = session.scalar(select(Annotation))
+            assert row.status is AnnotationStatus.UNKNOWN and row.speaker_id is None
+        else:
+            assert not list(session.scalars(select(Annotation)))
+        assert not list(session.scalars(select(SpeakerGroup)))
+
+    _with_session(migrated_settings, body)
+
+
+@pytest.mark.parametrize("change", ["text", "kind", "gap"])
+def test_short_window_bad_original_context_is_rejected_before_model_or_write(
+    migrated_client, migrated_settings, change,
+):
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        window = _window(inputs, _targets(inputs)[:1])
+        task = _expression_task(window)
+        if change == "gap":
+            task.gap_next_quote.clear()
+        else:
+            task.context[0][change] = "not the original text"
+        adapter = FakeProviderAdapter(script=[{}])
+        positions, gaps, evidence = _positions(inputs, window)
+        with pytest.raises(ValueError, match="actual.*window"):
+            asyncio.run(run_window(session, adapter=adapter, window=window, state=SceneState(),
+                                   book_version_id=inputs.book_version_id, quote_positions=positions,
+                                   gap_positions=gaps, evidence_positions=evidence,
+                                   expression_task=task))
+        assert not adapter.calls
+        assert not list(session.scalars(select(Annotation)))
+        assert not list(session.scalars(select(Scene)))
+
+    _with_session(migrated_settings, body)
+
+
+@pytest.mark.parametrize("cap", [AnnotationStatus.ACCEPTED, AnnotationStatus.UNKNOWN, "PROVISIONAL"])
+def test_expression_acceptance_ceiling_cannot_upgrade_or_forge_domain_status(
+    migrated_client, migrated_settings, cap,
+):
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        ids = _targets(inputs)[:1]
+        window = _window(inputs, ids)
+        result = _apply(session, output={"schema_version": "1.1", "labels": [_label(ids[0])]},
+                        window=window, state=SceneState(), inputs=inputs,
+                        expected_schema_version="1.1", acceptance_ceilings={ids[0]: cap})
+        assert not result.validation_ok
+        assert "invalid_acceptance_ceiling" in result.validation_codes
+        assert not list(session.scalars(select(Annotation)))
+        assert not list(session.scalars(select(Scene)))
+
+    _with_session(migrated_settings, body)
 
 
 @pytest.mark.parametrize("kind", ["thought", "quotation"])

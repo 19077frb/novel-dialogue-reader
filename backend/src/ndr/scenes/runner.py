@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from ..llm.adapter import ProviderAdapter
@@ -34,13 +36,14 @@ class WindowRunResult:
     adapter: str = "none"
     prompt_version: str = LABELING_PROMPT_VERSION
     error_code: str | None = None
+    compiler_fingerprint: str | None = None
 
     @property
     def ok(self) -> bool:
         return self.application.validation_ok
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "ok": self.ok,
             "attempts": self.attempts,
             "usage": self.usage_records,
@@ -49,6 +52,9 @@ class WindowRunResult:
             "error_code": self.error_code,
             "application": self.application.as_dict(),
         }
+        if self.compiler_fingerprint is not None:
+            value["compiler_fingerprint"] = self.compiler_fingerprint
+        return value
 
 
 def _reference_aliases(window) -> tuple[dict[str, str], dict[str, str]]:  # noqa: ANN001
@@ -306,10 +312,23 @@ async def run_window(
     cold_start: bool = True,
     retry_policy: RetryPolicy | None = None,
     run_id: str | None = None,
+    expression_task=None,  # noqa: ANN001 - explicitly prepared CompactTask
+    owner_approvals: Mapping[str, bool] | None = None,
 ) -> WindowRunResult:
     """跑一个窗口：最多 ``1 + max_format_retries`` 次调用，然后在同一事务里应用结果。"""
 
     policy = retry_policy or RetryPolicy()
+    protocol = None
+    if expression_task is not None:
+        from ..evaluation.owner_constraints import VERSION, ConstrainedOwnerProtocol
+        from ..llm.expression_compiler import compile_expression_output
+
+        expression_task = deepcopy(expression_task)
+        owner_approvals = dict(owner_approvals) if owner_approvals is not None else None
+        _validate_expression_task(expression_task, window, state, owner_approvals)
+        protocol = ConstrainedOwnerProtocol(expression_task)
+    elif owner_approvals is not None:
+        raise ValueError("Owner approval requires an explicit expression task")
     result = WindowRunResult(
         application=WindowApplication(
             window_id=window.window_id,
@@ -317,6 +336,7 @@ async def run_window(
             validation_ok=False,
         ),
         adapter=getattr(adapter, "name", "none"),
+        prompt_version=VERSION if protocol is not None else LABELING_PROMPT_VERSION,
     )
     correction: str | None = None
     attempt = 0
@@ -324,19 +344,33 @@ async def run_window(
     while True:
         attempt += 1
         result.attempts = attempt
-        payload = {
-            "messages": _messages_for(
+        messages = (_messages_for(
                 window=window, state=state, locked_summary=locked_summary, correction=correction
-            ),
+            ) if protocol is None else protocol.messages())
+        if protocol is not None and correction:
+            messages.append({"role": "user", "content": "上一次输出无效：" + correction})
+        payload = {
+            "messages": messages,
             "max_tokens": LABELING_MAX_TOKENS,
             "json_object": True,
             "target_quote_ids": list(window.target_quote_ids),
         }
         try:
-            raw = _restore_output_references(await adapter.generate_labels(payload), window)
+            returned = await adapter.generate_labels(payload)
+            raw = returned if protocol is not None else _restore_output_references(returned, window)
         except ProviderError as exc:
             result.error_code = exc.code.value
             result.application.warnings.append(f"{exc.code.value}: {exc.message}")
+            if protocol is not None:
+                failed_usage = exc.details.get("usage")
+                if isinstance(failed_usage, Mapping):
+                    result.usage_records.append(dict(failed_usage))
+                if isinstance(exc.details.get("body"), str):
+                    result.raw_outputs.append(exc.details["body"])
+                if (_known_expression_usage(failed_usage)
+                        and policy.should_retry(exc, retries_used=attempt - 1)):
+                    correction = exc.message
+                    continue
             return result
 
         usage = raw.get("_usage") if isinstance(raw, Mapping) else None
@@ -351,7 +385,32 @@ async def run_window(
             if isinstance(raw, Mapping)
             else raw
         )
-        report = parse_and_validate(payload_for_validation, _targets_for(window, state))
+        compilation = None
+        expected_version = "1.0"
+        try:
+            if protocol is not None:
+                compilation = compile_expression_output(
+                    payload_for_validation, expression_task, owner_approvals=owner_approvals,
+                )
+                payload_for_validation = compilation.output
+                expected_version = "1.1"
+            report = parse_and_validate(payload_for_validation, _targets_for(window, state),
+                                        expected_schema_version=expected_version)
+        except (InvalidModelOutput, ValidationError) as exc:
+            error = InvalidModelOutput(str(exc))
+            result.error_code = error.code.value
+            result.application.validation_codes = ["invalid_expression_output"]
+            result.application.warnings.append(error.message)
+            if (not _known_expression_usage(usage)
+                    or not policy.should_retry(error, retries_used=attempt - 1)):
+                return result
+            correction = error.message
+            continue
+        except ValueError as exc:
+            result.error_code = InvalidModelOutput(str(exc)).code.value
+            result.application.validation_codes = ["invalid_owner_approval"]
+            result.application.warnings.append(str(exc))
+            return result
         if report.ok and report.output is not None:
             result.application = apply_window(
                 session,
@@ -366,7 +425,13 @@ async def run_window(
                 locked_group_ids=locked_group_ids or set(),
                 dependency_hash=dependency_hash or window.dependency_hash,
                 run_id=run_id,
+                expected_schema_version=expected_version,
+                acceptance_ceilings=compilation.acceptance_ceilings if compilation else None,
             )
+            if compilation is not None:
+                result.compiler_fingerprint = compilation.fingerprint()
+                if result.application.validation_ok:
+                    result.error_code = None
             if isinstance(raw, Mapping):
                 repairs = raw.get("_reference_repairs")
                 if isinstance(repairs, list):
@@ -378,9 +443,50 @@ async def run_window(
         result.application.warnings.extend(report.messages[:5])
         error = InvalidModelOutput("；".join(report.messages[:3]) or "输出不符合 schema")
         result.error_code = error.code.value
-        if not policy.should_retry(error, retries_used=attempt - 1):
+        if (protocol is not None and not _known_expression_usage(usage)
+                or not policy.should_retry(error, retries_used=attempt - 1)):
             return result
         correction = error.message
+
+
+def _validate_expression_task(task, window, state, approvals):  # noqa: ANN001
+    from ..llm.expression_compiler import validate_initial_identity_fields
+
+    validate_initial_identity_fields(task)
+    if tuple(task.references[q] for q in task.quote_ids) != tuple(window.target_quote_ids):
+        raise ValueError("Expression targets differ from the actual window")
+    fragments = {f.fragment_id: f for f in window.fragments}
+    if set(task.references.values()) != set(fragments) or task.scene_ref != state.scene_ref:
+        raise ValueError("Expression references or scene differ from the actual window")
+    for row in task.context:
+        fragment = fragments[task.references[row["ref"]]]
+        if (row.get("start_cp"), row.get("end_cp"), row.get("text"), row.get("kind")) != (
+            fragment.start_cp, fragment.end_cp, fragment.text, fragment.kind.value,
+        ):
+            raise ValueError("Expression context differs from the actual original window")
+    actual_gaps = {f.fragment_id for f in window.fragments
+                   if f.kind.value in {"inner_gap", "outer_gap"}}
+    if {task.references[g] for g in task.gap_next_quote} != actual_gaps:
+        raise ValueError("Expression boundaries differ from the actual window")
+    identities = {c.character_id for c in state.identity_characters}
+    slots = {slot.display_label for slot in state.participants}
+    if any(c.character_id and c.character_id not in identities for c in task.candidates):
+        raise ValueError("Expression candidate was not provided by the current state")
+    if any(c.existing_ref and c.existing_ref not in slots for c in task.candidates):
+        raise ValueError("Expression candidate cites an unprovided scene slot")
+    if any(c.existing_ref and c.character_id != state.find(c.existing_ref).character_id
+           for c in task.candidates):
+        raise ValueError("Expression candidate identity differs from the provided scene slot")
+    if approvals is not None and (
+        set(approvals) != set(window.target_quote_ids)
+        or any(type(v) is not bool for v in approvals.values())
+    ):
+        raise ValueError("Complete explicit owner approvals required")
+
+
+def _known_expression_usage(usage) -> bool:  # noqa: ANN001
+    return (isinstance(usage, Mapping) and not usage.get("unknown")
+            and type(usage.get("total_tokens")) is int and usage["total_tokens"] >= 0)
 
 
 def _targets_for(window, state: SceneState):  # noqa: ANN001, ANN202

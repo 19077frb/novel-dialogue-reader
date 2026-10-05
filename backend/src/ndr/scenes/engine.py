@@ -53,7 +53,7 @@ from ..storage.models import (
     SceneMembership,
     SpeakerGroup,
 )
-from .acceptance import compute_visible_from_cp, decide_acceptance
+from .acceptance import AcceptanceDecision, compute_visible_from_cp, decide_acceptance
 from .review_sync import ENGINE_REASONS, MODEL_REASONS, sync_attribution_reviews
 from .state import SCENE_STATE_VERSION, ConfirmedCharacter, SceneState
 
@@ -431,6 +431,7 @@ def apply_window(
     update_dependency_hash: bool = True,
     preserve_existing_candidates: bool = False,
     expected_schema_version: str = "1.0",
+    acceptance_ceilings: Mapping[str, AnnotationStatus] | None = None,
 ) -> WindowApplication:
     """应用一次模型输出：校验 → 锁定检查 → 可见时点 → 接受策略 → 落库。"""
 
@@ -472,6 +473,15 @@ def apply_window(
 
     parsed = report.output
     accepted = report.accepted_labels
+    ceilings = dict(acceptance_ceilings or {})
+    owner_ids = {row.quote_id for row in accepted if has_owner_contract(row)}
+    if acceptance_ceilings is not None and (
+        expected_schema_version != "1.1" or set(ceilings) - owner_ids
+        or any(value is not AnnotationStatus.PROVISIONAL for value in ceilings.values())
+    ):
+        application.validation_ok = False
+        application.validation_codes.append("invalid_acceptance_ceiling")
+        return application
     effective_hash = (
         dependency_hash or getattr(window, "dependency_hash", "")
     )
@@ -635,7 +645,13 @@ def apply_window(
                 }
             )
         decision_out = decide_acceptance(stored_label, cold_start=cold_start)
-        if preserve_existing_candidates and decision_out.status is not AnnotationStatus.ACCEPTED:
+        if label.quote_id in ceilings and decision_out.status is AnnotationStatus.ACCEPTED:
+            decision_out = AcceptanceDecision(
+                status=AnnotationStatus.PROVISIONAL, reason="unapproved_expression_owner",
+                needs_review=True, review_reason=ReviewReason.LOW_CONFIDENCE,
+            )
+        if (preserve_existing_candidates and label.quote_id not in ceilings
+                and decision_out.status is not AnnotationStatus.ACCEPTED):
             previous = session.scalar(select(Annotation).where(
                 Annotation.quote_id == label.quote_id))
             if (previous is not None and not previous.stale and previous.speaker_id
