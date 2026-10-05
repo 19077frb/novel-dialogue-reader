@@ -3,10 +3,12 @@
 from copy import deepcopy
 
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from ndr.evaluation.compact import Candidate, CompactTask
 from ndr.evaluation.expression_owner import ExplicitOwnerProtocol
+from ndr.evaluation.owner_constraints import ConstrainedOwnerProtocol
 from ndr.evaluation.owner_scoring import score_owners
 from ndr.llm.errors import InvalidModelOutput
 
@@ -106,3 +108,41 @@ def test_wrong_unsupported_and_missing_owners_remain_in_denominator():
     )
     with pytest.raises(ValueError):
         score_owners(expected, [*rows, rows[0]])
+
+
+@pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
+def test_constrained_schema_and_compiler_preserve_unknown_and_known_owners(kind):
+    protocol = ConstrainedOwnerProtocol(task())
+    validator = Draft202012Validator(protocol.schema)
+    for character in (None, "C1"):
+        data = payload(kind, character)
+        before = deepcopy(data)
+        validator.validate(data)
+        result = protocol.compile(data)
+        assert result["protocol_version"] == "explicit-owner-null-field-constraints-2"
+        assert result["production_submission_allowed"] is False
+        assert all(
+            row["character_id"] == ("person" if character else None) for row in result["rows"]
+        )
+        assert data == before
+    for changes in ({"basis": "direct"}, {"evidence": ["E1"]}, {"character": ""}):
+        data = payload(kind, None)
+        data["labels"][0].update(changes)
+        assert list(validator.iter_errors(data))
+        with pytest.raises(InvalidModelOutput):
+            protocol.compile(data)
+
+
+def test_constrained_protocol_does_not_mutate_v1_or_reuse_its_fingerprint():
+    original = ExplicitOwnerProtocol(task())
+    before = (deepcopy(original.schema), original.messages(), original.fingerprint())
+    constrained = ConstrainedOwnerProtocol(task())
+    assert (original.schema, original.messages(), original.fingerprint()) == before
+    fresh = ExplicitOwnerProtocol(task())
+    assert (fresh.schema, fresh.messages(), fresh.fingerprint()) == before
+    assert constrained.fingerprint() != original.fingerprint()
+    assert "allOf" not in original.schema["$defs"]["OwnerLabel"]
+    data = payload()
+    data["labels"][0]["evidence"] = ["UNSENT"]
+    with pytest.raises(InvalidModelOutput):
+        constrained.compile(data)
