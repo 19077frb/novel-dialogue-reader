@@ -26,6 +26,7 @@ from ..llm.errors import ProviderError, ProviderErrorKind
 from ..storage.models import Book, BookCharacter, BookVersion, InferenceRun, Job
 from ..storage.transactions import transaction
 from .directory import _guard, _sync, directory, edit, merge
+from .facts import IdentityProfileUpdate, prepare_profile_updates
 from .merge_diagnostics import MergePlanError, character_refs, saved_model_groups
 from .names import GENERIC_NAMES, is_role_name, name_key, undecorated_name, valid_display_name
 from .visibility import baseline
@@ -389,6 +390,7 @@ def _apply(session, job, output, entries, visible_from_cp=None, *, settings=None
                     expected_version=by_id[target_id]["version"],
                 ),
                 active_job_id=job.id,
+                record_profile_updates=False,
             ).character_id
         target = session.get(BookCharacter, target_id)
         baseline(target)
@@ -406,6 +408,20 @@ def _apply(session, job, output, entries, visible_from_cp=None, *, settings=None
                  if name and name != target.canonical_name], ensure_ascii=False,
             )
             target.version += 1
+        fields = [("description", description)]
+        if group.preferred_name:
+            fields.extend((("name", target.canonical_name),
+                           ("aliases", tuple(json.loads(target.aliases_json)))))
+        updated_facts = prepare_profile_updates(target, version, tuple(
+            IdentityProfileUpdate(
+                field=field, value=value, visible_from_cp=cp,
+                canonical_sha256=version.canonical_sha256, source="model",
+                source_ref=f"merge-decision:{job.id}", accepted=True,
+            ) for field, value in fields
+        ))
+        if updated_facts != target.identity_facts_json and not group.preferred_name:
+            target.version += 1
+        target.identity_facts_json = updated_facts
         _sync(session, version, target, visible_from_cp=cp)
         for source_id in group.source_ids:
             merge(

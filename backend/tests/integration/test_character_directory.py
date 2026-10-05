@@ -157,7 +157,7 @@ def test_merge_preserves_sourced_facts_with_separate_identity_reveal(
         version = session.get(BookVersion, ids["version"])
         target = session.get(BookCharacter, ids["target"])
         assert session.get(BookCharacter, ids["source"]) is None
-        assert target.version == 3
+        assert target.version == (3 if mode == "manual" else 4)
         assert target.user_confirmed is (mode == "manual")
         early = visible_identity_profile(target, version, horizon=boundary - 1)
         late = visible_identity_profile(target, version, horizon=boundary)
@@ -214,7 +214,7 @@ def test_multi_source_auto_merge_reuses_one_validated_original(
     assert calls == [ids["version"]]
     with transaction(client.app.state.session_factory) as session:
         target = session.get(BookCharacter, ids["target"])
-        assert target.version == 3 and not target.user_confirmed
+        assert target.version == 4 and not target.user_confirmed
         facts = read_identity_facts(target, session.get(BookVersion, ids["version"]))
         assert {fact.value for fact in facts} == {"浅村悠太", "哥哥"}
         assert all(fact.identity_links[-1].target_id == target.id for fact in facts)
@@ -240,6 +240,59 @@ def test_corrupt_identity_facts_refuse_merge_without_deleting_source(
         assert source.canonical_name == "浅村悠太" and source.version == 1
         assert target.canonical_name == "悠太" and target.version == 1
         assert target.aliases_json == "[]"
+
+
+def test_explicit_edit_persists_field_clears_without_inventing_earlier_profile(
+    migrated_client, populated,
+):
+    from ndr.characters.facts import (
+        read_identity_facts,
+        read_identity_records,
+        visible_identity_profile,
+    )
+
+    client, ids = migrated_client, populated
+    url = f"/api/books/{ids['book']}/character-directory/{ids['target']}"
+    response = client.put(url, json={"name": "更新的人名", "aliases": [],
+        "description": "", "visible_from_cp": 5, "expected_version": 1})
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["version"] == 2
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, ids["version"])
+        person = session.get(BookCharacter, ids["target"])
+        assert person.version == 2 and person.user_confirmed and person.name_locked
+        assert person.description == "" and person.aliases_json == "[]"
+        assert read_identity_facts(person, version) == ()
+        assert len(read_identity_records(person, version)) == 3
+        assert visible_identity_profile(person, version, horizon=4)["name"] is None
+        profile = visible_identity_profile(person, version, horizon=5)
+        assert profile["name"] == "更新的人名" and profile["aliases"] == ()
+        assert profile["description"] == "" and all(r.source == "user" for r in profile["updates"])
+
+
+def test_model_description_decision_is_recorded_once_without_human_confirmation(
+    migrated_client, populated,
+):
+    from ndr.characters.facts import read_identity_records, visible_identity_profile
+
+    client, ids = migrated_client, populated
+    job, _ = _auto_job(client, ids)
+    _run_merge(client, job, [_merge_group(ids)], accept=False)
+    url = f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}/confirm"
+    body = {"selected_target_ids": [ids["target"]], "visible_from_cp": 5}
+    for _ in range(2):
+        response = client.post(url, json=body)
+        assert response.status_code == 200, response.text
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, ids["version"])
+        person = session.get(BookCharacter, ids["target"])
+        records = read_identity_records(person, version)
+        assert len(records) == 1 and records[0].source == "model"
+        assert records[0].field == "description" and person.version == 3
+        assert not person.user_confirmed and not person.name_locked
+        early = visible_identity_profile(person, version, horizon=4)
+        late = visible_identity_profile(person, version, horizon=5)
+        assert early["description"] == "" and late["description"] == person.description
 
 
 def test_color_is_independent_persistent_and_matches_reader(migrated_client, populated):

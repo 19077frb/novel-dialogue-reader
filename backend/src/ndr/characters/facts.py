@@ -72,6 +72,69 @@ class CharacterIdentityFact(ApiModel):
         return self
 
 
+class IdentityProfileUpdate(ApiModel):
+    """A deliberate field update, never a claimed quotation from the original."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["identity-facts-1"] = FACTS_VERSION
+    kind: Literal["profile_update"] = "profile_update"
+    field: Literal["name", "aliases", "description"]
+    value: str | tuple[str, ...]
+    visible_from_cp: Position
+    canonical_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source: Literal["user", "model"]
+    source_ref: str = Field(min_length=1, max_length=160)
+    accepted: StrictBool = False
+    identity_links: tuple[IdentityLink, ...] = ()
+
+    @model_validator(mode="after")
+    def check_update(self):
+        if not self.source_ref.strip():
+            raise ValueError("Profile update needs a source reference")
+        if self.field == "aliases":
+            if (
+                not isinstance(self.value, tuple)
+                or (self.source == "user" and len(self.value) > 64)
+                or len(set(self.value)) != len(self.value)
+                or any(
+                    not v.strip() or (self.source == "user" and len(v) > 128) for v in self.value
+                )
+            ):
+                raise ValueError("Profile aliases must be distinct bounded names")
+        elif not isinstance(self.value, str):
+            raise ValueError("Profile name and description must be strings")
+        elif self.field == "name" and (not self.value.strip() or len(self.value) > 128):
+            raise ValueError("Profile name must be nonblank and at most 128 characters")
+        elif self.field == "description" and len(self.value) > 512:
+            raise ValueError("Profile description must be at most 512 characters")
+        # Reuse the chain invariant without presenting this update as original proof.
+        _check_update_chain(self.identity_links)
+        return self
+
+
+def _check_update_chain(links):
+    visited = set()
+    for index, link in enumerate(links):
+        if index and links[index - 1].target_id != link.source_id:
+            raise ValueError("Identity link chain must be continuous")
+        if link.source_id in visited or link.target_id in visited:
+            raise ValueError("Identity link chain cannot revisit an identity")
+        visited.add(link.source_id)
+
+
+IdentityRecord = CharacterIdentityFact | IdentityProfileUpdate
+
+
+def _parse_record(value) -> IdentityRecord:
+    model = (
+        IdentityProfileUpdate
+        if isinstance(value, dict) and value.get("kind") == "profile_update"
+        else CharacterIdentityFact
+    )
+    return model.model_validate(value)
+
+
 @dataclass(frozen=True)
 class OriginalIdentitySnapshot:
     book_version_id: str
@@ -91,14 +154,14 @@ def _validate_version(character: BookCharacter, version: BookVersion) -> None:
         raise ValueError("Identity belongs to another book version")
 
 
-def read_identity_facts(
+def read_identity_records(
     character: BookCharacter, version: BookVersion
-) -> tuple[CharacterIdentityFact, ...]:
+) -> tuple[IdentityRecord, ...]:
     _validate_version(character, version)
     raw = json.loads(character.identity_facts_json or "[]")
     if not isinstance(raw, list):
         raise ValueError("Identity facts must be a list")
-    facts = tuple(CharacterIdentityFact.model_validate(value) for value in raw)
+    facts = tuple(_parse_record(value) for value in raw)
     for fact in facts:
         if (
             fact.canonical_sha256 != version.canonical_sha256
@@ -107,6 +170,14 @@ def read_identity_facts(
             raise ValueError("Identity fact does not belong to the immutable original")
         _validate_links(fact, character, version)
     return facts
+
+
+def read_identity_facts(
+    character: BookCharacter, version: BookVersion
+) -> tuple[CharacterIdentityFact, ...]:
+    return tuple(
+        f for f in read_identity_records(character, version) if isinstance(f, CharacterIdentityFact)
+    )
 
 
 def _validate_links(fact, character, version):
@@ -123,8 +194,18 @@ def append_identity_facts(
     *,
     original: OriginalIdentitySnapshot | None = None,
 ) -> bool:
+    return append_identity_records(character, version, facts, original=original)
+
+
+def append_identity_records(
+    character: BookCharacter,
+    version: BookVersion,
+    facts: tuple[IdentityRecord, ...],
+    *,
+    original: OriginalIdentitySnapshot | None = None,
+) -> bool:
     """Validate the whole block before mutating; the caller owns its transaction."""
-    current = read_identity_facts(character, version)
+    current = read_identity_records(character, version)
     if original is not None and (
         original.book_version_id != version.id
         or original.canonical_sha256 != version.canonical_sha256
@@ -134,14 +215,16 @@ def append_identity_facts(
     validated = []
     for supplied in facts:
         # Revalidate even already constructed objects instead of trusting bypassed models.
-        fact = CharacterIdentityFact.model_validate(supplied.model_dump())
+        fact = _parse_record(supplied.model_dump())
         _validate_links(fact, character, version)
         if (
             fact.canonical_sha256 != version.canonical_sha256
             or fact.visible_from_cp > version.canonical_length_cp
         ):
             raise ValueError("Identity fact is outside the immutable original")
-        if fact.source != "user" or fact.evidence_spans:
+        if isinstance(fact, CharacterIdentityFact) and (
+            fact.source != "user" or fact.evidence_spans
+        ):
             if original is None:
                 raise ValueError("Identity original snapshot is required")
             proof = [original.text[a:b] for a, b in fact.evidence_spans]
@@ -170,11 +253,19 @@ def visible_identity_facts(
     *,
     horizon: int,
 ) -> tuple[CharacterIdentityFact, ...]:
+    return tuple(
+        f
+        for f in visible_identity_records(character, version, horizon=horizon)
+        if isinstance(f, CharacterIdentityFact)
+    )
+
+
+def visible_identity_records(character, version, *, horizon: int) -> tuple[IdentityRecord, ...]:
     if type(horizon) is not int or not 0 <= horizon <= version.canonical_length_cp:
         raise ValueError("Explicit identity horizon must be within the original")
     return tuple(
         f
-        for f in read_identity_facts(character, version)
+        for f in read_identity_records(character, version)
         if f.accepted
         and f.visible_from_cp <= horizon
         and all(link.accepted and link.visible_from_cp <= horizon for link in f.identity_links)
@@ -184,37 +275,117 @@ def visible_identity_facts(
 def visible_identity_profile(
     character: BookCharacter, version: BookVersion, *, horizon: int
 ) -> dict:
-    facts = visible_identity_facts(character, version, horizon=horizon)
-    names = [f for f in facts if f.kind == "name"]
-    own_names = [f for f in names if not f.identity_links]
-    designations = [f for f in facts if f.kind == "designation"]
-    chosen = max(
-        enumerate(own_names or names or designations),
-        key=lambda item: (item[1].visible_from_cp, item[0]),
-        default=None,
+    records = visible_identity_records(character, version, horizon=horizon)
+    cohorts = {}
+    for index, record in enumerate(records):
+        origin = record.identity_links[0].source_id if record.identity_links else character.id
+        cohorts.setdefault(origin, []).append((index, record))
+    profiles = {origin: _cohort_profile(rows) for origin, rows in cohorts.items()}
+    own = profiles.get(character.id, {})
+    named = [p for p in profiles.values() if p["name"] is not None]
+    chosen = (
+        own
+        if own.get("name") is not None
+        else max(
+            named,
+            key=lambda p: p["name_position"],
+            default={},
+        )
     )
-    name = chosen[1].value if chosen else None
-    descriptions = [f for f in facts if f.kind == "description"]
-    own_descriptions = [f for f in descriptions if not f.identity_links]
-    description = max(
-        enumerate(own_descriptions or descriptions),
-        key=lambda item: (item[1].visible_from_cp, item[0]),
-        default=None,
+    name = chosen.get("name")
+    aliases = list(own.get("aliases", {}))
+    alias_reset = own.get("alias_reset_index", -1)
+    for origin, profile in profiles.items():
+        if origin == character.id:
+            continue
+        if profile["name"] and profile["name_position"][1] > alias_reset:
+            aliases.append(profile["name"])
+        aliases.extend(
+            value for value, position in profile["aliases"].items() if position[1] > alias_reset
+        )
+    described = [p for p in profiles.values() if p["description_defined"]]
+    description = (
+        own
+        if own.get("description_defined")
+        else max(
+            described,
+            key=lambda p: p["description_position"],
+            default={},
+        )
     )
+    facts = tuple(f for f in records if isinstance(f, CharacterIdentityFact))
     return {
         "character_id": character.id,
         "name": name,
-        "aliases": tuple(
-            dict.fromkeys(
-                f.value
-                for f in facts
-                if f.kind in {"name", "alias", "designation"} and f.value != name
-            )
-        ),
-        "description": description[1].value if description else "",
+        "aliases": tuple(dict.fromkeys(v for v in aliases if v != name)),
+        "description": description.get("description", ""),
         "relations": tuple(f for f in facts if f.kind == "relation"),
         "facts": facts,
+        "updates": tuple(r for r in records if isinstance(r, IdentityProfileUpdate)),
     }
+
+
+def _effective_position(index, record):
+    return max(
+        (record.visible_from_cp, *(link.visible_from_cp for link in record.identity_links))
+    ), index
+
+
+def _latest_field(facts, updates, kind, field):
+    latest_update = max(
+        ((i, r) for i, r in updates if r.field == field), key=lambda row: row[0], default=None
+    )
+    cutoff = latest_update[0] if latest_update else -1
+    new_facts = [(i, r) for i, r in facts if r.kind == kind and i > cutoff]
+    return max(new_facts, key=lambda row: (row[1].visible_from_cp, row[0]), default=latest_update)
+
+
+def _cohort_profile(rows):
+    facts = [(i, r) for i, r in rows if isinstance(r, CharacterIdentityFact)]
+    updates = [(i, r) for i, r in rows if isinstance(r, IdentityProfileUpdate)]
+    roles = [(i, r) for i, r in facts if r.kind == "designation"]
+    chosen = _latest_field(facts, updates, "name", "name") or max(
+        roles,
+        key=lambda row: (row[1].visible_from_cp, row[0]),
+        default=None,
+    )
+    name = chosen[1].value if chosen else None
+    alias_update = max(
+        ((i, r) for i, r in updates if r.field == "aliases"),
+        key=lambda row: row[0],
+        default=None,
+    )
+    cutoff = alias_update[0] if alias_update else -1
+    aliases = (
+        {v: _effective_position(*alias_update) for v in alias_update[1].value}
+        if alias_update
+        else {}
+    )
+    for i, fact in facts:
+        if fact.kind in {"name", "alias", "designation"} and i > cutoff:
+            aliases[fact.value] = _effective_position(i, fact)
+    described = _latest_field(facts, updates, "description", "description")
+    return {
+        "name": name,
+        "name_position": _effective_position(*chosen) if chosen else (-1, -1),
+        "aliases": aliases,
+        "alias_reset_index": cutoff,
+        "description": described[1].value if described else "",
+        "description_defined": described is not None,
+        "description_position": _effective_position(*described) if described else (-1, -1),
+    }
+
+
+def prepare_profile_updates(character, version, updates: tuple[IdentityProfileUpdate, ...]) -> str:
+    read_identity_records(character, version)
+    prepared = BookCharacter(
+        id=character.id,
+        book_version_id=version.id,
+        identity_facts_json=character.identity_facts_json or "[]",
+        version=1,
+    )
+    append_identity_records(prepared, version, updates)
+    return prepared.identity_facts_json
 
 
 def prepare_merged_identity_facts(
@@ -231,8 +402,8 @@ def prepare_merged_identity_facts(
         raise ValueError("Identity merge link does not match its source and target")
     if checked_link.visible_from_cp > version.canonical_length_cp:
         raise ValueError("Identity link is outside the immutable original")
-    source_facts = read_identity_facts(source, version)
-    target_facts = read_identity_facts(target, version)
+    source_facts = read_identity_records(source, version)
+    target_facts = read_identity_records(target, version)
     transferred = tuple(
         fact.model_copy(update={"identity_links": (*fact.identity_links, checked_link)})
         for fact in source_facts
@@ -243,7 +414,7 @@ def prepare_merged_identity_facts(
         identity_facts_json="[]",
         version=1,
     )
-    append_identity_facts(prepared, version, (*target_facts, *transferred), original=original)
+    append_identity_records(prepared, version, (*target_facts, *transferred), original=original)
     return prepared.identity_facts_json
 
 
@@ -252,7 +423,7 @@ def identity_facts_fingerprint(character: BookCharacter, version: BookVersion) -
         FACTS_VERSION,
         version.id,
         character.id,
-        [f.model_dump(mode="json") for f in read_identity_facts(character, version)],
+        [f.model_dump(mode="json") for f in read_identity_records(character, version)],
     ]
     return hashlib.sha256(
         json.dumps(values, ensure_ascii=False, sort_keys=True).encode("utf8")
