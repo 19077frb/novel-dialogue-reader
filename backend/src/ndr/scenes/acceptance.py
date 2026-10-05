@@ -6,8 +6,8 @@
 - 指代/承接（`COREFERENCE`/`RESPONSE_LINK`）带有可回溯引用时接受，空证据进入待确认。
 - 风格单一依据（`STYLE_ONLY`）始终进入待确认。
 - 证据不足（`INSUFFICIENT`）或 `assignment=UNKNOWN` → `UNKNOWN`，**绝不因此新建人物分组**。
-- 非 speech 的类型判断（心声/引用/集体声音…）可以接受，但按契约不带 speaker_ref，
-  因此不会污染普通人物色彩。
+- 旧1.0非 speech 仅接受类型；显式1.1的心声/引用独立校验人物，
+  与真实发声采用相同的证据接受规则，不自动补叙述者。
 
 可见时点由**后端**按证据位置计算：模型自报的 visible_from 不可信
 （schema 也禁止出现该字段）。
@@ -24,6 +24,7 @@ from ..domain.enums import (
     ReviewReason,
     SpeakerBasis,
 )
+from ..llm.expression_contract import has_owner_contract
 from ..llm.schemas import QuoteLabel
 
 ACCEPTANCE_POLICY_VERSION = "acceptance-4"
@@ -52,8 +53,8 @@ def decide_acceptance(label: QuoteLabel, *, cold_start: bool = True) -> Acceptan
             needs_review=True,
             review_reason=ReviewReason.LOW_CONFIDENCE,
         )
-    if label.kind is not QuoteKind.SPEECH:
-        # 已明确的心声、引用、集体声音等不带说话人，不污染普通人物色彩。
+    if not has_owner_contract(label):
+        # 旧非speech及新版集体/其他类型不携带单个人物归属。
         return AcceptanceDecision(status=ACCEPTED, reason="non_speech_type")
 
     basis = label.basis or SpeakerBasis.INSUFFICIENT

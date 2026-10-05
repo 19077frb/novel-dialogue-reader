@@ -64,6 +64,90 @@ SAMPLE = (
 )
 
 
+@pytest.mark.parametrize("kind", ["thought", "quotation"])
+def test_expression_contract_persists_original_kind_and_person(
+    migrated_client: TestClient, migrated_settings: Settings, kind: str,
+) -> None:
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        ids = _targets(inputs)[:2]
+        window = _window(inputs, ids)
+        evidence = next(f.fragment_id for f in window.fragments
+                        if f.fragment_id not in ids and f.text.strip())
+        output = {"schema_version": "1.1", "new_speakers": [{
+            "temp_ref": "new1", "scene_ref": "scene_current", "first_quote_id": ids[0],
+            "name": "少女", "description": "原文中的少女", "evidence_refs": [evidence],
+        }], "labels": [
+            _label(ids[0], kind=kind, assignment="NEW", speaker_ref="new1",
+                   basis="DIRECT", evidence_refs=[evidence]),
+            _label(ids[1], kind=kind, assignment="EXISTING", speaker_ref="new1",
+                   basis="DIRECT", evidence_refs=[evidence]),
+        ]}
+        state = SceneState()
+        rejected = _apply(session, output=output, window=window, state=state, inputs=inputs)
+        assert not rejected.validation_ok
+        assert not list(session.scalars(select(Annotation)))
+        assert not list(session.scalars(select(SpeakerGroup)))
+        result = _apply(session, output=output, window=window, state=state, inputs=inputs,
+                        expected_schema_version="1.1")
+        assert result.validation_ok, result.validation_codes
+        rows = list(session.scalars(select(Annotation)))
+        assert len(rows) == 2
+        assert {r.kind for r in rows} == {QuoteKind(kind)}
+        assert {r.status for r in rows} == {AnnotationStatus.ACCEPTED}
+        assert rows[0].speaker_id and rows[0].speaker_id == rows[1].speaker_id
+        assert len(list(session.scalars(select(SpeakerGroup)))) == 1
+        assert not state.recent_turns  # Thoughts/quotes are not real conversational turns.
+        original = rows[0]
+        original.user_locked = True
+        original.status = AnnotationStatus.USER_CONFIRMED
+        original.source = AnnotationSource.USER
+        unknown = {"schema_version": "1.1", "labels": [
+            _label(q, kind=kind, assignment="UNKNOWN", basis="INSUFFICIENT",
+                   evidence_refs=[]) for q in ids]}
+        result = _apply(session, output=unknown, window=window, state=state, inputs=inputs,
+                        expected_schema_version="1.1", locked_quote_ids={ids[0]})
+        assert result.validation_ok
+        assert original.status is AnnotationStatus.USER_CONFIRMED and original.speaker_id
+        second = session.scalar(select(Annotation).where(Annotation.quote_id == ids[1]))
+        assert second.status is AnnotationStatus.UNKNOWN and second.speaker_id is None
+        assert len(list(session.scalars(select(SpeakerGroup)))) == 1
+        assert result.skipped_locked_quote_ids == [ids[0]]
+
+    _with_session(migrated_settings, body)
+
+
+@pytest.mark.parametrize("kind", ["thought", "quotation"])
+def test_expression_unknown_does_not_create_people(
+    migrated_client: TestClient, migrated_settings: Settings, kind: str,
+) -> None:
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        ids = _targets(inputs)[:1]
+        window = _window(inputs, ids)
+        bad = {"schema_version": "1.1", "labels": [
+            _label(ids[0], kind=kind, assignment="EXISTING", speaker_ref="missing",
+                   basis="DIRECT", evidence_refs=[ids[0]])]}
+        result = _apply(session, output=bad, window=window, state=SceneState(), inputs=inputs,
+                        expected_schema_version="1.1")
+        assert not result.validation_ok and "unknown_speaker" in result.validation_codes
+        assert not list(session.scalars(select(Annotation)))
+        assert not list(session.scalars(select(Scene)))
+        output = {"schema_version": "1.1", "labels": [_label(ids[0], kind=kind)]}
+        result = _apply(session, output=output, window=window, state=SceneState(), inputs=inputs,
+                        expected_schema_version="1.1")
+        assert result.validation_ok
+        row = session.scalar(select(Annotation))
+        assert row.status is AnnotationStatus.UNKNOWN and row.kind is QuoteKind(kind)
+        assert row.speaker_id is None
+        assert not list(session.scalars(select(SpeakerGroup)))
+        assert not list(session.scalars(select(BookCharacter)))
+
+    _with_session(migrated_settings, body)
+
+
 def _import(client: TestClient) -> dict:
     response = client.post(
         "/api/books/import",

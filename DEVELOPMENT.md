@@ -75,6 +75,8 @@ pwsh -File scripts/verify.ps1
 
 ## 5. API 和模块边界
 
+模型输出默认仍为1.0。显式1.1领域契约允许心声和引用保留人物，必须由调用方在解析及应用时指定版本；结构生成使用`expression_output_json_schema()`，不得直接把评测模块的内部speech视图提交书库。版本和缓存边界见[契约](docs/CONTRACTS.md#模型配置任务和恢复)。当前调度器与页面未启用1.1，相关回归可运行`uv run --project backend python -m pytest backend/tests/unit/test_expression_contract.py backend/tests/integration/test_attribution_engine.py`，仅使用原创文本和隔离数据库，不调用模型。
+
 - `backend/src/ndr/api/`：HTTP 路由和请求/响应转换。
 - `backend/src/ndr/domain/`：Pydantic schema 与枚举，是 API 类型的权威来源。
 - `backend/src/ndr/ingest/`：TXT/EPUB 导入。

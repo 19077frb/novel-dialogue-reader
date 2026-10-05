@@ -38,6 +38,7 @@ from ..domain.enums import (
     SceneStatus,
     SpeakerBasis,
 )
+from ..llm.expression_contract import has_owner_contract
 from ..llm.schemas import IdentityProposal, LlmOutput, NewSpeaker
 from ..llm.validation import LabelingTargets, parse_and_validate
 from ..speakers.groups import SpeakerRegistry
@@ -429,6 +430,7 @@ def apply_window(
     run_id: str | None = None,
     update_dependency_hash: bool = True,
     preserve_existing_candidates: bool = False,
+    expected_schema_version: str = "1.0",
 ) -> WindowApplication:
     """应用一次模型输出：校验 → 锁定检查 → 可见时点 → 接受策略 → 落库。"""
 
@@ -457,7 +459,7 @@ def apply_window(
         ),
         evidence_ids=tuple(window.fragment_ids),
     )
-    report = parse_and_validate(output, targets)
+    report = parse_and_validate(output, targets, expected_schema_version=expected_schema_version)
     application = WindowApplication(
         window_id=window.window_id,
         scene_state=state,
@@ -533,7 +535,7 @@ def apply_window(
         scene_id = _ensure_scene(session, state, book_version_id)
         application.scene_id = scene_id
         speaker_id: str | None = None
-        if label.kind is QuoteKind.SPEECH and label.assignment is not None:
+        if has_owner_contract(label) and label.assignment is not None:
             if label.assignment is Assignment.NEW and label.speaker_ref:
                 declaration = next(
                     (
@@ -617,7 +619,7 @@ def apply_window(
 
         stored_label = label
         if (
-            label.kind is QuoteKind.SPEECH
+            has_owner_contract(label)
             and label.assignment in {Assignment.EXISTING, Assignment.NEW}
             and speaker_id is None
         ):
