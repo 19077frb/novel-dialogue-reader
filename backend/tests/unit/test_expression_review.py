@@ -60,6 +60,49 @@ def test_verification_message_builder_rejects_non_target_or_duplicate_ranges(req
         )
 
 
+@pytest.mark.parametrize("reading_mode", ["initial", "reread"])
+def test_partial_verification_binds_all_target_lists_and_schema_without_losing_context(
+    reading_mode,
+):
+    original = task()
+    scoped = replace(
+        original,
+        quote_ids=("Q1", "Q2"),
+        references={**original.references, "Q2": "q2", "G1": "g", "EB": "blank"},
+        context=(
+            *original.context,
+            {"ref": "Q2", "kind": "target_quote", "start_cp": 7, "end_cp": 10, "text": "「走」"},
+            {"ref": "G1", "kind": "outer_gap", "start_cp": 10, "end_cp": 12, "text": "后来"},
+            {"ref": "EB", "kind": "overlap", "start_cp": 12, "end_cp": 13, "text": " "},
+        ),
+        reading_mode=reading_mode,
+        visible_horizon_cp=13 if reading_mode == "initial" else None,
+    )
+    original_messages, original_fingerprint = scoped.messages(), scoped.fingerprint()
+    proposals = {"labels": [{"q": "Q1"}, {"q": "Q2"}]}
+    messages = build_challenge_messages(
+        scoped, requested=["q"], original=proposals, reviewed=proposals, challenger=proposals
+    )
+    primary, verification = map(json.loads, (messages[1]["content"], messages[-1]["content"]))
+    assert primary["targets"] == verification["targets"] == ["Q1"]
+    assert {k: v for k, v in primary.items() if k != "targets"} == {
+        k: v for k, v in json.loads(original_messages[1]["content"]).items() if k != "targets"
+    }
+    assert (
+        verification["first"] == verification["review"] == verification["challenger"] == proposals
+    )
+    schema = json.loads(messages[0]["content"].split("\n")[-1])
+    properties = schema["$defs"]["ChallengeItem"]["properties"]
+    assert properties["q"]["enum"] == ["Q1"]
+    for field in ("evidence", "contradiction_evidence"):
+        assert properties[field]["items"]["enum"] == ["E1", "Q1", "Q2"]
+        assert properties[field]["uniqueItems"] is True
+    assert schema["properties"]["checks"]["minItems"] == 1
+    assert schema["properties"]["checks"]["maxItems"] == 1
+    assert scoped.messages() == original_messages
+    assert scoped.fingerprint() == original_fingerprint
+
+
 def proposal(person="C1", kind="speech", *, basis="direct", scope="base"):
     payload = {
         "labels": [
@@ -158,6 +201,8 @@ def test_verified_agreement_challenge_binds_full_proposals_and_keeps_approval(ve
         {"contradiction_evidence": ["Q1"]},
         {"contradiction_evidence": []},
         {"evidence": ["missing"]},
+        {"evidence": ["E1：林舟说："]},
+        {"contradiction_evidence": ["E1：林舟说："]},
         {"evidence": ["E1", "E1"]},
         {"q": "E1"},
     ],
