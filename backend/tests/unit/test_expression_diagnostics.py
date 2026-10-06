@@ -1,15 +1,22 @@
 """Original auxiliary-isolation fixtures, not semantic quality claims."""
 
+import hashlib
+import json
 from copy import deepcopy
+from dataclasses import asdict, replace
 
 import pytest
 from pydantic import ValidationError
 
 from ndr.domain.enums import Assignment, QuoteKind
+from ndr.evaluation import compact
 from ndr.evaluation.compact import Candidate, CompactTask
+from ndr.evaluation.owner_constraints import ConstrainedOwnerProtocol
 from ndr.llm.errors import InvalidModelOutput
 from ndr.llm.expression_compiler import compile_expression_output
-from ndr.llm.expression_diagnostics import compile_expression_diagnostics
+from ndr.llm.expression_diagnostics import DIAGNOSTICS_VERSION, compile_expression_diagnostics
+from ndr.llm.expression_review import snapshot
+from ndr.llm.expression_task import ProjectedCompactTask
 
 
 def task():
@@ -159,3 +166,93 @@ def test_json_input_and_dict_input_preserve_the_same_fingerprint():
     second = compile_expression_diagnostics(json.dumps(raw), task())
     assert first.fingerprint() == second.fingerprint()
     assert first.compilation.output_json == second.compilation.output_json
+
+
+def production_task(version=DIAGNOSTICS_VERSION):
+    base = task()
+    return ProjectedCompactTask(
+        **{field: getattr(base, field) for field in base.__dataclass_fields__},
+        effective_profiles=tuple(
+            {
+                "character_id": c.character_id,
+                "canonical_name": c.name,
+                "aliases": list(c.aliases),
+                "description": c.description,
+            }
+            for c in base.candidates
+        ),
+        auxiliary_protocol=version,
+    )
+
+
+@pytest.mark.parametrize("invalid", [[], {}, 7, None])
+def test_malformed_main_target_stays_a_validation_failure(invalid):
+    raw = payload()
+    raw["labels"][0]["q"] = invalid
+    with pytest.raises(ValueError, match="string target"):
+        compile_expression_output(raw, production_task())
+
+
+@pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
+@pytest.mark.parametrize("dependent", [False, True])
+def test_production_dispatch_normalizes_review_and_downgrades_only_dependents(kind, dependent):
+    raw = payload(kind)
+    raw["labels"][0].update(addressee="C999", owner_depends_on_addressee=dependent)
+    before = deepcopy(raw)
+    projected = production_task()
+    compiled = compile_expression_output(
+        raw, projected, owner_approvals={f"q{i}": True for i in range(1, 4)}
+    )
+    assert raw == before
+    assert compiled.output.labels[0].kind is QuoteKind(kind)
+    assert compiled.output.labels[0].assignment is (
+        Assignment.UNKNOWN if dependent else Assignment.NEW
+    )
+    assert dict(compiled.owner_approvals)["q1"] is (not dependent)
+    assert all(
+        row.speaker_ref and row.assignment is not Assignment.UNKNOWN
+        for row in compiled.output.labels[1:]
+    )
+    assert "addressee" not in compiled.normalized_payload_json
+    assert compiled.auxiliary_warnings
+    reviewed = snapshot(raw, projected, call_ref="primary")
+    assert "addressee" not in json.dumps(reviewed["primary_payload"])
+    assert reviewed["auxiliary_warnings"] == compiled.auxiliary_warnings
+    changed = deepcopy(raw)
+    changed["labels"][0]["addressee"] = "C998"
+    assert compile_expression_output(changed, projected).fingerprint() != compiled.fingerprint()
+
+
+def test_production_legacy_fingerprint_and_schema_remain_exactly_compatible():
+    old = production_task(None)
+    fields = asdict(old)
+    fields.pop("auxiliary_protocol")
+    original = {
+        "protocol": compact.PROTOCOL_VERSION,
+        "prompt": compact.PROMPT_VERSION,
+        "compiler": compact.COMPILER_VERSION,
+        "task": fields,
+    }
+    assert (
+        old.fingerprint()
+        == hashlib.sha256(
+            json.dumps(original, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
+    )
+    new = replace(old, auxiliary_protocol=DIAGNOSTICS_VERSION)
+    assert new.fingerprint() != old.fingerprint()
+    assert (
+        "addressee" not in ConstrainedOwnerProtocol(old).schema["$defs"]["OwnerLabel"]["properties"]
+    )
+    assert "addressee" in ConstrainedOwnerProtocol(new).schema["$defs"]["OwnerLabel"]["properties"]
+    with pytest.raises(ValueError, match="Unsupported auxiliary"):
+        compile_expression_output(payload(), replace(old, auxiliary_protocol="invalid"))
+
+
+def test_isolation_cannot_hide_an_illegal_owner_approval_upgrade():
+    raw = payload()
+    raw["labels"][0].update(character=None, basis="insufficient", evidence=[], addressee="C999")
+    with pytest.raises(ValueError, match="cannot upgrade"):
+        compile_expression_output(
+            raw, production_task(), owner_approvals={f"q{i}": True for i in range(1, 4)}
+        )

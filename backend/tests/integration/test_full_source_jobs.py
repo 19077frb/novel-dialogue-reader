@@ -91,6 +91,95 @@ class WholeAdapter(FakeProviderAdapter):
         }
 
 
+class AuxiliaryAdapter(WholeAdapter):
+    def __init__(self, *, dependent=False, bad_main=False):
+        super().__init__()
+        self.dependent = dependent
+        self.bad_main = bad_main
+
+    async def generate_labels(self, payload):
+        result = await super().generate_labels(payload)
+        sent = json.loads(payload["messages"][1]["content"])
+        proof = next(
+            row["ref"]
+            for row in sent["context"]
+            if "林舟" in row["text"] and row["ref"] not in sent["targets"]
+        )
+        result["new_characters"] = [
+            {"ref": "N1", "name": "林舟", "description": "开口说话的林舟", "evidence": [proof]}
+        ]
+        for row in result["labels"]:
+            row.update(character="N1", basis="direct", evidence=[proof])
+        result["labels"][0].update(
+            addressee="C999",
+            addressee_evidence=["not-sent"],
+            owner_depends_on_addressee=self.dependent,
+        )
+        if self.bad_main:
+            result["labels"][0]["evidence"] = ["not-sent"]
+        return result
+
+
+@pytest.mark.parametrize("dependent", [False, True])
+def test_actual_auxiliary_isolation_preserves_main_or_holds_shared_identity(
+    migrated_client, dependent
+):
+    client = migrated_client
+    data, profile, inputs = prepare(client)
+    job = create(
+        client,
+        data,
+        profile,
+        scope={
+            "end_cp": inputs.source_ranges[0][1],
+            "auxiliary_protocol": "expression-auxiliary-isolation-1",
+        },
+    )
+    adapter = AuxiliaryAdapter(dependent=dependent)
+    result = run_job(
+        client.app.state.session_factory,
+        client.app.state.settings,
+        job_id=job["id"],
+        adapter_factory=lambda *_: adapter,
+    )
+    assert result.state is JobState.COMPLETED, client.get(f"/api/jobs/{job['id']}").json()["data"][
+        "last_error"
+    ]
+    assert result.calls == 1 and len(adapter.calls) == 1
+    detail = client.get(f"/api/jobs/{job['id']}").json()["data"]
+    assert "已隔离" in json.dumps(detail, ensure_ascii=False)
+    assert detail["usage"]["total_tokens"] == 11
+    restored = run_job(
+        client.app.state.session_factory,
+        client.app.state.settings,
+        job_id=job["id"],
+        adapter_factory=lambda *_: adapter,
+    )
+    assert restored.calls == 0 and len(adapter.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "version,bad_main", [(None, False), ("expression-auxiliary-isolation-1", True)]
+)
+def test_auxiliary_flag_never_bypasses_old_strict_mode_or_main_validation(
+    migrated_client, version, bad_main
+):
+    client = migrated_client
+    data, profile, inputs = prepare(client)
+    scope = {"end_cp": inputs.source_ranges[0][1]}
+    if version:
+        scope["auxiliary_protocol"] = version
+    job = create(client, data, profile, scope=scope)
+    adapter = AuxiliaryAdapter(bad_main=bad_main)
+    result = run_job(
+        client.app.state.session_factory,
+        client.app.state.settings,
+        job_id=job["id"],
+        adapter_factory=lambda *_: adapter,
+    )
+    assert result.state is JobState.FAILED and len(adapter.calls) == 1
+
+
 def test_actual_job_request_sends_whole_chapter_not_next_chapter(migrated_client):
     client = migrated_client
     data, profile, inputs = prepare(client)
@@ -332,7 +421,15 @@ def test_estimate_includes_three_possible_evidence_stages_per_round(migrated_cli
 
 @pytest.mark.parametrize(
     "strategy",
-    ["legacy", "complete", "complete-review", "complete-blocks", "complete-blocks-review"],
+    [
+        "legacy",
+        "complete",
+        "complete-review",
+        "complete-blocks",
+        "complete-blocks-review",
+        "complete-blocks-isolated",
+        "complete-blocks-isolated-review",
+    ],
 )
 def test_recheck_strategy_keeps_server_scope_and_does_not_call_at_creation(
     migrated_client, strategy
@@ -341,7 +438,15 @@ def test_recheck_strategy_keeps_server_scope_and_does_not_call_at_creation(
 
 
 @pytest.mark.parametrize(
-    "strategy", ["complete", "complete-review", "complete-blocks", "complete-blocks-review"]
+    "strategy",
+    [
+        "complete",
+        "complete-review",
+        "complete-blocks",
+        "complete-blocks-review",
+        "complete-blocks-isolated",
+        "complete-blocks-isolated-review",
+    ],
 )
 def test_actual_local_recheck_runs_selected_strategy_and_full_window_review(
     migrated_client, strategy
@@ -401,6 +506,9 @@ def _recheck_strategy_creation(migrated_client, strategy):
             "context-chapter-2" if strategy.startswith("complete-blocks") else "context-chapter-1"
         )
         assert scope["output_protocol"] == "expression-production-1"
+        assert scope.get("auxiliary_protocol") == (
+            "expression-auxiliary-isolation-1" if "-isolated" in strategy else None
+        )
         assert (scope.get("review_protocol") == "expression-evidence-review-1") == (
             strategy.endswith("-review")
         )

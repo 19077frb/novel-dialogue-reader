@@ -211,7 +211,13 @@ class RecheckIn(ApiModel):
 
     profile_id: str = Field(description="模型配置 ID；复核必须显式指定")
     dialogue_strategy: Literal[
-        "legacy", "complete", "complete-review", "complete-blocks", "complete-blocks-review"
+        "legacy",
+        "complete",
+        "complete-review",
+        "complete-blocks",
+        "complete-blocks-review",
+        "complete-blocks-isolated",
+        "complete-blocks-isolated-review",
     ] = Field(
         default="legacy",
         description="对白策略；完整策略仍限定服务器选定的当前场景/章节范围",

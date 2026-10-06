@@ -5,7 +5,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 
 from ..storage.cache import fingerprint
-from .expression_compiler import ExpressionCompilation, compile_expression_output
+from .expression_compiler import ExpressionCompilation
+from .expression_compiler import _compile_strict_expression_output as compile_expression_output
 from .validation import load_json_object
 
 DIAGNOSTICS_VERSION = "expression-auxiliary-isolation-1"
@@ -19,6 +20,7 @@ class DiagnosticCompilation:
     diagnostics_json: str
     quarantined_targets: tuple[str, ...]
     original_fingerprint: str
+    primary_json: str
 
     @property
     def diagnostics(self):
@@ -36,7 +38,7 @@ class DiagnosticCompilation:
         )
 
 
-def compile_expression_diagnostics(payload, task):
+def compile_expression_diagnostics(payload, task, *, owner_approvals=None):
     """Explicit alternative; the old compiler still rejects auxiliary fields.
 
     No model calls, data writes, or implied semantic dependency validation.
@@ -50,13 +52,15 @@ def compile_expression_diagnostics(payload, task):
     for row in primary["labels"]:
         if not isinstance(row, dict):
             raise ValueError("Invalid primary expression")
+        if not isinstance(row.get("q"), str):
+            raise ValueError("Primary expression requires a string target reference")
         data = {key: row.pop(key) for key in list(row) if key in AUX_FIELDS}
         if type(data.get("owner_depends_on_addressee", False)) is not bool:
             raise ValueError("Explicit boolean auxiliary dependency required")
         auxiliary[row.get("q")] = data
     # Duplicate/missing targets, main identities, evidence and scene defects
     # are not auxiliary defects and cannot be removed to obtain a valid result.
-    original = compile_expression_output(primary, task)
+    original = compile_expression_output(primary, task, owner_approvals=owner_approvals)
     nonblank = {r["ref"] for r in task.context if r["text"].strip()}
     known = {c.ref for c in task.candidates}
     diagnostics, failed = [], set()
@@ -114,10 +118,17 @@ def compile_expression_diagnostics(payload, task):
         ]
     # Final full compile retains coverage, stable references, original kinds,
     # creation order, and intrinsic acceptance ceilings. No per-row bypass.
-    result = compile_expression_output(primary, task) if failed else original
+    approvals = None if owner_approvals is None else dict(owner_approvals)
+    if approvals is not None:
+        for q in failed:
+            approvals[task.references[q]] = False
+    result = (
+        compile_expression_output(primary, task, owner_approvals=approvals) if failed else original
+    )
     return DiagnosticCompilation(
         result,
         json.dumps(diagnostics, ensure_ascii=False),
         tuple(q for q in task.quote_ids if q in failed),
         fingerprint(raw),
+        json.dumps(primary, ensure_ascii=False),
     )

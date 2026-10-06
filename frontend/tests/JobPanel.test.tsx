@@ -74,6 +74,12 @@ const RECOVERY = {
 } as unknown as JobRecoveryOut
 
 describe('JobPanel', () => {
+  it('keeps bounded auxiliary diagnostics visible from a restored checkpoint', async () => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, checkpoint: { auxiliary_warnings: ['已隔离无效受话信息', 42] } })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText('已隔离无效受话信息')).toBeInTheDocument()
+    expect(screen.getByLabelText('辅助信息校验提示')).not.toHaveTextContent('42')
+  })
   beforeEach(() => {
     vi.mocked(booksApi.fetchJob).mockReset()
     vi.mocked(jobsApi.fetchJobRecovery).mockReset()

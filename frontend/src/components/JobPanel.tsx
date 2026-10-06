@@ -100,6 +100,11 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
       {job.data.progress?.stage === 'rechecking' && (
         <p className="hint">正在复核本窗口全部对白：第 {String(job.data.progress.review_round)} / {String(job.data.progress.review_rounds)} 轮</p>
       )}
+      {Array.isArray(job.data.checkpoint?.auxiliary_warnings) && (
+        <div className="hint" aria-label="辅助信息校验提示">{job.data.checkpoint.auxiliary_warnings
+          .filter((notice): notice is string => typeof notice === 'string').slice(0, 5)
+          .map((notice, index) => <p key={index}>{notice}</p>)}</div>
+      )}
       {!!job.data.progress?.review_stopped && typeof job.data.progress.review_stopped === 'object' && (
         <div className="hint">{Object.values(job.data.progress.review_stopped).map((reason, index) => (
           <p key={index}>{String(reason)}</p>

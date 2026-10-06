@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, replace
 from typing import Literal
 
@@ -44,6 +45,8 @@ def snapshot(payload, task, *, call_ref, owner_approvals=None):
     if not isinstance(call_ref, str) or not call_ref:
         raise ValueError("Explicit call scope required")
     compilation = compile_expression_output(payload, task, owner_approvals=owner_approvals)
+    if compilation.normalized_payload_json is not None:
+        payload = json.loads(compilation.normalized_payload_json)
     checked = ConstrainedOwnerProtocol(task).compile(payload)
     original = checked["original_payload"]
     rows = {r["quote_id"]: r for r in checked["rows"]}
@@ -75,6 +78,11 @@ def snapshot(payload, task, *, call_ref, owner_approvals=None):
         "anonymous": anonymous,
         "breaks": tuple(original["breaks"]),
         "version": REVIEW_VERSION,
+        **(
+            {"primary_payload": payload, "auxiliary_warnings": compilation.auxiliary_warnings}
+            if compilation.normalized_payload_json is not None
+            else {}
+        ),
     }
 
 

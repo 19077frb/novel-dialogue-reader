@@ -76,13 +76,25 @@ def digest_request(payload: dict[str, Any]) -> str:
 def dialogue_strategy_range(strategy: str) -> dict[str, str]:
     if strategy == "legacy":
         return {}
-    if strategy not in {"complete", "complete-review", "complete-blocks", "complete-blocks-review"}:
+    if strategy not in {
+        "complete",
+        "complete-review",
+        "complete-blocks",
+        "complete-blocks-review",
+        "complete-blocks-isolated",
+        "complete-blocks-isolated-review",
+    }:
         raise ApiError.validation("不支持的对白处理策略")
     return {
         "context_policy": "context-chapter-2"
         if strategy.startswith("complete-blocks")
         else "context-chapter-1",
         "output_protocol": "expression-production-1",
+        **(
+            {"auxiliary_protocol": "expression-auxiliary-isolation-1"}
+            if "-isolated" in strategy
+            else {}
+        ),
         **(
             {"review_protocol": "expression-evidence-review-1"}
             if strategy.endswith("-review")
@@ -104,10 +116,15 @@ def estimate_inference(
     output_tokens_per_target: int = 20,
     max_recheck_rounds: int = 0,
     review_protocol: str | None = None,
+    auxiliary_protocol: str | None = None,
 ) -> JobEstimate:
     """纯本地估算：不调用模型、不写数据库。"""
 
     resolved_policy = policy or DEFAULT_POLICY
+    from ..llm.expression_diagnostics import DIAGNOSTICS_VERSION
+
+    if auxiliary_protocol not in (None, DIAGNOSTICS_VERSION):
+        raise ApiError.validation("不支持的辅助诊断版本")
     plan = plan_range(
         session,
         settings,
@@ -220,6 +237,7 @@ def estimate_inference(
         estimator=plan.windows[0].budget["estimator"] if plan.windows else {},
         policy={
             **resolved_policy.as_key(),
+            **({"auxiliary_protocol": auxiliary_protocol} if auxiliary_protocol else {}),
             **({"review_protocol": review_protocol} if review_protocol is not None else {}),
         },
         notes=notes,
@@ -281,6 +299,13 @@ def create_inference_job(
     protocol = range_payload.get("output_protocol")
     if protocol is not None and protocol != PRODUCTION_EXPRESSION_VERSION:
         raise ApiError.validation("不支持的对白输出协议")
+    from ..llm.expression_diagnostics import DIAGNOSTICS_VERSION
+
+    auxiliary_protocol = range_payload.get("auxiliary_protocol")
+    if auxiliary_protocol is not None and (
+        auxiliary_protocol != DIAGNOSTICS_VERSION or protocol != PRODUCTION_EXPRESSION_VERSION
+    ):
+        raise ApiError.validation("辅助诊断隔离须选择受支持的版本与短表达协议")
     from ..context.budget import CONTEXT_POLICY_CHAPTER, CONTEXT_POLICY_DIALOGUE_BLOCKS
 
     if (

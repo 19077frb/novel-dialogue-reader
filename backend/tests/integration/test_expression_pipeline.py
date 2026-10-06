@@ -30,7 +30,7 @@ from ndr.storage.models import (
 from ndr.storage.transactions import transaction
 
 
-def prepare(client, *, all_quotes=False):
+def prepare(client, *, all_quotes=False, auxiliary=False):
     text = "第一章\n林舟说：「早上好。」\n许晴答：「你好。」\n顾宁点头。"
     data = client.post(
         "/api/books/import", files={"file": ("stages.txt", text.encode(), "text/plain")}
@@ -73,6 +73,11 @@ def prepare(client, *, all_quotes=False):
                     "end_cp": cutoff,
                     "output_protocol": "expression-production-1",
                     "review_protocol": REVIEW_VERSION,
+                    **(
+                        {"auxiliary_protocol": "expression-auxiliary-isolation-1"}
+                        if auxiliary
+                        else {}
+                    ),
                 },
                 "budget": {"max_recheck_rounds": 1, "max_format_retries": 0},
                 "reading_mode": "reread",
@@ -158,6 +163,32 @@ def test_actual_job_independent_review_and_evidence_based_third_identity(
         assert len(runs) == calls
         assert all(r.state is InferenceRunState.SUCCEEDED for r in runs)
         assert sum(json.loads(r.usage_json)["total_tokens"] for r in runs) == 30 * calls
+
+
+def test_review_and_cached_replay_keep_independent_owner_and_auxiliary_notice(fake_provider_client):
+    client = fake_provider_client
+    create, factory = prepare(client, auxiliary=True)
+
+    class AuxiliaryStageAdapter(StageAdapter):
+        async def generate_labels(self, payload):
+            raw = await super().generate_labels(payload)
+            raw["labels"][0].update(addressee="C999", addressee_evidence=["not-sent"])
+            return raw
+
+    adapter = AuxiliaryStageAdapter(["林舟", "林舟"])
+    for key in ("auxiliary-first", "auxiliary-cache"):
+        job = create(key)
+        outcome = run_job(
+            factory, client.app.state.settings, job_id=job["id"], adapter_factory=lambda *_: adapter
+        )
+        assert outcome.state is JobState.COMPLETED, client.get(f"/api/jobs/{job['id']}").json()[
+            "data"
+        ]["last_error"]
+        with factory() as session:
+            annotation = session.scalar(select(Annotation))
+            assert session.get(SpeakerGroup, annotation.speaker_id).canonical_name == "林舟"
+            assert "已隔离" in session.get(Job, job["id"]).checkpoint_json
+    assert len(adapter.calls) == 2
 
 
 def test_cache_keeps_pending_owner_ceiling_without_new_review_calls(fake_provider_client):
@@ -284,7 +315,9 @@ def test_manual_owner_locked_during_review_is_not_overwritten(fake_provider_clie
 @pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
 @pytest.mark.parametrize("unknown", [False, True])
 def test_actual_manual_expression_correction_during_review_preserves_entire_answer(
-    fake_provider_client, kind, unknown,
+    fake_provider_client,
+    kind,
+    unknown,
 ):
     from ndr.corrections.history import annotation_snapshot
 
@@ -297,8 +330,12 @@ def test_actual_manual_expression_correction_during_review_preserves_entire_answ
         data.pop("review_protocol")
         row.range_json = json.dumps(data)
         row.budget_json = json.dumps({"max_recheck_rounds": 0})
-    run_job(factory, client.app.state.settings, job_id=prior_job["id"],
-            adapter_factory=lambda *_: StageAdapter(["林舟"]))
+    run_job(
+        factory,
+        client.app.state.settings,
+        job_id=prior_job["id"],
+        adapter_factory=lambda *_: StageAdapter(["林舟"]),
+    )
     job = create("manual-expression-review")
     saved = {}
 
@@ -306,20 +343,27 @@ def test_actual_manual_expression_correction_during_review_preserves_entire_answ
         with factory() as session:
             target = session.scalar(select(Annotation))
             quote_id, version = target.quote_id, target.version
-        response = client.post(f"/api/quotes/{quote_id}/corrections", json={
-            "action": "set_kind", "kind": kind, "expected_version": version,
-        })
+        response = client.post(
+            f"/api/quotes/{quote_id}/corrections",
+            json={
+                "action": "set_kind",
+                "kind": kind,
+                "expected_version": version,
+            },
+        )
         assert response.status_code == 201, response.text
         if unknown:
-            response = client.post(f"/api/quotes/{quote_id}/corrections",
-                                   json={"action": "mark_unknown"})
+            response = client.post(
+                f"/api/quotes/{quote_id}/corrections", json={"action": "mark_unknown"}
+            )
             assert response.status_code == 201, response.text
         with factory() as session:
             saved.update(annotation_snapshot(session.scalar(select(Annotation))))
 
     adapter = StageAdapter(["许晴", "许晴"], pause=(2, correct), kind="quotation")
-    result = run_job(factory, client.app.state.settings, job_id=job["id"],
-                     adapter_factory=lambda *_: adapter)
+    result = run_job(
+        factory, client.app.state.settings, job_id=job["id"], adapter_factory=lambda *_: adapter
+    )
     assert result.state is JobState.COMPLETED
     with factory() as session:
         annotation = session.scalar(select(Annotation))

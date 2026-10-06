@@ -195,11 +195,14 @@ class CompactTask:
         # Stable identities and mapping are deliberately included, not only visible names.
         from dataclasses import asdict
 
+        fields = asdict(self)
+        if fields.get("auxiliary_protocol") is None:
+            fields.pop("auxiliary_protocol", None)  # Preserve historical task/cache fingerprints.
         payload = {
             "protocol": PROTOCOL_VERSION,
             "prompt": PROMPT_VERSION,
             "compiler": COMPILER_VERSION,
-            "task": asdict(self),
+            "task": fields,
         }
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
@@ -315,7 +318,9 @@ def compile_output(payload: str | dict[str, Any], task: CompactTask) -> LlmOutpu
                     character_id=person.character_id if person else None,
                     name=(person.name if valid_display_name(person.name) else None)
                     if person and person.character_id in supplied_ids
-                    else person.name if person else discovery.name,
+                    else person.name
+                    if person
+                    else discovery.name,
                     description=(person.description or person.name or "身份资料尚未揭示")
                     if person
                     else discovery.description,

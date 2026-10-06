@@ -48,7 +48,7 @@ describe('shared processing preferences', () => {
     expect(module.getProcessingPreferences().maxRecheckRounds).toBe(3)
   })
 
-  it.each(['complete-review', 'complete-blocks', 'complete-blocks-review'] as const)('persists %s and never upgrades old or unknown values', async dialogueStrategy => {
+  it.each(['complete-review', 'complete-blocks', 'complete-blocks-review', 'complete-blocks-isolated', 'complete-blocks-isolated-review'] as const)('persists %s and never upgrades old or unknown values', async dialogueStrategy => {
     const module = await import('../src/processing/preferences')
     expect(module.getProcessingPreferences().dialogueStrategy).toBe('legacy')
     module.updateProcessingPreferences({ dialogueStrategy })

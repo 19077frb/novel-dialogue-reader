@@ -27,12 +27,13 @@ export function fetchRecentJobs(input: { bookId?: string; versionId?: string; ch
   return apiData<JobDetailOut[]>(`/api/jobs/recent?${params}`, { signal })
 }
 
-export type DialogueStrategy = 'legacy' | 'complete' | 'complete-review' | 'complete-blocks' | 'complete-blocks-review'
+export type DialogueStrategy = 'legacy' | 'complete' | 'complete-review' | 'complete-blocks' | 'complete-blocks-review' | 'complete-blocks-isolated' | 'complete-blocks-isolated-review'
 
 export function dialogueStrategyPayload(strategy?: DialogueStrategy) {
-  return strategy && ['complete', 'complete-review', 'complete-blocks', 'complete-blocks-review'].includes(strategy) ? {
+  return strategy && ['complete', 'complete-review', 'complete-blocks', 'complete-blocks-review', 'complete-blocks-isolated', 'complete-blocks-isolated-review'].includes(strategy) ? {
     context_policy: strategy.startsWith('complete-blocks') ? 'context-chapter-2' : 'context-chapter-1',
     output_protocol: 'expression-production-1',
+    ...(strategy.includes('-isolated') ? { auxiliary_protocol: 'expression-auxiliary-isolation-1' } : {}),
     ...(strategy.endsWith('-review') ? { review_protocol: 'expression-evidence-review-1' } : {}),
   } : {}
 }

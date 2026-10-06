@@ -135,7 +135,7 @@ uv run --project backend python -m pytest backend/tests/unit/test_expression_own
 
 ## 可选辅助诊断隔离
 
-`ndr.llm.expression_diagnostics.compile_expression_diagnostics`是显式替代编译入口，不调用模型或写库；正式`expression-production-1`任务仍使用原严格编译，不自动开启此模式。受话对象、受话证据及严格布尔`owner_depends_on_addressee`可作为辅助提案提供。程序先移出这些已声明的辅助字段，严格编译完整主归属，再独立验证辅助引用；坏辅助不会改变不依赖它的主结果。
+`ndr.llm.expression_diagnostics.compile_expression_diagnostics`是不调用模型或写库的隔离编译入口。正式`expression-production-1`任务只有显式冻结`auxiliary_protocol=expression-auxiliary-isolation-1`才使用它；界面对应`complete-blocks-isolated`及其独立复核版本。旧策略仍严格编译，不自动开启此模式。受话对象、受话证据及严格布尔`owner_depends_on_addressee`可作为可选辅助提案提供，不强制每个目标输出。程序先移出这些已声明的辅助字段，严格编译完整主归属，再独立验证辅助引用；坏辅助不会改变不依赖它的主结果。
 
 明确依赖坏辅助的目标，以及它引用的其他目标和共享新身份所涉及的依赖闭包，保留原表达类型但转为未知人物；移除不再使用的新身份后再次完整编译。主身份、证据、场景、缺失/重复目标或未知主字段仍直接拒绝。结果包含有界诊断摘要、隔离目标和原提案指纹；原始输出仍应由调用者保存在既有受限调用归档中。使用者需保存该入口自身指纹，不能只用剥离后的主结果充当缓存依据。程序不能证明模型的依赖声明或引用在语义上正确，离线检查不代表已取得真实复核收益。
 

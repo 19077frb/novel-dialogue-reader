@@ -338,6 +338,7 @@ export function appendAutomaticProcessing(bookId: string, versionId: string, pla
   const strategy = batchExecutions.get(bookId)?.execution.preferences.dialogueStrategy ?? 'legacy'
   if (plans.some(plan => Boolean(plan.estimate.policy?.full_source) !== (strategy !== 'legacy')
     || Boolean(plan.estimate.policy?.dialogue_blocks) !== strategy.startsWith('complete-blocks')
+    || plan.estimate.policy?.auxiliary_protocol !== (strategy.includes('-isolated') ? 'expression-auxiliary-isolation-1' : undefined)
     || (plan.estimate.policy?.review_protocol === 'expression-evidence-review-1') !== strategy.endsWith('-review'))) {
     publishBatch(bookId, { message: '当前批次已固定对白策略；新策略将在本批次结束后用于下一批，未追加不匹配的窗口。' })
     return 0

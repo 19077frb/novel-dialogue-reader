@@ -140,26 +140,32 @@ def _restore_output_references(raw: Any, window) -> Any:  # noqa: ANN001
         # unused declaration with a known context reference; never guess IDs or
         # rewrite any target's scene/speaker assignment.
         if (
-            not candidates and start_fragment is not None
+            not candidates
+            and start_fragment is not None
             and gap.kind.value == "outer_gap"
             and starts_at not in targets
             and (starts_at == gap_id or start_fragment.kind.value == "overlap")
             and start_fragment.start_cp >= gap.start_cp
             and sum(
                 item.get("after_gap_id") == gap_id
-                for item in payload["scene_updates"] if isinstance(item, dict)
-            ) == 1
+                for item in payload["scene_updates"]
+                if isinstance(item, dict)
+            )
+            == 1
             and any(
                 decision.get("gap_id") == gap_id and decision.get("decision") == "BREAK"
-                for decision in payload["gap_decisions"] if isinstance(decision, dict)
+                for decision in payload["gap_decisions"]
+                if isinstance(decision, dict)
             )
             and not any(
                 label.get("scene_ref") == update.get("temp_ref")
-                for label in payload.get("labels", []) if isinstance(label, dict)
+                for label in payload.get("labels", [])
+                if isinstance(label, dict)
             )
             and not any(
                 speaker.get("scene_ref") == update.get("temp_ref")
-                for speaker in payload.get("new_speakers", []) if isinstance(speaker, dict)
+                for speaker in payload.get("new_speakers", [])
+                if isinstance(speaker, dict)
             )
         ):
             deferred_gaps.add(gap_id)
@@ -167,17 +173,18 @@ def _restore_output_references(raw: Any, window) -> Any:  # noqa: ANN001
         elif candidates and starts_at == gap_id:
             quote_id = str(candidates[0].fragment_id)
             update["starts_at_quote_id"] = quote_id
-            reference_repairs.append(
-                f"repaired_scene_start:{gap_id}->{quote_id}"
-            )
+            reference_repairs.append(f"repaired_scene_start:{gap_id}->{quote_id}")
     if deferred_gaps:
-        payload["scene_updates"] = [update for update in payload["scene_updates"]
-                                   if not isinstance(update, dict)
-                                   or update.get("after_gap_id") not in deferred_gaps]
+        payload["scene_updates"] = [
+            update
+            for update in payload["scene_updates"]
+            if not isinstance(update, dict) or update.get("after_gap_id") not in deferred_gaps
+        ]
         payload["gap_decisions"] = [
             {**decision, "decision": "CONTINUE"}
             if isinstance(decision, dict) and decision.get("gap_id") in deferred_gaps
-            else decision for decision in payload["gap_decisions"]
+            else decision
+            for decision in payload["gap_decisions"]
         ]
     if reference_repairs:
         payload["_reference_repairs"] = reference_repairs
@@ -209,16 +216,29 @@ def _messages_for(
             "start_cp": fragment.start_cp,
             "end_cp": fragment.end_cp,
             "text": fragment.text,
-            **({"next_target_quote_id": next(
-                (alias(target.fragment_id) for target in target_fragments
-                 if target.start_cp >= fragment.end_cp), None,
-            )} if fragment.kind.value in {"inner_gap", "outer_gap"} else {}),
+            **(
+                {
+                    "next_target_quote_id": next(
+                        (
+                            alias(target.fragment_id)
+                            for target in target_fragments
+                            if target.start_cp >= fragment.end_cp
+                        ),
+                        None,
+                    )
+                }
+                if fragment.kind.value in {"inner_gap", "outer_gap"}
+                else {}
+            ),
         }
         for fragment in window.fragments
     ]
     identity_provenance = {
-        item.character_id: {"source": item.source, "user_confirmed": item.user_confirmed,
-                            "confirmation_source": item.confirmation_source}
+        item.character_id: {
+            "source": item.source,
+            "user_confirmed": item.user_confirmed,
+            "confirmation_source": item.confirmation_source,
+        }
         for item in state.identity_characters
     }
     speaker_records = [
@@ -228,8 +248,7 @@ def _messages_for(
             "canonical_name": slot.canonical_name or None,
             "description": slot.description or "未说明",
             "first_quote_id": stable_to_alias.get(slot.first_quote_id),
-            "is_pov": slot.character_id is not None
-            and slot.character_id == state.pov_character_id,
+            "is_pov": slot.character_id is not None and slot.character_id == state.pov_character_id,
             "evidence_refs": [alias(ref) for ref in slot.evidence_refs if ref in stable_to_alias],
             "identity_provenance": identity_provenance.get(
                 slot.character_id,
@@ -277,8 +296,11 @@ def _messages_for(
             {
                 "role": "user",
                 "content": (
-                    (correction if correction.startswith("复核说明：")
-                     else "上一次输出无效：" + correction)
+                    (
+                        correction
+                        if correction.startswith("复核说明：")
+                        else "上一次输出无效：" + correction
+                    )
                     + "。请重新只输出符合 schema 的 JSON 对象，"
                     "不要包含任何解释或额外文本。"
                 ),
@@ -322,6 +344,7 @@ async def run_window(
         owner_approvals = dict(owner_approvals) if owner_approvals is not None else None
         _validate_expression_task(expression_task, window, state, owner_approvals)
         from ..llm.expression_task import ProjectedCompactTask
+
         if isinstance(expression_task, ProjectedCompactTask):
             state.production_expression_task = expression_task
         protocol = ConstrainedOwnerProtocol(expression_task)
@@ -342,9 +365,13 @@ async def run_window(
     while True:
         attempt += 1
         result.attempts = attempt
-        messages = (_messages_for(
+        messages = (
+            _messages_for(
                 window=window, state=state, locked_summary=locked_summary, correction=correction
-            ) if protocol is None else protocol.messages())
+            )
+            if protocol is None
+            else protocol.messages()
+        )
         if protocol is not None and correction:
             messages.append({"role": "user", "content": "上一次输出无效：" + correction})
         payload = {
@@ -365,8 +392,9 @@ async def run_window(
                     result.usage_records.append(dict(failed_usage))
                 if isinstance(exc.details.get("body"), str):
                     result.raw_outputs.append(exc.details["body"])
-                if (_known_expression_usage(failed_usage)
-                        and policy.should_retry(exc, retries_used=attempt - 1)):
+                if _known_expression_usage(failed_usage) and policy.should_retry(
+                    exc, retries_used=attempt - 1
+                ):
                     correction = exc.message
                     continue
             return result
@@ -388,19 +416,25 @@ async def run_window(
         try:
             if protocol is not None:
                 compilation = compile_expression_output(
-                    payload_for_validation, expression_task, owner_approvals=owner_approvals,
+                    payload_for_validation,
+                    expression_task,
+                    owner_approvals=owner_approvals,
                 )
                 payload_for_validation = compilation.output
                 expected_version = "1.1"
-            report = parse_and_validate(payload_for_validation, _targets_for(window, state),
-                                        expected_schema_version=expected_version)
+            report = parse_and_validate(
+                payload_for_validation,
+                _targets_for(window, state),
+                expected_schema_version=expected_version,
+            )
         except (InvalidModelOutput, ValidationError) as exc:
             error = InvalidModelOutput(str(exc))
             result.error_code = error.code.value
             result.application.validation_codes = ["invalid_expression_output"]
             result.application.warnings.append(error.message)
-            if (not _known_expression_usage(usage)
-                    or not policy.should_retry(error, retries_used=attempt - 1)):
+            if not _known_expression_usage(usage) or not policy.should_retry(
+                error, retries_used=attempt - 1
+            ):
                 return result
             correction = error.message
             continue
@@ -428,6 +462,7 @@ async def run_window(
             )
             if compilation is not None:
                 result.compiler_fingerprint = compilation.fingerprint()
+                result.application.warnings.extend(compilation.auxiliary_warnings)
                 if result.application.validation_ok:
                     result.error_code = None
             if isinstance(raw, Mapping):
@@ -441,8 +476,11 @@ async def run_window(
         result.application.warnings.extend(report.messages[:5])
         error = InvalidModelOutput("；".join(report.messages[:3]) or "输出不符合 schema")
         result.error_code = error.code.value
-        if (protocol is not None and not _known_expression_usage(usage)
-                or not policy.should_retry(error, retries_used=attempt - 1)):
+        if (
+            protocol is not None
+            and not _known_expression_usage(usage)
+            or not policy.should_retry(error, retries_used=attempt - 1)
+        ):
             return result
         correction = error.message
 
@@ -453,9 +491,11 @@ def _validate_expression_task(task, window, state, approvals):  # noqa: ANN001
 
     validate_initial_identity_fields(task)
     if isinstance(task, ProjectedCompactTask):
-        if (not state.projected_identity_input
-                or task.visible_horizon_cp != state.identity_input_horizon
-                or task.reading_mode != state.identity_input_mode):
+        if (
+            not state.projected_identity_input
+            or task.visible_horizon_cp != state.identity_input_horizon
+            or task.reading_mode != state.identity_input_mode
+        ):
             raise ValueError("Production expression differs from its server visibility view")
         actual = {p.character_id: p.as_dict() for p in state.identity_characters}
         if actual != {p["character_id"]: p for p in task.effective_profiles}:
@@ -468,11 +508,15 @@ def _validate_expression_task(task, window, state, approvals):  # noqa: ANN001
     for row in task.context:
         fragment = fragments[task.references[row["ref"]]]
         if (row.get("start_cp"), row.get("end_cp"), row.get("text"), row.get("kind")) != (
-            fragment.start_cp, fragment.end_cp, fragment.text, fragment.kind.value,
+            fragment.start_cp,
+            fragment.end_cp,
+            fragment.text,
+            fragment.kind.value,
         ):
             raise ValueError("Expression context differs from the actual original window")
-    actual_gaps = {f.fragment_id for f in window.fragments
-                   if f.kind.value in {"inner_gap", "outer_gap"}}
+    actual_gaps = {
+        f.fragment_id for f in window.fragments if f.kind.value in {"inner_gap", "outer_gap"}
+    }
     if {task.references[g] for g in task.gap_next_quote} != actual_gaps:
         raise ValueError("Expression boundaries differ from the actual window")
     identities = {c.character_id for c in state.identity_characters}
@@ -481,8 +525,10 @@ def _validate_expression_task(task, window, state, approvals):  # noqa: ANN001
         raise ValueError("Expression candidate was not provided by the current state")
     if any(c.existing_ref and c.existing_ref not in slots for c in task.candidates):
         raise ValueError("Expression candidate cites an unprovided scene slot")
-    if any(c.existing_ref and c.character_id != state.find(c.existing_ref).character_id
-           for c in task.candidates):
+    if any(
+        c.existing_ref and c.character_id != state.find(c.existing_ref).character_id
+        for c in task.candidates
+    ):
         raise ValueError("Expression candidate identity differs from the provided scene slot")
     if approvals is not None and (
         set(approvals) != set(window.target_quote_ids)
@@ -492,8 +538,12 @@ def _validate_expression_task(task, window, state, approvals):  # noqa: ANN001
 
 
 def _known_expression_usage(usage) -> bool:  # noqa: ANN001
-    return (isinstance(usage, Mapping) and not usage.get("unknown")
-            and type(usage.get("total_tokens")) is int and usage["total_tokens"] >= 0)
+    return (
+        isinstance(usage, Mapping)
+        and not usage.get("unknown")
+        and type(usage.get("total_tokens")) is int
+        and usage["total_tokens"] >= 0
+    )
 
 
 def _targets_for(window, state: SceneState):  # noqa: ANN001, ANN202
@@ -502,7 +552,8 @@ def _targets_for(window, state: SceneState):  # noqa: ANN001, ANN202
     return LabelingTargets(
         require_display_names=True,
         known_declaration_ids=tuple(item.character_id for item in state.identity_characters)
-        if state.production_expression_task is not None else (),
+        if state.production_expression_task is not None
+        else (),
         character_ids=tuple(item.character_id for item in state.identity_characters),
         quote_ids=tuple(window.target_quote_ids),
         gap_ids=tuple(

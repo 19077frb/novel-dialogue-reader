@@ -15,9 +15,14 @@ PRODUCTION_CACHE_VERSION = "expression-1"
 @dataclass(frozen=True)
 class ProjectedCompactTask(CompactTask):
     effective_profiles: tuple[dict, ...] = ()
+    auxiliary_protocol: str | None = None
 
     def validate_effective_profiles(self):
         self.__post_init__()
+        from .expression_diagnostics import DIAGNOSTICS_VERSION
+
+        if self.auxiliary_protocol not in (None, DIAGNOSTICS_VERSION):
+            raise ValueError("Unsupported auxiliary isolation version")
         profiles = {p["character_id"]: p for p in self.effective_profiles}
         if len(profiles) != len(self.effective_profiles) or set(profiles) != {
             c.character_id for c in self.candidates
@@ -54,7 +59,7 @@ def known_declaration_ids(task):
     return tuple(c.character_id for c in task.candidates if c.character_id)
 
 
-def build_production_expression_task(window, state: SceneState):
+def build_production_expression_task(window, state: SceneState, *, auxiliary_protocol=None):
     from ..scenes.runner import _reference_aliases
 
     if not state.projected_identity_input or state.identity_input_horizon is None:
@@ -105,6 +110,7 @@ def build_production_expression_task(window, state: SceneState):
         reading_mode=state.identity_input_mode,
         visible_horizon_cp=state.identity_input_horizon,
         effective_profiles=profiles,
+        auxiliary_protocol=auxiliary_protocol,
     )
     task.validate_effective_profiles()
     return task

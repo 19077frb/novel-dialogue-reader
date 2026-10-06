@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..domain.enums import AnnotationStatus
 from ..evaluation.compact import CompactTask, compile_output
@@ -22,6 +22,20 @@ class ExpressionCompilation:
     output_json: str
     protocol_fingerprint: str
     owner_approvals: tuple[tuple[str, bool], ...]
+    normalized_payload_json: str | None = None
+    auxiliary_diagnostics_json: str | None = None
+
+    @property
+    def auxiliary_warnings(self):
+        data = json.loads(self.auxiliary_diagnostics_json or "{}")
+        invalid = sum(not r["valid"] for r in data.get("records", []))
+        if not invalid:
+            return []
+        isolated = len(data.get("quarantined_targets", []))
+        return [
+            f"已隔离 {invalid} 条无效受话辅助信息；不依赖它的归属保留，"
+            f"{isolated} 条依赖归属保留原类型并转为未知人物。"
+        ]
 
     @property
     def output(self) -> ExpressionLlmOutput:
@@ -45,6 +59,11 @@ class ExpressionCompilation:
                     self.protocol_fingerprint,
                     self.output_json,
                     self.owner_approvals,
+                    *(
+                        [self.normalized_payload_json, self.auxiliary_diagnostics_json]
+                        if self.auxiliary_diagnostics_json is not None
+                        else []
+                    ),
                 ],
                 ensure_ascii=False,
                 sort_keys=True,
@@ -79,6 +98,34 @@ def validate_initial_identity_fields(task: CompactTask) -> None:
 
 
 def compile_expression_output(
+    payload: str | Mapping,
+    task: CompactTask,
+    *,
+    owner_approvals: Mapping[str, bool] | None = None,
+) -> ExpressionCompilation:
+    version = getattr(task, "auxiliary_protocol", None)
+    if version is not None:
+        from .expression_diagnostics import DIAGNOSTICS_VERSION, compile_expression_diagnostics
+
+        if version != DIAGNOSTICS_VERSION:
+            raise ValueError("Unsupported auxiliary isolation version")
+        result = compile_expression_diagnostics(payload, task, owner_approvals=owner_approvals)
+        return replace(
+            result.compilation,
+            protocol_fingerprint=result.fingerprint(),
+            normalized_payload_json=result.primary_json,
+            auxiliary_diagnostics_json=json.dumps(
+                {
+                    "records": result.diagnostics,
+                    "quarantined_targets": list(result.quarantined_targets),
+                },
+                ensure_ascii=False,
+            ),
+        )
+    return _compile_strict_expression_output(payload, task, owner_approvals=owner_approvals)
+
+
+def _compile_strict_expression_output(
     payload: str | Mapping,
     task: CompactTask,
     *,

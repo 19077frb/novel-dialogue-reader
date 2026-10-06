@@ -289,7 +289,9 @@ def _prepare_identity_view(session, job, version, state, window=None, *, people=
         if output_protocol is not None and output_protocol != PRODUCTION_EXPRESSION_VERSION:
             raise ValueError("不支持的对白输出协议")
         if output_protocol and window is not None:
-            state.production_expression_task = build_production_expression_task(window, state)
+            state.production_expression_task = build_production_expression_task(
+                window, state, auxiliary_protocol=_range_of(job).get("auxiliary_protocol")
+            )
     except (ValueError, TypeError, KeyError) as exc:
         return False, f"人物资料无法安全读取：{exc}"
     return True, None
@@ -470,6 +472,17 @@ def _positions(inputs, window):  # noqa: ANN001, ANN202
     return quote_positions, gap_positions, evidence_positions
 
 
+def _retain_auxiliary_warnings(job, warnings):
+    """Keep bounded user-visible diagnostics across finalization and cache replay."""
+    if not _range_of(job).get("auxiliary_protocol"):
+        return
+    checkpoint = _json_of(job.checkpoint_json)
+    current = checkpoint.get("auxiliary_warnings", [])
+    notices = [w[:600] for w in [*current, *warnings] if isinstance(w, str)]
+    checkpoint["auxiliary_warnings"] = list(dict.fromkeys(notices))[-5:]
+    job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+
+
 def _apply_payload(
     session: Session,
     *,
@@ -611,7 +624,10 @@ def _apply_payload(
         dependency_hash=window.dependency_hash,
         created_run_id=run_id,
     )
-    return True, [], [], [*reference_repairs, *report.warnings]
+    auxiliary_warnings = compilation.auxiliary_warnings if compilation else []
+    if isinstance(raw, ReviewedExpression):
+        auxiliary_warnings.extend(raw.auxiliary_warnings)
+    return True, [], [], [*reference_repairs, *auxiliary_warnings, *report.warnings]
 
 
 def _review_state(session: Session, job: Job, window) -> SceneState:  # noqa: ANN001
@@ -1050,6 +1066,8 @@ def _run_recheck_pass(
                         preserve_existing_candidates=True,
                         attribution_only=full_window,
                     )
+                    if ok:
+                        _retain_auxiliary_warnings(job, _repair_warnings)
                 else:
                     ok, codes, messages = False, ["invalid_identity_input"], [reason]
                 if run_id:
@@ -1391,7 +1409,8 @@ def run_job(
             job.state = JobState.FAILED
             job.last_error = str(exc)
             job.progress_json = json.dumps(
-                {"stage": "invalid_full_context", "calls": 0}, ensure_ascii=False,
+                {"stage": "invalid_full_context", "calls": 0},
+                ensure_ascii=False,
             )
             session.commit()
             outcome.state = JobState.FAILED
@@ -1675,6 +1694,7 @@ def run_job(
                     )
                 ).scalar_one_or_none()
                 if ok:
+                    _retain_auxiliary_warnings(job, repair_warnings)
                     if row is not None:
                         row.state = JobState.COMPLETED
                     done += 1
@@ -1976,6 +1996,7 @@ def run_job(
                             break
                     else:
                         run.state = InferenceRunState.SUCCEEDED
+                        _retain_auxiliary_warnings(job, repair_warnings)
                         known_usage = bool(usage) and not usage.get("unknown")
                         run.usage_json = (
                             json.dumps(usage, ensure_ascii=False) if known_usage else None
@@ -2063,6 +2084,15 @@ def run_job(
                         "recheck_targets": outcome.recheck_targets,
                         "recheck_calls": outcome.recheck_calls,
                         "review_stopped": _json_of(job.checkpoint_json).get("review_stopped", {}),
+                        **(
+                            {
+                                "auxiliary_warnings": _json_of(job.checkpoint_json)[
+                                    "auxiliary_warnings"
+                                ]
+                            }
+                            if _json_of(job.checkpoint_json).get("auxiliary_warnings")
+                            else {}
+                        ),
                     },
                     ensure_ascii=False,
                 )
@@ -2115,6 +2145,8 @@ def _request_payload_for(
     if task is not None:
         payload["compiler_task_fingerprint"] = task.fingerprint()
         payload["output_protocol"] = PRODUCTION_EXPRESSION_VERSION
+        if task.auxiliary_protocol is not None:
+            payload["auxiliary_protocol"] = task.auxiliary_protocol
     return payload
 
 
@@ -2225,8 +2257,11 @@ def reconcile_job(session: Session, job: Job, *, action: str) -> dict[str, Any]:
     if action == "retry":
         checkpoint = _json_of(job.checkpoint_json)
         roster_entry = checkpoint.get("roster_pipeline")
-        if (job.kind is JobKind.CHARACTER_ROSTER and roster_entry
-                and roster_entry.get("failed_stage")):
+        if (
+            job.kind is JobKind.CHARACTER_ROSTER
+            and roster_entry
+            and roster_entry.get("failed_stage")
+        ):
             stage = roster_entry["failed_stage"]
             generations = roster_entry.setdefault("retry_stages", {})
             generations[stage] = generations.get(stage, 0) + 1

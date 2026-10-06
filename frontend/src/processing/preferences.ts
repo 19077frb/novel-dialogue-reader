@@ -39,7 +39,7 @@ function normalize(value: Partial<ProcessingPreferences>): ProcessingPreferences
     rosterRepairEnabled: value.rosterRepairEnabled === true,
     maxRosterRepairs: typeof value.maxRosterRepairs === 'number' && Number.isSafeInteger(value.maxRosterRepairs)
       && value.maxRosterRepairs >= 0 ? Math.min(5, value.maxRosterRepairs) : 1,
-    dialogueStrategy: ['complete', 'complete-review', 'complete-blocks', 'complete-blocks-review'].includes(value.dialogueStrategy ?? '') ? value.dialogueStrategy! : 'legacy',
+    dialogueStrategy: ['complete', 'complete-review', 'complete-blocks', 'complete-blocks-review', 'complete-blocks-isolated', 'complete-blocks-isolated-review'].includes(value.dialogueStrategy ?? '') ? value.dialogueStrategy! : 'legacy',
     profileId: typeof value.profileId === 'string' ? value.profileId : '',
     concurrency: Math.min(16, positive(value.concurrency) ?? 2),
     maxRecheckRounds: typeof value.maxRecheckRounds === 'number' && Number.isSafeInteger(value.maxRecheckRounds)

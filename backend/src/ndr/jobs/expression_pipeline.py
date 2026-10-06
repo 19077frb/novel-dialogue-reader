@@ -30,10 +30,11 @@ REVIEW_CACHE_VERSION = "expr-review-1"
 
 
 class ReviewedExpression(ProviderResult):
-    def __init__(self, payload, *, approvals, task_fingerprint):
+    def __init__(self, payload, *, approvals, task_fingerprint, auxiliary_warnings=()):
         super().__init__(payload)
         self.owner_approvals = deepcopy(approvals)
         self.task_fingerprint = task_fingerprint
+        self.auxiliary_warnings = [w[:600] for w in auxiliary_warnings if isinstance(w, str)][:5]
 
     def cache_payload(self):
         return {
@@ -41,6 +42,7 @@ class ReviewedExpression(ProviderResult):
             "payload": _clean(self),
             "owner_approvals": self.owner_approvals,
             "task_fingerprint": self.task_fingerprint,
+            **({"auxiliary_warnings": self.auxiliary_warnings} if self.auxiliary_warnings else {}),
         }
 
 
@@ -57,6 +59,7 @@ def cached_proposal(cached, task):
         record["payload"],
         approvals=record["owner_approvals"],
         task_fingerprint=record["task_fingerprint"],
+        auxiliary_warnings=record.get("auxiliary_warnings", ()),
     )
     compile_expression_output(result, task, owner_approvals=result.owner_approvals)
     return result
@@ -137,6 +140,8 @@ def run_review_pipeline(
     task = deepcopy(state.production_expression_task)
     base = _clean(primary_raw)
     first = proposal_snapshot(base, task, call_ref=primary_run_id)
+    diagnostic_warnings = list(first.get("auxiliary_warnings", []))
+    base = first.get("primary_payload", base)
     result = PipelineResult(primary_raw)
     original_breaks = tuple(base.get("breaks", ()))
     with session_factory() as session:
@@ -199,6 +204,8 @@ def run_review_pipeline(
                 "review_generation": generation,
                 "review_binding": fingerprint([primary_run_id, binding]),
             }
+            if task.auxiliary_protocol is not None:
+                request["auxiliary_protocol"] = task.auxiliary_protocol
             if correction:
                 request["messages"].append(
                     {"role": "user", "content": "上一次输出未通过校验：" + correction}
@@ -350,7 +357,10 @@ def run_review_pipeline(
         def check_proposal(payload, run_id):
             if payload.get("breaks"):
                 raise ValueError("复核不允许改变场景边界")
-            return payload, proposal_snapshot(payload, task, call_ref=run_id)
+            proposed = proposal_snapshot(payload, task, call_ref=run_id)
+            diagnostic_warnings.extend(proposed.get("auxiliary_warnings", []))
+            del diagnostic_warnings[:-5]
+            return proposed.get("primary_payload", payload), proposed
 
         messages = ConstrainedOwnerProtocol(task).messages()
         messages.append(
@@ -493,4 +503,6 @@ def run_review_pipeline(
             checkpoint.setdefault("expression_review_reasons", {})[window.window_id] = reasons
             job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
             session.commit()
+    if isinstance(result.raw, ReviewedExpression):
+        result.raw.auxiliary_warnings = diagnostic_warnings[-5:]
     return result
