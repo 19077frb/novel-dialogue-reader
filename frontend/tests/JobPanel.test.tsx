@@ -74,6 +74,34 @@ const RECOVERY = {
 } as unknown as JobRecoveryOut
 
 describe('JobPanel', () => {
+  it.each([
+    ['identity_feedback:1', '正在检查人物名单反馈'],
+    ['review:2', '正在独立复核本窗口全部对白：第 2 轮'],
+    ['adjudication:2', '正在裁决本窗口的归属争议：第 2 轮'],
+    ['verification:2', '正在核验新的归属建议：第 2 轮'],
+  ])('renders the real stage %s without undefined round counts', async (stage, label) => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, progress: { stage: 'rechecking', review_stage: stage } })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText(label)).toBeInTheDocument()
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument()
+  })
+
+  it('restores Chinese feedback reasons as suggestions in a collapsible block, without a new request', async () => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, checkpoint: { expression_reviews: { w1: {
+      identity_feedback: { issues: [
+        { kind: 'incorrect_association', reason: '姓名指向同一个人', targets: ['Q1'] },
+        { kind: 'incorrect_pov', reason: '叙述者可能是林舟', targets: ['Q2'] },
+      ] },
+    } } } })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText(/提出 2 个问题/)).toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: '展开人物名单反馈' })
+    await userEvent.click(toggle)
+    expect(screen.getByText(/人物关联有争议：姓名指向同一个人/)).toBeVisible()
+    expect(screen.getByText(/第一视角建议：叙述者可能是林舟/)).toBeVisible()
+    expect(screen.getByText(/不会自动修改本章主人公/)).toBeVisible()
+    expect(booksApi.fetchJob).toHaveBeenCalledTimes(1)
+  })
   it('keeps bounded auxiliary diagnostics visible from a restored checkpoint', async () => {
     vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, checkpoint: { auxiliary_warnings: ['已隔离无效受话信息', 42] } })
     renderWithProviders(<JobPanel jobId="j1" />)

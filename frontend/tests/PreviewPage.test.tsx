@@ -82,7 +82,8 @@ vi.mock('../src/api/annotations', () => ({
   fetchAnnotations: vi.fn(),
 }))
 
-vi.mock('../src/api/jobs', () => ({
+vi.mock('../src/api/jobs', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/api/jobs')>(),
   jobKeys: { usage: (bookId: string) => ['usage', bookId] },
   estimateRange: vi.fn(),
   createJob: vi.fn(),

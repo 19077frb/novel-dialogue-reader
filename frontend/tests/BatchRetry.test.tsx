@@ -11,7 +11,7 @@ import type { ChapterOut, EstimateOut, JobDetailOut } from '../src/api/types'
 
 vi.mock('../src/api/books', () => ({ completeChapterProcessing: vi.fn(), fetchBook: vi.fn(), fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn(), setChapterProcessingStatus: vi.fn() }))
 vi.mock('../src/api/characters', () => ({ analyzeCharacterRoster: vi.fn(), confirmCharacterRoster: vi.fn(), fetchCharacterRoster: vi.fn() }))
-vi.mock('../src/api/jobs', () => ({ pauseJob: vi.fn(), createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
+vi.mock('../src/api/jobs', async importOriginal => ({ ...await importOriginal<typeof import('../src/api/jobs')>(), pauseJob: vi.fn(), createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
 vi.mock('../src/processing/jobCompletion', () => ({ waitForJobCompletion: vi.fn(async job => job) }))
 
 const chapter = { id: 'c1', title: '第一章', ordinal: 0, start_cp: 0, end_cp: 100, dialogue_processed: false } as ChapterOut
@@ -272,23 +272,34 @@ it('extends the same pool before old dialogue finishes, deduplicates and sequenc
   expect(books.completeChapterProcessing).toHaveBeenCalledTimes(3)
 })
 
-it.each(['complete', 'complete-blocks', 'complete-blocks-isolated'] as const)('keeps %s block-version frozen when extending an automatic batch', async dialogueStrategy => {
+it.each(['complete', 'complete-blocks', 'complete-blocks-isolated', 'complete-blocks-isolated-feedback-review'] as const)('keeps %s block-version frozen when extending an automatic batch', async dialogueStrategy => {
   let finishFirstRoster!: (job: JobDetailOut) => void
   vi.mocked(characters.analyzeCharacterRoster).mockImplementationOnce(() => new Promise(resolve => { finishFirstRoster = resolve }))
   vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
   const blocks = dialogueStrategy.startsWith('complete-blocks')
   const auxiliary_protocol = dialogueStrategy.includes('-isolated') ? 'expression-auxiliary-isolation-1' : undefined
-  const policy = { full_source: true, ...(blocks ? { dialogue_blocks: true } : {}), ...(auxiliary_protocol ? { auxiliary_protocol } : {}) }
+  const identity_feedback_protocol = dialogueStrategy.includes('-feedback') ? 'identity-feedback-1' : undefined
+  const policy = { full_source: true, ...(blocks ? { dialogue_blocks: true } : {}), ...(auxiliary_protocol ? { auxiliary_protocol } : {}),
+    ...(identity_feedback_protocol ? { identity_feedback_protocol, review_protocol: 'expression-evidence-review-1' } : {}) }
   const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate: { ...estimate, policy } }],
-    preferences: { ...getProcessingPreferences(), dialogueStrategy, profileId: 'p1', concurrency: 2, tokenLimit: null }, expandable: true })
+    preferences: { ...getProcessingPreferences(), dialogueStrategy, maxRecheckRounds: 1, profileId: 'p1', concurrency: 2, tokenLimit: null }, expandable: true })
   await vi.waitFor(() => expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1))
   const next = { chapter: { ...chapter, id: 'c2', ordinal: 1 }, estimate: { ...estimate, policy } }
   expect(appendAutomaticProcessing('b1', 'v1', [{ ...next, estimate: { ...estimate, policy: { full_source: true, dialogue_blocks: !blocks } } }])).toBe(0)
   expect(appendAutomaticProcessing('b1', 'v1', [{ ...next, estimate: { ...estimate, policy: { ...policy, auxiliary_protocol: auxiliary_protocol ? undefined : 'expression-auxiliary-isolation-1' } } }])).toBe(0)
+  expect(appendAutomaticProcessing('b1', 'v1', [{ ...next, estimate: { ...estimate, policy: { ...policy, identity_feedback_protocol: identity_feedback_protocol ? undefined : 'identity-feedback-1' } } }])).toBe(0)
   expect(appendAutomaticProcessing('b1', 'v1', [next])).toBe(1)
   finishFirstRoster(job('COMPLETED'))
   await run
   expect(books.completeChapterProcessing).toHaveBeenCalledTimes(2)
+})
+
+it('blocks a zero-round feedback batch before any roster or dialogue request', async () => {
+  await expect(runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', dialogueStrategy: 'complete-blocks-isolated-feedback-review', maxRecheckRounds: 0 },
+  })).rejects.toThrow('至少 1')
+  expect(characters.analyzeCharacterRoster).not.toHaveBeenCalled()
+  expect(jobs.createJob).not.toHaveBeenCalled()
 })
 
 it('stops admission and dispatch of appended chapters when the user stops the queue', async () => {

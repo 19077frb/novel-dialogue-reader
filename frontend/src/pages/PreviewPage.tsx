@@ -15,6 +15,7 @@ import {
 } from '../api/books'
 import {
   estimateRange,
+  dialogueStrategyDisabledReason,
   freshIdempotencyKey,
   fetchUsage,
   fetchRecentJobs,
@@ -268,7 +269,8 @@ export default function PreviewPage() {
         budget,
       }, signal),
     enabled: Boolean(bookId) && rangeValid && range.chapterId !== null
-      && processingMode === 'single' && !batchProgress.running,
+      && processingMode === 'single' && !batchProgress.running
+      && !dialogueStrategyDisabledReason(preferences.dialogueStrategy, budget.maxRecheckRounds),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     retry: false,
@@ -287,6 +289,8 @@ export default function PreviewPage() {
 
   const jobMutation = useMutation({
     mutationFn: async (mode: 'preview' | 'process') => {
+      const reason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, budget.maxRecheckRounds)
+      if (reason) throw new Error(reason)
       manuallySelectedJobRef.current = null
       setDetailRequest(0)
       const versionId = book.data?.active_version_id ?? null
@@ -393,6 +397,8 @@ export default function PreviewPage() {
     (task) => task.job && !TERMINAL_JOB_STATES.has(task.job.state),
   ) || Boolean(currentJob && !TERMINAL_JOB_STATES.has(currentJob.state))
   const runBlockers: string[] = []
+  const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, budget.maxRecheckRounds)
+  if (strategyReason) runBlockers.push(strategyReason)
   if (singleRunning) runBlockers.push('当前单章任务尚未结束，请等待或在任务面板停止')
   if (!singleProgress && recentJobs.isPending) runBlockers.push('正在读取已有任务')
   if (recentJobs.isError) runBlockers.push('已有任务读取失败，请重新读取后再处理')
@@ -586,9 +592,9 @@ export default function PreviewPage() {
           <button
             type="button"
             onClick={() => void estimateQuery.refetch()}
-            disabled={!rangeValid || estimateQuery.isFetching || jobMutation.isPending}
+            disabled={!rangeValid || estimateQuery.isFetching || jobMutation.isPending || Boolean(strategyReason)}
             data-testid="preview-estimate"
-            title={!rangeValid ? '请先选择有效的处理范围。' : estimateQuery.isFetching ? '正在生成窗口预览，请等待完成。' : jobMutation.isPending ? '正在提交窗口任务，请等待完成。' : undefined}
+            title={!rangeValid ? '请先选择有效的处理范围。' : estimateQuery.isFetching ? '正在生成窗口预览，请等待完成。' : jobMutation.isPending ? '正在提交窗口任务，请等待完成。' : strategyReason ?? undefined}
           >
             重新预览窗口与估算（不调用模型）
           </button>

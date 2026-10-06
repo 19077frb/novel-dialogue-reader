@@ -9513,7 +9513,8 @@
               "complete-blocks",
               "complete-blocks-review",
               "complete-blocks-isolated",
-              "complete-blocks-isolated-review"
+              "complete-blocks-isolated-review",
+              "complete-blocks-isolated-feedback-review"
             ],
             "title": "Dialogue Strategy",
             "description": "对白策略；完整策略仍限定服务器选定的当前场景/章节范围",

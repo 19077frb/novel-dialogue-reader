@@ -218,6 +218,7 @@ class RecheckIn(ApiModel):
         "complete-blocks-review",
         "complete-blocks-isolated",
         "complete-blocks-isolated-review",
+        "complete-blocks-isolated-feedback-review",
     ] = Field(
         default="legacy",
         description="对白策略；完整策略仍限定服务器选定的当前场景/章节范围",

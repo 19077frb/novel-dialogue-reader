@@ -437,6 +437,64 @@ def test_recheck_strategy_keeps_server_scope_and_does_not_call_at_creation(
     _recheck_strategy_creation(migrated_client, strategy)
 
 
+def test_feedback_recheck_strategy_requires_rounds_and_preserves_server_scope(migrated_client):
+    _recheck_strategy_creation(migrated_client, "complete-blocks-isolated-feedback-review")
+
+
+@pytest.mark.parametrize("reading_mode", ["initial", "reread"])
+def test_actual_local_feedback_uses_frozen_scope_and_one_feedback_stage(
+    migrated_client, reading_mode
+):
+    client = migrated_client
+    _, profile, inputs = prepare(client)
+    response = client.post(
+        f"/api/quotes/{inputs.quotes[0].quote_id}/recheck",
+        json={
+            "profile_id": profile["id"],
+            "dialogue_strategy": "complete-blocks-isolated-feedback-review",
+            "reading_mode": reading_mode,
+            "budget": {"max_recheck_rounds": 1, "max_format_retries": 0},
+            "idempotency_key": "local-feedback",
+            "run_now": False,
+        },
+    )
+    assert response.status_code == 202, response.text
+    job = response.json()["data"]
+
+    class EmptyFeedbackAdapter(WholeAdapter):
+        async def generate_labels(self, payload):
+            raw = await super().generate_labels(payload)
+            if payload.get("review_stage") == "identity_feedback:1":
+                return {
+                    "schema_version": "identity-feedback-1",
+                    "issues": [],
+                    "proposal": json.loads(payload["messages"][-1]["content"])[
+                        "primary_proposal"
+                    ],
+                    "_usage": raw["_usage"],
+                }
+            return raw
+
+    adapter = EmptyFeedbackAdapter()
+    result = run_job(
+        client.app.state.session_factory,
+        client.app.state.settings,
+        job_id=job["id"],
+        adapter_factory=lambda *_: adapter,
+    )
+    assert result.state is JobState.COMPLETED, result.errors
+    assert len(adapter.calls) == 3
+    assert sum(c["payload"].get("review_stage") == "identity_feedback:1" for c in adapter.calls) == 1
+    for call in adapter.calls:
+        sent = json.loads(call["payload"]["messages"][1]["content"])
+        assert "未来秘密" not in "".join(f["text"] for f in sent["context"])
+    with client.app.state.session_factory() as session:
+        checkpoint = json.loads(session.get(Job, job["id"]).checkpoint_json)
+        assert next(iter(checkpoint["expression_reviews"].values()))["identity_feedback"][
+            "issues"
+        ] == []
+
+
 @pytest.mark.parametrize(
     "strategy",
     [
@@ -491,6 +549,7 @@ def _recheck_strategy_creation(migrated_client, strategy):
             "profile_id": profile["id"],
             "dialogue_strategy": strategy,
             "idempotency_key": "local-strategy",
+            "budget": {"max_recheck_rounds": 1},
             "run_now": False,
         },
     )
@@ -511,6 +570,9 @@ def _recheck_strategy_creation(migrated_client, strategy):
         )
         assert (scope.get("review_protocol") == "expression-evidence-review-1") == (
             strategy.endswith("-review")
+        )
+        assert scope.get("identity_feedback_protocol") == (
+            "identity-feedback-1" if strategy == "complete-blocks-isolated-feedback-review" else None
         )
     assert (
         client.post(

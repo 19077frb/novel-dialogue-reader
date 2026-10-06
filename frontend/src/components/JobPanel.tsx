@@ -15,6 +15,7 @@ import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 import { OperationTimer } from './OperationTimer'
 import { ReadErrorNotice } from './ReadErrorNotice'
 import { ProposalDiagnostics } from './ProposalDiagnostics'
+import { IdentityFeedbackSummary } from './IdentityFeedbackSummary'
 
 export const JOB_STATE_LABELS: Record<string, string> = {
   QUEUED: '排队中', RUNNING: '处理中', PAUSING: '正在停止', PAUSED: '已暂停',
@@ -25,6 +26,16 @@ const JOB_KIND_LABELS: Record<string, string> = {
   IMPORT: '导入', INFERENCE: '对白归属', CHARACTER_ROSTER: '人物识别',
   CHARACTER_MERGE: '自动合并人物',
   RECHECK: '局部复核', RECOMPUTE: '重新计算', EXPORT: '导出',
+}
+
+function reviewProgress(progress: Record<string, unknown>): string {
+  const stage = typeof progress.review_stage === 'string' ? progress.review_stage : ''
+  const [kind, round] = stage.split(':')
+  const label = ({ identity_feedback: '正在检查人物名单反馈', review: '正在独立复核本窗口全部对白',
+    adjudication: '正在裁决本窗口的归属争议', verification: '正在核验新的归属建议' } as Record<string, string>)[kind]
+  if (label) return kind !== 'identity_feedback' && /^\d+$/.test(round ?? '') ? `${label}：第 ${round} 轮` : label
+  return typeof progress.review_round === 'number' && typeof progress.review_rounds === 'number'
+    ? `正在复核本窗口全部对白：第 ${progress.review_round} / ${progress.review_rounds} 轮` : '正在复核本窗口全部对白'
 }
 
 export function isTerminalJob(state: JobDetailOut['state']): boolean {
@@ -98,8 +109,9 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
         <strong data-testid="job-state" title={state}>{JOB_STATE_LABELS[state ?? ''] ?? state}</strong>
       </p>
       {job.data.progress?.stage === 'rechecking' && (
-        <p className="hint">正在复核本窗口全部对白：第 {String(job.data.progress.review_round)} / {String(job.data.progress.review_rounds)} 轮</p>
+        <p className="hint">{reviewProgress(job.data.progress)}</p>
       )}
+      <IdentityFeedbackSummary checkpoint={job.data.checkpoint} />
       {Array.isArray(job.data.checkpoint?.auxiliary_warnings) && (
         <div className="hint" aria-label="辅助信息校验提示">{job.data.checkpoint.auxiliary_warnings
           .filter((notice): notice is string => typeof notice === 'string').slice(0, 5)

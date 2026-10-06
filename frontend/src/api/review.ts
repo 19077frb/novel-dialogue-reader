@@ -5,6 +5,7 @@
  * 局部更正只影响选中对白；结构调整只标记实际受影响范围。
  */
 import { apiData } from './client'
+import { dialogueStrategyDisabledReason } from './jobs'
 import type {
   CorrectionOut,
   GapCorrectionOut,
@@ -207,6 +208,8 @@ export function recheckQuote(
   input: RecheckInput,
   signal?: AbortSignal,
 ): Promise<JobDetailOut> {
+  const reason = dialogueStrategyDisabledReason(input.dialogueStrategy, input.maxRecheckRounds ?? 0)
+  if (reason) return Promise.reject(new Error(reason))
   return apiData<JobDetailOut>(`/api/quotes/${quoteId}/recheck`, {
     method: 'POST',
     signal,

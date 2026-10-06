@@ -14,7 +14,7 @@ import { ThinkingSettings } from './ThinkingSettings'
 import { DialogueStrategySettings } from './DialogueStrategySettings'
 import { FormatRetrySetting } from './FormatRetrySetting'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
-import { freshIdempotencyKey, fetchRecentJobs } from '../api/jobs'
+import { freshIdempotencyKey, fetchRecentJobs, dialogueStrategyDisabledReason } from '../api/jobs'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 
 export interface RecheckPanelProps {
@@ -44,6 +44,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
 
   const selectedProfile = profiles.data?.find(profile => profile.id === preferences.profileId) ?? profiles.data?.[0]
   const effectiveProfileId = selectedProfile?.id ?? ''
+  const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, preferences.maxRecheckRounds)
 
   const start = async () => {
     if (!effectiveProfileId) {
@@ -115,9 +116,9 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
         type="button"
         className="ndr-primary"
         onClick={start}
-        disabled={running}
+        disabled={running || Boolean(strategyReason)}
         data-testid="recheck-start"
-        title={running ? '请先等待现有任务状态读取或复核完成；读取失败时点击“重新读取任务”。' : undefined}
+        title={running ? '请先等待现有任务状态读取或复核完成；读取失败时点击“重新读取任务”。' : strategyReason ?? undefined}
       >
         {busy ? '正在创建任务…' : '开始局部复核（调用模型）'}
       </button>

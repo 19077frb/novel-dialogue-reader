@@ -1,5 +1,5 @@
 import { fetchChapters, fetchProcessingStatus } from '../api/books'
-import { estimateRange } from '../api/jobs'
+import { estimateRange, dialogueStrategyDisabledReason } from '../api/jobs'
 import type { ProcessingPreferences } from './preferences'
 import { estimateRosterTokens } from './preferences'
 import { mapWithConcurrency } from './concurrency'
@@ -40,6 +40,8 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
   lookAhead: number, preferences: ProcessingPreferences, onFinished: () => void = () => undefined) {
   const session = sessionFor(bookId)
   session.spent = automaticAllowance(bookId) ?? session.spent
+  const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, preferences.maxRecheckRounds)
+  if (strategyReason) { session.message = strategyReason; return }
   const appending = canAppendAutomaticProcessing(bookId, bookVersionId)
   if (planningBooks.has(bookId) || (activeBook && !appending) || (hasBatchWork() && !appending)
     || session.blocked || !preferences.profileId) return

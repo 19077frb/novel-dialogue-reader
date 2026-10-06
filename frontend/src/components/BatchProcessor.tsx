@@ -8,7 +8,7 @@ import {
   confirmCharacterRoster,
   fetchCharacterRoster,
 } from '../api/characters'
-import { createJob, estimateRange, freshIdempotencyKey, pauseJob, fetchRecentJobs } from '../api/jobs'
+import { createJob, estimateRange, freshIdempotencyKey, pauseJob, fetchRecentJobs, dialogueStrategyDisabledReason } from '../api/jobs'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 import { hasSingleWork } from '../processing/singleWorkflow'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
@@ -339,7 +339,8 @@ export function appendAutomaticProcessing(bookId: string, versionId: string, pla
   if (plans.some(plan => Boolean(plan.estimate.policy?.full_source) !== (strategy !== 'legacy')
     || Boolean(plan.estimate.policy?.dialogue_blocks) !== strategy.startsWith('complete-blocks')
     || plan.estimate.policy?.auxiliary_protocol !== (strategy.includes('-isolated') ? 'expression-auxiliary-isolation-1' : undefined)
-    || (plan.estimate.policy?.review_protocol === 'expression-evidence-review-1') !== strategy.endsWith('-review'))) {
+    || (plan.estimate.policy?.review_protocol === 'expression-evidence-review-1') !== strategy.endsWith('-review')
+    || plan.estimate.policy?.identity_feedback_protocol !== (strategy === 'complete-blocks-isolated-feedback-review' ? 'identity-feedback-1' : undefined))) {
     publishBatch(bookId, { message: '当前批次已固定对白策略；新策略将在本批次结束后用于下一批，未追加不匹配的窗口。' })
     return 0
   }
@@ -662,6 +663,8 @@ export interface BatchExecution {
 
 /** Shared sequenced roster/window pipeline for manual batches and reader look-ahead. */
 export async function runBatchProcessing(execution: BatchExecution) {
+  const reason = dialogueStrategyDisabledReason(execution.preferences.dialogueStrategy, execution.preferences.maxRecheckRounds)
+  if (reason) throw new Error(reason)
   return withWorkflowLock(`processing:${execution.bookId}`, () => runBatchInternal(execution))
 }
 
@@ -1257,6 +1260,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const [endId, setEndId] = useState('')
   const [preferences, setPreferences] = useProcessingPreferences()
   const { profileId, maxRecheckRounds, maxFormatRetries, concurrency } = preferences
+  const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, maxRecheckRounds)
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
   const setMaxRecheckRounds = (value: number) => setPreferences({ maxRecheckRounds: value })
   const setTokenLimitText = (value: string) => setPreferences({ tokenLimit: positiveIntegerOrNull(value) })
@@ -1486,7 +1490,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       )}
       <p className="hint">并发数同时约束人物识别和对白窗口；设为 1 即按顺序处理，建议从 2 开始。</p>
       <div className="ndr-form-actions">
-        <button type="button" className="ndr-primary" title={running ? '批量处理正在运行，请等待结束或先停止任务。' : estimating ? '正在估算 Token，请等待估算完成。' : !bookVersionId ? '书籍版本尚未读取，请先重新读取书籍。' : !validRange ? '请选择有效的开始和结束章节，结束章节不能早于开始章节。' : !profileId ? '请先选择模型配置，再估算和启动批量处理。' : undefined} disabled={running || estimating || !validRange || !profileId || !bookVersionId} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
+        <button type="button" className="ndr-primary" title={running ? '批量处理正在运行，请等待结束或先停止任务。' : estimating ? '正在估算 Token，请等待估算完成。' : !bookVersionId ? '书籍版本尚未读取，请先重新读取书籍。' : !validRange ? '请选择有效的开始和结束章节，结束章节不能早于开始章节。' : !profileId ? '请先选择模型配置，再估算和启动批量处理。' : strategyReason ?? undefined} disabled={running || estimating || !validRange || !profileId || !bookVersionId || Boolean(strategyReason)} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
           {running ? '批量处理中…' : estimating ? '正在估算…' : estimatedTokens === null ? '预估 Token' : '确认并开始批量处理'}
         </button>
       </div>
@@ -1498,6 +1502,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
           {positiveIntegerOrNull(tokenLimitText) !== null && estimatedTokens > (positiveIntegerOrNull(tokenLimitText) ?? 0) ? ' 预计会超过当前上限，系统只会在剩余额度允许时派发新任务。' : ''}
         </p>
       )}
+      {strategyReason && <p className="hint">{strategyReason}</p>}
       {!profileId && <p className="hint">请选择批量处理使用的模型配置。</p>}
       {!validRange && <p className="status-error">结束章节不能早于开始章节。</p>}
       {progress && <p className="hint" data-testid="batch-progress">{progress}</p>}

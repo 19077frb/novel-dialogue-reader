@@ -83,6 +83,7 @@ def dialogue_strategy_range(strategy: str) -> dict[str, str]:
         "complete-blocks-review",
         "complete-blocks-isolated",
         "complete-blocks-isolated-review",
+        "complete-blocks-isolated-feedback-review",
     }:
         raise ApiError.validation("不支持的对白处理策略")
     return {
@@ -98,6 +99,11 @@ def dialogue_strategy_range(strategy: str) -> dict[str, str]:
         **(
             {"review_protocol": "expression-evidence-review-1"}
             if strategy.endswith("-review")
+            else {}
+        ),
+        **(
+            {"identity_feedback_protocol": "identity-feedback-1"}
+            if strategy == "complete-blocks-isolated-feedback-review"
             else {}
         ),
     }
