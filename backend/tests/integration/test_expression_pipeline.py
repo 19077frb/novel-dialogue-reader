@@ -30,8 +30,16 @@ from ndr.storage.models import (
 from ndr.storage.transactions import transaction
 
 
-def prepare(client, *, all_quotes=False, auxiliary=False, identity_feedback=False):
-    text = "第一章\n林舟说：「早上好。」\n许晴答：「你好。」\n顾宁点头。"
+def prepare(
+    client,
+    *,
+    all_quotes=False,
+    auxiliary=False,
+    identity_feedback=False,
+    text=None,
+    context_policy=None,
+):
+    text = text or "第一章\n林舟说：「早上好。」\n许晴答：「你好。」\n顾宁点头。"
     data = client.post(
         "/api/books/import", files={"file": ("stages.txt", text.encode(), "text/plain")}
     ).json()["data"]
@@ -73,6 +81,7 @@ def prepare(client, *, all_quotes=False, auxiliary=False, identity_feedback=Fals
                     "end_cp": cutoff,
                     "output_protocol": "expression-production-1",
                     "review_protocol": REVIEW_VERSION,
+                    **({"context_policy": context_policy} if context_policy is not None else {}),
                     **(
                         {"identity_feedback_protocol": "identity-feedback-1"}
                         if identity_feedback
@@ -114,9 +123,7 @@ class StageAdapter(FakeProviderAdapter):
         evidence = next(
             r["ref"]
             for r in data["context"]
-            if r["text"].strip()
-            and r["ref"] not in data["targets"]
-            and r["ref"] not in data["gap_next_quote"]
+            if r["text"].strip() and r["ref"] not in data["targets"]
         )
         result = {
             "labels": [
@@ -570,6 +577,35 @@ def test_corrupt_review_cache_cannot_upgrade_pending_or_trigger_new_calls(fake_p
     assert len(adapter.calls) == 2
     with factory() as session:
         assert session.scalar(select(Annotation)).status is AnnotationStatus.PROVISIONAL
+
+
+def test_review_reference_policy_does_not_reuse_old_review_cache(
+    fake_provider_client, monkeypatch
+):
+    from ndr.llm import original_evidence
+
+    client = fake_provider_client
+    create, factory = prepare(client)
+    with monkeypatch.context() as patch:
+        patch.setattr(original_evidence, "REFERENCE_POLICY_VERSION", "old-narration-exclusion")
+        old = create("old-reference-policy")
+        adapter = StageAdapter(["许晴", "许晴"])
+        result = run_job(
+            factory, client.app.state.settings, job_id=old["id"], adapter_factory=lambda *_: adapter
+        )
+        assert result.state is JobState.COMPLETED
+        assert len(adapter.calls) == 2
+    new = create("new-reference-policy")
+    adapter = StageAdapter(["林舟", "林舟"])
+    result = run_job(
+        factory, client.app.state.settings, job_id=new["id"], adapter_factory=lambda *_: adapter
+    )
+    assert result.state is JobState.COMPLETED, result.errors
+    assert len(adapter.calls) == 2
+    with factory() as session:
+        assert len(list(session.scalars(select(ResultCache)))) == 2
+        row = session.scalar(select(Annotation))
+        assert session.get(SpeakerGroup, row.speaker_id).canonical_name == "林舟"
 
 
 def test_explicit_retry_repeats_only_unknown_stage_not_received_primary(fake_provider_client):

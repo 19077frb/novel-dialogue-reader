@@ -25,13 +25,7 @@ class FeedbackAdapter(StageAdapter):
             self.calls.append({"payload": deepcopy(payload)})
             wanted = json.loads(payload["messages"][-1]["content"])["targets"]
             context = json.loads(payload["messages"][1]["content"])["context"]
-            ref = next(
-                r["ref"]
-                for r in context
-                if r["text"].strip()
-                and r.get("kind") not in {"inner_gap", "outer_gap"}
-                and r["ref"] not in wanted
-            )
+            ref = next(r["ref"] for r in context if r["text"].strip() and r["ref"] not in wanted)
             return {
                 "checks": [
                     {
@@ -273,3 +267,95 @@ def test_feedback_cannot_override_existing_manual_quote(fake_provider_client):
         assert annotation.user_locked and annotation.kind is QuoteKind.THOUGHT
         assert annotation.source is AnnotationSource.USER and annotation.version == 7
         assert "locked" in session.get(Job, job["id"]).checkpoint_json.lower()
+
+
+@pytest.mark.parametrize("verdict", ["support_challenger", "undecidable"])
+def test_new_anonymous_feedback_uses_adjudicated_identities_not_feedback_local_refs(
+    fake_provider_client, verdict
+):
+    client = fake_provider_client
+    create, factory = prepare(
+        client,
+        identity_feedback=True,
+        all_quotes=True,
+        auxiliary=True,
+        context_policy="context-chapter-2",
+        text="第一章\n门卫说：「早上好。」\n快递员答：「你好。」\n两人都没有透露姓名。",
+    )
+
+    class AnonymousAdapter(FeedbackAdapter):
+        async def generate_labels(self, payload):
+            raw = await super().generate_labels(payload)
+            stage = payload.get("review_stage", "")
+            if stage == "identity_feedback:1":
+                proposal = raw["proposal"]
+                proof = proposal["labels"][0]["evidence"]
+                for label in proposal["labels"]:
+                    label["character"] = "N9"
+                proposal["new_characters"] = [
+                    {
+                        "ref": "N9",
+                        "name": "门卫",
+                        "description": "说话的门卫",
+                        "evidence": proof,
+                    }
+                ]
+                raw["issues"][0].update(kind="omitted_identity", character="N9")
+            elif stage.startswith("adjudication:"):
+                context = json.loads(payload["messages"][1]["content"])["context"]
+                raw["new_characters"] = []
+                for index, label in enumerate(raw["labels"]):
+                    name = ("门卫", "快递员")[index]
+                    proof = next(
+                        row["ref"]
+                        for row in context
+                        if name in row["text"] and row["ref"] != label["q"]
+                    )
+                    ref = f"N{index + 1}"
+                    label.update(character=ref, basis="direct", evidence=[proof])
+                    raw["new_characters"].append(
+                        {
+                            "ref": ref,
+                            "name": name,
+                            "description": f"发言的{name}",
+                            "evidence": [proof],
+                        }
+                    )
+            return raw
+
+    job = create("feedback-new-anonymous")
+    adapter = AnonymousAdapter(verdict=verdict)
+    result = run_job(
+        factory, client.app.state.settings, job_id=job["id"], adapter_factory=lambda *_: adapter
+    )
+    assert result.state is JobState.COMPLETED, result.errors
+    assert len(adapter.calls) == 5
+    with factory() as session:
+        annotations = list(session.scalars(select(Annotation).join(Quote).order_by(Quote.start_cp)))
+        assert len(annotations) == 2
+        names = [session.get(SpeakerGroup, row.speaker_id).canonical_name for row in annotations]
+        if verdict == "support_challenger":
+            assert names == ["门卫", "快递员"]
+            assert len({row.speaker_id for row in annotations}) == 2
+            assert all(row.status is AnnotationStatus.ACCEPTED for row in annotations)
+        else:
+            assert names == ["许晴", "许晴"]
+            assert all(row.status is AnnotationStatus.PROVISIONAL for row in annotations)
+            assert (
+                session.scalar(select(SpeakerGroup).where(SpeakerGroup.canonical_name == "快递员"))
+                is None
+            )
+        runs = list(session.scalars(select(InferenceRun).where(InferenceRun.job_id == job["id"])))
+        assert (
+            len(runs) == 5
+            and sum(json.loads(row.usage_json)["total_tokens"] for row in runs) == 150
+        )
+        feedback = next(
+            iter(
+                json.loads(session.get(Job, job["id"]).checkpoint_json)[
+                    "expression_reviews"
+                ].values()
+            )
+        )["identity_feedback"]
+        assert feedback["issues"][0]["character"] == "N9"
+        assert feedback["source_ref"] in {row.id for row in runs}

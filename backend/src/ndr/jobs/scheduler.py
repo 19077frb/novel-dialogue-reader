@@ -413,6 +413,8 @@ def _cache_key_for(
     prompt_hint: str | None = None,
     review_rounds: int | None = None,
 ) -> str:
+    from ..llm.original_evidence import REFERENCE_POLICY_VERSION
+
     snapshot = snapshot or {}
     # 缓存必须覆盖实际发给模型的动态人物状态，而不只是预先规划的正文片段。
     messages = _request_payload_for(window=window, state=state, correction=prompt_hint)["messages"]
@@ -428,6 +430,7 @@ def _cache_key_for(
                     **(
                         {
                             "review_protocol": _range_of(job).get("review_protocol"),
+                            "evidence_reference_policy": REFERENCE_POLICY_VERSION,
                             "review_rounds": review_rounds
                             if review_rounds is not None
                             else _budget_of(job).get("max_recheck_rounds"),

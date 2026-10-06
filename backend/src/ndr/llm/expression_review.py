@@ -13,6 +13,7 @@ from ..evaluation.owner_constraints import ConstrainedOwnerProtocol
 from ..storage.cache import fingerprint
 from .expression_compiler import compile_expression_output
 from .expression_contract import OWNER_KINDS
+from .original_evidence import original_evidence_refs
 
 REVIEW_VERSION = "expression-evidence-review-1"
 KINDS = frozenset(k.value for k in OWNER_KINDS)
@@ -155,11 +156,7 @@ class ChallengeOutput(ApiModel):
 
 
 def _challenge_evidence_refs(task):
-    return tuple(
-        row["ref"]
-        for row in task.context
-        if row["text"].strip() and row.get("kind") not in {"inner_gap", "outer_gap"}
-    )
+    return original_evidence_refs(task)
 
 
 def build_challenge_messages(task, *, requested, original, reviewed, challenger):

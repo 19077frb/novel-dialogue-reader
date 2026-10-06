@@ -197,7 +197,7 @@ def test_actual_feedback_request_preserves_raw_context_and_distinguishes_issue_s
     assert issue["evidence"]["items"]["enum"] == ["E1", "Q1", "Q2"]
 
 
-@pytest.mark.parametrize("ref,kind,text", [("G1", "outer_gap", "后来"), ("EB", "overlap", " ")])
+@pytest.mark.parametrize("ref,kind,text", [("G1", "outer_gap", "\n"), ("EB", "overlap", " ")])
 def test_blank_and_boundary_evidence_cannot_support_identity_feedback(ref, kind, text):
     task, primary, feedback = fixture()
     task = replace(
@@ -214,6 +214,20 @@ def test_blank_and_boundary_evidence_cannot_support_identity_feedback(ref, kind,
     plan = prepare_identity_feedback(task, primary, primary_source="first")
     schema = json.loads(build_identity_feedback_messages(plan, task)[0]["content"].split("\n")[-1])
     assert ref not in schema["$defs"]["IdentityIssue"]["properties"]["evidence"]["items"]["enum"]
+
+
+@pytest.mark.parametrize("kind", ["inner_gap", "outer_gap"])
+def test_sent_nonblank_narration_gap_is_feedback_evidence_not_a_boundary_only_id(kind):
+    task, primary, feedback = fixture()
+    task = replace(task, context=({**task.context[0], "kind": kind}, *task.context[1:]))
+    result = compile_case(task, primary, feedback)
+    assert json.loads(result.issues_json)[0]["evidence"] == ["E1"]
+    plan = prepare_identity_feedback(task, primary, primary_source="first")
+    schema = json.loads(build_identity_feedback_messages(plan, task)[0]["content"].split("\n")[-1])
+    assert "E1" in schema["$defs"]["IdentityIssue"]["properties"]["evidence"]["items"]["enum"]
+    feedback["issues"][0]["evidence"] = ["B1"]
+    with pytest.raises(ValueError, match="external evidence"):
+        compile_case(task, primary, feedback)
 
 
 def test_pov_candidate_cannot_be_used_to_hide_modified_anonymous_description():

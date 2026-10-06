@@ -16,6 +16,7 @@ from ..domain.common import ApiModel
 from ..evaluation.owner_constraints import ConstrainedOwnerProtocol
 from ..storage.cache import fingerprint
 from .expression_compiler import compile_expression_output
+from .original_evidence import REFERENCE_POLICY_VERSION, original_evidence_refs
 
 FEEDBACK_VERSION = "identity-feedback-1"
 
@@ -50,6 +51,7 @@ class IdentityFeedbackPlan:
         return fingerprint(
             [
                 self.version,
+                REFERENCE_POLICY_VERSION,
                 self.task_fingerprint,
                 self.original_json,
                 self.primary_source,
@@ -71,6 +73,7 @@ class CompiledIdentityFeedback:
         return fingerprint(
             [
                 FEEDBACK_VERSION,
+                REFERENCE_POLICY_VERSION,
                 self.proposal_json,
                 self.issues_json,
                 self.plan_fingerprint,
@@ -106,11 +109,7 @@ def build_identity_feedback_messages(plan, task):
     schema = IdentityFeedback.model_json_schema()
     issue = schema["$defs"]["IdentityIssue"]["properties"]
     issue["targets"]["items"]["enum"] = list(task.quote_ids)
-    issue["evidence"]["items"]["enum"] = [
-        row["ref"]
-        for row in task.context
-        if row["text"].strip() and row.get("kind") not in {"inner_gap", "outer_gap"}
-    ]
+    issue["evidence"]["items"]["enum"] = list(original_evidence_refs(task))
     issue["targets"]["uniqueItems"] = issue["evidence"]["uniqueItems"] = True
     messages[0]["content"] += (
         "\n本阶段返回identity-feedback-1 JSON，不直接返回labels。proposal使用上述完整归属协议。"
@@ -159,11 +158,7 @@ def compile_identity_feedback(plan, payload, task, *, source_ref):
         raise ValueError("Identity feedback cannot change scene boundaries")
     if any(before[q]["kind"] != after[q]["kind"] for q in before):
         raise ValueError("Identity feedback cannot change expression types")
-    actual = {
-        r["ref"]
-        for r in task.context
-        if r["text"].strip() and r.get("kind") not in {"inner_gap", "outer_gap"}
-    }
+    actual = set(original_evidence_refs(task))
     candidates = {c.ref for c in task.candidates}
     discoveries = {p["ref"] for p in proposal.get("new_characters", [])}
     claimed, changed, pov = set(), set(), None

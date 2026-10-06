@@ -95,7 +95,7 @@ def test_partial_verification_binds_all_target_lists_and_schema_without_losing_c
     properties = schema["$defs"]["ChallengeItem"]["properties"]
     assert properties["q"]["enum"] == ["Q1"]
     for field in ("evidence", "contradiction_evidence"):
-        assert properties[field]["items"]["enum"] == ["E1", "Q1", "Q2"]
+        assert properties[field]["items"]["enum"] == ["E1", "Q1", "Q2", "G1"]
         assert properties[field]["uniqueItems"] is True
     assert schema["properties"]["checks"]["minItems"] == 1
     assert schema["properties"]["checks"]["maxItems"] == 1
@@ -246,7 +246,7 @@ def test_full_compile_never_promotes_pending_or_accepts_invalid_identity():
         compile_decisions(task(), {"q": replace(first["q"], evidence=("not_sent",))})
 
 
-@pytest.mark.parametrize("ref", ["G1", "EB"])
+@pytest.mark.parametrize("ref", ["G1", "EB", "B1"])
 def test_challenge_cannot_use_boundaries_or_blank_evidence(ref):
     original = task()
     altered = replace(
@@ -254,7 +254,7 @@ def test_challenge_cannot_use_boundaries_or_blank_evidence(ref):
         references={**original.references, "G1": "g", "EB": "blank"},
         context=(
             *original.context,
-            {"ref": "G1", "kind": "outer_gap", "start_cp": 7, "end_cp": 8, "text": "响"},
+            {"ref": "G1", "kind": "outer_gap", "start_cp": 7, "end_cp": 8, "text": "\n"},
             {"ref": "EB", "kind": "overlap", "start_cp": 8, "end_cp": 9, "text": " "},
         ),
         gap_next_quote={"G1": None},
@@ -269,6 +269,24 @@ def test_challenge_cannot_use_boundaries_or_blank_evidence(ref):
             requested=("q",),
             verifier_ref="verifier",
         )
+
+
+@pytest.mark.parametrize("kind", ["inner_gap", "outer_gap"])
+def test_challenge_preserves_actual_nonblank_narrative_evidence(kind):
+    original = task()
+    scoped = replace(
+        original, context=({**original.context[0], "kind": kind}, *original.context[1:])
+    )
+    verified = verify_payload(
+        check("support_challenger"),
+        scoped,
+        proposal(),
+        proposal(scope="review"),
+        proposal("C3", scope="third"),
+        requested=("q",),
+        verifier_ref="verifier",
+    )
+    assert verified["q"].verdict == "support_challenger"
 
 
 def test_mutated_verified_record_cannot_change_pending_approval_or_basis():
