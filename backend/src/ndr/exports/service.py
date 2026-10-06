@@ -193,6 +193,7 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
         selected = bool(chapter_ids)
         fmt = artifact.format
         annotations_manifest = None
+        annotations_options = None
         if fmt is ExportFormat.EPUB:
             frozen_processing = payload.get("chapter_processing")
             if isinstance(frozen_processing, dict):
@@ -207,7 +208,7 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
                     Chapter.id, Chapter.processing_status_override,
                 ).where(Chapter.book_version_id == version.id,
                         Chapter.processing_status_override.is_not(None))).all())
-            annotations_manifest = build_annotations_manifest(
+            annotations_options = dict(
                 projection_payload=payload,
                 rendered=rendered,
                 canonical_text=load_canonical_text(settings, version),
@@ -230,6 +231,7 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
     path = out_dir / filename
     try:
         if fmt is ExportFormat.EPUB:
+            annotations_manifest = build_annotations_manifest(**annotations_options)
             data = build_epub(
                 rendered,
                 images=images,
@@ -247,6 +249,12 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
             expected_fragments=_expected_fragments(rendered),
             epubcheck_jar=epubcheck_jar,
         )
+        ledger = (annotations_manifest or {}).get("identity_ledger")
+        if ledger is not None:
+            validation["identity_ledger"] = {
+                "characters": len(ledger["characters"]),
+                "omitted": ledger["omitted_characters"],
+            }
         ok = bool(validation.get("ok"))
         outcome = ExportOutcome(
             artifact_id=artifact_id,

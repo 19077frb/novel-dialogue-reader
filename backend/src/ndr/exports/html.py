@@ -22,7 +22,7 @@ def render_block(block: RenderedBlock, *, images: Mapping[str, bytes]) -> str:
     if block.node_type is ContentNodeType.IMAGE:
         resource_id = block.resource_id
         if not resource_id or resource_id not in images:
-            return '<p class="meta">（插图缺失）</p>'
+            return '<p class="meta" data-ndr-auxiliary="true">（插图缺失）</p>'
         data_url = _image_data_url(block.media_type, images[resource_id])
         alt = escape(block.alt)
         return f'<figure><img src="{data_url}" alt="{alt}"/><figcaption>{alt}</figcaption></figure>'

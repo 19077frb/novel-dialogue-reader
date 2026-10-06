@@ -42,6 +42,7 @@ export function ExportProgress({ artifact, busy }: ExportProgressProps) {
     detail?: string
     version?: string
   }
+  const ledger = (artifact.validation?.identity_ledger ?? {}) as { omitted?: number }
   return (
     <div className="ndr-export-progress" data-testid="export-progress">
       <p role="status" aria-live="polite">
@@ -69,6 +70,12 @@ export function ExportProgress({ artifact, busy }: ExportProgressProps) {
       {(internal.missing_resources?.length ?? 0) > 0 && (
         <p className="status-error" data-testid="export-missing-resources">
           导出缺少资源：{internal.missing_resources?.slice(0, 3).join('、')}
+        </p>
+      )}
+      {typeof ledger.omitted === 'number' && Number.isInteger(ledger.omitted) && ledger.omitted > 0 && (
+        <p className="hint" data-testid="export-identity-omitted">
+          有 {ledger.omitted} 位人物的完整资料需要未导出的章节、无法核验的位置或超过可携带限制，未写入文件。
+          正文和已导出的对白标注不受影响；若需迁移完整人物资料，请导出整本。
         </p>
       )}
       {artifact.state !== 'COMPLETED' && (

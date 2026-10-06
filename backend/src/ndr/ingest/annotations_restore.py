@@ -31,6 +31,7 @@ from ..domain.enums import (
     SpeakerBasis,
 )
 from ..exports.annotations import normalize_for_match
+from ..exports.identity_manifest import history_identity, restore_identity_manifest
 from ..storage.models import Annotation, BookCharacter, Chapter, Quote, Scene, SpeakerGroup
 
 _MAX_GROUP_LABEL_LEN = 32
@@ -71,6 +72,10 @@ def restore_annotations_from_manifest(
         ).scalars()
     )
     binding = _bind_chapters(chapters, manifest.get("chapter_titles", []) or [])
+    characters, identity_stats, identity_anchors = restore_identity_manifest(
+        session, version, manifest.get("identity_ledger"), binding, canonical_text,
+    )
+    restored_character_ids = {character.id for character in characters.values()}
     processed_count = 0
     for raw_index in manifest.get("processed_chapter_indices", []) or []:
         if not isinstance(raw_index, int):
@@ -97,6 +102,7 @@ def restore_annotations_from_manifest(
             "unmatched": 0,
             "speakers": len(speakers),
             "processed_chapters": processed_count,
+            **identity_stats,
         }
 
     quotes_by_chapter: dict[str, list[tuple[Quote, str]]] = {}
@@ -116,7 +122,6 @@ def restore_annotations_from_manifest(
     scenes: dict[str, Scene] = {}
     scene_bounds: dict[str, list[int]] = {}
     groups: dict[tuple[str, str], SpeakerGroup] = {}
-    characters: dict[str, BookCharacter] = {}
     used_labels: dict[str, set[str]] = {}
     pointers: dict[str, int] = {}
     restored = 0
@@ -157,6 +162,9 @@ def restore_annotations_from_manifest(
                 quote=quote,
                 speaker=speaker,
                 binding=binding,
+                identity_anchors=identity_anchors,
+                restored_character_ids=restored_character_ids,
+                legacy_character_confirmation="identity_ledger" not in manifest,
             )
         annotation = _annotation_for(
             entry, quote=quote, group=group, scene=scenes.get(chapter.id)
@@ -181,6 +189,7 @@ def restore_annotations_from_manifest(
         "unmatched": unmatched,
         "speakers": len(speakers),
         "processed_chapters": processed_count,
+        **identity_stats,
     }
 
 
@@ -233,6 +242,9 @@ def _group_for(  # noqa: PLR0913 - 建组需要的上下文就是这些
     quote: Quote,
     speaker: dict,
     binding: dict,
+    identity_anchors,
+    restored_character_ids: set[str],
+    legacy_character_confirmation: bool,
 ) -> SpeakerGroup:
     scene = _scene_for(session, scenes, chapter)
     key = str(speaker.get("key"))
@@ -254,6 +266,7 @@ def _group_for(  # noqa: PLR0913 - 建组需要的上下文就是这些
         version=version,
         speaker=speaker,
         first_seen_cp=quote.start_cp,
+        imported_user_confirmation=legacy_character_confirmation,
     )
     group = SpeakerGroup(
         scene_id=scene.id,
@@ -279,13 +292,35 @@ def _group_for(  # noqa: PLR0913 - 建组需要的上下文就是这些
                         bound.end_cp if bound else version.canonical_length_cp + 1,
                         "identity": record["identity"][:160], "name": record["name"][:128],
                         "description": record["description"][:512]})
+    anchored = speaker.get("anchored_history")
+    if identity_anchors is not None and isinstance(anchored, list) and len(anchored) <= 10000:
+        try:
+            mapped = []
+            ids = {key: row.id for key, row in characters.items()}
+            for record in anchored:
+                if not isinstance(record, dict) or set(record) != {
+                    "cp", "identity", "name", "description",
+                }:
+                    raise ValueError("Invalid speaker history")
+                if not all(isinstance(record[k], str) for k in ("identity", "name", "description")):
+                    raise ValueError("Invalid speaker history fields")
+                if (len(record["identity"]) > 160 or len(record["name"]) > 128
+                        or len(record["description"]) > 512):
+                    raise ValueError("Speaker history fields exceed bounds")
+                mapped.append(dict(record, cp=identity_anchors.point(record["cp"]),
+                                   identity=history_identity(record["identity"], ids, version)))
+            history = mapped or history
+        except (ValueError, TypeError, KeyError):
+            pass
     if history:
         group.presentation_history_json = json.dumps(history, ensure_ascii=False)
-        character.presentation_history_json = group.presentation_history_json
+        if character.id not in restored_character_ids:
+            character.presentation_history_json = group.presentation_history_json
     else:
         from ..characters.visibility import capture
         capture(group, version.canonical_length_cp)
-        capture(character, version.canonical_length_cp)
+        if character.id not in restored_character_ids:
+            capture(character, version.canonical_length_cp)
     groups[(chapter.id, key)] = group
     return group
 
@@ -297,10 +332,12 @@ def _character_for(
     version,
     speaker: dict,
     first_seen_cp: int,
+    imported_user_confirmation: bool = True,
 ) -> BookCharacter:
     """为清单身份建立书籍级人物，避免同名的不同色号在回导后被合并。"""
 
-    key = str(speaker.get("identity") or speaker.get("key") or "")
+    key = str(speaker.get("character_identity") or speaker.get("identity")
+              or speaker.get("key") or "")
     existing = characters.get(key)
     if existing is not None:
         return existing
@@ -321,8 +358,8 @@ def _character_for(
             description=(
                 str(speaker.get("description") or "")[:_MAX_GROUP_DESCRIPTION_LEN] or None
             ),
-            source=CharacterSource.USER,
-            user_confirmed=True,
+            source=CharacterSource.USER if imported_user_confirmation else CharacterSource.MODEL,
+            user_confirmed=imported_user_confirmation,
             confirmation_source="imported",
             first_seen_cp=first_seen_cp,
             preferred_color_index=(

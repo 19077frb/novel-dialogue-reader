@@ -39,7 +39,7 @@ from .document import (
 )
 from .layout import LayoutNormalizer
 
-EPUB_PARSER_VERSION = "epub-6"
+EPUB_PARSER_VERSION = "epub-7"
 EPUB_NORMALIZATION_VERSION = "canonical-epub-blocks-2"
 
 CONTAINER_PATH = "META-INF/container.xml"
@@ -539,6 +539,15 @@ def _iter_text(element: ET.Element) -> str:
     return "".join(parts)
 
 
+def _ndr_paragraph_text(element: ET.Element) -> str:
+    if element.get("data-ndr-auxiliary") == "true":
+        return ""
+    parts = [element.text or ""]
+    for child in element:
+        parts.extend((_ndr_paragraph_text(child), child.tail or ""))
+    return "".join(parts)
+
+
 def _walk(
     element: ET.Element,
     builder: _BlockBuilder,
@@ -549,6 +558,17 @@ def _walk(
     if tag in SKIP_TAGS:
         return
     if strip_ndr_auxiliary and element.get("data-ndr-auxiliary") == "true":
+        return
+
+    if (
+        strip_ndr_auxiliary and tag == "p"
+        and element.get("class") == "node-paragraph"
+        and all(_local(child.tag) == "span" for child in element.iter() if child is not element)
+    ):
+        # NDR splits a paragraph into colored spans. Normalize the original
+        # paragraph once, not each fragment (which would erase boundary spaces).
+        builder.start_block(ContentNodeType.PARAGRAPH)
+        builder.add_text(_ndr_paragraph_text(element))
         return
 
     block_type = BLOCK_TAGS.get(tag)
