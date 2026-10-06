@@ -42,6 +42,29 @@ def _speech_label(**overrides) -> QuoteLabel:
 # ---------- 场景状态 ----------
 
 
+@pytest.mark.parametrize("explicit", [True, False])
+def test_explicit_identity_survives_restore_and_never_links_by_name(explicit) -> None:
+    state = SceneState(explicit_identity=explicit, confirmed_characters=[
+        ConfirmedCharacter("c1", "小雨", description="已有人物"),
+    ])
+    restored = SceneState.from_snapshot(state.snapshot())
+    assert restored.explicit_identity is explicit
+    registry = SpeakerRegistry(restored)
+    first = registry.register_temp_speaker(temp_ref="n1", first_quote_id="q1",
+                                           canonical_name="小雨")
+    second = registry.register_temp_speaker(temp_ref="n2", first_quote_id="q2",
+                                            canonical_name="小雨")
+    if explicit:
+        assert first.character_id is None and second.character_id is None
+        assert first is not second
+    else:
+        assert first.character_id == "c1" and second is first
+    old_snapshot = state.snapshot()
+    old_snapshot.pop("explicit_identity")
+    old_snapshot["state_version"] = "scene-state-5"
+    assert not SceneState.from_snapshot(old_snapshot).explicit_identity
+
+
 def test_update_does_not_close_scene() -> None:
     state = SceneState(scene_id="sc1", participants=[])
     registry = SpeakerRegistry(state)
@@ -193,7 +216,7 @@ def test_snapshot_round_trip_preserves_state() -> None:
     ]
     assert "最近已确认轮次=S1:绫濑沙季" in restored.prompt_state()
     assert restored.label_map()["new1"] == "S1"
-    assert restored.snapshot()["state_version"] == "scene-state-5"
+    assert restored.snapshot()["state_version"] == "scene-state-6"
 
 
 def test_prompt_state_is_bounded() -> None:

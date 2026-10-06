@@ -375,6 +375,112 @@ def _label(quote_id: str, **overrides) -> dict:
     return payload
 
 
+@pytest.mark.parametrize("same_name", ["女同学", "小雨"])
+def test_explicit_new_identities_do_not_merge_by_name_and_replay_is_stable(
+    migrated_client, migrated_settings, same_name,
+):
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        old = BookCharacter(book_version_id=version.id, canonical_name=same_name,
+                            description="人工资料", source="USER", user_confirmed=True)
+        session.add(old)
+        session.flush()
+        ids = _targets(inputs)[:2]
+        window = _window(inputs, ids)
+        output = {"schema_version": "1.1", "new_speakers": [
+            {"temp_ref": f"n{i}", "scene_ref": "scene_current", "first_quote_id": q,
+             "name": same_name, "description": f"不同身份{i}", "evidence_refs": [q]}
+            for i, q in enumerate(ids)
+        ], "labels": [_label(q, assignment="NEW", speaker_ref=f"n{i}", basis="DIRECT",
+                              evidence_refs=[q]) for i, q in enumerate(ids)]}
+        state = SceneState(confirmed_characters=[ConfirmedCharacter(old.id, same_name)])
+        result = _apply(session, output=output, window=window, state=state, inputs=inputs,
+                        expected_schema_version="1.1")
+        assert result.validation_ok, result.validation_codes
+        people = list(session.scalars(select(BookCharacter)))
+        assert len(people) == 3
+        new_ids = {p.id for p in people if p.id != old.id}
+        assert len(new_ids) == 2 and {s.character_id for s in state.participants} == new_ids
+        assert old.description == "人工资料" and old.user_confirmed
+        assert all(not p.user_confirmed and p.temp_key for p in people if p.id in new_ids)
+        restored = SceneState.from_snapshot(state.snapshot())
+        replay = _apply(session, output=output, window=window, state=restored, inputs=inputs,
+                        expected_schema_version="1.1")
+        assert replay.validation_ok, replay.validation_codes
+        assert len(list(session.scalars(select(BookCharacter)))) == 3
+        assert {s.character_id for s in restored.participants} == new_ids
+
+    _with_session(migrated_settings, body)
+
+
+def test_explicit_missing_character_id_is_rejected_without_state_or_database_changes(
+    migrated_client, migrated_settings,
+):
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        ids = _targets(inputs)[:1]
+        state = SceneState(confirmed_characters=[ConfirmedCharacter("missing", "小雨")])
+        before = state.snapshot()
+        output = {"schema_version": "1.1", "new_speakers": [{
+            "temp_ref": "n1", "scene_ref": "scene_current", "first_quote_id": ids[0],
+            "name": "小雨", "description": "不存在的候选", "character_id": "missing",
+            "evidence_refs": ids,
+        }], "labels": [_label(ids[0], assignment="NEW", speaker_ref="n1", basis="DIRECT",
+                              evidence_refs=ids)]}
+        result = _apply(session, output=output, window=_window(inputs, ids), state=state,
+                        inputs=inputs, expected_schema_version="1.1")
+        assert not result.validation_ok
+        assert result.validation_codes == ["invalid_explicit_character_id"]
+        assert state.snapshot() == before
+        assert not list(session.scalars(select(BookCharacter)))
+        assert not list(session.scalars(select(Scene)))
+
+    _with_session(migrated_settings, body)
+
+
+def test_explicit_existing_id_uses_own_alias_without_name_conflict(
+    migrated_client, migrated_settings,
+):
+    _import(migrated_client)
+
+    def body(session, inputs, version):
+        person = BookCharacter(book_version_id=version.id, canonical_name="小雨",
+                               aliases_json='["女同学"]', description="人工资料",
+                               source="USER", user_confirmed=True)
+        other = BookCharacter(book_version_id=version.id, canonical_name="女同学",
+                              description="另一个人", source="MODEL", user_confirmed=False)
+        session.add_all([person, other])
+        session.flush()
+        ids = _targets(inputs)[:2]
+        state = SceneState(confirmed_characters=[
+            ConfirmedCharacter(person.id, "小雨", ("女同学",), "人工资料"),
+            ConfirmedCharacter(other.id, "女同学"),
+        ])
+        output = {"schema_version": "1.1", "new_speakers": [{
+            "temp_ref": "c1", "scene_ref": "scene_current", "first_quote_id": ids[0],
+            "name": "女同学", "description": "人物声明", "character_id": person.id,
+            "evidence_refs": ids[:1],
+        }], "labels": [
+            _label(ids[0], assignment="NEW", speaker_ref="c1", basis="DIRECT",
+                   evidence_refs=ids[:1]),
+            _label(ids[1], assignment="EXISTING", speaker_ref="c1", speaker_name="女同学",
+                   basis="DIRECT", evidence_refs=ids[:1]),
+        ]}
+        result = _apply(session, output=output, window=_window(inputs, ids), state=state,
+                        inputs=inputs, expected_schema_version="1.1")
+        assert result.validation_ok, result.validation_codes
+        assert not any(w.startswith("confirmed_identity_conflict") for w in result.warnings)
+        assert len(list(session.scalars(select(BookCharacter)))) == 2
+        assert {s.character_id for s in state.participants} == {person.id}
+        assert person.description == "人工资料" and person.user_confirmed
+        refreshed = next(p for p in state.book_characters if p.character_id == person.id)
+        assert refreshed.source == "USER" and refreshed.user_confirmed
+
+    _with_session(migrated_settings, body)
+
+
 def _thought(quote_id: str) -> dict:
     return _label(
         quote_id,

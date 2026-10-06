@@ -18,7 +18,7 @@ from typing import Any
 from ..characters.names import GENERIC_NAMES, matches_name, undecorated_name
 from ..domain.enums import GapDecision, SceneStatus
 
-SCENE_STATE_VERSION = "scene-state-5"
+SCENE_STATE_VERSION = "scene-state-6"
 
 
 @dataclass(frozen=True)
@@ -114,6 +114,7 @@ class SceneState:
     # Refreshed from storage before a call; not duplicated in every checkpoint.
     book_characters: list[ConfirmedCharacter] = field(default_factory=list)
     pov_character_id: str | None = None
+    explicit_identity: bool = False
     known_characters: dict[str, str] = field(default_factory=dict)
     unresolved: list[str] = field(default_factory=list)
     version: int = 1
@@ -157,6 +158,8 @@ class SceneState:
         )
 
     def _confirmed_by_name(self, value: str | None) -> ConfirmedCharacter | None:
+        if self.explicit_identity:
+            return None
         key = (value or "").strip().casefold()
         if not key:
             return None
@@ -376,6 +379,7 @@ class SceneState:
             "participants": [slot.as_dict() for slot in self.participants],
             "confirmed_characters": [item.as_dict() for item in self.confirmed_characters],
             "pov_character_id": self.pov_character_id,
+            "explicit_identity": self.explicit_identity,
             "known_characters": dict(self.known_characters),
             "unresolved": list(self.unresolved),
             "version": self.version,
@@ -405,6 +409,7 @@ class SceneState:
                 if isinstance(item, dict)
             ],
             pov_character_id=payload.get("pov_character_id"),
+            explicit_identity=payload.get("explicit_identity") is True,
             known_characters=dict(payload.get("known_characters", {})),
             unresolved=list(payload.get("unresolved", [])),
             version=int(payload.get("version", 1)),

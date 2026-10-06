@@ -56,7 +56,8 @@ class SpeakerRegistry:
                 canonical_name = character.canonical_name
         named = self.state.find_by_character(character_id)
         named = named or (
-            self.state.find_by_name(canonical_name) if canonical_name not in GENERIC_NAMES else None
+            self.state.find_by_name(canonical_name)
+            if not self.state.explicit_identity and canonical_name not in GENERIC_NAMES else None
         )
         if named is not None and character_id and named.character_id not in (None, character_id):
             named = None

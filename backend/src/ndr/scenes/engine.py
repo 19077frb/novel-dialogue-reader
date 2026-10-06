@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -214,20 +215,32 @@ def _discover_character(
         raise ValueError("人物 ID 不属于当前书籍版本")
     # With a confirmed chapter roster, a genuinely new named person discovered
     # during attribution must also be available to subsequent chapter analysis.
-    if (character is None and state.confirmed_characters and declaration.evidence_refs
-            and valid_display_name(declaration.name) and declaration.name not in GENERIC_NAMES):
-        rows = list(session.scalars(select(BookCharacter).where(
-            BookCharacter.book_version_id == version_id,
-        )))
-        matches = [row for row in rows if matches_name(
-            declaration.name, [row.canonical_name or "", *json.loads(row.aliases_json or "[]")],
-        )]
+    if (character is None and (state.confirmed_characters or state.explicit_identity)
+            and declaration.evidence_refs and valid_display_name(declaration.name)
+            and (state.explicit_identity or declaration.name not in GENERIC_NAMES)):
+        temp_key = None
+        if state.explicit_identity:
+            temp_key = hashlib.sha256(json.dumps(
+                ["expression-identity-1", declaration.temp_ref, declaration.first_quote_id],
+                ensure_ascii=False,
+            ).encode()).hexdigest()
+            matches = list(session.scalars(select(BookCharacter).where(
+                BookCharacter.book_version_id == version_id, BookCharacter.temp_key == temp_key,
+            )))
+        else:
+            rows = list(session.scalars(select(BookCharacter).where(
+                BookCharacter.book_version_id == version_id,
+            )))
+            matches = [row for row in rows if matches_name(
+                declaration.name, [row.canonical_name or "", *json.loads(row.aliases_json or "[]")],
+            )]
         if len(matches) > 1:
             return None
         character = matches[0] if matches else BookCharacter(
             book_version_id=version_id, canonical_name=declaration.name,
             description=declaration.description, aliases_json="[]",
             source=CharacterSource.MODEL, user_confirmed=False, first_seen_cp=first_seen_cp,
+            temp_key=temp_key,
         )
         if not matches:
             session.add(character)
@@ -275,6 +288,8 @@ def _discover_character(
     refreshed = ConfirmedCharacter(
         character.id, character.canonical_name or "",
         tuple(json.loads(character.aliases_json or "[]")), character.description or "",
+        source=CharacterSource(character.source).value, user_confirmed=character.user_confirmed,
+        confirmation_source=character.confirmation_source or "unknown",
     )
     state.book_characters = [item for item in state.book_characters
                              if item.character_id != character.id] + [refreshed]
@@ -436,7 +451,8 @@ def apply_window(
     """应用一次模型输出：校验 → 锁定检查 → 可见时点 → 接受策略 → 落库。"""
 
     state = state or SceneState()
-    state.sync_confirmed_participants()
+    if expected_schema_version == "1.0":
+        state.sync_confirmed_participants()
     registry = SpeakerRegistry(state)
     quote_positions = dict(quote_positions or {})
     gap_positions = dict(gap_positions or {})
@@ -482,6 +498,19 @@ def apply_window(
         application.validation_ok = False
         application.validation_codes.append("invalid_acceptance_ceiling")
         return application
+    if expected_schema_version == "1.1":
+        declared_ids = {person.character_id for person in parsed.new_speakers
+                        if person.character_id}
+        valid_ids = set(session.scalars(select(BookCharacter.id).where(
+            BookCharacter.book_version_id == book_version_id,
+            BookCharacter.id.in_(declared_ids),
+        ))) if declared_ids else set()
+        if declared_ids != valid_ids:
+            application.validation_ok = False
+            application.validation_codes.append("invalid_explicit_character_id")
+            return application
+    state.explicit_identity = expected_schema_version == "1.1"
+    state.sync_confirmed_participants()
     effective_hash = (
         dependency_hash or getattr(window, "dependency_hash", "")
     )
@@ -595,10 +624,13 @@ def apply_window(
                         # speaker_ref 已指向用户确认人物时，姓名与说明只能来自确认名单。
                         # 模型即使返回另一个已确认姓名，也只记录冲突，不反向改写。
                         incoming = state._confirmed_by_name(label.speaker_name)
-                        if label.speaker_name and (
-                            incoming is None
-                            or incoming.character_id != authoritative.character_id
-                        ):
+                        name_matches = (
+                            matches_name(label.speaker_name, [authoritative.canonical_name,
+                                                              *authoritative.aliases])
+                            if state.explicit_identity else incoming is not None
+                            and incoming.character_id == authoritative.character_id
+                        )
+                        if label.speaker_name and not name_matches:
                             application.warnings.append(
                                 "confirmed_identity_conflict:"
                                 f"{label.speaker_ref}:{label.speaker_name}"
