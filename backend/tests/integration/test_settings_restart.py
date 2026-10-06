@@ -16,6 +16,78 @@ import pytest
 from ndr.config import Settings
 from ndr.portable import LibraryLock
 
+STARTUP_TIMEOUT_SECONDS = 180
+
+
+def _wait_ready(
+    client,
+    process,
+    port,
+    log_path,
+    *,
+    timeout=STARTUP_TIMEOUT_SECONDS,
+    monotonic=time.monotonic,
+    sleep=time.sleep,
+):
+    """Wait for this process, never restart it or accept a merely open port."""
+    started = monotonic()
+    deadline = started + timeout
+    last_health = "尚未收到健康响应"
+    while monotonic() < deadline:
+        returncode = process.poll()
+        if returncode is not None:
+            pytest.fail(
+                f"隔离服务已退出，code={returncode}，port={port}\n"
+                + log_path.read_text(encoding="utf-8")
+            )
+        try:
+            response = client.get(f"http://127.0.0.1:{port}/api/health")
+            last_health = f"HTTP {response.status_code}: {response.text[:500]}"
+            if response.status_code == 200 and response.json()["database"]["state"] == "READY":
+                return
+        except httpx.TransportError as exc:
+            last_health = f"{type(exc).__name__}: {exc}"
+        sleep(0.1)
+    pytest.fail(
+        f"隔离服务启动超时：port={port}，等待={monotonic() - started:.1f}s，"
+        f"上限={timeout}s，最近健康状态={last_health}\n" + log_path.read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.parametrize("outcome", ["slow-ready", "never-ready", "exited"])
+def test_startup_wait_is_bounded_and_requires_database_ready(tmp_path, outcome):
+    from types import SimpleNamespace
+
+    elapsed = [0.0]
+    calls = []
+    log_path = tmp_path / "wait.log"
+    log_path.write_text("migration in progress", encoding="utf-8")
+
+    def sleep(seconds):
+        elapsed[0] += seconds
+
+    def get(url):
+        calls.append(url)
+        state = "READY" if outcome == "slow-ready" and elapsed[0] >= 60 else "MIGRATING"
+        return httpx.Response(200, json={"database": {"state": state}})
+
+    kwargs = dict(monotonic=lambda: elapsed[0], sleep=sleep)
+    client = SimpleNamespace(get=get)
+    process = SimpleNamespace(poll=lambda: 7 if outcome == "exited" else None)
+    if outcome == "slow-ready":
+        _wait_ready(client, process, 1234, log_path, **kwargs)
+        assert 60 <= elapsed[0] < STARTUP_TIMEOUT_SECONDS
+        assert calls
+    else:
+        reason = "服务已退出.*code=7" if outcome == "exited" else "启动超时.*MIGRATING"
+        with pytest.raises(pytest.fail.Exception, match=reason) as error:
+            _wait_ready(client, process, 1234, log_path, **kwargs)
+        assert "migration in progress" in str(error.value)
+        if outcome == "exited":
+            assert elapsed[0] == 0 and calls == []
+        else:
+            assert STARTUP_TIMEOUT_SECONDS <= elapsed[0] < STARTUP_TIMEOUT_SECONDS + 0.2
+
 
 def _port() -> int:
     with socket.socket() as listener:
@@ -86,22 +158,7 @@ else:
         try:
 
             def wait_ready(port):
-                deadline = time.monotonic() + 45
-                while time.monotonic() < deadline:
-                    assert process.poll() is None, (tmp_path / "server.log").read_text(
-                        encoding="utf-8"
-                    )
-                    try:
-                        response = client.get(f"http://127.0.0.1:{port}/api/health")
-                        if (
-                            response.status_code == 200
-                            and response.json()["database"]["state"] == "READY"
-                        ):
-                            return
-                    except httpx.TransportError:
-                        pass
-                    time.sleep(0.1)
-                pytest.fail((tmp_path / "server.log").read_text(encoding="utf-8"))
+                _wait_ready(client, process, port, tmp_path / "server.log")
 
             wait_ready(old_port)
             info = client.get(f"http://127.0.0.1:{old_port}/api/settings/application").json()[
