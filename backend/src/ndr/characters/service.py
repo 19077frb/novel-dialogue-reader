@@ -33,7 +33,11 @@ from ..ingest.query import load_canonical_text
 from ..jobs.service import digest_request, profile_snapshot
 from ..llm.prompts import build_roster_messages
 from ..llm.schemas import RosterOutput
-from ..llm.sourced_roster import SOURCED_ROSTER_VERSION, SourcedRosterOutput
+from ..llm.sourced_roster import (
+    SOURCED_ROSTER_VERSION,
+    SOURCED_ROSTER_VERSIONS,
+    SourcedRosterOutput,
+)
 from ..storage.chapter_status import complete_chapter_automatically
 from ..storage.models import (
     Book,
@@ -714,5 +718,6 @@ def roster_messages(
         chapter_title=chapter.title,
         chapter_lines=text.splitlines() or [""],
         existing_characters=existing_characters_for_prompt(session, version),
-        sourced=json.loads(job.range_json or "{}").get("roster_protocol") == SOURCED_ROSTER_VERSION,
+        sourced=(json.loads(job.range_json or "{}").get("roster_protocol")
+                 in SOURCED_ROSTER_VERSIONS),
     )

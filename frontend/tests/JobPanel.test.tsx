@@ -83,6 +83,19 @@ describe('JobPanel', () => {
     vi.mocked(jobsApi.fetchJobRecovery).mockResolvedValue(RECOVERY)
   })
 
+  it('shows retained roster proposal warnings instead of an opaque diagnostic object', async () => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, kind: 'CHARACTER_ROSTER',
+      state: 'COMPLETED', last_error: null,
+      progress: { proposal_diagnostics: { isolated_characters: 1, discarded_auxiliary_facts: 2,
+        discarded_descriptions: 1, details: [{ character_index: 2, message: '姓名依据无效' }] } },
+    })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText(/已保留有效人物提案/)).toHaveTextContent('隔离 1 个人物')
+    expect(screen.queryByText(/proposal_diagnostics:/)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '展开人物分析提示' }))
+    expect(screen.getByText('第 2 个人物：姓名依据无效')).toBeVisible()
+  })
+
   it('显示真实计数、未知用量、退避建议与后端给出的恢复动作', async () => {
     renderWithProviders(<JobPanel jobId="j1" />)
 

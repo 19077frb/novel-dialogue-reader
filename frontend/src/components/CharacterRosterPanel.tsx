@@ -13,6 +13,7 @@ import {
 import { fetchJob } from '../api/books'
 import { OperationTimer } from './OperationTimer'
 import { ReadErrorNotice } from './ReadErrorNotice'
+import { ProposalDiagnostics } from './ProposalDiagnostics'
 import { JOB_STATE_LABELS } from './JobPanel'
 import { readJournal, writeJournal, removeJournal } from '../processing/journal'
 import { freshIdempotencyKey, fetchRecentJobs } from '../api/jobs'
@@ -355,6 +356,9 @@ export function CharacterRosterPanel({
       {rosterJobId && job.data && <OperationTimer startedAt={Date.parse(job.data.created_at)}
         finishedAt={TERMINAL_JOB_STATES.has(job.data.state) ? Date.parse(job.data.updated_at) : null} />}
       {rosterJobId && job.isError && <ReadErrorNotice label="人物任务读取失败" error={job.error} retrying={job.isFetching} onRetry={() => void job.refetch()} />}
+      {job.data?.state === 'COMPLETED' && job.data.range?.chapter_id === chapterId && (
+        <ProposalDiagnostics value={job.data.progress?.proposal_diagnostics} />
+      )}
       {rosterJobId && job.data?.state === 'FAILED' && (
         <p className="status-error">人物分析失败：{job.data.last_error ?? '未知错误'}</p>
       )}

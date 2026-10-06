@@ -14,6 +14,7 @@ import type { JobDetailOut } from '../api/types'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 import { OperationTimer } from './OperationTimer'
 import { ReadErrorNotice } from './ReadErrorNotice'
+import { ProposalDiagnostics } from './ProposalDiagnostics'
 
 export const JOB_STATE_LABELS: Record<string, string> = {
   QUEUED: '排队中', RUNNING: '处理中', PAUSING: '正在停止', PAUSED: '已暂停',
@@ -125,7 +126,7 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
       </dl>
       {job.data.progress && (
         <details><summary>任务诊断详情</summary><ul className="hint">
-          {Object.entries(job.data.progress).map(([key, value]) => (
+          {Object.entries(job.data.progress).filter(([key]) => key !== 'proposal_diagnostics').map(([key, value]) => (
             <li key={key}>
               {key}: {String(value)}
             </li>
@@ -178,6 +179,7 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
         </div>
       )}
       {job.data.last_error && <p className="status-error">{job.data.last_error}</p>}
+      {job.data.state === 'COMPLETED' && <ProposalDiagnostics value={job.data.progress?.proposal_diagnostics} />}
       {action.isError && <p className="status-error" role="alert">{action.error instanceof Error ? action.error.message : '任务操作失败，请重试。'}</p>}
     </div>
   )

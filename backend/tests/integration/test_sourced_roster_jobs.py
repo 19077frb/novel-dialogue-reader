@@ -48,10 +48,10 @@ def test_new_job_writes_original_bound_model_facts_and_old_job_stays_legacy(migr
     client = migrated_client
     data, job = prepare(client)
     with client.app.state.session_factory() as session:
-        assert json.loads(session.get(Job, job["id"]).range_json)["roster_protocol"] == "sourced-roster-1"
+        assert json.loads(session.get(Job, job["id"]).range_json)["roster_protocol"] == "sourced-roster-2"
     result, adapter = run(client, job, response())
     assert result.state == JobState.COMPLETED
-    assert adapter.calls[0]["payload"]["roster_protocol"] == "sourced-roster-1"
+    assert adapter.calls[0]["payload"]["roster_protocol"] == "sourced-roster-2"
     with client.app.state.session_factory() as session:
         person = session.scalar(select(BookCharacter).where(
             BookCharacter.book_version_id == data["book_version_id"],
@@ -154,3 +154,41 @@ def test_new_protocol_failure_keeps_charges_and_no_partial_person(migrated_clien
         )))
         attempt = session.scalar(select(InferenceRun).where(InferenceRun.job_id == job["id"]))
         assert json.loads(attempt.usage_json)["total_tokens"] == 19
+
+
+@pytest.mark.parametrize("protocol", ["sourced-roster-1", "sourced-roster-2"])
+def test_actual_job_freezes_strict_or_isolated_semantics_and_preserves_diagnostics(
+    migrated_client, protocol,
+):
+    client = migrated_client
+    data, job = prepare(client)
+    with transaction(client.app.state.session_factory) as session:
+        stored = session.get(Job, job["id"])
+        value = json.loads(stored.range_json)
+        value["roster_protocol"] = protocol
+        stored.range_json = json.dumps(value)
+    payload = response()
+    person = payload["characters"][0]
+    person["description"] = "无原文说明"
+    person["facts"].append({"kind": "description", "value": "无原文说明",
+                            "evidence_refs": ["L999"]})
+    bad = deepcopy(person)
+    bad.update(temp_ref="c2", name="错误姓名")
+    payload["characters"].append(bad)
+    result, adapter = run(client, job, payload)
+    assert adapter.calls[0]["payload"]["roster_protocol"] == protocol
+    assert result.state == (JobState.COMPLETED if protocol.endswith("2") else JobState.FAILED)
+    with client.app.state.session_factory() as session:
+        people = list(session.scalars(select(BookCharacter).where(
+            BookCharacter.book_version_id == data["book_version_id"],
+        )))
+        attempt = session.scalar(select(InferenceRun).where(InferenceRun.job_id == job["id"]))
+        assert json.loads(attempt.usage_json)["total_tokens"] == 19
+        if protocol.endswith("2"):
+            assert len(people) == 1 and people[0].canonical_name == "林舟"
+            assert people[0].description == ""
+            diagnostic = json.loads(session.get(Job, job["id"]).progress_json)["proposal_diagnostics"]
+            assert diagnostic["isolated_characters"] == 1
+            assert diagnostic["discarded_auxiliary_facts"] == 2
+        else:
+            assert not people

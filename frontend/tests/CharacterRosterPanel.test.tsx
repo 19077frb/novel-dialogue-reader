@@ -4,7 +4,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, expect, it, vi } from 'vitest'
 import * as charactersApi from '../src/api/characters'
 import * as jobsApi from '../src/api/jobs'
-import type { ChapterRosterOut } from '../src/api/types'
+import * as booksApi from '../src/api/books'
+import type { ChapterRosterOut, JobDetailOut } from '../src/api/types'
 import { CharacterRosterPanel } from '../src/components/CharacterRosterPanel'
 
 vi.mock('../src/api/characters', async importOriginal => ({
@@ -14,6 +15,9 @@ vi.mock('../src/api/characters', async importOriginal => ({
 }))
 vi.mock('../src/api/jobs', async importOriginal => ({
   ...await importOriginal<typeof import('../src/api/jobs')>(), fetchRecentJobs: vi.fn(),
+}))
+vi.mock('../src/api/books', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/api/books')>(), fetchJob: vi.fn(),
 }))
 
 function roster(chapter = 'c1', names = ['林舟', '陆欣', '陈阳', '女同学']): ChapterRosterOut {
@@ -103,4 +107,22 @@ it('keeps legacy nonempty manual drafts but does not restore them over confirmed
     { ...roster(), status: 'CONFIRMED', pov_character_id: 'person0' })
   expect(await screen.findByTestId('roster-name-p0')).toHaveValue('林舟')
   expect(screen.queryByTestId('roster-name-manual')).not.toBeInTheDocument()
+})
+
+it('restores saved partial-proposal warnings without leaking them into a different chapter', async () => {
+  const job = { id: 'roster-job', state: 'COMPLETED', range: { chapter_id: 'c1' },
+    created_at: '2026-10-06T00:00:00Z', updated_at: '2026-10-06T00:00:01Z',
+    progress: { proposal_diagnostics: { isolated_characters: 1, discarded_auxiliary_facts: 2,
+      discarded_descriptions: 0, details: [{ character_index: 2, message: '姓名没有原文依据' }] } },
+  } as unknown as JobDetailOut
+  vi.mocked(booksApi.fetchJob).mockResolvedValue(job)
+  vi.mocked(jobsApi.fetchRecentJobs).mockImplementation(async input => input.chapterId === 'c1' ? [job] : [])
+  const view = mount()
+  expect(await screen.findByText(/已保留有效人物提案/)).toHaveTextContent('隔离 1 个人物')
+  expect(screen.getByTestId('roster-name-p0')).toHaveValue('林舟')
+  fireEvent.click(screen.getByRole('button', { name: '展开人物分析提示' }))
+  expect(screen.getByText('第 2 个人物：姓名没有原文依据')).toBeVisible()
+  view.rerender(view.ui('c2'))
+  await waitFor(() => expect(screen.queryByText(/已保留有效人物提案/)).not.toBeInTheDocument())
+  expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
 })

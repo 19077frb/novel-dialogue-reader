@@ -206,7 +206,8 @@ class FakeProviderAdapter:
 
         if self.labeling_mode != "deterministic":
             return {"schema_version": ("1.1" if (payload or {}).get("roster_protocol")
-                                       == "sourced-roster-1" else OUTPUT_SCHEMA_VERSION),
+                                       in {"sourced-roster-1", "sourced-roster-2"}
+                                       else OUTPUT_SCHEMA_VERSION),
                     "characters": []}
         result = {
             "schema_version": OUTPUT_SCHEMA_VERSION,
@@ -229,7 +230,7 @@ class FakeProviderAdapter:
                 },
             ],
         }
-        if (payload or {}).get("roster_protocol") == "sourced-roster-1":
+        if (payload or {}).get("roster_protocol") in {"sourced-roster-1", "sourced-roster-2"}:
             result["schema_version"] = "1.1"
             for person in result["characters"]:
                 person["facts"] = [

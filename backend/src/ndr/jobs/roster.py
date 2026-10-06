@@ -26,7 +26,12 @@ from ..ingest.query import load_canonical_text
 from ..llm.adapters import AdapterSpec, build_adapter
 from ..llm.errors import ProviderError
 from ..llm.schemas import RosterOutput
-from ..llm.sourced_roster import SOURCED_ROSTER_VERSION, compile_sourced_roster
+from ..llm.sourced_roster import (
+    SOURCED_ROSTER_VERSION,
+    SOURCED_ROSTER_VERSIONS,
+    compile_isolated_sourced_roster,
+    compile_sourced_roster,
+)
 from ..storage.models import BookVersion, Chapter, InferenceRun, Job
 
 ROSTER_MAX_TOKENS = 2000
@@ -101,7 +106,8 @@ def _build_adapter(settings: Settings, credentials, snapshot: dict[str, Any]):  
 
 def _prepare_input(session, settings, job, version, chapter):
     source_text = load_canonical_text(settings, version)
-    sourced = _job_range(job).get("roster_protocol") == SOURCED_ROSTER_VERSION
+    protocol = _job_range(job).get("roster_protocol")
+    sourced = protocol in SOURCED_ROSTER_VERSIONS
     original = (OriginalIdentitySnapshot(version.id, version.canonical_sha256, source_text)
                 if sourced else None)
     messages = roster_messages(session, settings, job, version, chapter,
@@ -109,7 +115,7 @@ def _prepare_input(session, settings, job, version, chapter):
     request_data = json.loads(messages[1]["content"].split("任务参数（JSON）：\n", 1)[1]
                               .split("\n\n", 1)[0])
     allowed_ids = {item["character_id"] for item in request_data["existing_characters"]}
-    return messages, original, sourced, allowed_ids
+    return messages, original, protocol if sourced else "legacy-roster-1", allowed_ids
 
 
 def run_character_roster_job(
@@ -169,7 +175,7 @@ def run_character_roster_job(
 
         chapter_start, chapter_end = chapter.start_cp, chapter.end_cp
         try:
-            messages, original, sourced, allowed_character_ids = _prepare_input(
+            messages, original, protocol, allowed_character_ids = _prepare_input(
                 session, settings, job, version, chapter,
             )
         except Exception as exc:  # noqa: BLE001 - no call or partial candidate writes
@@ -217,7 +223,7 @@ def run_character_roster_job(
             adapter.generate_labels(
                 {
                     "task": "roster",
-                    "roster_protocol": SOURCED_ROSTER_VERSION if sourced else "legacy-roster-1",
+                    "roster_protocol": protocol,
                     "messages": messages,
                     "max_tokens": ROSTER_MAX_TOKENS,
                     "json_object": True,
@@ -231,7 +237,13 @@ def run_character_roster_job(
             if not str(key).startswith("_")
         }
         identity_facts = None
-        if sourced:
+        diagnostics = {}
+        if protocol == SOURCED_ROSTER_VERSION:
+            output, identity_facts, diagnostics = compile_isolated_sourced_roster(
+                payload, original=original, chapter_start=chapter_start, chapter_end=chapter_end,
+                allowed_character_ids=allowed_character_ids, source_ref=run_id,
+            )
+        elif protocol in SOURCED_ROSTER_VERSIONS:
             output, identity_facts = compile_sourced_roster(
                 payload, original=original, chapter_start=chapter_start, chapter_end=chapter_end,
                 allowed_character_ids=allowed_character_ids, source_ref=run_id,
@@ -307,6 +319,7 @@ def run_character_roster_job(
             {
                 "roster_version": roster.version,
                 "candidate_count": len(output.characters),
+                "proposal_diagnostics": diagnostics,
                 "calls": 1,
             },
             ensure_ascii=False,
@@ -316,6 +329,7 @@ def run_character_roster_job(
                 "stage": "completed",
                 "calls": 1,
                 "candidate_count": len(output.characters),
+                "proposal_diagnostics": diagnostics,
             },
             ensure_ascii=False,
         )
