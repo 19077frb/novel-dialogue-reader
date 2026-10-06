@@ -119,6 +119,8 @@ uv run --project backend python -m pytest backend/tests/unit/test_trial_journal.
 
 `ndr.evaluation.owner_scoring.score_owners`要求调用者提供明确人物Gold及已验证的可接受性。三种类型归给正确人物均计正确；类型差异应另外统计。未知、错误、未返回目标仍进入分母；没有明确人物的Gold不能根据POV补上再计分。合法引用不证明语义正确，程序编译通过不等于模型质量通过。新入口本身不加载凭据、不发送请求、不默认开启思考，也不实现生产刷新恢复。
 
+`ndr.llm.expression_review`提供共享三类表达裁决：`snapshot`先完整编译，保留稳定人物、原kind、调用来源、匿名声明和固有可接受性；`reconcile`将三种类型的同一人物视为身份一致，但不改写选中提案的类型。分歧可接受有支持依据的第三人物；两次未知可恢复；已一致答案被第三答案挑战时先待确认，`verify_payload`要求独立核查来源、完整覆盖和目标外反证，绑定任务与三份提案指纹。不确定核查仍保持待确认，人工锁优先，匿名同名不建立跨调用身份。`compile_decisions`整块重建1.1并传递完整批准表，调用方不能丢弃`acceptance_ceilings`；`review_effects`分别统计身份纠正/损害、新增未知/错误和类型纠正/损害。以上纯函数不启动模型或写库，尚未作为正式Jobs完整裁决阶段，也不代表已经测得语义收益。
+
 `ndr.evaluation.owner_constraints.ConstrainedOwnerProtocol`是显式可选的第二版：在消息中的 JSON Schema 写明未知人物必须使用 `insufficient` 和空人物证据，非空人物引用不能是空字符串，并区分类型判断与人物依据。它沿用完整严格编译，不自动清洗冲突字段，不给未知引用补叙述者。条件是提示契约，不表示提供方启用了强制结构输出，也不保证语义正确；调用者必须使用该版本的独立指纹，不能复用第一版缓存。正式Jobs显式选择`expression-production-1`时使用此协议；实验第一版默认和界面默认任务均未切换。
 
 相关原创离线回归：
