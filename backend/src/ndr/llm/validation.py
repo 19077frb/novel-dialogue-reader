@@ -38,6 +38,7 @@ class LabelingTargets:
     confirmed_names: tuple[str, ...] = ()
     character_ids: tuple[str, ...] = ()
     require_display_names: bool = False
+    known_declaration_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -409,6 +410,8 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
             ))
         if (targets.require_display_names or isinstance(output, ExpressionLlmOutput)) and (
             not valid_display_name(speaker.name)
+            and not (speaker.name is None and speaker.character_id
+                     and speaker.character_id in targets.known_declaration_ids)
         ):
             issues.append(ValidationIssue(
                 "missing_speaker_name", "新人物必须在 name 填写简短姓名或称呼，详细描述另填",

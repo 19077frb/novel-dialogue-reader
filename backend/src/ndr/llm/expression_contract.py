@@ -51,7 +51,7 @@ def has_owner_contract(label: QuoteLabel) -> bool:
     )
 
 
-def expression_output_json_schema() -> dict[str, Any]:
+def expression_output_json_schema(*, known_character_ids: tuple[str, ...] = ()) -> dict[str, Any]:
     """Describe the same owner field relationships enforced at runtime."""
     schema = ExpressionLlmOutput.model_json_schema()
     label = schema["$defs"]["ExpressionQuoteLabel"]
@@ -101,5 +101,21 @@ def expression_output_json_schema() -> dict[str, Any]:
     ]
     speaker = schema["$defs"]["NewSpeaker"]
     speaker["required"].append("name")
-    speaker["properties"]["name"] = {"type": "string", "minLength": 1, "maxLength": 32}
+    named = {"type": "string", "minLength": 1, "maxLength": 32}
+    speaker["properties"]["name"] = (
+        named if not known_character_ids else {"anyOf": [named, {"type": "null"}]}
+    )
+    if known_character_ids:
+        speaker["allOf"] = [
+            {
+                "if": {
+                    "required": ["character_id"],
+                    "properties": {
+                        "character_id": {"enum": list(known_character_ids)},
+                    },
+                },
+                "then": {"properties": {"evidence_refs": {"minItems": 1}}},
+                "else": {"properties": {"name": named}},
+            }
+        ]
     return schema

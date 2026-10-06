@@ -54,6 +54,8 @@ class SpeakerRegistry:
                               if item.character_id == character_id), None)
             if character is not None:
                 canonical_name = character.canonical_name
+                if self.state.production_expression_task is not None:
+                    description = character.description
         named = self.state.find_by_character(character_id)
         named = named or (
             self.state.find_by_name(canonical_name)

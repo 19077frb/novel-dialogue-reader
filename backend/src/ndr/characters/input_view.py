@@ -56,6 +56,8 @@ def project_identity_state(state: SceneState, people, version, *, reading_mode, 
                                   if p.character_id in projected]
     state.book_characters = list(projected.values())
     state.projected_identity_input = True
+    state.identity_input_horizon = horizon
+    state.identity_input_mode = reading_mode.value
     for slot in state.participants:
         person = projected.get(slot.character_id)
         slot.canonical_name = person.canonical_name if person else ""

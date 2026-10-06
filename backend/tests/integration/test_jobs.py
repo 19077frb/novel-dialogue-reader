@@ -108,6 +108,238 @@ def _run_with_fake(settings: Settings, job_id: str, adapter: FakeProviderAdapter
         engine.dispose()
 
 
+class ShortJobAdapter(FakeProviderAdapter):
+    def __init__(self, *, kind="speech", bad_first=False, known_usage=True, discover=False):
+        super().__init__()
+        self.kind, self.bad_first = kind, bad_first
+        self.known_usage, self.discover = known_usage, discover
+
+    async def generate_labels(self, payload):
+        self.calls.append({"kind": "labels", "payload": deepcopy(payload)})
+        data = json.loads(payload["messages"][1]["content"])
+        assert payload["output_protocol"] == "expression-production-1"
+        assert "compiler_task_fingerprint" in payload
+        evidence = next(r["ref"] for r in data["context"] if r["text"].strip()
+                        and r["ref"] not in data["targets"]
+                        and r["ref"] not in data["gap_next_quote"]) if any(
+                            r["text"].strip() and r["ref"] not in data["targets"]
+                            and r["ref"] not in data["gap_next_quote"] for r in data["context"]
+                        ) else data["targets"][0]
+        result = {"labels": [{"q": q, "kind": self.kind,
+                              "character": "N1" if self.discover else data["candidates"][0]["id"],
+                              "basis": "style_only", "evidence": [evidence]}
+                             for q in data["targets"]]}
+        if self.discover:
+            result["new_characters"] = [{"ref": "N1", "name": "路人", "description": "匿名路人",
+                                         "evidence": [evidence]}]
+        if self.bad_first and len(self.calls) == 1:
+            result["labels"] = []
+        result["_usage"] = ({"input_tokens": 10, "output_tokens": 20, "total_tokens": 30,
+                             "unknown": False} if self.known_usage else {"unknown": True})
+        return result
+
+
+def test_short_protocol_rejects_unknown_version_before_creating_job(
+    fake_provider_client, migrated_settings,
+):
+    data = _import(fake_provider_client)
+    profile = _fake_profile(fake_provider_client)
+    response = fake_provider_client.post("/api/jobs", json={
+        "book_id": data["book_id"], "profile_id": profile, "mode": "process",
+        "range": {"output_protocol": "unrecognized"}, "budget": {},
+        "idempotency_key": "invalid-short", "run_now": False,
+    })
+    assert response.status_code == 422, response.text
+    engine, factory = _factory(migrated_settings)
+    try:
+        with factory() as session:
+            assert not list(session.scalars(select(Job).where(Job.idempotency_key == "invalid-short")))
+    finally:
+        engine.dispose()
+
+
+def test_short_chapter_job_uses_confirmed_roster_without_eager_scene_slots(
+    fake_provider_client, migrated_settings,
+):
+    client = fake_provider_client
+    data = _import(client)
+    profile = _fake_profile(client)
+    chapter = client.get(f"/api/books/{data['book_id']}/chapters").json()["data"][0]
+    path = f"/api/books/{data['book_id']}/chapters/{chapter['id']}/character-roster"
+    revision = client.get(path).json()["data"]["version"]
+    response = client.put(path, json={"candidates": [{"temp_ref": "manual",
+        "canonical_name": "少女", "description": "持伞的人物", "aliases": []},
+        {"temp_ref": "other", "canonical_name": "少年", "description": "递外套的人物", "aliases": []}],
+        "pov_temp_ref": "manual", "expected_version": revision})
+    assert response.status_code == 200, response.text
+    people_ids = {c["character_id"] for c in response.json()["data"]["candidates"]}
+    engine, factory = _factory(migrated_settings)
+    try:
+        with factory() as session:
+            cutoff = session.scalar(select(Quote).order_by(Quote.start_cp)).end_cp
+        job = _create_job(client, data["book_id"], profile, key="short-confirmed-chapter",
+            range={"chapter_id": chapter["id"], "start_cp": 0, "end_cp": cutoff,
+                   "output_protocol": "expression-production-1"}, reading_mode="reread")
+        adapter = ShortJobAdapter()
+        outcome = _run_with_fake(migrated_settings, job["id"], adapter)
+        assert outcome.state is JobState.COMPLETED, outcome.errors
+        request = json.loads(adapter.calls[0]["payload"]["messages"][1]["content"])
+        assert {c["name"] for c in request["candidates"]} == {"少女", "少年"}
+        assert request["pov"] is not None
+        with factory() as session:
+            groups = list(session.scalars(select(SpeakerGroup)))
+            assert len(groups) == 1 and groups[0].character_id in people_ids
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("stale", [True, False])
+def test_short_jobs_reject_stale_identity_bindings_and_review_without_old_answers(
+    fake_provider_client, migrated_settings, stale,
+):
+    data = _import(fake_provider_client)
+    profile = _fake_profile(fake_provider_client)
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            version = session.scalar(select(BookVersion))
+            cutoff = session.scalar(select(Quote).order_by(Quote.start_cp)).end_cp
+            person = BookCharacter(book_version_id=version.id, canonical_name="少女",
+                                   source="USER", user_confirmed=True, aliases_json="[]")
+            session.add(person)
+            session.flush()
+            person_id = person.id
+        job = _create_job(fake_provider_client, data["book_id"], profile, key="short-review",
+            range={"start_cp": 0, "end_cp": cutoff, "output_protocol": "expression-production-1"},
+            budget={"max_recheck_rounds": 0 if stale else 1, "max_format_retries": 2},
+            reading_mode="reread")
+
+        class CallbackAdapter(ShortJobAdapter):
+            async def generate_labels(self, payload):
+                result = await super().generate_labels(payload)
+                if stale:
+                    with transaction(factory) as session:
+                        session.get(BookCharacter, person_id).canonical_name = "在途改名"
+                elif len(self.calls) == 2:
+                    sent = json.dumps(payload["messages"], ensure_ascii=False)
+                    assert "candidate_hints" not in sent and "旧候选" not in sent
+                    assert "独立复核" in sent
+                    with transaction(factory) as session:
+                        annotation = session.scalar(select(Annotation))
+                        annotation.user_locked = True
+                        annotation.source = AnnotationSource.USER
+                    for label in result["labels"]:
+                        label["kind"] = "quotation"
+                return result
+
+        adapter = CallbackAdapter(kind="thought")
+        result = _run_with_fake(migrated_settings, job["id"], adapter)
+        assert result.state is (JobState.FAILED if stale else JobState.COMPLETED), result.errors
+        assert len(adapter.calls) == (1 if stale else 2)
+        with factory() as session:
+            annotations = list(session.scalars(select(Annotation)))
+            runs = list(session.scalars(select(InferenceRun).where(InferenceRun.job_id == job["id"])))
+            assert len(runs) == len(adapter.calls)
+            if stale:
+                assert not annotations
+                assert runs[0].state is InferenceRunState.FAILED
+                assert json.loads(runs[0].usage_json)["total_tokens"] == 30
+            else:
+                assert annotations[0].kind is QuoteKind.THOUGHT
+                assert annotations[0].source is AnnotationSource.USER
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
+@pytest.mark.parametrize("mode", ["initial", "reread"])
+def test_real_jobs_short_protocol_keeps_stable_owner_visibility_and_replay(
+    fake_provider_client, migrated_settings, kind, mode,
+):
+    data = _import(fake_provider_client)
+    profile = _fake_profile(fake_provider_client)
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            version = session.scalar(select(BookVersion))
+            quote = session.scalar(select(Quote).order_by(Quote.start_cp))
+            cutoff, quote_id = quote.end_cp, quote.id
+            person = BookCharacter(book_version_id=version.id, canonical_name="未来姓名",
+                description="未来说明", aliases_json='["未来别名"]', source="USER", user_confirmed=True,
+                presentation_history_json=json.dumps([{"cp": len(SAMPLE) - 1,
+                    "name": "未来姓名", "description": "未来说明", "identity": "future"}]))
+            session.add(person)
+            session.flush()
+            person_id = person.id
+        request_range = {"start_cp": 0, "end_cp": cutoff,
+                         "output_protocol": "expression-production-1"}
+        job = _create_job(fake_provider_client, data["book_id"], profile, key="short-main",
+                          range=request_range, reading_mode=mode, visible_horizon_cp=cutoff)
+        adapter = ShortJobAdapter(kind=kind)
+        outcome = _run_with_fake(migrated_settings, job["id"], adapter)
+        assert outcome.state is JobState.COMPLETED, outcome.errors
+        sent = json.dumps(adapter.calls[0]["payload"]["messages"], ensure_ascii=False)
+        if mode == "initial":
+            assert all(value not in sent for value in ("未来姓名", "未来别名", "未来说明"))
+        else:
+            assert all(value in sent for value in ("未来姓名", "未来别名", "未来说明"))
+        with transaction(factory) as session:
+            annotation = session.scalar(select(Annotation).where(Annotation.quote_id == quote_id))
+            group = session.get(SpeakerGroup, annotation.speaker_id)
+            assert annotation.kind is QuoteKind(kind)
+            assert annotation.status is AnnotationStatus.PROVISIONAL
+            assert group.character_id == person_id
+            assert group.canonical_name == "未来姓名"
+            if mode == "initial":
+                from ndr.characters.visibility import visible_value
+                fallback = {"private_identity": "private", "name": "future", "description": "future"}
+                assert visible_value(group.presentation_history_json, cutoff, fallback=fallback)["name"] == ""
+                assert visible_value(group.presentation_history_json, len(SAMPLE), fallback=fallback)["name"] == "未来姓名"
+            assert session.get(BookCharacter, person_id).canonical_name == "未来姓名"
+        replay = _create_job(fake_provider_client, data["book_id"], profile, key="short-replay",
+                             range=request_range, reading_mode=mode, visible_horizon_cp=cutoff)
+        replay_result = _run_with_fake(migrated_settings, replay["id"], adapter)
+        assert replay_result.state is JobState.COMPLETED
+        assert replay_result.cached_windows == 1 and replay_result.calls == 0
+        assert len(adapter.calls) == 1
+        with factory() as session:
+            assert all(a.status is AnnotationStatus.PROVISIONAL for a in session.scalars(select(Annotation)))
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("known_usage", [True, False])
+def test_short_jobs_format_retry_is_metered_and_unknown_usage_stops(
+    fake_provider_client, migrated_settings, known_usage,
+):
+    data = _import(fake_provider_client)
+    profile = _fake_profile(fake_provider_client)
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            cutoff = session.scalar(select(Quote).order_by(Quote.start_cp)).end_cp
+        job = _create_job(fake_provider_client, data["book_id"], profile, key="short-bad",
+            range={"start_cp": 0, "end_cp": cutoff, "output_protocol": "expression-production-1"},
+            budget={"max_format_retries": 1}, reading_mode="reread")
+        adapter = ShortJobAdapter(bad_first=True, known_usage=known_usage, discover=True)
+        result = _run_with_fake(migrated_settings, job["id"], adapter)
+        assert result.state is (JobState.COMPLETED if known_usage else JobState.FAILED), result.errors
+        assert len(adapter.calls) == (2 if known_usage else 1)
+        with factory() as session:
+            runs = list(session.scalars(select(InferenceRun).where(InferenceRun.job_id == job["id"])))
+            assert len(runs) == len(adapter.calls)
+            assert all((r.usage_json is not None) is known_usage for r in runs)
+            if known_usage:
+                assert sum(json.loads(r.usage_json)["total_tokens"] for r in runs) == 60
+                people = list(session.scalars(select(BookCharacter)))
+                assert len(people) == 1 and people[0].canonical_name == "路人"
+                assert not people[0].user_confirmed
+            else:
+                assert not list(session.scalars(select(Annotation)))
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.parametrize("mode,legacy", [("initial", False), ("reread", False), ("initial", True)])
 def test_actual_job_request_projects_restored_identity_and_future_changes_do_not_bust_cache(
     fake_provider_client, migrated_settings, mode, legacy,

@@ -311,6 +311,9 @@ async def run_window(
 
     policy = retry_policy or RetryPolicy()
     protocol = None
+    # Protocol-specific exemptions belong to this invocation, not a previous
+    # window processed with the same in-memory scene state.
+    state.production_expression_task = None
     if expression_task is not None:
         from ..evaluation.owner_constraints import VERSION, ConstrainedOwnerProtocol
         from ..llm.expression_compiler import compile_expression_output
@@ -318,6 +321,9 @@ async def run_window(
         expression_task = deepcopy(expression_task)
         owner_approvals = dict(owner_approvals) if owner_approvals is not None else None
         _validate_expression_task(expression_task, window, state, owner_approvals)
+        from ..llm.expression_task import ProjectedCompactTask
+        if isinstance(expression_task, ProjectedCompactTask):
+            state.production_expression_task = expression_task
         protocol = ConstrainedOwnerProtocol(expression_task)
     elif owner_approvals is not None:
         raise ValueError("Owner approval requires an explicit expression task")
@@ -443,8 +449,17 @@ async def run_window(
 
 def _validate_expression_task(task, window, state, approvals):  # noqa: ANN001
     from ..llm.expression_compiler import validate_initial_identity_fields
+    from ..llm.expression_task import ProjectedCompactTask
 
     validate_initial_identity_fields(task)
+    if isinstance(task, ProjectedCompactTask):
+        if (not state.projected_identity_input
+                or task.visible_horizon_cp != state.identity_input_horizon
+                or task.reading_mode != state.identity_input_mode):
+            raise ValueError("Production expression differs from its server visibility view")
+        actual = {p.character_id: p.as_dict() for p in state.identity_characters}
+        if actual != {p["character_id"]: p for p in task.effective_profiles}:
+            raise ValueError("Production expression profiles differ from the actual state")
     if tuple(task.references[q] for q in task.quote_ids) != tuple(window.target_quote_ids):
         raise ValueError("Expression targets differ from the actual window")
     fragments = {f.fragment_id: f for f in window.fragments}
@@ -486,6 +501,8 @@ def _targets_for(window, state: SceneState):  # noqa: ANN001, ANN202
 
     return LabelingTargets(
         require_display_names=True,
+        known_declaration_ids=tuple(item.character_id for item in state.identity_characters)
+        if state.production_expression_task is not None else (),
         character_ids=tuple(item.character_id for item in state.identity_characters),
         quote_ids=tuple(window.target_quote_ids),
         gap_ids=tuple(

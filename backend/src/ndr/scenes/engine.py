@@ -159,7 +159,13 @@ def _ensure_group(
     scene_id: str,
     visible_from_cp: int | None = None,
 ) -> str:
-    from ..characters.visibility import baseline, capture, history, initialize
+    from ..characters.visibility import (
+        baseline,
+        capture,
+        history,
+        identity_presentation_history,
+        initialize,
+    )
     from ..storage.models import BookVersion
     cp = visible_from_cp
     if cp is None:
@@ -168,9 +174,19 @@ def _ensure_group(
     # Confirmed book identities remain authoritative, regardless of who accepted the roster.
     character = session.get(BookCharacter, slot.character_id) if slot.character_id else None
     character_history = history(character) if character else []
-    if character_history:
+    projected = state.production_expression_task is not None
+    display_history = None
+    if projected and character is not None:
+        if character.id not in state.projected_presentation_cache:
+            version_id = session.get(Scene, scene_id).book_version_id
+            state.projected_presentation_cache[character.id] = identity_presentation_history(
+                character, session.get(BookVersion, version_id))
+        display_history = state.projected_presentation_cache[character.id]
+    if projected:
+        cp = max(cp, state.identity_input_horizon or 0)
+    elif character_history:
         cp = max(cp, max(item["cp"] for item in character_history))
-    if character is not None and (
+    if not projected and character is not None and (
         character.user_confirmed or character.confirmation_source == "automatic"
     ):
         slot.canonical_name = character.canonical_name or ""
@@ -178,11 +194,19 @@ def _ensure_group(
     if slot.group_id:
         row = session.get(SpeakerGroup, slot.group_id)
         if row is not None:
-            baseline(row)
+            if not projected:
+                baseline(row)
             row.canonical_name = slot.canonical_name or None
             row.description = slot.description or None
             row.character_id = slot.character_id
+            if projected and not history(row) and display_history:
+                row.presentation_history_json = json.dumps(display_history, ensure_ascii=False)
             capture(row, cp)
+            if projected and character is not None:
+                row.canonical_name = (display_history[-1]["name"] if display_history
+                                      else character.canonical_name) or None
+                row.description = (display_history[-1]["description"] if display_history
+                                   else character.description) or None
         return slot.group_id
     row = SpeakerGroup(
         scene_id=scene_id,
@@ -195,8 +219,16 @@ def _ensure_group(
     )
     session.add(row)
     session.flush()
-    initialize(row, cp, character)
+    if display_history:
+        row.presentation_history_json = json.dumps(display_history, ensure_ascii=False)
+    else:
+        initialize(row, cp, character if not projected else None)
     capture(row, cp)
+    if projected and character is not None:
+        row.canonical_name = (display_history[-1]["name"] if display_history
+                              else character.canonical_name) or None
+        row.description = (display_history[-1]["description"] if display_history
+                           else character.description) or None
     slot.group_id = row.id
     return row.id
 
@@ -213,6 +245,11 @@ def _discover_character(
     character = session.get(BookCharacter, character_id) if character_id else None
     if character is not None and character.book_version_id != version_id:
         raise ValueError("人物 ID 不属于当前书籍版本")
+    if (state.production_expression_task is not None and declaration.character_id
+            and character is not None):
+        # A supplied ID is already authoritative; never refill its visible
+        # profile from mutable future metadata or treat old fields as new facts.
+        return character.id
     # With a confirmed chapter roster, a genuinely new named person discovered
     # during attribution must also be available to subsequent chapter analysis.
     if (character is None and (state.confirmed_characters or state.explicit_identity)
@@ -460,6 +497,9 @@ def apply_window(
     locked_quote_ids = set(locked_quote_ids or ())
 
     targets = LabelingTargets(
+        known_declaration_ids=tuple(item.character_id for item in state.identity_characters)
+        if expected_schema_version == "1.1" and state.production_expression_task is not None
+        else (),
         character_ids=tuple(item.character_id for item in state.identity_characters),
         quote_ids=tuple(window.target_quote_ids),
         gap_ids=tuple(

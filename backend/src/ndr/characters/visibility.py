@@ -46,6 +46,26 @@ def initialize(row, cp, character=None):
         capture(row, cp)
 
 
+def identity_presentation_history(character, version):
+    """Materialize accepted ledger reveal times for display, never for model input."""
+    from .facts import read_identity_records, visible_identity_profile
+
+    records = read_identity_records(character, version)
+    if not records:
+        return history(character)
+    positions = sorted({0, *(max((r.visible_from_cp, *(link.visible_from_cp
+        for link in r.identity_links))) for r in records
+        if r.accepted and all(link.accepted for link in r.identity_links))})
+    result = []
+    for cp in positions:
+        profile = visible_identity_profile(character, version, horizon=cp)
+        row = {"cp": cp, "identity": identity(character), "name": profile["name"] or "",
+               "description": profile["description"]}
+        if not result or any(row[key] != result[-1][key] for key in ("name", "description")):
+            result.append(row)
+    return result
+
+
 def visible_value(raw, horizon, *, fallback):
     if horizon is None:
         return fallback

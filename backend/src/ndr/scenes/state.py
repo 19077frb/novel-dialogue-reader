@@ -123,6 +123,10 @@ class SceneState:
     explicit_identity: bool = False
     # Ephemeral input flag; restored jobs re-project using their frozen range version.
     projected_identity_input: bool = False
+    identity_input_horizon: int | None = None
+    identity_input_mode: str = "initial"
+    production_expression_task: Any = None
+    projected_presentation_cache: dict[str, list[dict]] = field(default_factory=dict)
     known_characters: dict[str, str] = field(default_factory=dict)
     unresolved: list[str] = field(default_factory=list)
     version: int = 1

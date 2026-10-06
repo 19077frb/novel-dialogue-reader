@@ -208,6 +208,10 @@ class CompactTask:
 
 def compile_output(payload: str | dict[str, Any], task: CompactTask) -> LlmOutput:
     """Compile a fully valid dependency block, never guess or partially commit."""
+    from ..characters.names import valid_display_name
+    from ..llm.expression_task import known_declaration_ids
+
+    supplied_ids = known_declaration_ids(task)
     output = CompactOutput.model_validate(
         load_json_object(payload) if isinstance(payload, str) else payload
     )
@@ -309,8 +313,10 @@ def compile_output(payload: str | dict[str, Any], task: CompactTask) -> LlmOutpu
                     scene_ref=scene,
                     first_quote_id=task.references[q],
                     character_id=person.character_id if person else None,
-                    name=person.name if person else discovery.name,
-                    description=(person.description or person.name)
+                    name=(person.name if valid_display_name(person.name) else None)
+                    if person and person.character_id in supplied_ids
+                    else person.name if person else discovery.name,
+                    description=(person.description or person.name or "身份资料尚未揭示")
                     if person
                     else discovery.description,
                     aliases=list(person.aliases) if person else [],
@@ -340,6 +346,7 @@ def compile_output(payload: str | dict[str, Any], task: CompactTask) -> LlmOutpu
         evidence_ids=tuple(task.references.values()),
         character_ids=tuple(c.character_id for c in task.candidates if c.character_id),
         require_display_names=True,
+        known_declaration_ids=supplied_ids,
     )
     report = validate_output(compiled, targets)
     if not report.ok:

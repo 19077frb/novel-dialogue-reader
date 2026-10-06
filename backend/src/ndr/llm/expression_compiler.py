@@ -11,6 +11,7 @@ from ..evaluation.compact import CompactTask, compile_output
 from ..evaluation.owner_constraints import ConstrainedOwnerProtocol
 from .errors import InvalidModelOutput
 from .expression_contract import EXPRESSION_SCHEMA_VERSION, OWNER_KINDS, ExpressionLlmOutput
+from .expression_task import ProjectedCompactTask, known_declaration_ids
 from .validation import LabelingTargets, load_json_object, parse_and_validate
 
 COMPILER_VERSION = "domain-expression-compiler-1"
@@ -54,6 +55,9 @@ class ExpressionCompilation:
 def validate_initial_identity_fields(task: CompactTask) -> None:
     """Validate supplied field visibility, not the semantic truth of an identity."""
     task.__post_init__()
+    if isinstance(task, ProjectedCompactTask):
+        task.validate_effective_profiles()
+        return
     if task.reading_mode != "initial":
         return
     for candidate in task.candidates:
@@ -112,6 +116,7 @@ def compile_expression_output(
         character_ids=tuple(c.character_id for c in task.candidates if c.character_id),
         evidence_ids=tuple(task.references.values()),
         require_display_names=True,
+        known_declaration_ids=known_declaration_ids(task),
     )
     report = parse_and_validate(domain, targets, expected_schema_version=EXPRESSION_SCHEMA_VERSION)
     if not report.ok:

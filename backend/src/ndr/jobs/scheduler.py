@@ -44,6 +44,11 @@ from ..domain.enums import (
 from ..llm.adapter import FAKE_PROVIDER_PROTOCOL, PROTOCOL_CAPABILITIES, ProviderAdapter
 from ..llm.adapters import AdapterSpec, build_adapter
 from ..llm.errors import ProviderError, ProviderErrorKind
+from ..llm.expression_task import (
+    PRODUCTION_CACHE_VERSION,
+    PRODUCTION_EXPRESSION_VERSION,
+    build_production_expression_task,
+)
 from ..llm.prompts import LABELING_PROMPT_VERSION
 from ..llm.prompts.labeling import DATA_DELIMITER, escape_data_markers
 from ..llm.validation import parse_and_validate
@@ -51,7 +56,13 @@ from ..scenes.acceptance import ACCEPTANCE_POLICY_VERSION
 from ..scenes.engine import apply_window
 from ..scenes.runner import _messages_for, _restore_output_references, _targets_for
 from ..scenes.state import ConfirmedCharacter, SceneState, SpeakerSlot
-from ..storage.cache import CacheKeyParts, ResultCacheStore, compute_cache_key, fingerprint
+from ..storage.cache import (
+    CACHE_SCHEMA_VERSION,
+    CacheKeyParts,
+    ResultCacheStore,
+    compute_cache_key,
+    fingerprint,
+)
 from ..storage.chapter_status import complete_chapter_automatically
 from ..storage.models import (
     Annotation,
@@ -239,22 +250,38 @@ def _apply_confirmed_roster(
 def _prepare_identity_view(session, job, version, state, window=None, *, people=None):
     requested = _range_of(job).get("identity_input_version")
     if requested is None:
-        return True, None
+        return (
+            (False, "短协议任务缺少冻结的人物输入版本")
+            if _range_of(job).get("output_protocol")
+            else (True, None)
+        )
     if requested != IDENTITY_INPUT_VERSION:
         return False, "人物输入版本不受支持，不能继续旧任务"
     mode = _reading_mode_of(job)
     horizon = version.canonical_length_cp
     if mode is ReadingMode.INITIAL:
-        horizon = max((f.end_cp for f in window.fragments), default=0) if window else int(
-            _range_of(job).get("end_cp") or version.canonical_length_cp)
+        horizon = (
+            max((f.end_cp for f in window.fragments), default=0)
+            if window
+            else int(_range_of(job).get("end_cp") or version.canonical_length_cp)
+        )
         explicit = _range_of(job).get("visible_horizon_cp")
         if explicit is not None:
             horizon = min(horizon, int(explicit))
     try:
-        project_identity_state(state, people if people is not None else
-                               list_book_characters(session, version), version,
-                               reading_mode=mode, horizon=horizon)
+        project_identity_state(
+            state,
+            people if people is not None else list_book_characters(session, version),
+            version,
+            reading_mode=mode,
+            horizon=horizon,
+        )
         state.sync_confirmed_participants()
+        output_protocol = _range_of(job).get("output_protocol")
+        if output_protocol is not None and output_protocol != PRODUCTION_EXPRESSION_VERSION:
+            raise ValueError("不支持的对白输出协议")
+        if output_protocol and window is not None:
+            state.production_expression_task = build_production_expression_task(window, state)
     except (ValueError, TypeError, KeyError) as exc:
         return False, f"人物资料无法安全读取：{exc}"
     return True, None
@@ -378,18 +405,26 @@ def _cache_key_for(
     snapshot = snapshot or {}
     # 缓存必须覆盖实际发给模型的动态人物状态，而不只是预先规划的正文片段。
     messages = _request_payload_for(window=window, state=state, correction=prompt_hint)["messages"]
+    expression = state.production_expression_task
     return compute_cache_key(
         CacheKeyParts(
             book_version_id=version.id,
             target_ids=list(window.target_quote_ids),
-            input_fingerprint=fingerprint(messages),
+            input_fingerprint=fingerprint({"messages": messages, "task": expression.fingerprint()})
+            if expression
+            else fingerprint(messages),
             model=str(snapshot.get("model", "")),
             params=snapshot.get("params", {}) or {},
-            protocol_version=(f"{snapshot.get('protocol', '')}:{snapshot.get('base_url', '')}"
-                              + (":" + str(_range_of(job)["identity_input_version"])
-                                 if "identity_input_version" in _range_of(job) else "")),
-            prompt_version=LABELING_PROMPT_VERSION,
-            schema_version="1.0",
+            protocol_version=(
+                f"{snapshot.get('protocol', '')}:{snapshot.get('base_url', '')}"
+                + (
+                    ":" + str(_range_of(job)["identity_input_version"])
+                    if "identity_input_version" in _range_of(job)
+                    else ""
+                )
+            ),
+            prompt_version=PRODUCTION_EXPRESSION_VERSION if expression else LABELING_PROMPT_VERSION,
+            schema_version="1.1" if expression else "1.0",
             policy_version=window.policy_version,
             dependency_hash=window.dependency_hash,
             reading_mode=_reading_mode_of(job).value,
@@ -437,13 +472,48 @@ def _apply_payload(
         if isinstance(raw, dict)
         else raw
     )
-    report = parse_and_validate(payload, _targets_for(window, state))
+    compilation = None
+    cache_payload = payload
+    expected_version = "1.0"
+    if state.production_expression_task is not None:
+        from pydantic import ValidationError
+
+        from ..llm.errors import InvalidModelOutput
+        from ..llm.expression_compiler import compile_expression_output
+        from ..scenes.runner import _validate_expression_task
+
+        try:
+            _validate_expression_task(state.production_expression_task, window, state, None)
+        except ValueError as exc:
+            return False, ["invalid_expression_input"], [str(exc)], []
+        try:
+            compilation = compile_expression_output(payload, state.production_expression_task)
+        except (ValueError, InvalidModelOutput, ValidationError) as exc:
+            return False, ["invalid_expression_output"], [str(exc)], []
+        payload = compilation.output
+        if (
+            attribution_only
+            and not payload.scene_updates
+            and all(d.decision.value == "CONTINUE" for d in payload.gap_decisions)
+        ):
+            payload = payload.model_copy(update={"gap_decisions": []})
+        expected_version = "1.1"
+    report = parse_and_validate(
+        payload, _targets_for(window, state), expected_schema_version=expected_version
+    )
     if not report.ok or report.output is None:
         return False, report.error_codes, report.messages, list(report.warnings)
-    if attribution_only and (report.output.scene_updates or report.output.gap_decisions
-                             or report.output.identity_proposals):
-        return (False, ["review_structure_changed"],
-                ["复核仅修改对白归属与证据，不切分场景或合并拆分人物"], [])
+    if attribution_only and (
+        report.output.scene_updates
+        or report.output.gap_decisions
+        or report.output.identity_proposals
+    ):
+        return (
+            False,
+            ["review_structure_changed"],
+            ["复核仅修改对白归属与证据，不切分场景或合并拆分人物"],
+            [],
+        )
     quote_positions, gap_positions, evidence_positions = _positions(inputs, window)
     # 人工确认过的对白（user_locked）不能被模型结果覆盖，也不能被自动 merge/split。
     locked_quote_ids = {
@@ -483,12 +553,18 @@ def _apply_payload(
         source=AnnotationSource.MODEL,
         run_id=run_id,
         preserve_existing_candidates=preserve_existing_candidates,
+        expected_schema_version=expected_version,
+        acceptance_ceilings=compilation.acceptance_ceilings if compilation else None,
     )
     if not result.validation_ok:
         return False, result.validation_codes, result.warnings, list(report.warnings)
     ResultCacheStore(session).put(
         cache_key=cache_key,
-        result_json=json.dumps(report.output.model_dump(mode="json"), ensure_ascii=False),
+        result_json=json.dumps(
+            cache_payload if compilation else report.output.model_dump(mode="json"),
+            ensure_ascii=False,
+        ),
+        schema_version=PRODUCTION_CACHE_VERSION if compilation else CACHE_SCHEMA_VERSION,
         dependency_hash=window.dependency_hash,
         created_run_id=run_id,
     )
@@ -497,31 +573,49 @@ def _apply_payload(
 
 def _review_state(session: Session, job: Job, window) -> SceneState:  # noqa: ANN001
     state = _load_state(job)
-    annotation = session.scalar(select(Annotation).where(
-        Annotation.quote_id == window.target_quote_ids[0]))
+    annotation = session.scalar(
+        select(Annotation).where(Annotation.quote_id == window.target_quote_ids[0])
+    )
     scene = session.get(Scene, annotation.scene_id) if annotation and annotation.scene_id else None
     if scene is None:
         raise ValueError("复核对白缺少既有场景")
     state.scene_id, state.scene_ref, state.start_cp = scene.id, window.scene_ref, scene.start_cp
     state.last_quote_id = state.last_speaker_ref = None
     state.recent_turns = []
-    state.participants = [SpeakerSlot(
-        display_label=group.display_label, first_quote_id=group.first_quote_id or "",
-        group_id=group.id, character_id=group.character_id,
-        canonical_name=group.canonical_name or "", description=group.description or "",
-    ) for group in session.scalars(select(SpeakerGroup).where(
-        SpeakerGroup.scene_id == scene.id).order_by(SpeakerGroup.display_label))]
+    state.participants = [
+        SpeakerSlot(
+            display_label=group.display_label,
+            first_quote_id=group.first_quote_id or "",
+            group_id=group.id,
+            character_id=group.character_id,
+            canonical_name=group.canonical_name or "",
+            description=group.description or "",
+        )
+        for group in session.scalars(
+            select(SpeakerGroup)
+            .where(SpeakerGroup.scene_id == scene.id)
+            .order_by(SpeakerGroup.display_label)
+        )
+    ]
     return state
 
 
 def _run_recheck(
-    session_factory: sessionmaker[Session], settings: Settings, **kwargs,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    **kwargs,
 ) -> dict[str, int]:
     policy = kwargs["policy"]
     if policy.recheck_max_rounds <= 0:
         return _run_recheck_pass(session_factory, settings, **kwargs)
-    stats = {"windows": 0, "targets": 0, "calls": 0, "restored_evidence": 0,
-             "unknown_outcome": 0, "aborted": 0}
+    stats = {
+        "windows": 0,
+        "targets": 0,
+        "calls": 0,
+        "restored_evidence": 0,
+        "unknown_outcome": 0,
+        "aborted": 0,
+    }
     window_id, job_id = kwargs["window"].window_id, kwargs["job_id"]
     with session_factory() as session:
         job = session.get(Job, job_id)
@@ -534,11 +628,18 @@ def _run_recheck(
             job = session.get(Job, job_id)
             if job.state in STOP_STATES or job.state is JobState.PAUSING:
                 return stats
-            job.progress_json = json.dumps({"stage": "rechecking", "window_id": window_id,
-                "review_round": index + 1, "review_rounds": policy.recheck_max_rounds})
+            job.progress_json = json.dumps(
+                {
+                    "stage": "rechecking",
+                    "window_id": window_id,
+                    "review_round": index + 1,
+                    "review_rounds": policy.recheck_max_rounds,
+                }
+            )
             session.commit()
-        current = _run_recheck_pass(session_factory, settings, **kwargs, full_window=True,
-                                   round_index=index + 1)
+        current = _run_recheck_pass(
+            session_factory, settings, **kwargs, full_window=True, round_index=index + 1
+        )
         for key in stats:
             stats[key] += current[key]
         if current["unknown_outcome"]:
@@ -546,14 +647,17 @@ def _run_recheck(
         with session_factory() as session:
             job = session.get(Job, job_id)
             if job.state in STOP_STATES or (
-                job.state is JobState.PAUSING and not current.get("round_completed")):
+                job.state is JobState.PAUSING and not current.get("round_completed")
+            ):
                 return stats
             checkpoint = _json_of(job.checkpoint_json)
             checkpoint.setdefault("review_rounds", {})[window_id] = (
-                index + 1 if current.get("round_completed") else index)
+                index + 1 if current.get("round_completed") else index
+            )
             if current.get("aborted"):
                 checkpoint.setdefault("review_stopped", {})[window_id] = current.get(
-                    "stop_reason", "复核提前结束，已保留首次有效结果。")
+                    "stop_reason", "复核提前结束，已保留首次有效结果。"
+                )
             job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
             session.commit()
         if current.get("aborted") or not current["windows"]:
@@ -582,21 +686,34 @@ def _run_recheck_pass(
     复核失败不改变首次结果；只有超时（结果未知、可能已计费）才升级为人工对账。
     """
 
-    stats = {"windows": 0, "targets": 0, "calls": 0, "restored_evidence": 0,
-             "unknown_outcome": 0, "aborted": 0, "round_completed": 0}
+    stats = {
+        "windows": 0,
+        "targets": 0,
+        "calls": 0,
+        "restored_evidence": 0,
+        "unknown_outcome": 0,
+        "aborted": 0,
+        "round_completed": 0,
+    }
     if adapter is None:
         return stats
 
     with session_factory() as session:
-        query = select(Annotation, Quote, Bundle(
-            "identity", SpeakerGroup.canonical_name, SpeakerGroup.character_id))
-        query = (query
-            .join(Quote, Quote.id == Annotation.quote_id)
+        query = select(
+            Annotation,
+            Quote,
+            Bundle("identity", SpeakerGroup.canonical_name, SpeakerGroup.character_id),
+        )
+        query = (
+            query.join(Quote, Quote.id == Annotation.quote_id)
             .outerjoin(SpeakerGroup, SpeakerGroup.id == Annotation.speaker_id)
-            .where(Quote.id.in_(window.target_quote_ids)))
+            .where(Quote.id.in_(window.target_quote_ids))
+        )
         if not full_window:
-            query = query.where(Annotation.user_locked.is_(False), Annotation.status.in_(
-                (AnnotationStatus.UNKNOWN, AnnotationStatus.PROVISIONAL)))
+            query = query.where(
+                Annotation.user_locked.is_(False),
+                Annotation.status.in_((AnnotationStatus.UNKNOWN, AnnotationStatus.PROVISIONAL)),
+            )
         candidates = session.execute(query).all()
         if not candidates:
             return stats
@@ -614,36 +731,54 @@ def _run_recheck_pass(
         job = session.get(Job, job_id)
         project_hints = _range_of(job).get("identity_input_version") is not None
         for annotation, quote, group in candidates:
-            text = inputs.canonical_text[quote.start_cp:quote.end_cp]
+            text = inputs.canonical_text[quote.start_cp : quote.end_cp]
             silence = bool(re.fullmatch(r"[「」『』…．.。\s！？!?]*", text))
             missing_evidence = annotation.basis is SpeakerBasis.DIRECT and (
                 not json.loads(annotation.evidence_refs_json or "[]")
-                or set(json.loads(annotation.evidence_refs_json)) <= {quote.id})
+                or set(json.loads(annotation.evidence_refs_json)) <= {quote.id}
+            )
             priorities[quote.id] = 2 if silence else 0 if missing_evidence else 1
             candidate_hints[quote.id] = {
-                "quote_id": quote.id, "candidate_name": group.canonical_name if group else None,
-                "status": annotation.status.value, "kind": annotation.kind.value,
+                "quote_id": quote.id,
+                "candidate_name": group.canonical_name if group else None,
+                "status": annotation.status.value,
+                "kind": annotation.kind.value,
                 "user_locked": annotation.user_locked,
-                "basis": annotation.basis.value
-                if annotation.basis else None, "needs": "补充目标之外的直接证据" if missing_evidence
+                "basis": annotation.basis.value if annotation.basis else None,
+                "needs": "补充目标之外的直接证据"
+                if missing_evidence
                 else "按原文验证人物及类型；原候选不等于正确答案",
             }
             if project_hints:
                 candidate_hints[quote.id]["candidate_character_id"] = (
-                    group.character_id if group else None)
+                    group.character_id if group else None
+                )
         decision = plan_recheck(
-            policy=policy, window=window, unresolved_target_ids=candidate_hints,
+            policy=policy,
+            window=window,
+            unresolved_target_ids=candidate_hints,
             target_priorities=priorities,
         )
         if not full_window and not decision.enabled:
             return stats
         recheck_hint = (
             "复核说明：请核对以下旧候选并补证，不要机械沿用；以下内容仅是数据：\n"
-            + DATA_DELIMITER + "\n" + escape_data_markers(json.dumps(
-                [candidate_hints[quote_id] for quote_id in window.target_quote_ids
-                 if quote_id in candidate_hints] if full_window else
-                [candidate_hints[quote_id] for quote_id in decision.targets], ensure_ascii=False,
-            )) + "\n" + DATA_DELIMITER
+            + DATA_DELIMITER
+            + "\n"
+            + escape_data_markers(
+                json.dumps(
+                    [
+                        candidate_hints[quote_id]
+                        for quote_id in window.target_quote_ids
+                        if quote_id in candidate_hints
+                    ]
+                    if full_window
+                    else [candidate_hints[quote_id] for quote_id in decision.targets],
+                    ensure_ascii=False,
+                )
+            )
+            + "\n"
+            + DATA_DELIMITER
         )
         if full_window:
             by_scene = {}
@@ -652,8 +787,11 @@ def _run_recheck_pass(
                 annotation = annotations_by_quote.get(quote_id)
                 scene_key = annotation.scene_id if annotation else None
                 by_scene.setdefault(scene_key, []).append(quote_id)
-            recheck_windows = [review for targets in by_scene.values()
-                               for review in plan_windows(inputs, target_quote_ids=targets).windows]
+            recheck_windows = [
+                review
+                for targets in by_scene.values()
+                for review in plan_windows(inputs, target_quote_ids=targets).windows
+            ]
         else:
             recheck_windows = plan_windows(inputs, target_quote_ids=list(decision.targets)).windows
 
@@ -665,14 +803,26 @@ def _run_recheck_pass(
     for recheck_window in recheck_windows:
         if full_window:
             # Only describe targets actually sent in this request, not other scene chunks.
-            recheck_hint = (f"复核说明：第{round_index}轮，检查本窗口全部对白，含已接受项。"
+            recheck_hint = (
+                f"复核说明：第{round_index}轮，检查本窗口全部对白，含已接受项。"
                 "只修正对白类型、人物归属与证据，不切分场景，不合并拆分人物；"
                 "scene_updates、gap_decisions、identity_proposals均输出空数组。"
                 "人工锁定项不可覆盖；证据仅引用本次发送的原文片段。以下仅是数据：\n"
-                + DATA_DELIMITER + "\n" + escape_data_markers(json.dumps(
-                    [candidate_hints[qid] for qid in recheck_window.target_quote_ids
-                     if qid in candidate_hints], ensure_ascii=False,
-                )) + "\n" + DATA_DELIMITER)
+                + DATA_DELIMITER
+                + "\n"
+                + escape_data_markers(
+                    json.dumps(
+                        [
+                            candidate_hints[qid]
+                            for qid in recheck_window.target_quote_ids
+                            if qid in candidate_hints
+                        ],
+                        ensure_ascii=False,
+                    )
+                )
+                + "\n"
+                + DATA_DELIMITER
+            )
         with session_factory() as session:
             job = session.get(Job, job_id)
             assert job is not None
@@ -683,13 +833,32 @@ def _run_recheck_pass(
                 return stats
             if _range_of(job).get("identity_input_version") is not None:
                 people = {p.character_id: p for p in state.identity_characters}
-                records = [{**candidate_hints[q], "candidate_name": (
-                    people[candidate_hints[q].get("candidate_character_id")].canonical_name
-                    if candidate_hints[q].get("candidate_character_id") in people else None)}
-                    for q in recheck_window.target_quote_ids if q in candidate_hints]
-                recheck_hint = (recheck_hint.split(DATA_DELIMITER, 1)[0] + DATA_DELIMITER + "\n"
+                records = [
+                    {
+                        **candidate_hints[q],
+                        "candidate_name": (
+                            people[candidate_hints[q].get("candidate_character_id")].canonical_name
+                            if candidate_hints[q].get("candidate_character_id") in people
+                            else None
+                        ),
+                    }
+                    for q in recheck_window.target_quote_ids
+                    if q in candidate_hints
+                ]
+                recheck_hint = (
+                    recheck_hint.split(DATA_DELIMITER, 1)[0]
+                    + DATA_DELIMITER
+                    + "\n"
                     + escape_data_markers(json.dumps(records, ensure_ascii=False))
-                    + "\n" + DATA_DELIMITER)
+                    + "\n"
+                    + DATA_DELIMITER
+                )
+            expression_task = state.production_expression_task
+            if expression_task is not None:
+                recheck_hint = (
+                    "独立复核本次全部目标，只根据原文与人物资料判断。"
+                    "不提供初次答案；不得切场景，breaks输出空数组。"
+                )
             cache_key = _cache_key_for(
                 job=job,
                 version=version,
@@ -718,33 +887,56 @@ def _run_recheck_pass(
                     return stats
                 max_input = _budget_of(job).get("max_input_tokens")
                 spent = spent_tokens(session, job_id)
+                if expression_task is not None and cached_result is None and spent["unknown_runs"]:
+                    stats["aborted"] = 1
+                    stats["stop_reason"] = "已有调用用量未知，已保留结果并停止额外复核"
+                    return stats
                 review_request = _request_payload_for(
-                    window=recheck_window, state=state, correction=correction,
+                    window=recheck_window,
+                    state=state,
+                    correction=correction,
                 )
-                reserve = sum(estimate_tokens(message["content"])
-                              for message in review_request["messages"]) + max(
+                reserve = sum(
+                    estimate_tokens(message["content"]) for message in review_request["messages"]
+                ) + max(
                     _output_token_reserve(snapshot, len(recheck_window.target_quote_ids)),
                     max_tokens_override or 0,
                 )
-                if cached_result is None and max_input is not None and (
-                    spent["input_tokens"] + (spent["unknown_runs"] + 1) * reserve > int(max_input)
+                if (
+                    cached_result is None
+                    and max_input is not None
+                    and (
+                        spent["input_tokens"] + (spent["unknown_runs"] + 1) * reserve
+                        > int(max_input)
+                    )
                 ):
                     # Optional recheck must not discard the already accepted first result.
                     stats["aborted"] = 1
                     stats["stop_reason"] = "剩余输入额度不足，已保留结果并停止额外复核。"
                     return stats
                 max_output = _budget_of(job).get("max_output_tokens")
-                if cached_result is None and max_output is not None and (
-                    spent["output_tokens"] + _output_token_reserve(
-                        snapshot, len(recheck_window.target_quote_ids)) > int(max_output)
+                if (
+                    cached_result is None
+                    and max_output is not None
+                    and (
+                        spent["output_tokens"]
+                        + _output_token_reserve(snapshot, len(recheck_window.target_quote_ids))
+                        > int(max_output)
+                    )
                 ):
                     stats["aborted"] = 1
                     stats["stop_reason"] = "剩余输出额度不足，已保留结果并停止额外复核。"
                     return stats
             if cached_result is None:
                 raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
-                    session_factory, adapter, job_id=job_id, window=recheck_window,
-                    state=state, snapshot=snapshot, settings=settings, correction=correction,
+                    session_factory,
+                    adapter,
+                    job_id=job_id,
+                    window=recheck_window,
+                    state=state,
+                    snapshot=snapshot,
+                    settings=settings,
+                    correction=correction,
                     max_tokens_override=max_tokens_override,
                 )
                 stats["calls"] += 1
@@ -755,8 +947,11 @@ def _run_recheck_pass(
                         assert run is not None
                         run.elapsed_ms = elapsed_ms
                         run.error_code = error.code.value
-                        run.state = (InferenceRunState.UNKNOWN_OUTCOME if timeout
-                                     else InferenceRunState.FAILED)
+                        run.state = (
+                            InferenceRunState.UNKNOWN_OUTCOME
+                            if timeout
+                            else InferenceRunState.FAILED
+                        )
                         run.usage_json = _usage_json_from_error(error)
                         if timeout:
                             failed_job = session.get(Job, job_id)
@@ -767,9 +962,19 @@ def _run_recheck_pass(
                     if timeout:
                         stats["unknown_outcome"] = 1
                         return stats
-                    if error.kind is ProviderErrorKind.INVALID_OUTPUT and attempt < retry_limit:
+                    if (
+                        error.kind is ProviderErrorKind.INVALID_OUTPUT
+                        and attempt < retry_limit
+                        and (
+                            expression_task is None or _known_call_usage(error.details.get("usage"))
+                        )
+                    ):
                         correction = recheck_hint + "；本次重试需修正：" + error.message
-                        max_tokens_override = _escalated_max_tokens(snapshot, error)
+                        max_tokens_override = (
+                            _escalated_max_tokens(snapshot, error)
+                            if expression_task is None
+                            else None
+                        )
                         continue
                     stats["aborted"] = 1
                     stats["stop_reason"] = f"复核调用失败，已保留结果：{error.message[:200]}"
@@ -780,13 +985,21 @@ def _run_recheck_pass(
             with session_factory() as session:
                 job = session.get(Job, job_id)
                 assert job is not None
-                state = (_review_state(session, job, recheck_window)
-                         if full_window else _load_state(job))
+                state = (
+                    _review_state(session, job, recheck_window) if full_window else _load_state(job)
+                )
                 safe, reason = _prepare_identity_view(session, job, version, state, recheck_window)
+                if expression_task is not None:
+                    state.production_expression_task = expression_task
                 if safe:
                     ok, codes, messages, _repair_warnings = _apply_payload(
-                        session, window=recheck_window, inputs=inputs, state=state,
-                        raw=raw, run_id=run_id, cache_key=cache_key,
+                        session,
+                        window=recheck_window,
+                        inputs=inputs,
+                        state=state,
+                        raw=raw,
+                        run_id=run_id,
+                        cache_key=cache_key,
                         preserve_existing_candidates=True,
                         attribution_only=full_window,
                     )
@@ -811,13 +1024,26 @@ def _run_recheck_pass(
             if not safe:
                 stats["aborted"], stats["stop_reason"] = 1, reason
                 return stats
-            correction = recheck_hint + "；本次重试需修正：" + (
-                "；".join(messages)[:800] or "；".join(codes))
+            if expression_task is not None and (
+                "invalid_expression_input" in codes
+                or not _known_call_usage(raw.get("_usage") if isinstance(raw, dict) else None)
+            ):
+                stats["aborted"], stats["stop_reason"] = (
+                    1,
+                    "复核输入已改变或用量未知，已保留有效结果",
+                )
+                return stats
+            correction = (
+                recheck_hint
+                + "；本次重试需修正："
+                + ("；".join(messages)[:800] or "；".join(codes))
+            )
             cached_result = None
             if attempt == retry_limit:
                 stats["aborted"] = 1
                 stats["stop_reason"] = "复核输出未通过校验，已保留结果：" + (
-                    "；".join(messages)[:200] or "；".join(codes))
+                    "；".join(messages)[:200] or "；".join(codes)
+                )
         if stats["aborted"]:
             return stats
     stats["round_completed"] = 1
@@ -911,7 +1137,9 @@ def _dispatch_with_bounded_retry(
     run_id = ""
     elapsed_ms = 0
     request_payload = _request_payload_for(
-        window=window, state=state, correction=correction,
+        window=window,
+        state=state,
+        correction=correction,
         max_tokens_override=max_tokens_override,
     )
     request_fingerprint = _request_fingerprint(request_payload, snapshot)
@@ -1050,8 +1278,11 @@ def run_job(
         if requested_policy is None:
             budget = _budget_of(job)
             if budget.get("max_recheck_rounds") is not None:
-                policy = replace(policy, recheck_max_rounds=int(budget["max_recheck_rounds"]),
-                                 recheck_max_targets=0)
+                policy = replace(
+                    policy,
+                    recheck_max_rounds=int(budget["max_recheck_rounds"]),
+                    recheck_max_targets=0,
+                )
             elif "max_rechecks" in budget:
                 policy = replace(
                     policy,
@@ -1158,8 +1389,11 @@ def run_job(
     def _maybe_recheck(window_, window_adapter_, window_snapshot_) -> bool:  # noqa: ANN001, ANN202
         """首次结果落地后的有限复核（默认关闭）；返回 False 表示任务需要人工对账。"""
 
-        if (policy.recheck_max_targets <= 0 and policy.recheck_max_rounds <= 0
-                or window_adapter_ is None):
+        if (
+            policy.recheck_max_targets <= 0
+            and policy.recheck_max_rounds <= 0
+            or window_adapter_ is None
+        ):
             return True
         stats = _run_recheck(
             session_factory,
@@ -1280,6 +1514,7 @@ def run_job(
             snapshot=window_snapshot,
             state=state,
         )
+        expression_task = state.production_expression_task
 
         # 缓存命中：不调用模型，也不新增推理尝试
         with session_factory() as session:
@@ -1296,14 +1531,19 @@ def run_job(
                 safe, reason = _apply_confirmed_roster(session, job, version, state, window)
                 if not safe:
                     job.state, job.last_error = JobState.FAILED, reason
-                    failed_window = session.scalar(select(JobWindow).where(
-                        JobWindow.job_id == job_id, JobWindow.window_id == window.window_id))
+                    failed_window = session.scalar(
+                        select(JobWindow).where(
+                            JobWindow.job_id == job_id, JobWindow.window_id == window.window_id
+                        )
+                    )
                     if failed_window:
                         failed_window.state = JobState.FAILED
                     session.commit()
                     outcome.state = JobState.FAILED
                     outcome.errors.append("invalid_identity_input")
                     return outcome
+                if expression_task is not None:
+                    state.production_expression_task = expression_task
                 ok, codes, messages, repair_warnings = _apply_payload(
                     session,
                     window=window,
@@ -1344,6 +1584,18 @@ def run_job(
                     problems = "；".join(messages[:3])
                     job.last_error = f"缓存结果未通过校验：{codes}；问题：{problems}"
                 session.commit()
+            if "invalid_expression_input" in codes:
+                with session_factory() as session:
+                    failed_job = session.get(Job, job_id)
+                    failed_job.state = JobState.PARTIAL if done else JobState.FAILED
+                    failed_row = session.scalar(select(JobWindow).where(
+                        JobWindow.job_id == job_id, JobWindow.window_id == window.window_id))
+                    if failed_row:
+                        failed_row.state = JobState.FAILED
+                    session.commit()
+                    outcome.state = failed_job.state
+                outcome.errors.append("invalid_expression_input")
+                return outcome
             if ok:
                 # 首次结果落地后按策略做有限局部复核（默认关闭）
                 if not _maybe_recheck(window, window_adapter, window_snapshot):
@@ -1386,13 +1638,14 @@ def run_job(
                     spent = spent_tokens(session, job_id)
                     max_input = _budget_of(job).get("max_input_tokens")
                     retry_reserve = sum(
-                        estimate_tokens(message["content"]) for message in
-                        _request_payload_for(window=window, state=state,
-                                             correction=correction)["messages"]
+                        estimate_tokens(message["content"])
+                        for message in _request_payload_for(
+                            window=window, state=state, correction=correction
+                        )["messages"]
                     ) + max(output_reserve, attempt_max_tokens or 0)
                     if max_input is not None and (
-                        spent["input_tokens"] + spent["unknown_runs"] * reserve
-                        + retry_reserve > int(max_input)
+                        spent["input_tokens"] + spent["unknown_runs"] * reserve + retry_reserve
+                        > int(max_input)
                     ):
                         job.state = JobState.BUDGET_EXHAUSTED
                         job.last_error = "剩余额度不足以纠错重试，已停止调用"
@@ -1400,10 +1653,15 @@ def run_job(
                         outcome.state = JobState.BUDGET_EXHAUSTED
                         outcome.budget_exhausted = True
                         return outcome
-                    job.progress_json = json.dumps({
-                        "stage": "validation_retry", "retry_attempt": attempt,
-                        "retry_limit": format_retry_limit, "windows_done": done,
-                    }, ensure_ascii=False)
+                    job.progress_json = json.dumps(
+                        {
+                            "stage": "validation_retry",
+                            "retry_attempt": attempt,
+                            "retry_limit": format_retry_limit,
+                            "windows_done": done,
+                        },
+                        ensure_ascii=False,
+                    )
                     session.commit()
             raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
                 session_factory,
@@ -1450,12 +1708,19 @@ def run_job(
                     if (
                         error.kind is ProviderErrorKind.INVALID_OUTPUT
                         and attempt < format_retry_limit
+                        and (
+                            expression_task is None or _known_call_usage(error.details.get("usage"))
+                        )
                     ):
                         run.state = InferenceRunState.FAILED
                         run.error_code = error.code.value
                         session.commit()
                         retry_correction = error.message
-                        retry_max_tokens = _escalated_max_tokens(window_snapshot, error)
+                        retry_max_tokens = (
+                            _escalated_max_tokens(window_snapshot, error)
+                            if expression_task is None
+                            else None
+                        )
                     else:
                         outcome.errors.append(f"{window.window_id}:{error.code.value}")
                         run.state = InferenceRunState.FAILED
@@ -1481,6 +1746,8 @@ def run_job(
                     run.usage_json = json.dumps(usage, ensure_ascii=False) if known_usage else None
                     state = _load_state(job)
                     safe, reason = _apply_confirmed_roster(session, job, version, state, window)
+                    if expression_task is not None:
+                        state.production_expression_task = expression_task
                     if not safe:
                         run.state = InferenceRunState.FAILED
                         run.error_code = "INVALID_IDENTITY_INPUT"
@@ -1504,7 +1771,11 @@ def run_job(
                     if not ok:
                         run.state = InferenceRunState.FAILED
                         run.error_code = "INVALID_MODEL_OUTPUT"
-                        if attempt < format_retry_limit:
+                        if (
+                            attempt < format_retry_limit
+                            and "invalid_expression_input" not in codes
+                            and (expression_task is None or _known_call_usage(usage))
+                        ):
                             # 记下失败尝试，带着具体问题重发一次（不把窗口标记为终态失败）
                             session.commit()
                             hint = "；".join(messages)[:800] or "；".join(codes)
@@ -1634,29 +1905,55 @@ def _request_payload_for(
     max_tokens_override: int | None = None,
 ) -> dict[str, Any]:
     """The business request shared by dispatch, budgeting and message cache keys."""
-    payload = {
-        "messages": _messages_for(
+    task = state.production_expression_task
+    if task is None:
+        messages = _messages_for(
             window=window, state=state, locked_summary=None, correction=correction
-        ),
+        )
+    else:
+        from ..evaluation.owner_constraints import ConstrainedOwnerProtocol
+        from ..scenes.runner import _validate_expression_task
+
+        _validate_expression_task(task, window, state, None)
+        messages = ConstrainedOwnerProtocol(task).messages()
+        if correction:
+            messages.append({"role": "user", "content": correction
+                if correction.startswith("独立复核") else "上一次输出无效：" + correction})
+    payload = {
+        "messages": messages,
         "max_tokens": LABELING_MAX_TOKENS,
         "json_object": True,
         "target_quote_ids": list(window.target_quote_ids),
     }
     if isinstance(max_tokens_override, int) and max_tokens_override > 0:
         payload["max_tokens_override"] = int(max_tokens_override)
+    if task is not None:
+        payload["compiler_task_fingerprint"] = task.fingerprint()
+        payload["output_protocol"] = PRODUCTION_EXPRESSION_VERSION
     return payload
 
 
 def _request_fingerprint(payload: dict[str, Any], snapshot: dict[str, Any] | None) -> str:
     snapshot = snapshot or {}
-    return fingerprint({
-        "version": "production-request-1",
-        "request": payload,
-        "model_configuration": {
-            key: snapshot.get(key)
-            for key in ("protocol", "base_url", "model", "params", "inference_options")
-        },
-    })
+    return fingerprint(
+        {
+            "version": "production-request-1",
+            "request": payload,
+            "model_configuration": {
+                key: snapshot.get(key)
+                for key in ("protocol", "base_url", "model", "params", "inference_options")
+            },
+        }
+    )
+
+
+def _known_call_usage(usage) -> bool:
+    return (
+        isinstance(usage, dict)
+        and not usage.get("unknown")
+        and type(usage.get("total_tokens")) is int
+        and usage["total_tokens"] >= 0
+    )
 
 
 def _dispatch(
@@ -1668,13 +1965,23 @@ def _dispatch(
     max_tokens_override: int | None = None,
     request_payload: dict[str, Any] | None = None,
 ) -> Any:
-    payload = request_payload if request_payload is not None else _request_payload_for(
-        window=window, state=state, correction=correction,
-        max_tokens_override=max_tokens_override,
+    payload = (
+        request_payload
+        if request_payload is not None
+        else _request_payload_for(
+            window=window,
+            state=state,
+            correction=correction,
+            max_tokens_override=max_tokens_override,
+        )
     )
     # An adapter cannot mutate the frozen request used by another retry or its ledger hash.
     raw = asyncio.run(adapter.generate_labels(deepcopy(payload)))
-    return _restore_output_references(raw, window)
+    return (
+        raw
+        if state.production_expression_task is not None
+        else _restore_output_references(raw, window)
+    )
 
 
 def reconcile_stale_runs(
