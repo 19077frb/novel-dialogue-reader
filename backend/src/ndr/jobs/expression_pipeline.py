@@ -23,7 +23,7 @@ from ..llm.expression_review import (
 )
 from ..llm.receipt import ProviderResult
 from ..storage.cache import fingerprint
-from ..storage.models import InferenceRun, Job, JobWindow
+from ..storage.models import Annotation, InferenceRun, Job, JobWindow
 from ..storage.run_archive import decode_archive
 
 REVIEW_CACHE_VERSION = "expr-review-1"
@@ -146,6 +146,19 @@ def run_review_pipeline(
     original_breaks = tuple(base.get("breaks", ()))
     with session_factory() as session:
         job = session.get(Job, job_id)
+        feedback_version = json.loads(job.range_json or "{}").get("identity_feedback_protocol")
+        locked_targets = (
+            set(
+                session.scalars(
+                    select(Annotation.quote_id).where(
+                        Annotation.quote_id.in_(list(first["decisions"])),
+                        Annotation.user_locked.is_(True),
+                    )
+                )
+            )
+            if feedback_version
+            else set()
+        )
         checkpoint = json.loads(job.checkpoint_json or "{}")
         checkpoint.setdefault("expression_reviews", {}).setdefault(window.window_id, {}).update(
             {
@@ -350,6 +363,61 @@ def run_review_pipeline(
             correction = problem
         return None
 
+    feedback = None
+    feedback_targets = set()
+    if feedback_version and rounds:
+        from ..llm.identity_feedback import (
+            FEEDBACK_VERSION,
+            build_identity_feedback_messages,
+            compile_identity_feedback,
+            prepare_identity_feedback,
+        )
+
+        if feedback_version != FEEDBACK_VERSION:
+            raise ValueError("Unsupported identity feedback version")
+        plan = prepare_identity_feedback(
+            task, base, primary_source=primary_run_id, locked_targets=locked_targets
+        )
+        feedback = stage(
+            "identity_feedback:1",
+            build_identity_feedback_messages(plan, task),
+            lambda payload, run_id: compile_identity_feedback(
+                plan, payload, task, source_ref=run_id
+            ),
+            binding=plan.fingerprint(),
+        )
+        if feedback is not None:
+            issues = json.loads(feedback.issues_json)
+            feedback_targets = {
+                task.references[q]
+                for issue in issues
+                if issue["kind"] != "incorrect_pov"
+                for q in issue["targets"]
+            }
+            with session_factory() as session:
+                job = session.get(Job, job_id)
+                checkpoint = json.loads(job.checkpoint_json or "{}")
+                checkpoint["expression_reviews"][window.window_id]["identity_feedback"] = {
+                    "plan_fingerprint": feedback.plan_fingerprint,
+                    "source_ref": feedback.source_ref,
+                    "issues": issues,
+                    "pov_candidate": feedback.pov_candidate,
+                }
+                job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+                session.commit()
+            if feedback_targets:
+                pending = {
+                    q: replace(d, admissible=False) if q in feedback_targets else d
+                    for q, d in first["decisions"].items()
+                }
+                pending_payload, approvals = decision_payload(
+                    task, pending, breaks=original_breaks, anonymous=first["anonymous"]
+                )
+                result.raw = ReviewedExpression(
+                    pending_payload, approvals=approvals, task_fingerprint=task.fingerprint()
+                )
+                result.raw.restored_attempt = getattr(primary_raw, "restored_attempt", False)
+
     for round_index in range(rounds):
         if result.stopped:
             break
@@ -380,7 +448,10 @@ def run_review_pipeline(
         ]
         third = None
         anonymous = {**first["anonymous"], **reviewed["anonymous"]}
-        if differences:
+        feedback_challenge = (
+            round_index == 0 and feedback is not None and bool(json.loads(feedback.issues_json))
+        )
+        if differences or feedback_challenge:
             adjudication = ConstrainedOwnerProtocol(task).messages()
             adjudication.append(
                 {
@@ -390,7 +461,25 @@ def run_review_pipeline(
                         "允许有证据的第三种人物答案；无法区分则未知。"
                         "不得改变场景，breaks为空。\n"
                     )
-                    + json.dumps({"first": base, "review": second[0]}, ensure_ascii=False),
+                    + json.dumps(
+                        {
+                            "first": base,
+                            "review": second[0],
+                            **(
+                                {
+                                    "identity_feedback": {
+                                        "issues": json.loads(feedback.issues_json),
+                                        "proposal": json.loads(feedback.proposal_json),
+                                        "pov_candidate": feedback.pov_candidate,
+                                        "instruction": "反馈只是候选，不强制接受身份或POV。",
+                                    }
+                                }
+                                if feedback_challenge
+                                else {}
+                            ),
+                        },
+                        ensure_ascii=False,
+                    ),
                 }
             )
             binding = [
@@ -398,13 +487,16 @@ def run_review_pipeline(
                 second[0],
                 [d.source_ref for d in first["decisions"].values()],
                 [d.source_ref for d in reviewed["decisions"].values()],
+                *([feedback.fingerprint()] if feedback_challenge else []),
             ]
             third = stage(
                 f"adjudication:{round_index + 1}", adjudication, check_proposal, binding=binding
             )
             if third is None:
                 pending = {
-                    q: replace(d, admissible=False) if q in differences else d
+                    q: replace(d, admissible=False)
+                    if q in set(differences) | feedback_targets
+                    else d
                     for q, d in first["decisions"].items()
                 }
                 payload, approvals = decision_payload(

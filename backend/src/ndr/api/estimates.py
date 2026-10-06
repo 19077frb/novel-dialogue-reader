@@ -47,10 +47,13 @@ def estimate_route(
 
     try:
         if (
-            payload.range.get("auxiliary_protocol") is not None
+            (
+                payload.range.get("auxiliary_protocol") is not None
+                or payload.range.get("identity_feedback_protocol") is not None
+            )
             and payload.range.get("output_protocol") != "expression-production-1"
         ):
-            raise ApiError.validation("辅助诊断隔离须使用短表达协议")
+            raise ApiError.validation("辅助诊断或人物名单反馈须使用短表达协议")
         estimate = estimate_inference(
             session,
             settings,
@@ -63,6 +66,7 @@ def estimate_route(
             policy=policy_for_version(payload.range.get("context_policy")),
             review_protocol=payload.range.get("review_protocol"),
             auxiliary_protocol=payload.range.get("auxiliary_protocol"),
+            identity_feedback_protocol=payload.range.get("identity_feedback_protocol"),
         )
     except FullContextError as exc:
         raise ApiError.validation(str(exc)) from exc

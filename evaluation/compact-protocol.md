@@ -44,7 +44,7 @@ uv run --project backend python -m pytest backend/tests/unit/test_cold_roster.py
 
 ### 有界身份反馈编译边界
 
-`ndr.llm.identity_feedback` 的 `identity-feedback-1` 是纯提案编译入口，尚未接入正式 Jobs 或页面，不会调用模型、修改人物目录或执行合并。它冻结原任务和首次有效提案，反馈注明遗漏身份、错误关联或POV候选冲突，引用本次实际非空原文，并提交完整关联目标及完整归属提案。共享匿名声明的目标必须作为整个依赖块处理；不相关对白、表达类型、场景边界和身份声明不可改写，锁定目标不可更改。POV只返回候选，不更改章节目录。
+`ndr.llm.identity_feedback` 的 `identity-feedback-1` 是纯提案编译入口，本身不会调用模型、修改人物目录或执行合并。正式 Jobs 可在 `range` 显式设置 `identity_feedback_protocol=identity-feedback-1`，同时启用短表达、证据复核及至少一轮复核；当前页面尚无此选项。每窗最多一次名单反馈，反馈仅作为有来源的第三裁决候选，独立复核不接收原答案或反馈；两次一致被第三答案挑战时仍须独立核验。它冻结原任务和首次有效提案，反馈注明遗漏身份、错误关联或POV候选冲突，引用本次实际非空原文，并提交完整关联目标及完整归属提案。共享匿名声明的目标必须作为整个依赖块处理；不相关对白、表达类型、场景边界和身份声明不可改写，锁定目标不可更改。POV只返回候选，不更改章节目录。
 
 反馈限一代并绑定独立来源。格式及引用通过不证明语义正确，编译结果仍须由调用者进行独立裁决、保留接受上限及账本/恢复保护；不能将该纯入口直接当作自动确认结果。离线原创契约测试为 `uv run --project backend python -m pytest backend/tests/unit/test_identity_feedback.py`，不调用付费模型，不代表真实小说质量。
 

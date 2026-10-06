@@ -431,6 +431,11 @@ def _cache_key_for(
                             "review_rounds": review_rounds
                             if review_rounds is not None
                             else _budget_of(job).get("max_recheck_rounds"),
+                            **(
+                                {"identity_feedback_protocol":
+                                    _range_of(job)["identity_feedback_protocol"]}
+                                if _range_of(job).get("identity_feedback_protocol") else {}
+                            ),
                         }
                         if selected(job)
                         else {}

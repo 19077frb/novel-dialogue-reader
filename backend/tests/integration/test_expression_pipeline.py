@@ -30,7 +30,7 @@ from ndr.storage.models import (
 from ndr.storage.transactions import transaction
 
 
-def prepare(client, *, all_quotes=False, auxiliary=False):
+def prepare(client, *, all_quotes=False, auxiliary=False, identity_feedback=False):
     text = "第一章\n林舟说：「早上好。」\n许晴答：「你好。」\n顾宁点头。"
     data = client.post(
         "/api/books/import", files={"file": ("stages.txt", text.encode(), "text/plain")}
@@ -73,6 +73,11 @@ def prepare(client, *, all_quotes=False, auxiliary=False):
                     "end_cp": cutoff,
                     "output_protocol": "expression-production-1",
                     "review_protocol": REVIEW_VERSION,
+                    **(
+                        {"identity_feedback_protocol": "identity-feedback-1"}
+                        if identity_feedback
+                        else {}
+                    ),
                     **(
                         {"auxiliary_protocol": "expression-auxiliary-isolation-1"}
                         if auxiliary

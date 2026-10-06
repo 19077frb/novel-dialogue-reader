@@ -117,6 +117,7 @@ def estimate_inference(
     max_recheck_rounds: int = 0,
     review_protocol: str | None = None,
     auxiliary_protocol: str | None = None,
+    identity_feedback_protocol: str | None = None,
 ) -> JobEstimate:
     """纯本地估算：不调用模型、不写数据库。"""
 
@@ -143,7 +144,17 @@ def estimate_inference(
     if review_protocol is not None and review_protocol != REVIEW_VERSION:
         raise ApiError.validation("不支持的证据复核版本")
     evidence_review = review_protocol == REVIEW_VERSION
-    multiplier = 1 + (3 if evidence_review else 1) * max_recheck_rounds
+    from ..llm.identity_feedback import FEEDBACK_VERSION
+
+    if identity_feedback_protocol is not None and (
+        identity_feedback_protocol != FEEDBACK_VERSION
+        or not evidence_review
+        or max_recheck_rounds < 1
+    ):
+        raise ApiError.validation("人物名单反馈须配合证据复核并设置至少一轮复核")
+    multiplier = 1 + (3 if evidence_review else 1) * max_recheck_rounds + int(
+        identity_feedback_protocol is not None
+    )
     input_tokens *= multiplier
     output_tokens *= multiplier
     notes = [
@@ -155,6 +166,8 @@ def estimate_inference(
             f"证据复核按首次处理加每轮最多三个阶段（独立复核、分歧裁决、挑战核验）估算：每窗最多{multiplier}个规划阶段。"
             "裁决与核验按需要执行，0轮关闭；格式纠错、限流重试、候选证据提示和模型推理用量未构成上限，实际消耗可高于估算。"
         )
+        if identity_feedback_protocol:
+            notes.append("已计入每窗最多一次有证据的人物名单反馈；反馈不直接修改人物目录。")
     elif max_recheck_rounds:
         notes.append(
             f"已计入最多 {max_recheck_rounds} 轮全窗口复核；"
@@ -239,6 +252,10 @@ def estimate_inference(
             **resolved_policy.as_key(),
             **({"auxiliary_protocol": auxiliary_protocol} if auxiliary_protocol else {}),
             **({"review_protocol": review_protocol} if review_protocol is not None else {}),
+            **(
+                {"identity_feedback_protocol": identity_feedback_protocol}
+                if identity_feedback_protocol is not None else {}
+            ),
         },
         notes=notes,
         windows=windows,
@@ -321,6 +338,15 @@ def create_inference_job(
         review_protocol != REVIEW_VERSION or protocol != PRODUCTION_EXPRESSION_VERSION
     ):
         raise ApiError.validation("证据裁决复核必须显式选择短表达协议及受支持的复核版本")
+    from ..llm.identity_feedback import FEEDBACK_VERSION
+
+    identity_feedback_protocol = range_payload.get("identity_feedback_protocol")
+    if identity_feedback_protocol is not None and (
+        identity_feedback_protocol != FEEDBACK_VERSION
+        or review_protocol != REVIEW_VERSION
+        or int(budget.get("max_recheck_rounds") or 0) < 1
+    ):
+        raise ApiError.validation("人物名单反馈须配合短表达证据复核并设置至少一轮复核")
     snapshot = profile_snapshot(profile, inference_options)
     request_payload = {
         "kind": kind.value,

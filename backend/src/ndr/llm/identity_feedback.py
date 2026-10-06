@@ -1,7 +1,7 @@
 """Bounded, whole-block identity feedback proposals; no dispatch or library writes.
 
-This boundary is not yet a production task entry point. Its compilation is a
-candidate for independent adjudication, not authorization to overwrite facts.
+Production stages may use this boundary to obtain candidates for independent
+adjudication, never authorization to overwrite facts or apply proposals alone.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class IdentityIssue(ApiModel):
 
 class IdentityFeedback(ApiModel):
     schema_version: Literal["identity-feedback-1"]
-    issues: list[IdentityIssue] = Field(min_length=1, max_length=10000)
+    issues: list[IdentityIssue] = Field(max_length=10000)
     proposal: dict
 
 
@@ -118,6 +118,7 @@ def build_identity_feedback_messages(plan, task):
         "问题targets须覆盖共享新身份的完整依赖块，不改其他对白、类型或场景。"
         "omitted_identity必须声明新的N；incorrect_association可指向已有C或有证据的新N。"
         "incorrect_pov只提出已有C候选，不修改目录或对白归属。"
+        "没有有依据的身份问题时issues为空，proposal保持原提案不变。"
         "证据只填已提供编号，不能将姓名、坐标、理由或候选本身当原文引用。\n" + _json(schema)
     )
     short = {stable: ref for ref, stable in task.references.items()}
