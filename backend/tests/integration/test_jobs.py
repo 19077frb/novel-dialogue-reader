@@ -10,12 +10,29 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from ndr.config import Settings
-from ndr.domain.enums import InferenceRunState, JobState
+from ndr.domain.enums import (
+    AnnotationSource,
+    AnnotationStatus,
+    InferenceRunState,
+    JobState,
+    QuoteKind,
+)
 from ndr.jobs.scheduler import reconcile_stale_runs, run_job
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.llm.errors import ProviderError, ProviderErrorKind
+from ndr.scenes.state import ConfirmedCharacter, SceneState, SpeakerSlot
 from ndr.storage.engine import create_db_engine, create_session_factory
-from ndr.storage.models import InferenceRun, Job, JobWindow
+from ndr.storage.models import (
+    Annotation,
+    BookCharacter,
+    BookVersion,
+    InferenceRun,
+    Job,
+    JobWindow,
+    Quote,
+    Scene,
+    SpeakerGroup,
+)
 from ndr.storage.transactions import transaction
 
 SAMPLE = (
@@ -85,6 +102,186 @@ def _run_with_fake(settings: Settings, job_id: str, adapter: FakeProviderAdapter
             adapter_factory=lambda job, snapshot: adapter,
         )
         return outcome
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("mode,legacy", [("initial", False), ("reread", False), ("initial", True)])
+def test_actual_job_request_projects_restored_identity_and_future_changes_do_not_bust_cache(
+    fake_provider_client, migrated_settings, mode, legacy,
+):
+    data = _import(fake_provider_client)
+    profile = _fake_profile(fake_provider_client)
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            version = session.scalar(select(BookVersion))
+            cutoff = session.scalar(select(Quote).order_by(Quote.start_cp)).end_cp
+            facts = [{"kind": kind, "value": value, "visible_from_cp": cp,
+                      "canonical_sha256": version.canonical_sha256, "source": "user",
+                      "source_ref": "manual", "accepted": True}
+                     for kind, value, cp in [("designation", "少女", 0),
+                                             ("name", "未来姓名", len(SAMPLE) - 1),
+                                             ("alias", "未来别名", len(SAMPLE) - 1),
+                                             ("description", "未来说明", len(SAMPLE) - 1),
+                                             ("relation", "未来关系", len(SAMPLE) - 1)]]
+            person = BookCharacter(book_version_id=version.id, canonical_name="未来姓名",
+                                   aliases_json='["未来别名"]', description="未来说明",
+                                   source="MODEL", user_confirmed=False,
+                                   identity_facts_json=json.dumps(facts, ensure_ascii=False))
+            session.add(person)
+            session.flush()
+            person_id = person.id
+            original_state = SceneState(
+                confirmed_characters=[ConfirmedCharacter(person.id, "未来姓名", ("未来别名",),
+                                                          "未来说明")],
+                participants=[SpeakerSlot("S1", "old", character_id=person.id,
+                                          canonical_name="未来姓名", description="未来说明")],
+                known_characters={"未来姓名": "未来说明"},
+                recent_turns=[{"quote_id": "old", "speaker_ref": "S1", "speaker_name": "未来姓名"}],
+            ).snapshot()
+
+        def create(key):
+            result = _create_job(fake_provider_client, data["book_id"], profile, key=key,
+                                 range={"start_cp": 0, "end_cp": cutoff}, reading_mode=mode,
+                                 visible_horizon_cp=cutoff)
+            with transaction(factory) as session:
+                job = session.get(Job, result["id"])
+                stored = json.loads(job.range_json)
+                assert stored["identity_input_version"] == "identity-input-1"
+                if legacy:
+                    stored.pop("identity_input_version")
+                    job.range_json = json.dumps(stored)
+                job.checkpoint_json = json.dumps({"scene_state": original_state}, ensure_ascii=False)
+            return result
+
+        job = create("projected-request")
+        adapter = FakeProviderAdapter()
+        result = _run_with_fake(migrated_settings, job["id"], adapter)
+        assert result.state is JobState.COMPLETED, result.errors
+        sent = json.dumps(adapter.calls[0]["payload"]["messages"], ensure_ascii=False)
+        if mode == "initial" and not legacy:
+            assert all(text not in sent for text in ("未来姓名", "未来别名", "未来说明", "未来关系"))
+            assert "少女" in sent and person_id in sent
+            with transaction(factory) as session:
+                person = session.get(BookCharacter, person_id)
+                assert person.canonical_name == "未来姓名"
+                changed = json.loads(person.identity_facts_json)
+                changed[1]["value"] = "另一个未来姓名"
+                person.canonical_name = "另一个未来姓名"
+                person.identity_facts_json = json.dumps(changed, ensure_ascii=False)
+            cached = create("projected-cache")
+            cached_result = _run_with_fake(migrated_settings, cached["id"], adapter)
+            assert cached_result.cached_windows == 1 and cached_result.calls == 0
+            assert len(adapter.calls) == 1
+        else:
+            assert all(text in sent for text in ("未来姓名", "未来别名", "未来说明"))
+            if mode == "reread":
+                assert "未来关系" in sent
+        again = _create_job(fake_provider_client, data["book_id"], profile, key="projected-request",
+                            range={"start_cp": 0, "end_cp": cutoff}, reading_mode=mode,
+                            visible_horizon_cp=cutoff)
+        assert again["id"] == job["id"]
+        assert ("identity_input_version" in again["range"]) is not legacy
+    finally:
+        engine.dispose()
+
+
+def test_full_window_review_filters_current_group_names_and_keeps_manual_answer(
+    fake_provider_client, migrated_settings,
+):
+    data = _import(fake_provider_client)
+    profile = _fake_profile(fake_provider_client)
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            version = session.scalar(select(BookVersion))
+            quote = session.scalar(select(Quote).order_by(Quote.start_cp))
+            cutoff, quote_id = quote.end_cp, quote.id
+            facts = [{"kind": kind, "value": value, "visible_from_cp": cp,
+                      "canonical_sha256": version.canonical_sha256, "source": "user",
+                      "source_ref": "manual", "accepted": True}
+                     for kind, value, cp in [("designation", "少女", 0),
+                                             ("name", "未来姓名", len(SAMPLE) - 1)]]
+            person = BookCharacter(book_version_id=version.id, canonical_name="未来姓名",
+                                   description="未来说明", source="USER", user_confirmed=True,
+                                   identity_facts_json=json.dumps(facts, ensure_ascii=False))
+            scene = Scene(book_version_id=version.id, start_cp=0)
+            session.add_all([person, scene])
+            session.flush()
+            group = SpeakerGroup(scene_id=scene.id, first_quote_id=quote.id, display_label="S1",
+                                 character_id=person.id, canonical_name="未来姓名",
+                                 description="未来说明")
+            session.add(group)
+            session.flush()
+            session.add(Annotation(quote_id=quote.id, scene_id=scene.id, speaker_id=group.id,
+                                   kind=QuoteKind.SPEECH, source=AnnotationSource.USER,
+                                   user_locked=True, status=AnnotationStatus.USER_CONFIRMED))
+            group_id = group.id
+            checkpoint = SceneState(scene_id=scene.id, participants=[SpeakerSlot(
+                "S1", quote.id, group_id=group.id, character_id=person.id,
+                canonical_name="未来姓名", description="未来说明")]).snapshot()
+        job = _create_job(fake_provider_client, data["book_id"], profile, key="review-visible",
+                          range={"start_cp": 0, "end_cp": cutoff}, visible_horizon_cp=cutoff,
+                          budget={"max_input_tokens": 200_000, "max_recheck_rounds": 1})
+        with transaction(factory) as session:
+            session.get(Job, job["id"]).checkpoint_json = json.dumps({"scene_state": checkpoint})
+        adapter = FakeProviderAdapter()
+        result = _run_with_fake(migrated_settings, job["id"], adapter)
+        assert result.state is JobState.COMPLETED, result.errors
+        assert len(adapter.calls) == 2
+        for call in adapter.calls:
+            sent = json.dumps(call["payload"]["messages"], ensure_ascii=False)
+            assert "未来姓名" not in sent and "未来说明" not in sent
+            assert "少女" in sent
+        with transaction(factory) as session:
+            answer = session.scalar(select(Annotation).where(Annotation.quote_id == quote_id))
+            assert answer.user_locked and answer.status is AnnotationStatus.USER_CONFIRMED
+            assert answer.speaker_id == group_id
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("during_call", [False, True])
+def test_invalid_identity_input_stops_actual_job_without_unsafe_retry_or_partial_result(
+    fake_provider_client, migrated_settings, during_call,
+):
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, data["book_id"], _fake_profile(fake_provider_client),
+                      key="bad-identity-input")
+    engine, factory = _factory(migrated_settings)
+    try:
+        with transaction(factory) as session:
+            person = BookCharacter(book_version_id=data["book_version_id"], canonical_name="未来姓名",
+                                   source="MODEL", identity_facts_json=(
+                                       '[]' if during_call else '{"bad":"ledger"}'))
+            session.add(person)
+            session.flush()
+            person_id = person.id
+
+        class CorruptingFake(FakeProviderAdapter):
+            def _next(self, *, kind, payload=None):
+                response = super()._next(kind=kind, payload=payload)
+                if during_call:
+                    with transaction(factory) as session:
+                        session.get(BookCharacter, person_id).identity_facts_json = '{"bad":"ledger"}'
+                response["_usage"] = {"total_tokens": 37, "input_tokens": 30, "output_tokens": 7}
+                return response
+
+        adapter = CorruptingFake()
+        result = _run_with_fake(migrated_settings, job["id"], adapter)
+        assert result.state is JobState.FAILED
+        assert len(adapter.calls) == (1 if during_call else 0)
+        with factory() as session:
+            assert "人物资料无法安全读取" in session.get(Job, job["id"]).last_error
+            runs = list(session.scalars(select(InferenceRun)))
+            assert not list(session.scalars(select(Annotation)))
+            if during_call:
+                assert len(runs) == 1 and runs[0].state is InferenceRunState.FAILED
+                assert runs[0].error_code == "INVALID_IDENTITY_INPUT"
+                assert json.loads(runs[0].usage_json)["total_tokens"] == 37
+            else:
+                assert not runs
     finally:
         engine.dispose()
 

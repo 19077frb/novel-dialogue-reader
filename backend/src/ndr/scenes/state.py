@@ -32,9 +32,10 @@ class ConfirmedCharacter:
     source: str = "unknown"
     user_confirmed: bool | None = None
     confirmation_source: str = "unknown"
+    relations: tuple[dict[str, Any], ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "character_id": self.character_id,
             "canonical_name": self.canonical_name,
             "aliases": list(self.aliases),
@@ -43,6 +44,9 @@ class ConfirmedCharacter:
             "user_confirmed": self.user_confirmed,
             "confirmation_source": self.confirmation_source,
         }
+        if self.relations:
+            value["relations"] = [dict(item) for item in self.relations]
+        return value
 
     def prompt_record(self) -> dict[str, Any]:
         value = self.as_dict()
@@ -60,6 +64,8 @@ class ConfirmedCharacter:
             user_confirmed=(payload.get("user_confirmed")
                             if type(payload.get("user_confirmed")) is bool else None),
             confirmation_source=str(payload.get("confirmation_source", "unknown")),
+            relations=tuple(dict(item) for item in payload.get("relations", [])
+                            if isinstance(item, dict)),
         )
 
 
@@ -115,6 +121,8 @@ class SceneState:
     book_characters: list[ConfirmedCharacter] = field(default_factory=list)
     pov_character_id: str | None = None
     explicit_identity: bool = False
+    # Ephemeral input flag; restored jobs re-project using their frozen range version.
+    projected_identity_input: bool = False
     known_characters: dict[str, str] = field(default_factory=dict)
     unresolved: list[str] = field(default_factory=list)
     version: int = 1
@@ -284,7 +292,13 @@ class SceneState:
             unique.append(slot)
         self.participants = unique
 
+        counts = {}
+        if self.projected_identity_input:
+            for character in self.identity_characters:
+                counts[character.canonical_name] = counts.get(character.canonical_name, 0) + 1
         for character in self.confirmed_characters:
+            if self.projected_identity_input and counts.get(character.canonical_name, 0) != 1:
+                continue
             self.remember_character(character.canonical_name, character.description)
 
     def prompt_state(self, *, max_chars: int = 300) -> str:

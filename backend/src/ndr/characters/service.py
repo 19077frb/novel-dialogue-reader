@@ -27,6 +27,7 @@ from ..domain.enums import (
     JobKind,
     JobPurpose,
     JobState,
+    ReadingMode,
 )
 from ..ingest.document import collapse_whitespace, has_chapter_body_text
 from ..ingest.query import load_canonical_text
@@ -38,6 +39,7 @@ from ..llm.sourced_roster import (
     SOURCED_ROSTER_VERSIONS,
     SourcedRosterOutput,
 )
+from ..scenes.state import SceneState
 from ..storage.chapter_status import complete_chapter_automatically
 from ..storage.models import (
     Book,
@@ -50,6 +52,7 @@ from ..storage.models import (
     ModelProfile,
 )
 from .identity import supplement_aliases
+from .input_view import IDENTITY_INPUT_VERSION, project_identity_state
 from .names import GENERIC_NAMES, matches_name, revealed_name, undecorated_name
 
 
@@ -686,6 +689,7 @@ def create_roster_job(
                 "start_cp": chapter.start_cp,
                 "end_cp": chapter.end_cp,
                 "roster_protocol": SOURCED_ROSTER_VERSION,
+                "identity_input_version": IDENTITY_INPUT_VERSION,
             },
             ensure_ascii=False,
         ),
@@ -714,10 +718,21 @@ def roster_messages(
     canonical = (load_canonical_text(settings, version)
                  if canonical_text is None else canonical_text)
     text = canonical[chapter.start_cp : chapter.end_cp]
+    identity_version = json.loads(job.range_json or "{}").get("identity_input_version")
+    if identity_version is None:
+        existing = existing_characters_for_prompt(session, version)
+    elif identity_version == IDENTITY_INPUT_VERSION:
+        people = list_book_characters(session, version)
+        projected = project_identity_state(SceneState(), people, version,
+                                           reading_mode=ReadingMode.INITIAL, horizon=chapter.end_cp)
+        existing = [{**projected[p.id].prompt_record(), "name_locked": p.name_locked}
+                    for p in people]
+    else:
+        raise ValueError("人物输入版本不受支持")
     return build_roster_messages(
         chapter_title=chapter.title,
         chapter_lines=text.splitlines() or [""],
-        existing_characters=existing_characters_for_prompt(session, version),
+        existing_characters=existing,
         sourced=(json.loads(job.range_json or "{}").get("roster_protocol")
                  in SOURCED_ROSTER_VERSIONS),
     )

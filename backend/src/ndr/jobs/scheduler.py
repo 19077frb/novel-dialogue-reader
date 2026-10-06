@@ -21,8 +21,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Bundle, Session, sessionmaker
 
+from ..characters.input_view import IDENTITY_INPUT_VERSION, project_identity_state
 from ..characters.service import confirmed_roster_context, list_book_characters
 from ..config import Settings
 from ..context.budget import DEFAULT_POLICY, BudgetPolicy, estimate_tokens, policy_for_version
@@ -187,12 +188,13 @@ def _apply_confirmed_roster(
     job: Job,
     version: BookVersion,
     state: SceneState,
+    window=None,
 ) -> tuple[bool, str | None]:
     """把用户确认的人物与 POV 注入场景状态；返回是否可继续。"""
 
     chapter_id = _range_of(job).get("chapter_id")
     if not chapter_id:
-        return True, None
+        return _prepare_identity_view(session, job, version, state, window)
     roster, characters = confirmed_roster_context(session, version, str(chapter_id))
     if roster is None:
         return False, "请先分析并确认本章人物，再选择本章主人公"
@@ -212,6 +214,7 @@ def _apply_confirmed_roster(
         )
         for character in characters
     ]
+    people = list_book_characters(session, version)
     state.book_characters = [
         ConfirmedCharacter(
             character_id=character.id,
@@ -222,12 +225,37 @@ def _apply_confirmed_roster(
             user_confirmed=character.user_confirmed,
             confirmation_source=character.confirmation_source or "unknown",
         )
-        for character in list_book_characters(session, version)
+        for character in people
     ]
     state.pov_character_id = roster.pov_character_id
-    state.sync_confirmed_participants()
+    if _range_of(job).get("identity_input_version") is None:
+        state.sync_confirmed_participants()
     if state.pov_character_id not in {item.character_id for item in state.confirmed_characters}:
         return False, "本章主人公不在已确认人物中，请重新确认"
+    return _prepare_identity_view(session, job, version, state, window, people=people)
+
+
+def _prepare_identity_view(session, job, version, state, window=None, *, people=None):
+    requested = _range_of(job).get("identity_input_version")
+    if requested is None:
+        return True, None
+    if requested != IDENTITY_INPUT_VERSION:
+        return False, "人物输入版本不受支持，不能继续旧任务"
+    mode = _reading_mode_of(job)
+    horizon = version.canonical_length_cp
+    if mode is ReadingMode.INITIAL:
+        horizon = max((f.end_cp for f in window.fragments), default=0) if window else int(
+            _range_of(job).get("end_cp") or version.canonical_length_cp)
+        explicit = _range_of(job).get("visible_horizon_cp")
+        if explicit is not None:
+            horizon = min(horizon, int(explicit))
+    try:
+        project_identity_state(state, people if people is not None else
+                               list_book_characters(session, version), version,
+                               reading_mode=mode, horizon=horizon)
+        state.sync_confirmed_participants()
+    except (ValueError, TypeError, KeyError) as exc:
+        return False, f"人物资料无法安全读取：{exc}"
     return True, None
 
 
@@ -358,7 +386,9 @@ def _cache_key_for(
             input_fingerprint=fingerprint(messages),
             model=str(snapshot.get("model", "")),
             params=snapshot.get("params", {}) or {},
-            protocol_version=f"{snapshot.get('protocol', '')}:{snapshot.get('base_url', '')}",
+            protocol_version=(f"{snapshot.get('protocol', '')}:{snapshot.get('base_url', '')}"
+                              + (":" + str(_range_of(job)["identity_input_version"])
+                                 if "identity_input_version" in _range_of(job) else "")),
             prompt_version=LABELING_PROMPT_VERSION,
             schema_version="1.0",
             policy_version=window.policy_version,
@@ -559,7 +589,8 @@ def _run_recheck_pass(
         return stats
 
     with session_factory() as session:
-        query = select(Annotation, Quote, SpeakerGroup.canonical_name)
+        query = select(Annotation, Quote, Bundle(
+            "identity", SpeakerGroup.canonical_name, SpeakerGroup.character_id))
         query = (query
             .join(Quote, Quote.id == Annotation.quote_id)
             .outerjoin(SpeakerGroup, SpeakerGroup.id == Annotation.speaker_id)
@@ -581,7 +612,9 @@ def _run_recheck_pass(
         )
         priorities = {}
         candidate_hints = {}
-        for annotation, quote, name in candidates:
+        job = session.get(Job, job_id)
+        project_hints = _range_of(job).get("identity_input_version") is not None
+        for annotation, quote, group in candidates:
             text = inputs.canonical_text[quote.start_cp:quote.end_cp]
             silence = bool(re.fullmatch(r"[「」『』…．.。\s！？!?]*", text))
             missing_evidence = annotation.basis is SpeakerBasis.DIRECT and (
@@ -589,13 +622,16 @@ def _run_recheck_pass(
                 or set(json.loads(annotation.evidence_refs_json)) <= {quote.id})
             priorities[quote.id] = 2 if silence else 0 if missing_evidence else 1
             candidate_hints[quote.id] = {
-                "quote_id": quote.id, "candidate_name": name,
+                "quote_id": quote.id, "candidate_name": group.canonical_name if group else None,
                 "status": annotation.status.value, "kind": annotation.kind.value,
                 "user_locked": annotation.user_locked,
                 "basis": annotation.basis.value
                 if annotation.basis else None, "needs": "补充目标之外的直接证据" if missing_evidence
                 else "按原文验证人物及类型；原候选不等于正确答案",
             }
+            if project_hints:
+                candidate_hints[quote.id]["candidate_character_id"] = (
+                    group.character_id if group else None)
         decision = plan_recheck(
             policy=policy, window=window, unresolved_target_ids=candidate_hints,
             target_priorities=priorities,
@@ -642,6 +678,19 @@ def _run_recheck_pass(
             job = session.get(Job, job_id)
             assert job is not None
             state = _review_state(session, job, recheck_window) if full_window else _load_state(job)
+            safe, reason = _prepare_identity_view(session, job, version, state, recheck_window)
+            if not safe:
+                stats["aborted"], stats["stop_reason"] = 1, reason
+                return stats
+            if _range_of(job).get("identity_input_version") is not None:
+                people = {p.character_id: p for p in state.identity_characters}
+                records = [{**candidate_hints[q], "candidate_name": (
+                    people[candidate_hints[q].get("candidate_character_id")].canonical_name
+                    if candidate_hints[q].get("candidate_character_id") in people else None)}
+                    for q in recheck_window.target_quote_ids if q in candidate_hints]
+                recheck_hint = (recheck_hint.split(DATA_DELIMITER, 1)[0] + DATA_DELIMITER + "\n"
+                    + escape_data_markers(json.dumps(records, ensure_ascii=False))
+                    + "\n" + DATA_DELIMITER)
             cache_key = _cache_key_for(
                 job=job,
                 version=version,
@@ -730,12 +779,16 @@ def _run_recheck_pass(
                 assert job is not None
                 state = (_review_state(session, job, recheck_window)
                          if full_window else _load_state(job))
-                ok, codes, messages, _repair_warnings = _apply_payload(
-                    session, window=recheck_window, inputs=inputs, state=state,
-                    raw=raw, run_id=run_id, cache_key=cache_key,
-                    preserve_existing_candidates=True,
-                    attribution_only=full_window,
-                )
+                safe, reason = _prepare_identity_view(session, job, version, state, recheck_window)
+                if safe:
+                    ok, codes, messages, _repair_warnings = _apply_payload(
+                        session, window=recheck_window, inputs=inputs, state=state,
+                        raw=raw, run_id=run_id, cache_key=cache_key,
+                        preserve_existing_candidates=True,
+                        attribution_only=full_window,
+                    )
+                else:
+                    ok, codes, messages = False, ["invalid_identity_input"], [reason]
                 if run_id:
                     run = session.get(InferenceRun, run_id)
                     assert run is not None
@@ -752,6 +805,9 @@ def _run_recheck_pass(
                 session.commit()
             if ok:
                 break
+            if not safe:
+                stats["aborted"], stats["stop_reason"] = 1, reason
+                return stats
             correction = recheck_hint + "；本次重试需修正：" + (
                 "；".join(messages)[:800] or "；".join(codes))
             cached_result = None
@@ -1155,7 +1211,7 @@ def run_job(
             spent = spent_tokens(session, job_id)
             job_snapshot = job
             state = _load_state(job)
-            roster_ok, roster_error = _apply_confirmed_roster(session, job, version, state)
+            roster_ok, roster_error = _apply_confirmed_roster(session, job, version, state, window)
             if not roster_ok:
                 job.state = JobState.FAILED
                 job.last_error = roster_error
@@ -1228,7 +1284,17 @@ def run_job(
                 job = session.get(Job, job_id)
                 assert job is not None
                 state = _load_state(job)
-                _apply_confirmed_roster(session, job, version, state)
+                safe, reason = _apply_confirmed_roster(session, job, version, state, window)
+                if not safe:
+                    job.state, job.last_error = JobState.FAILED, reason
+                    failed_window = session.scalar(select(JobWindow).where(
+                        JobWindow.job_id == job_id, JobWindow.window_id == window.window_id))
+                    if failed_window:
+                        failed_window.state = JobState.FAILED
+                    session.commit()
+                    outcome.state = JobState.FAILED
+                    outcome.errors.append("invalid_identity_input")
+                    return outcome
                 ok, codes, messages, repair_warnings = _apply_payload(
                     session,
                     window=window,
@@ -1405,7 +1471,18 @@ def run_job(
                     known_usage = bool(usage) and not usage.get("unknown")
                     run.usage_json = json.dumps(usage, ensure_ascii=False) if known_usage else None
                     state = _load_state(job)
-                    _apply_confirmed_roster(session, job, version, state)
+                    safe, reason = _apply_confirmed_roster(session, job, version, state, window)
+                    if not safe:
+                        run.state = InferenceRunState.FAILED
+                        run.error_code = "INVALID_IDENTITY_INPUT"
+                        job.state = JobState.PARTIAL if done else JobState.FAILED
+                        job.last_error = reason
+                        if row is not None:
+                            row.state = JobState.FAILED
+                        session.commit()
+                        outcome.state, outcome.calls = job.state, calls
+                        outcome.errors.append("invalid_identity_input")
+                        return outcome
                     ok, codes, messages, repair_warnings = _apply_payload(
                         session,
                         window=window,

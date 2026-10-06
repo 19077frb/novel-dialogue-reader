@@ -192,3 +192,39 @@ def test_actual_job_freezes_strict_or_isolated_semantics_and_preserves_diagnosti
             assert diagnostic["discarded_auxiliary_facts"] == 2
         else:
             assert not people
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_roster_request_uses_chapter_visible_identity_not_future_book_fields(migrated_client, legacy):
+    client = migrated_client
+    data, job = prepare(client, "第一章\n林舟说：「早上好。」\n第二章\n少女自称未来姓名。")
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, data["book_version_id"])
+        records = [{"kind": kind, "value": value, "visible_from_cp": cp,
+                    "canonical_sha256": version.canonical_sha256, "source": "user",
+                    "source_ref": "manual", "accepted": True}
+                   for kind, value, cp in [("designation", "少女", 0),
+                                           ("name", "未来姓名", version.canonical_length_cp),
+                                           ("alias", "未来别名", version.canonical_length_cp),
+                                           ("description", "未来说明", version.canonical_length_cp)]]
+        person = BookCharacter(book_version_id=version.id, canonical_name="未来姓名",
+                               description="未来说明", aliases_json='["未来别名"]',
+                               source="MODEL", user_confirmed=False,
+                               identity_facts_json=json.dumps(records, ensure_ascii=False))
+        session.add(person)
+        session.flush()
+        person_id = person.id
+        if legacy:
+            stored = session.get(Job, job["id"])
+            value = json.loads(stored.range_json)
+            value.pop("identity_input_version")
+            stored.range_json = json.dumps(value)
+    result, adapter = run(client, job, response())
+    assert result.state is JobState.COMPLETED, result.errors
+    sent = json.dumps(adapter.calls[0]["payload"]["messages"], ensure_ascii=False)
+    assert person_id in sent
+    if legacy:
+        assert all(text in sent for text in ("未来姓名", "未来别名", "未来说明"))
+    else:
+        assert all(text not in sent for text in ("未来姓名", "未来别名", "未来说明"))
+        assert "少女" in sent
