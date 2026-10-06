@@ -230,9 +230,17 @@ def create_inference_job(
     if budget.get("max_recheck_rounds") is None:
         budget = {key: value for key, value in budget.items() if key != "max_recheck_rounds"}
     from ..llm.expression_task import PRODUCTION_EXPRESSION_VERSION
+
     protocol = range_payload.get("output_protocol")
     if protocol is not None and protocol != PRODUCTION_EXPRESSION_VERSION:
         raise ApiError.validation("不支持的对白输出协议")
+    from ..llm.expression_review import REVIEW_VERSION
+
+    review_protocol = range_payload.get("review_protocol")
+    if review_protocol is not None and (
+        review_protocol != REVIEW_VERSION or protocol != PRODUCTION_EXPRESSION_VERSION
+    ):
+        raise ApiError.validation("证据裁决复核必须显式选择短表达协议及受支持的复核版本")
     snapshot = profile_snapshot(profile, inference_options)
     request_payload = {
         "kind": kind.value,

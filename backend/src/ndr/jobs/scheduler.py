@@ -76,6 +76,13 @@ from ..storage.models import (
     Scene,
     SpeakerGroup,
 )
+from .expression_pipeline import (
+    ReviewedExpression,
+    cached_proposal,
+    restore_primary,
+    run_review_pipeline,
+    selected,
+)
 from .roster import run_character_roster_job
 from .service import (
     credential_mode_of,
@@ -401,6 +408,7 @@ def _cache_key_for(
     snapshot: dict[str, Any] | None,
     state: SceneState,
     prompt_hint: str | None = None,
+    review_rounds: int | None = None,
 ) -> str:
     snapshot = snapshot or {}
     # 缓存必须覆盖实际发给模型的动态人物状态，而不只是预先规划的正文片段。
@@ -410,7 +418,22 @@ def _cache_key_for(
         CacheKeyParts(
             book_version_id=version.id,
             target_ids=list(window.target_quote_ids),
-            input_fingerprint=fingerprint({"messages": messages, "task": expression.fingerprint()})
+            input_fingerprint=fingerprint(
+                {
+                    "messages": messages,
+                    "task": expression.fingerprint(),
+                    **(
+                        {
+                            "review_protocol": _range_of(job).get("review_protocol"),
+                            "review_rounds": review_rounds
+                            if review_rounds is not None
+                            else _budget_of(job).get("max_recheck_rounds"),
+                        }
+                        if selected(job)
+                        else {}
+                    ),
+                }
+            )
             if expression
             else fingerprint(messages),
             model=str(snapshot.get("model", "")),
@@ -487,7 +510,20 @@ def _apply_payload(
         except ValueError as exc:
             return False, ["invalid_expression_input"], [str(exc)], []
         try:
-            compilation = compile_expression_output(payload, state.production_expression_task)
+            if (
+                isinstance(raw, ReviewedExpression)
+                and raw.task_fingerprint != state.production_expression_task.fingerprint()
+            ):
+                raise ValueError("Resolved review does not match current task")
+            compilation = compile_expression_output(
+                payload,
+                state.production_expression_task,
+                owner_approvals=raw.owner_approvals
+                if isinstance(raw, ReviewedExpression)
+                else None,
+            )
+            if isinstance(raw, ReviewedExpression):
+                cache_payload = raw.cache_payload()
         except (ValueError, InvalidModelOutput, ValidationError) as exc:
             return False, ["invalid_expression_output"], [str(exc)], []
         payload = compilation.output
@@ -564,7 +600,11 @@ def _apply_payload(
             cache_payload if compilation else report.output.model_dump(mode="json"),
             ensure_ascii=False,
         ),
-        schema_version=PRODUCTION_CACHE_VERSION if compilation else CACHE_SCHEMA_VERSION,
+        schema_version=(
+            "expr-review-1" if isinstance(raw, ReviewedExpression) else PRODUCTION_CACHE_VERSION
+        )
+        if compilation
+        else CACHE_SCHEMA_VERSION,
         dependency_hash=window.dependency_hash,
         created_run_id=run_id,
     )
@@ -1121,6 +1161,7 @@ def _dispatch_with_bounded_retry(
     settings: Settings,
     correction: str | None = None,
     max_tokens_override: int | None = None,
+    request_payload_override: dict[str, Any] | None = None,
 ) -> tuple[Any, ProviderError | None, str, int]:
     """调用适配器；限流/暂时不可用按**有上限**的退避重试。
 
@@ -1136,11 +1177,15 @@ def _dispatch_with_bounded_retry(
     error: ProviderError | None = None
     run_id = ""
     elapsed_ms = 0
-    request_payload = _request_payload_for(
-        window=window,
-        state=state,
-        correction=correction,
-        max_tokens_override=max_tokens_override,
+    request_payload = (
+        deepcopy(request_payload_override)
+        if request_payload_override is not None
+        else _request_payload_for(
+            window=window,
+            state=state,
+            correction=correction,
+            max_tokens_override=max_tokens_override,
+        )
     )
     request_fingerprint = _request_fingerprint(request_payload, snapshot)
     for index in range(allowed):
@@ -1155,6 +1200,7 @@ def _dispatch_with_bounded_retry(
             session.add(run)
             session.flush()
             from ..storage.run_archive import save_run_archive
+
             save_run_archive(run, request_payload)
             run.state = InferenceRunState.DISPATCHED
             run_id = run.id
@@ -1181,11 +1227,25 @@ def _dispatch_with_bounded_retry(
         with session_factory() as session:
             returned_run = session.get(InferenceRun, run_id)
             if returned_run is not None:
-                save_run_archive(returned_run, request_payload, raw=raw, error=error,
-                                 elapsed_ms=elapsed_ms, phase="returned")
+                save_run_archive(
+                    returned_run,
+                    request_payload,
+                    raw=raw,
+                    error=error,
+                    elapsed_ms=elapsed_ms,
+                    phase="returned",
+                )
                 session.commit()
 
         if error is None or error.kind not in AUTO_RETRY_KINDS or index + 1 >= allowed:
+            from ..llm.receipt import ProviderResult
+
+            if isinstance(raw, dict):
+                if not isinstance(raw, ProviderResult):
+                    raw = ProviderResult(raw)
+                raw.dispatch_attempts = index + 1
+            if error is not None:
+                error.dispatch_attempts = index + 1
             return raw, error, run_id, elapsed_ms
 
         backoff = backoff_seconds(index + 1, settings)
@@ -1400,6 +1460,8 @@ def run_job(
     def _maybe_recheck(window_, window_adapter_, window_snapshot_) -> bool:  # noqa: ANN001, ANN202
         """首次结果落地后的有限复核（默认关闭）；返回 False 表示任务需要人工对账。"""
 
+        if selected(job_snapshot):
+            return True
         if (
             policy.recheck_max_targets <= 0
             and policy.recheck_max_rounds <= 0
@@ -1493,7 +1555,14 @@ def run_job(
         )
         reserve = max(planned_reserve, actual_prompt_tokens + output_reserve)
         max_input = _budget_of(job_snapshot).get("max_input_tokens")
-        if max_input is not None and spent["input_tokens"] + reserve > int(max_input):
+        pending_review = selected(job_snapshot) and window.window_id in _json_of(
+            job_snapshot.checkpoint_json
+        ).get("expression_reviews", {})
+        if (
+            max_input is not None
+            and spent["input_tokens"] + reserve > int(max_input)
+            and not pending_review
+        ):
             with session_factory() as session:
                 job = session.get(Job, job_id)
                 assert job is not None
@@ -1524,6 +1593,7 @@ def run_job(
             window=window,
             snapshot=window_snapshot,
             state=state,
+            review_rounds=policy.recheck_max_rounds,
         )
         expression_task = state.production_expression_task
 
@@ -1535,6 +1605,21 @@ def run_job(
                 else ResultCacheStore(session).get(cache_key)
             )
         if cached_result is not None:
+            try:
+                cached_raw = (
+                    cached_proposal(cached_result, expression_task)
+                    if expression_task is not None
+                    else cached_result.payload()
+                )
+            except (ValueError, ProviderError, KeyError, TypeError) as exc:
+                with session_factory() as session:
+                    failed_job = session.get(Job, job_id)
+                    failed_job.state = JobState.FAILED
+                    failed_job.last_error = "缓存复核提案无法安全恢复：" + str(exc)[:400]
+                    session.commit()
+                outcome.state = JobState.FAILED
+                outcome.errors.append("invalid_review_cache")
+                return outcome
             with session_factory() as session:
                 job = session.get(Job, job_id)
                 assert job is not None
@@ -1560,7 +1645,7 @@ def run_job(
                     window=window,
                     inputs=inputs,
                     state=state,
-                    raw=cached_result.payload(),
+                    raw=cached_raw,
                     run_id=None,
                     cache_key=cache_key,
                 )
@@ -1599,8 +1684,11 @@ def run_job(
                 with session_factory() as session:
                     failed_job = session.get(Job, job_id)
                     failed_job.state = JobState.PARTIAL if done else JobState.FAILED
-                    failed_row = session.scalar(select(JobWindow).where(
-                        JobWindow.job_id == job_id, JobWindow.window_id == window.window_id))
+                    failed_row = session.scalar(
+                        select(JobWindow).where(
+                            JobWindow.job_id == job_id, JobWindow.window_id == window.window_id
+                        )
+                    )
                     if failed_row:
                         failed_row.state = JobState.FAILED
                     session.commit()
@@ -1674,7 +1762,21 @@ def run_job(
                         ensure_ascii=False,
                     )
                     session.commit()
-            raw, error, run_id, elapsed_ms = _dispatch_with_bounded_retry(
+            restored = None
+            if expression_task is not None and selected(job_snapshot):
+                with session_factory() as session:
+                    active_job = session.get(Job, job_id)
+                    try:
+                        restored = restore_primary(
+                            session, active_job, window, expression_task, window_snapshot
+                        )
+                    except ValueError as exc:
+                        active_job.state, active_job.last_error = JobState.FAILED, str(exc)
+                        session.commit()
+                        outcome.state = JobState.FAILED
+                        outcome.errors.append("invalid_review_restore")
+                        return outcome
+            raw, error, run_id, elapsed_ms = restored or _dispatch_with_bounded_retry(
                 session_factory,
                 window_adapter,
                 job_id=job_id,
@@ -1685,6 +1787,52 @@ def run_job(
                 correction=correction,
                 max_tokens_override=attempt_max_tokens,
             )
+
+            if (
+                error is None
+                and expression_task is not None
+                and selected(job_snapshot)
+                and policy.recheck_max_rounds > 0
+            ):
+                from ..llm.expression_compiler import compile_expression_output
+
+                try:
+                    if not isinstance(raw, dict):
+                        raise ValueError("模型提案必须是对象")
+                    compile_expression_output(
+                        {k: v for k, v in raw.items() if not str(k).startswith("_")},
+                        expression_task,
+                    )
+                except (ValueError, ProviderError):
+                    pass  # Original format-retry path owns invalid first proposals.
+                else:
+                    review = run_review_pipeline(
+                        session_factory,
+                        settings,
+                        job_id=job_id,
+                        window=window,
+                        state=state,
+                        adapter=window_adapter,
+                        model_snapshot=window_snapshot,
+                        primary_raw=raw,
+                        primary_run_id=run_id,
+                        primary_elapsed_ms=elapsed_ms,
+                        rounds=policy.recheck_max_rounds,
+                    )
+                    outcome.recheck_calls += review.calls
+                    if review.stopped:
+                        with session_factory() as session:
+                            active_job = session.get(Job, job_id)
+                            if active_job.state is JobState.PAUSING:
+                                active_job.state = JobState.PAUSED
+                                session.commit()
+                            outcome.state = active_job.state
+                        outcome.unknown_runs += int(review.unknown)
+                        return outcome
+                    review.raw["_usage"] = raw.get("_usage")
+                    raw = review.raw
+                    outcome.recheck_windows += 1
+                    outcome.recheck_targets += len(window.target_quote_ids)
 
             retry_correction = None
             with session_factory() as session:
@@ -1751,7 +1899,7 @@ def run_job(
                         window_failed = True
                         break
                 else:
-                    calls += 1
+                    calls += int(not getattr(raw, "restored_attempt", False))
                     usage = raw.get("_usage") if isinstance(raw, dict) else None
                     known_usage = bool(usage) and not usage.get("unknown")
                     run.usage_json = json.dumps(usage, ensure_ascii=False) if known_usage else None
@@ -1928,8 +2076,14 @@ def _request_payload_for(
         _validate_expression_task(task, window, state, None)
         messages = ConstrainedOwnerProtocol(task).messages()
         if correction:
-            messages.append({"role": "user", "content": correction
-                if correction.startswith("独立复核") else "上一次输出无效：" + correction})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": correction
+                    if correction.startswith("独立复核")
+                    else "上一次输出无效：" + correction,
+                }
+            )
     payload = {
         "messages": messages,
         "max_tokens": LABELING_MAX_TOKENS,
@@ -1991,9 +2145,13 @@ def _dispatch(
     if state.production_expression_task is not None:
         return raw
     from ..llm.receipt import ProviderResult
+
     restored = _restore_output_references(raw, window)
-    return ProviderResult(restored, receipt=getattr(raw, "receipt", None),
-                          original_result=getattr(raw, "original_result", raw))
+    return ProviderResult(
+        restored,
+        receipt=getattr(raw, "receipt", None),
+        original_result=getattr(raw, "original_result", raw),
+    )
 
 
 def reconcile_stale_runs(
@@ -2045,8 +2203,15 @@ def reconcile_job(session: Session, job: Job, *, action: str) -> dict[str, Any]:
     rows = list(session.execute(select(JobWindow).where(JobWindow.job_id == job.id)).scalars())
     pending = [row for row in rows if row.state is JobState.NEEDS_RECONCILIATION]
     if action == "retry":
+        checkpoint = _json_of(job.checkpoint_json)
         for row in pending:
             row.state = JobState.QUEUED
+            entry = checkpoint.get("expression_reviews", {}).get(row.window_id)
+            if entry and entry.get("failed_stage"):
+                stage = entry["failed_stage"]
+                generations = entry.setdefault("retry_stages", {})
+                generations[stage] = generations.get(stage, 0) + 1
+        job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
         job.state = JobState.QUEUED
         job.last_error = None
     else:

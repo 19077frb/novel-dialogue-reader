@@ -77,6 +77,8 @@ pwsh -File scripts/verify.ps1
 
 推理尝试的内部证据由`ndr.storage.run_archive`压缩保存，适配器通过`ProviderResult.receipt`/`ProviderError.receipt`私有属性传递实际请求和已接收响应，不添加模型JSON字段或公开错误正文。归档包含已发送小说文本和提供方响应，应与书库同等保护，禁止上传仓库。迁移0022仅新增可空、按需加载的列，不回填历史证据、不自动压缩整库；8MiB上限、不完整标记和使用边界见[契约](docs/CONTRACTS.md#模型配置任务和恢复)。当前归档覆盖调度器对白及章节人物分析，读取成功不等于结果通过校验，也不等于已实现自动重放恢复。
 
+`ndr.jobs.expression_pipeline`为显式短表达任务提供正式多阶段复核。`ReviewedExpression`将完整短提案、任务绑定和接受上限一起传给领域编译，不能用普通模型JSON伪造该类型。缓存使用独立版本并恢复上限；检查点只存调用引用，原始输出读内部压缩归档。阶段恢复不增加用量、不推断未收到的响应；实际产品选择及模型质量另验收。离线回归可运行`uv run --project backend python -m pytest backend/tests/integration/test_expression_pipeline.py`，仅用原创文本和隔离库。
+
 模型输出默认仍为1.0。显式1.1领域契约允许心声和引用保留人物，必须由调用方在解析及应用时指定版本；结构生成使用`expression_output_json_schema()`，不得直接把评测模块的内部speech视图提交书库。版本和缓存边界见[契约](docs/CONTRACTS.md#模型配置任务和恢复)。正式Jobs API可显式选择`range.output_protocol=expression-production-1`，由短协议编译为1.1；页面尚无选择且默认未切换。相关回归可运行`uv run --project backend python -m pytest backend/tests/unit/test_expression_contract.py backend/tests/integration/test_attribution_engine.py`，仅使用原创文本和隔离数据库，不调用模型。
 
 内部`run_window(expression_task=...)`可显式使用短表达协议：任务正文、目标、片段类型和边界必须与实际窗口一致，候选人物须来自当前状态；初读候选字段必须匹配范围内的身份事实。`compile_expression_output()`返回完整1.1输出与独立的接受上限，二者须一起应用；仅取`output`会丢失复核限制。调用方完整的`owner_approvals`表只能降低接受性，不能批准缺乏依据的归属。该路径保留每次原始响应及用量；用量未知时不自动重复格式失败请求，鉴权/限流/超时也不在此重发。内部入口不代表Job调度器、缓存、预算和刷新恢复已经接入。编译测试另见`backend/tests/unit/test_expression_compiler.py`。

@@ -78,8 +78,8 @@ def snapshot(payload, task, *, call_ref, owner_approvals=None):
     }
 
 
-def compile_decisions(task, resolved, *, breaks=(), anonymous=None):
-    """Compile the complete block and preserve every explicit acceptance ceiling."""
+def decision_payload(task, resolved, *, breaks=(), anonymous=None):
+    """Serialize a complete resolved proposal without discarding its ceilings."""
     if set(resolved) != {task.references[q] for q in task.quote_ids}:
         raise ValueError("Complete expression dependency block required")
     short = {stable: ref for ref, stable in task.references.items()}
@@ -122,11 +122,16 @@ def compile_decisions(task, resolved, *, breaks=(), anonymous=None):
                 "evidence": [short[e] for e in d.evidence],
             }
         )
-    return compile_expression_output(
+    return (
         {"labels": labels, "breaks": list(breaks), "new_characters": discoveries},
-        task,
-        owner_approvals={q: d.admissible for q, d in resolved.items()},
+        {q: d.admissible for q, d in resolved.items()},
     )
+
+
+def compile_decisions(task, resolved, *, breaks=(), anonymous=None):
+    """Compile the complete block and preserve every explicit acceptance ceiling."""
+    payload, approvals = decision_payload(task, resolved, breaks=breaks, anonymous=anonymous)
+    return compile_expression_output(payload, task, owner_approvals=approvals)
 
 
 class ChallengeItem(ApiModel):

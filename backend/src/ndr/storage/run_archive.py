@@ -86,6 +86,7 @@ def save_run_archive(run, request, *, raw=None, error=None, elapsed_ms=None, pha
             "error": {
                 "kind": getattr(getattr(error, "kind", None), "value", None),
                 "details": getattr(error, "details", {}),
+                "message": getattr(error, "message", str(error)),
             }
             if error is not None
             else None,
