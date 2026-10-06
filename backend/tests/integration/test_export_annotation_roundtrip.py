@@ -284,6 +284,44 @@ def test_plain_epub_import_is_unaffected(migrated_client: TestClient) -> None:
     assert data["import_status"] == "COMPLETED"
 
 
+def test_manual_expression_owners_survive_epub_roundtrip(fake_provider_client, migrated_settings):
+    client = fake_provider_client
+    data = import_sample(client)
+    profile = create_fake_profile(client)
+    run_deterministic_job(migrated_settings, client, book_id=data["book_id"],
+                          profile_id=profile, key="manual-expression-roundtrip")
+    items = annotations_of(client, data["book_id"], reading_mode="reread")["items"]
+    assert len(items) >= 3
+    for item, kind in zip(items[:3], ("speech", "thought", "quotation"), strict=True):
+        assert item["speaker_group_id"]
+        response = client.post(f"/api/quotes/{item['quote_id']}/corrections", json={
+            "action": "set_kind", "kind": kind,
+        })
+        assert response.status_code == 201, response.text
+    original_by_mode = {
+        mode: annotations_of(client, data["book_id"], reading_mode=mode)
+        for mode in ("initial", "reread")
+    }
+    raw = _export(client, data["book_id"], _preview(client, data["book_id"])["snapshot_id"])
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        manifest = json.loads(archive.read("OEBPS/annotations.json"))
+    assert [(r["kind"], r["source"]) for r in manifest["annotations"][:3]] == [
+        (kind, "USER") for kind in ("speech", "thought", "quotation")
+    ]
+    restored = client.post("/api/books/import", files={
+        "file": ("manual-expressions.epub", raw, "application/epub+zip"),
+    })
+    assert restored.status_code == 202, restored.text
+    book_id = restored.json()["data"]["book_id"]
+    for mode in ("initial", "reread"):
+        expected = [(r["kind"], r["label"], r["color_index"], r["status"], r["source"])
+                    for r in original_by_mode[mode]["items"][:3]]
+        actual = annotations_of(client, book_id, reading_mode=mode)["items"][:3]
+        assert [(r["kind"], r["label"], r["color_index"], r["status"], r["source"])
+                for r in actual] == expected
+        assert all(r["user_locked"] and r["speaker_group_id"] and not r["withheld"] for r in actual)
+
+
 def test_css_normalized_epub_roundtrip_preserves_text_annotations_and_processed_state(
     fake_provider_client: TestClient, migrated_settings,
 ) -> None:

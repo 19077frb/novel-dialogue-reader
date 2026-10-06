@@ -8962,7 +8962,7 @@
                 "type": "null"
               }
             ],
-            "description": "set_kind 必填"
+            "description": "set_kind 必填；指定/新建人物可选 speech/thought/quotation，省略仍为 speech"
           },
           "description": {
             "type": "string",

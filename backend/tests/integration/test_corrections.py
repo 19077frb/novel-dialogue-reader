@@ -308,6 +308,139 @@ def test_local_correction_and_undo_leave_other_quotes_unchanged(
         assert _annotation_state(migrated_settings, quote_id) == before[quote_id]
 
 
+@pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
+def test_set_expression_kind_keeps_owner_visibility_and_can_be_undone(
+    fake_provider_client, migrated_settings, kind,
+):
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings)
+    ids = quote_ids(client, data["book_id"])
+    before = {q: _annotation_state(migrated_settings, q) for q in ids}
+    target = ids[0]
+    with session_scope(migrated_settings) as factory, factory() as session:
+        original = session.scalar(select(Annotation).where(Annotation.quote_id == target))
+        visibility = original.visible_from_cp
+        evidence = original.evidence_refs_json
+    counts = _counts(migrated_settings)
+    response = client.post(f"/api/quotes/{target}/corrections", json={
+        "action": "set_kind", "kind": kind, "expected_version": before[target]["version"],
+    })
+    assert response.status_code == 201, response.text
+    after = _annotation_state(migrated_settings, target)
+    assert after["kind"] == kind
+    assert after["speaker_id"] == before[target]["speaker_id"]
+    assert after["assignment"] == "EXISTING"
+    assert after["status"] == "USER_CONFIRMED"
+    assert after["source"] == "USER" and after["user_locked"]
+    with session_scope(migrated_settings) as factory, factory() as session:
+        row = session.scalar(select(Annotation).where(Annotation.quote_id == target))
+        assert row.visible_from_cp == visibility and row.evidence_refs_json == evidence
+    for mode in ("initial", "reread"):
+        projection = annotations_of(client, data["book_id"], reading_mode=mode)
+        projected = next(item for item in projection["items"] if item["quote_id"] == target)
+        assert projected["kind"] == kind and projected["speaker_group_id"] == after["speaker_id"]
+    assert _counts(migrated_settings)["runs"] == counts["runs"]
+    for q in ids[1:]:
+        assert _annotation_state(migrated_settings, q) == before[q]
+    undone = client.post(f"/api/corrections/{response.json()['data']['correction_id']}/undo")
+    assert undone.status_code == 201, undone.text
+    restored = _annotation_state(migrated_settings, target)
+    for field in ("kind", "speaker_id", "assignment", "basis", "status", "source", "user_locked"):
+        assert restored[field] == before[target][field]
+
+
+@pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
+@pytest.mark.parametrize("action", ["assign_existing", "create_speaker"])
+def test_explicit_expression_kind_for_manual_owner(
+    fake_provider_client, migrated_settings, kind, action,
+):
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings)
+    items = annotations_of(client, data["book_id"])["items"]
+    target = items[1]["quote_id"]
+    payload = {"action": action, "kind": kind}
+    if action == "assign_existing":
+        payload["speaker_ref"] = items[0]["speaker_group_id"]
+    response = client.post(f"/api/quotes/{target}/corrections", json=payload)
+    assert response.status_code == 201, response.text
+    after = _annotation_state(migrated_settings, target)
+    assert after["kind"] == kind and after["speaker_id"]
+    assert after["status"] == "USER_CONFIRMED" and after["user_locked"]
+    assert after["assignment"] == ("EXISTING" if action == "assign_existing" else "NEW")
+
+
+@pytest.mark.parametrize("kind", ["thought", "quotation"])
+def test_expression_unknown_does_not_guess_pov_and_locks_original_kind(
+    fake_provider_client, migrated_settings, kind,
+):
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings)
+    target = quote_ids(client, data["book_id"])[0]
+    response = client.post(f"/api/quotes/{target}/corrections", json={"action": "mark_unknown"})
+    assert response.status_code == 201
+    response = client.post(f"/api/quotes/{target}/corrections", json={"action": "set_kind", "kind": kind})
+    assert response.status_code == 201
+    after = _annotation_state(migrated_settings, target)
+    assert after["kind"] == kind and after["speaker_id"] is None
+    assert after["status"] == "UNKNOWN" and after["assignment"] == "UNKNOWN"
+    assert after["basis"] == "INSUFFICIENT" and after["user_locked"]
+    response = client.post(f"/api/quotes/{target}/corrections", json={"action": "mark_unknown"})
+    assert response.status_code == 201
+    assert _annotation_state(migrated_settings, target)["kind"] == kind
+
+
+@pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
+def test_set_expression_kind_can_explicitly_choose_same_scene_owner(
+    fake_provider_client, migrated_settings, kind,
+):
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings)
+    item = annotations_of(client, data["book_id"])["items"][0]
+    target = item["quote_id"]
+    response = client.post(f"/api/quotes/{target}/corrections", json={"action": "mark_unknown"})
+    assert response.status_code == 201
+    response = client.post(f"/api/quotes/{target}/corrections", json={
+        "action": "set_kind", "kind": kind, "speaker_ref": item["speaker_group_id"],
+    })
+    assert response.status_code == 201, response.text
+    after = _annotation_state(migrated_settings, target)
+    assert after["kind"] == kind and after["speaker_id"] == item["speaker_group_id"]
+    assert after["assignment"] == "EXISTING" and after["status"] == "USER_CONFIRMED"
+    assert after["user_locked"]
+
+
+@pytest.mark.parametrize("kind", ["group", "other", "unknown"])
+@pytest.mark.parametrize("action", ["assign_existing", "create_speaker", "set_kind"])
+def test_non_individual_kind_cannot_be_assigned_an_individual(
+    fake_provider_client, migrated_settings, kind, action,
+):
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings)
+    item = annotations_of(client, data["book_id"])["items"][0]
+    target = item["quote_id"]
+    before = _annotation_state(migrated_settings, target)
+    counts = _counts(migrated_settings)
+    response = client.post(f"/api/quotes/{target}/corrections", json={
+        "action": action, "kind": kind, "speaker_ref": item["speaker_group_id"],
+    })
+    assert response.status_code == 422
+    assert _annotation_state(migrated_settings, target) == before
+    assert _counts(migrated_settings) == counts
+
+
+@pytest.mark.parametrize("kind", ["group", "other", "unknown"])
+def test_set_non_individual_kind_clears_owner(fake_provider_client, migrated_settings, kind):
+    client = fake_provider_client
+    data = _prepare(client, migrated_settings)
+    target = quote_ids(client, data["book_id"])[0]
+    response = client.post(f"/api/quotes/{target}/corrections", json={"action": "set_kind", "kind": kind})
+    assert response.status_code == 201
+    after = _annotation_state(migrated_settings, target)
+    assert after["kind"] == kind and after["speaker_id"] is None
+    assert after["assignment"] is None and after["basis"] is None
+    assert after["status"] == "USER_CONFIRMED" and after["user_locked"]
+
+
 def test_multi_quote_correction_only_changes_explicit_selection(
     fake_provider_client, migrated_settings,
 ):

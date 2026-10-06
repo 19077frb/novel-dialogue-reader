@@ -65,20 +65,30 @@ def color_projection(session, version_id, horizon=None, *, characters=None):
         "private_identity": f"group:{group.id}",
         "name": group.canonical_name or "", "description": group.description or "",
     }) for group in groups}
-    entries = [(presentations[group.id]["identity"], group.preferred_color_index
-                if presentations[group.id]["identity"] == f"character:{group.character_id}"
-                else None) for group in groups]
     if characters is None:
-        character_colors = session.execute(
-            select(BookCharacter.id, BookCharacter.preferred_color_index)
+        character_colors = list(session.execute(
+            select(BookCharacter.id, BookCharacter.preferred_color_index,
+                   BookCharacter.presentation_history_json)
             .where(BookCharacter.book_version_id == version_id)
             .order_by(BookCharacter.first_seen_cp, BookCharacter.created_at, BookCharacter.id),
-        )
+        ))
     else:
-        character_colors = [(row.id, row.preferred_color_index) for row in sorted(
+        character_colors = [(row.id, row.preferred_color_index, row.presentation_history_json)
+                            for row in sorted(
             characters, key=lambda row: (
                 row.first_seen_cp if row.first_seen_cp is not None else -1, row.created_at, row.id,
             ),
         )]
-    entries.extend((f"character:{key}", preferred) for key, preferred in character_colors)
+    # Imported historical identities may differ from the current character ID.
+    # Only an exact match of the two *visible* histories may inherit its color;
+    # a later merge must not paint unrelated earlier voices with the target color.
+    visible_characters = {key: visible_value(raw, horizon, fallback={
+        "identity": f"character:{key}", "private_identity": f"private-character:{key}",
+        "name": "", "description": "",
+    })["identity"] for key, _preferred, raw in character_colors}
+    entries = [(presentations[group.id]["identity"], group.preferred_color_index
+                if presentations[group.id]["identity"] == visible_characters.get(
+                    group.character_id, f"character:{group.character_id}")
+                else None) for group in groups]
+    entries.extend((f"character:{key}", preferred) for key, preferred, _raw in character_colors)
     return groups, presentations, allocate_colors(entries)

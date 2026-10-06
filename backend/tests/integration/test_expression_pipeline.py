@@ -281,6 +281,57 @@ def test_manual_owner_locked_during_review_is_not_overwritten(fake_provider_clie
         assert session.get(SpeakerGroup, annotation.speaker_id).canonical_name == "林舟"
 
 
+@pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
+@pytest.mark.parametrize("unknown", [False, True])
+def test_actual_manual_expression_correction_during_review_preserves_entire_answer(
+    fake_provider_client, kind, unknown,
+):
+    from ndr.corrections.history import annotation_snapshot
+
+    client = fake_provider_client
+    create, factory = prepare(client)
+    prior_job = create("manual-expression-prior")
+    with transaction(factory) as session:
+        row = session.get(Job, prior_job["id"])
+        data = json.loads(row.range_json)
+        data.pop("review_protocol")
+        row.range_json = json.dumps(data)
+        row.budget_json = json.dumps({"max_recheck_rounds": 0})
+    run_job(factory, client.app.state.settings, job_id=prior_job["id"],
+            adapter_factory=lambda *_: StageAdapter(["林舟"]))
+    job = create("manual-expression-review")
+    saved = {}
+
+    def correct():
+        with factory() as session:
+            target = session.scalar(select(Annotation))
+            quote_id, version = target.quote_id, target.version
+        response = client.post(f"/api/quotes/{quote_id}/corrections", json={
+            "action": "set_kind", "kind": kind, "expected_version": version,
+        })
+        assert response.status_code == 201, response.text
+        if unknown:
+            response = client.post(f"/api/quotes/{quote_id}/corrections",
+                                   json={"action": "mark_unknown"})
+            assert response.status_code == 201, response.text
+        with factory() as session:
+            saved.update(annotation_snapshot(session.scalar(select(Annotation))))
+
+    adapter = StageAdapter(["许晴", "许晴"], pause=(2, correct), kind="quotation")
+    result = run_job(factory, client.app.state.settings, job_id=job["id"],
+                     adapter_factory=lambda *_: adapter)
+    assert result.state is JobState.COMPLETED
+    with factory() as session:
+        annotation = session.scalar(select(Annotation))
+        assert annotation_snapshot(annotation) == saved
+        assert annotation.kind.value == kind and annotation.user_locked
+        assert annotation.source is AnnotationSource.USER
+        if unknown:
+            assert annotation.speaker_id is None and annotation.status is AnnotationStatus.UNKNOWN
+        else:
+            assert session.get(SpeakerGroup, annotation.speaker_id).canonical_name == "林舟"
+
+
 def test_review_timeout_stops_without_applying_or_automatically_repeating(fake_provider_client):
     client = fake_provider_client
     create, factory = prepare(client)

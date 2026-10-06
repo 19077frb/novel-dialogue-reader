@@ -3130,7 +3130,7 @@ export interface components {
              * @description 已有分组：可以是 group_id，也可以是场景内编号（S1、S2…）
              */
             speaker_ref?: string | null;
-            /** @description set_kind 必填 */
+            /** @description set_kind 必填；指定/新建人物可选 speech/thought/quotation，省略仍为 speech */
             kind?: components["schemas"]["QuoteKind"] | null;
             /**
              * Description

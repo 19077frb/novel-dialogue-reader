@@ -18,6 +18,7 @@ from pydantic import Field, model_validator
 
 from .common import ApiModel
 from .enums import (
+    EXPRESSION_OWNER_KINDS,
     AnnotationSource,
     AnnotationStatus,
     Assignment,
@@ -85,7 +86,10 @@ class QuoteCorrectionIn(ApiModel):
         default=None,
         description="已有分组：可以是 group_id，也可以是场景内编号（S1、S2…）",
     )
-    kind: QuoteKind | None = Field(default=None, description="set_kind 必填")
+    kind: QuoteKind | None = Field(
+        default=None,
+        description="set_kind 必填；指定/新建人物可选 speech/thought/quotation，省略仍为 speech",
+    )
     description: str = Field(default="", max_length=512, description="create_speaker 的说明，可空")
     quote_ids: list[str] | None = Field(
         default=None,
@@ -103,6 +107,12 @@ class QuoteCorrectionIn(ApiModel):
             raise ValueError("assign_existing 必须提供 speaker_ref")
         if self.action == "set_kind" and self.kind is None:
             raise ValueError("set_kind 必须提供 kind")
+        if (self.action in {"assign_existing", "create_speaker"}
+                and self.kind is not None and self.kind not in EXPRESSION_OWNER_KINDS):
+            raise ValueError("指定或新建人物仅支持发声、心声或引用类型")
+        if (self.action == "set_kind" and self.speaker_ref
+                and self.kind not in EXPRESSION_OWNER_KINDS):
+            raise ValueError("集体、其他或未知类型不能指定单个人物")
         if self.quote_ids is not None and len(set(self.quote_ids)) != len(self.quote_ids):
             raise ValueError("quote_ids 不能重复")
         return self

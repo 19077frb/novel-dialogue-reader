@@ -29,6 +29,7 @@ from ..domain.corrections import (
     UndoOut,
 )
 from ..domain.enums import (
+    EXPRESSION_OWNER_KINDS,
     AnnotationSource,
     AnnotationStatus,
     Assignment,
@@ -171,7 +172,7 @@ def _apply_quote_action(
     if action is CorrectionAction.ASSIGN_EXISTING:
         assert payload.speaker_ref is not None  # schema 已校验
         group = _resolve_existing_group(session, scene_id=scene.id, ref=payload.speaker_ref)
-        annotation.kind = QuoteKind.SPEECH
+        annotation.kind = payload.kind or QuoteKind.SPEECH
         annotation.assignment = Assignment.EXISTING
         annotation.basis = SpeakerBasis.DIRECT
         annotation.speaker_id = group.id
@@ -190,7 +191,7 @@ def _apply_quote_action(
             session.flush()
             group_id = group.id
             created_group_ids.append(group_id)
-        annotation.kind = QuoteKind.SPEECH
+        annotation.kind = payload.kind or QuoteKind.SPEECH
         annotation.assignment = Assignment.NEW
         annotation.basis = SpeakerBasis.DIRECT
         annotation.speaker_id = group_id
@@ -199,7 +200,7 @@ def _apply_quote_action(
     if action is CorrectionAction.SET_KIND:
         assert payload.kind is not None  # schema 已校验
         annotation.kind = payload.kind
-        if payload.kind is not QuoteKind.SPEECH:
+        if payload.kind not in EXPRESSION_OWNER_KINDS:
             annotation.assignment = None
             annotation.basis = None
             annotation.speaker_id = None
@@ -223,7 +224,7 @@ def _apply_quote_action(
     # MARK_UNKNOWN：锁定「未知」本身，不新建人物、不改类型
     annotation.speaker_id = None
     annotation.status = AnnotationStatus.UNKNOWN
-    if annotation.kind is QuoteKind.SPEECH:
+    if annotation.kind in EXPRESSION_OWNER_KINDS:
         annotation.assignment = Assignment.UNKNOWN
         annotation.basis = SpeakerBasis.INSUFFICIENT
     else:

@@ -4,20 +4,26 @@
  * 四种动作都不调用模型；`expected_version` 取当前标注版本，服务端做乐观并发校验，
  * 旧页面提交会拿到 409（由调用方展示冲突并刷新）。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { QuoteCorrectionInput } from '../api/review'
 import type { AnnotationStateOut, QuoteKind, SceneGroupRefOut } from '../api/types'
 import { labelText } from '../styles/palette'
 
 const KINDS: { value: QuoteKind; label: string }[] = [
-  { value: 'speech', label: '对白（有说话人）' },
+  { value: 'speech', label: '对白（发声）' },
   { value: 'thought', label: '心声' },
   { value: 'quotation', label: '引用' },
   { value: 'group', label: '集体声音' },
   { value: 'other', label: '其他' },
   { value: 'unknown', label: '未知类型' },
 ]
+
+const OWNER_KINDS = KINDS.filter((item) =>
+  ['speech', 'thought', 'quotation'].includes(item.value),
+)
+const ownerKindOf = (kind?: QuoteKind): QuoteKind =>
+  kind && OWNER_KINDS.some((item) => item.value === kind) ? kind : 'speech'
 
 type Action = QuoteCorrectionInput['action']
 
@@ -49,6 +55,22 @@ export function CorrectionForm({
   const [speakerRef, setSpeakerRef] = useState('')
   const [description, setDescription] = useState('')
   const [kind, setKind] = useState<QuoteKind>(annotation?.kind ?? 'speech')
+  const [ownerKind, setOwnerKind] = useState<QuoteKind>(ownerKindOf(annotation?.kind))
+
+  // 新句重置草稿；同句更新只同步未编辑字段，保留用户尚未提交的选择。
+  const quoteId = annotation?.quote_id
+  const lastQuote = useRef(quoteId)
+  const kindEdited = useRef(false)
+  const ownerKindEdited = useRef(false)
+  useEffect(() => {
+    if (lastQuote.current !== quoteId) {
+      lastQuote.current = quoteId
+      kindEdited.current = false
+      ownerKindEdited.current = false
+    }
+    if (!kindEdited.current) setKind(annotation?.kind ?? 'speech')
+    if (!ownerKindEdited.current) setOwnerKind(ownerKindOf(annotation?.kind))
+  }, [quoteId, annotation?.kind])
 
   // 没有已有分组时（空候选）默认切到「新建说话人」，避免用户先撞一次错误
   useEffect(() => {
@@ -73,7 +95,8 @@ export function CorrectionForm({
     onSubmit({
       action,
       speakerRef: action === 'assign_existing' ? speakerRef : null,
-      kind: action === 'set_kind' ? kind : null,
+      kind: action === 'set_kind' ? kind
+        : action === 'assign_existing' || action === 'create_speaker' ? ownerKind : null,
       description: action === 'create_speaker' ? description : '',
       expectedVersion: annotation?.version ?? null,
       expectedSceneVersion: action === 'create_speaker' ? sceneVersion : null,
@@ -89,7 +112,7 @@ export function CorrectionForm({
           ? `${annotation.status} · ${labelText(annotation.label) || '（无色/无编号）'} · 版本 ${annotation.version}`
           : '还没有标注（更正会建立一条人工标注）'}
       </p>
-      <label>
+      <label className="ndr-field">
         动作
         <select
           value={action}
@@ -107,7 +130,7 @@ export function CorrectionForm({
       </label>
 
       {requiresSpeaker && (
-        <label>
+        <label className="ndr-field">
           已有说话人（本场景）
           <select
             value={speakerRef}
@@ -134,7 +157,7 @@ export function CorrectionForm({
       )}
 
       {action === 'create_speaker' && (
-        <label>
+        <label className="ndr-field">
           说明（可空）
           <input
             type="text"
@@ -146,12 +169,34 @@ export function CorrectionForm({
         </label>
       )}
 
+      {(action === 'assign_existing' || action === 'create_speaker') && (
+        <label className="ndr-field">
+          类型
+          <select
+            value={ownerKind}
+            onChange={(event) => {
+              ownerKindEdited.current = true
+              setOwnerKind(event.target.value as QuoteKind)
+            }}
+            data-testid="correction-owner-kind"
+          >
+            {OWNER_KINDS.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+          <span className="hint">发声、心声和引用均可指定人物，不会强制改为发声。</span>
+        </label>
+      )}
+
       {action === 'set_kind' && (
-        <label>
+        <label className="ndr-field">
           类型
           <select
             value={kind}
-            onChange={(event) => setKind(event.target.value as QuoteKind)}
+            onChange={(event) => {
+              kindEdited.current = true
+              setKind(event.target.value as QuoteKind)
+            }}
             data-testid="correction-kind"
           >
             {KINDS.map((item) => (
@@ -160,6 +205,7 @@ export function CorrectionForm({
               </option>
             ))}
           </select>
+          <span className="hint">改为发声、心声或引用会保留已有归属；其他类型会清除单个人物归属。</span>
         </label>
       )}
 

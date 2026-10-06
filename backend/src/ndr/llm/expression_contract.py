@@ -4,11 +4,11 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
-from ..domain.enums import Assignment, QuoteKind, SpeakerBasis
+from ..domain.enums import EXPRESSION_OWNER_KINDS, Assignment, QuoteKind, SpeakerBasis
 from .schemas import LlmOutput, QuoteLabel
 
 EXPRESSION_SCHEMA_VERSION = "1.1"
-OWNER_KINDS = frozenset({QuoteKind.SPEECH, QuoteKind.THOUGHT, QuoteKind.QUOTATION})
+OWNER_KINDS = EXPRESSION_OWNER_KINDS
 
 
 class ExpressionQuoteLabel(QuoteLabel):
