@@ -76,14 +76,17 @@ def digest_request(payload: dict[str, Any]) -> str:
 def dialogue_strategy_range(strategy: str) -> dict[str, str]:
     if strategy == "legacy":
         return {}
-    if strategy not in {"complete", "complete-review"}:
+    if strategy not in {"complete", "complete-review", "complete-blocks", "complete-blocks-review"}:
         raise ApiError.validation("不支持的对白处理策略")
     return {
-        "context_policy": "context-chapter-1",
+        "context_policy": "context-chapter-2"
+        if strategy.startswith("complete-blocks")
+        else "context-chapter-1",
         "output_protocol": "expression-production-1",
         **(
             {"review_protocol": "expression-evidence-review-1"}
-            if strategy == "complete-review" else {}
+            if strategy.endswith("-review")
+            else {}
         ),
     }
 
@@ -136,8 +139,10 @@ def estimate_inference(
             "裁决与核验按需要执行，0轮关闭；格式纠错、限流重试、候选证据提示和模型推理用量未构成上限，实际消耗可高于估算。"
         )
     elif max_recheck_rounds:
-        notes.append(f"已计入最多 {max_recheck_rounds} 轮全窗口复核；"
-                     "上下文补全、拆窗及输出重试可增加消耗，实际以调用用量为准。")
+        notes.append(
+            f"已计入最多 {max_recheck_rounds} 轮全窗口复核；"
+            "上下文补全、拆窗及输出重试可增加消耗，实际以调用用量为准。"
+        )
     if plan.stats.get("oversized_targets"):
         notes.append(f"其中 {plan.stats['oversized_targets']} 条目标超长，会单独成窗口或保留待定。")
     target_ids = [quote_id for window in plan.windows for quote_id in window.target_quote_ids]
@@ -147,23 +152,33 @@ def estimate_inference(
     }
     canonical = load_canonical_text(settings, version)
     # One bounded result per planned window; never fetch the entire task history.
-    processed_ids = set(session.scalars(
-        select(Annotation.quote_id).where(Annotation.quote_id.in_(target_ids or [""]))
-    ))
-    latest_windows = select(
-        JobWindow.window_id, JobWindow.state, Job.last_error,
-        func.row_number().over(
-            partition_by=JobWindow.window_id,
-            order_by=(Job.created_at.desc(), Job.id.desc()),
-        ).label("rank"),
-    ).join(Job, Job.id == JobWindow.job_id).where(
-        Job.book_version_id == version.id,
-        JobWindow.window_id.in_([window.window_id for window in plan.windows] or [""]),
-    ).subquery()
-    last_attempts = {
-        row.window_id: row for row in session.execute(
-            select(latest_windows).where(latest_windows.c.rank == 1)
+    processed_ids = set(
+        session.scalars(
+            select(Annotation.quote_id).where(Annotation.quote_id.in_(target_ids or [""]))
         )
+    )
+    latest_windows = (
+        select(
+            JobWindow.window_id,
+            JobWindow.state,
+            Job.last_error,
+            func.row_number()
+            .over(
+                partition_by=JobWindow.window_id,
+                order_by=(Job.created_at.desc(), Job.id.desc()),
+            )
+            .label("rank"),
+        )
+        .join(Job, Job.id == JobWindow.job_id)
+        .where(
+            Job.book_version_id == version.id,
+            JobWindow.window_id.in_([window.window_id for window in plan.windows] or [""]),
+        )
+        .subquery()
+    )
+    last_attempts = {
+        row.window_id: row
+        for row in session.execute(select(latest_windows).where(latest_windows.c.rank == 1))
     }
     windows: list[dict[str, Any]] = []
     for index, window in enumerate(plan.windows):
@@ -183,8 +198,11 @@ def estimate_inference(
                 "start_cp": window_start,
                 "end_cp": window_end,
                 "target_count": len(window.target_quote_ids),
-                "estimated_tokens": (int(window.budget["total_tokens"])
-                + len(window.target_quote_ids) * output_tokens_per_target) * multiplier,
+                "estimated_tokens": (
+                    int(window.budget["total_tokens"])
+                    + len(window.target_quote_ids) * output_tokens_per_target
+                )
+                * multiplier,
                 "preview": canonical[window_start : min(window_end, window_start + 160)].strip(),
                 "processing_status": (
                     "completed" if completed else "failed" if failed else "unprocessed"
@@ -200,9 +218,10 @@ def estimate_inference(
         output_tokens=output_tokens,
         total_tokens=input_tokens + output_tokens,
         estimator=plan.windows[0].budget["estimator"] if plan.windows else {},
-        policy={**resolved_policy.as_key(), **(
-            {"review_protocol": review_protocol} if review_protocol is not None else {}
-        )},
+        policy={
+            **resolved_policy.as_key(),
+            **({"review_protocol": review_protocol} if review_protocol is not None else {}),
+        },
         notes=notes,
         windows=windows,
     )
@@ -262,10 +281,13 @@ def create_inference_job(
     protocol = range_payload.get("output_protocol")
     if protocol is not None and protocol != PRODUCTION_EXPRESSION_VERSION:
         raise ApiError.validation("不支持的对白输出协议")
-    from ..context.budget import CONTEXT_POLICY_CHAPTER
+    from ..context.budget import CONTEXT_POLICY_CHAPTER, CONTEXT_POLICY_DIALOGUE_BLOCKS
 
-    if (range_payload.get("context_policy") == CONTEXT_POLICY_CHAPTER
-            and protocol != PRODUCTION_EXPRESSION_VERSION):
+    if (
+        range_payload.get("context_policy")
+        in {CONTEXT_POLICY_CHAPTER, CONTEXT_POLICY_DIALOGUE_BLOCKS}
+        and protocol != PRODUCTION_EXPRESSION_VERSION
+    ):
         raise ApiError.validation("完整章节上下文策略须配合短表达协议")
     from ..llm.expression_review import REVIEW_VERSION
 
@@ -340,9 +362,7 @@ def create_inference_job(
             },
             ensure_ascii=False,
         ),
-        profile_snapshot_json=json.dumps(snapshot, ensure_ascii=False)
-        if profile
-        else None,
+        profile_snapshot_json=json.dumps(snapshot, ensure_ascii=False) if profile else None,
         budget_json=json.dumps(budget, ensure_ascii=False),
         progress_json=json.dumps({"stage": "queued", "windows_done": 0}, ensure_ascii=False),
         idempotency_key=idempotency_key,

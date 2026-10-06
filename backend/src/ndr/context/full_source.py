@@ -108,11 +108,29 @@ def plan_full_source(inputs, *, target_quote_ids):
         raise FullContextError("目标对白不在完整原文范围内，或超出初读可见位置")
     windows, covered = [], []
     version = policy_version_for(inputs.policy)
-    for start, end in _units(inputs, ranges):
+    units = []
+    if inputs.policy.dialogue_blocks:
+        from .dialogue_blocks import dialogue_units
+
+        for start, end in ranges:
+            targets = [q for q in ordered if start <= q.start_cp and q.end_cp <= end]
+            units.extend(
+                dialogue_units(
+                    inputs,
+                    start,
+                    end,
+                    targets,
+                    separator=SEPARATOR,
+                    error=FullContextError,
+                )
+            )
+    else:
+        units = [(start, end, ()) for start, end in _units(inputs, ranges)]
+    for start, end, context in units:
         targets = [q for q in ordered if start <= q.start_cp and q.end_cp <= end]
         if not targets:
             continue
-        fragments = _fragments(inputs, start, end, targets)
+        fragments = _fragments(inputs, start, end, targets) + context
         ledger = BudgetLedger(policy=inputs.policy, estimator=inputs.estimator)
         for fragment in fragments:
             item = ledger.register(
@@ -158,6 +176,8 @@ def plan_full_source(inputs, *, target_quote_ids):
         )
         summary = ledger.summary()
         summary["source_range"] = [start, end]
+        if inputs.policy.dialogue_blocks:
+            summary["boundary_ranges"] = [[f.start_cp, f.end_cp] for f in context]
         estimates = {
             key: summary[key]
             for key in (
@@ -172,7 +192,7 @@ def plan_full_source(inputs, *, target_quote_ids):
                 inputs.estimator.estimate(inputs.canonical_text[q.start_cp : q.end_cp])
                 for q in targets
             ),
-            overlap_tokens=0,
+            overlap_tokens=sum(inputs.estimator.estimate(f.text) for f in context),
         )
         window = ProcessingWindow(
             window_id,

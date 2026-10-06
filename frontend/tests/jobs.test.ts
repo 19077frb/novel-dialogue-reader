@@ -6,8 +6,10 @@ describe('freshIdempotencyKey', () => {
   it('maps the same explicit strategy for estimate and execution without upgrading restored inputs', () => {
     expect(dialogueStrategyPayload()).toEqual({})
     expect(dialogueStrategyPayload('legacy')).toEqual({})
+    expect(dialogueStrategyPayload('future' as Parameters<typeof dialogueStrategyPayload>[0])).toEqual({})
     expect(dialogueStrategyPayload('complete')).toEqual({ context_policy: 'context-chapter-1', output_protocol: 'expression-production-1' })
     expect(dialogueStrategyPayload('complete-review')).toEqual({ context_policy: 'context-chapter-1', output_protocol: 'expression-production-1', review_protocol: 'expression-evidence-review-1' })
+    expect(dialogueStrategyPayload('complete-blocks')).toEqual({ context_policy: 'context-chapter-2', output_protocol: 'expression-production-1' })
   })
   it('sends validation retries independently from unresolved quote rechecks', () => {
     expect(budgetPayload({ maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: 2, maxFormatRetries: 4 }))

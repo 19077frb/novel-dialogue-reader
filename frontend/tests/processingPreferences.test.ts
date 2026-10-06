@@ -48,12 +48,12 @@ describe('shared processing preferences', () => {
     expect(module.getProcessingPreferences().maxRecheckRounds).toBe(3)
   })
 
-  it('persists the explicit dialogue strategy and never upgrades old or unknown values', async () => {
+  it.each(['complete-review', 'complete-blocks', 'complete-blocks-review'] as const)('persists %s and never upgrades old or unknown values', async dialogueStrategy => {
     const module = await import('../src/processing/preferences')
     expect(module.getProcessingPreferences().dialogueStrategy).toBe('legacy')
-    module.updateProcessingPreferences({ dialogueStrategy: 'complete-review' })
+    module.updateProcessingPreferences({ dialogueStrategy })
     vi.resetModules()
-    expect((await import('../src/processing/preferences')).getProcessingPreferences().dialogueStrategy).toBe('complete-review')
+    expect((await import('../src/processing/preferences')).getProcessingPreferences().dialogueStrategy).toBe(dialogueStrategy)
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, JSON.stringify({ dialogueStrategy: 'new-future-mode' }))
     expect(module.getProcessingPreferences().dialogueStrategy).toBe('legacy')
   })

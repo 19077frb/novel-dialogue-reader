@@ -3345,7 +3345,7 @@ export interface components {
              * @default legacy
              * @enum {string}
              */
-            dialogue_strategy: "legacy" | "complete" | "complete-review";
+            dialogue_strategy: "legacy" | "complete" | "complete-review" | "complete-blocks" | "complete-blocks-review";
             inference_options?: components["schemas"]["InferenceOptions"] | null;
             budget?: components["schemas"]["BudgetIn"];
             /** @default initial */

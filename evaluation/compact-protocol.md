@@ -129,6 +129,10 @@ uv run --project backend python -m pytest backend/tests/unit/test_trial_journal.
 uv run --project backend python -m pytest backend/tests/unit/test_expression_owner.py
 ```
 
+## 完整对话块的正式规划入口
+
+长章完整原文可显式选择`range.context_policy=context-chapter-2`，正式规划器使用完整段落/连续对话块与原文边界证据。它保留旧`context-chapter-1`计划及缓存，整章可容时仍一窗；完整块和边界超预算时拒绝，不截断对白。初读不发送右侧原文，分窗不认证场景独立。实际行为见[契约](../docs/CONTRACTS.md)，离线覆盖可运行`backend/tests/unit/test_dialogue_blocks.py`和`backend/tests/integration/test_dialogue_block_jobs.py`。使用新策略做质量比较须冻结新版本，不能复用旧策略成绩或将无Gold的交付完整当准确率。
+
 ## 可选辅助诊断隔离
 
 `ndr.llm.expression_diagnostics.compile_expression_diagnostics`是显式替代编译入口，不调用模型或写库；正式`expression-production-1`任务仍使用原严格编译，不自动开启此模式。受话对象、受话证据及严格布尔`owner_depends_on_addressee`可作为辅助提案提供。程序先移出这些已声明的辅助字段，严格编译完整主归属，再独立验证辅助引用；坏辅助不会改变不依赖它的主结果。

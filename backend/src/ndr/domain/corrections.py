@@ -37,9 +37,7 @@ from .inference_options import InferenceOptions
 from .jobs import BudgetIn
 
 # 说话人级别的四种更正；其余动作各有专用端点（Gap / merge / split / undo）。
-QuoteCorrectionAction = Literal[
-    "assign_existing", "create_speaker", "set_kind", "mark_unknown"
-]
+QuoteCorrectionAction = Literal["assign_existing", "create_speaker", "set_kind", "mark_unknown"]
 
 
 class AnnotationStateOut(ApiModel):
@@ -107,11 +105,17 @@ class QuoteCorrectionIn(ApiModel):
             raise ValueError("assign_existing 必须提供 speaker_ref")
         if self.action == "set_kind" and self.kind is None:
             raise ValueError("set_kind 必须提供 kind")
-        if (self.action in {"assign_existing", "create_speaker"}
-                and self.kind is not None and self.kind not in EXPRESSION_OWNER_KINDS):
+        if (
+            self.action in {"assign_existing", "create_speaker"}
+            and self.kind is not None
+            and self.kind not in EXPRESSION_OWNER_KINDS
+        ):
             raise ValueError("指定或新建人物仅支持发声、心声或引用类型")
-        if (self.action == "set_kind" and self.speaker_ref
-                and self.kind not in EXPRESSION_OWNER_KINDS):
+        if (
+            self.action == "set_kind"
+            and self.speaker_ref
+            and self.kind not in EXPRESSION_OWNER_KINDS
+        ):
             raise ValueError("集体、其他或未知类型不能指定单个人物")
         if self.quote_ids is not None and len(set(self.quote_ids)) != len(self.quote_ids):
             raise ValueError("quote_ids 不能重复")
@@ -206,8 +210,11 @@ class RecheckIn(ApiModel):
     """`POST /api/quotes/{id}/recheck`：有上限的局部复核（**会创建真实付费任务**）。"""
 
     profile_id: str = Field(description="模型配置 ID；复核必须显式指定")
-    dialogue_strategy: Literal["legacy", "complete", "complete-review"] = Field(
-        default="legacy", description="对白策略；完整策略仍限定服务器选定的当前场景/章节范围",
+    dialogue_strategy: Literal[
+        "legacy", "complete", "complete-review", "complete-blocks", "complete-blocks-review"
+    ] = Field(
+        default="legacy",
+        description="对白策略；完整策略仍限定服务器选定的当前场景/章节范围",
     )
     inference_options: InferenceOptions | None = None
     budget: BudgetIn = Field(default_factory=BudgetIn)

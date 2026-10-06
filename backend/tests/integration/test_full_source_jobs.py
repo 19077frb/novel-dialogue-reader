@@ -330,14 +330,19 @@ def test_estimate_includes_three_possible_evidence_stages_per_round(migrated_cli
     )
 
 
-@pytest.mark.parametrize("strategy", ["legacy", "complete", "complete-review"])
+@pytest.mark.parametrize(
+    "strategy",
+    ["legacy", "complete", "complete-review", "complete-blocks", "complete-blocks-review"],
+)
 def test_recheck_strategy_keeps_server_scope_and_does_not_call_at_creation(
     migrated_client, strategy
 ):
     _recheck_strategy_creation(migrated_client, strategy)
 
 
-@pytest.mark.parametrize("strategy", ["complete", "complete-review"])
+@pytest.mark.parametrize(
+    "strategy", ["complete", "complete-review", "complete-blocks", "complete-blocks-review"]
+)
 def test_actual_local_recheck_runs_selected_strategy_and_full_window_review(
     migrated_client, strategy
 ):
@@ -392,10 +397,12 @@ def _recheck_strategy_creation(migrated_client, strategy):
     if strategy == "legacy":
         assert "output_protocol" not in scope and "context_policy" not in scope
     else:
-        assert scope["context_policy"] == "context-chapter-1"
+        assert scope["context_policy"] == (
+            "context-chapter-2" if strategy.startswith("complete-blocks") else "context-chapter-1"
+        )
         assert scope["output_protocol"] == "expression-production-1"
         assert (scope.get("review_protocol") == "expression-evidence-review-1") == (
-            strategy == "complete-review"
+            strategy.endswith("-review")
         )
     assert (
         client.post(

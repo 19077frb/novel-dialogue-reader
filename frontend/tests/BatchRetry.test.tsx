@@ -272,6 +272,23 @@ it('extends the same pool before old dialogue finishes, deduplicates and sequenc
   expect(books.completeChapterProcessing).toHaveBeenCalledTimes(3)
 })
 
+it.each(['complete', 'complete-blocks'] as const)('keeps %s block-version frozen when extending an automatic batch', async dialogueStrategy => {
+  let finishFirstRoster!: (job: JobDetailOut) => void
+  vi.mocked(characters.analyzeCharacterRoster).mockImplementationOnce(() => new Promise(resolve => { finishFirstRoster = resolve }))
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  const blocks = dialogueStrategy === 'complete-blocks'
+  const policy = { full_source: true, ...(blocks ? { dialogue_blocks: true } : {}) }
+  const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate: { ...estimate, policy } }],
+    preferences: { ...getProcessingPreferences(), dialogueStrategy, profileId: 'p1', concurrency: 2, tokenLimit: null }, expandable: true })
+  await vi.waitFor(() => expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1))
+  const next = { chapter: { ...chapter, id: 'c2', ordinal: 1 }, estimate: { ...estimate, policy } }
+  expect(appendAutomaticProcessing('b1', 'v1', [{ ...next, estimate: { ...estimate, policy: { full_source: true, dialogue_blocks: !blocks } } }])).toBe(0)
+  expect(appendAutomaticProcessing('b1', 'v1', [next])).toBe(1)
+  finishFirstRoster(job('COMPLETED'))
+  await run
+  expect(books.completeChapterProcessing).toHaveBeenCalledTimes(2)
+})
+
 it('stops admission and dispatch of appended chapters when the user stops the queue', async () => {
   let finishOldWindow!: (job: JobDetailOut) => void
   vi.mocked(jobs.createJob).mockImplementationOnce(() => new Promise(resolve => { finishOldWindow = resolve }))
