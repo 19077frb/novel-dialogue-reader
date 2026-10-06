@@ -73,6 +73,21 @@ def digest_request(payload: dict[str, Any]) -> str:
     return fingerprint(payload)
 
 
+def dialogue_strategy_range(strategy: str) -> dict[str, str]:
+    if strategy == "legacy":
+        return {}
+    if strategy not in {"complete", "complete-review"}:
+        raise ApiError.validation("不支持的对白处理策略")
+    return {
+        "context_policy": "context-chapter-1",
+        "output_protocol": "expression-production-1",
+        **(
+            {"review_protocol": "expression-evidence-review-1"}
+            if strategy == "complete-review" else {}
+        ),
+    }
+
+
 def estimate_inference(
     session: Session,
     settings: Settings,
@@ -85,6 +100,7 @@ def estimate_inference(
     policy: BudgetPolicy | None = None,
     output_tokens_per_target: int = 20,
     max_recheck_rounds: int = 0,
+    review_protocol: str | None = None,
 ) -> JobEstimate:
     """纯本地估算：不调用模型、不写数据库。"""
 
@@ -102,14 +118,24 @@ def estimate_inference(
     targets = sum(len(window.target_quote_ids) for window in plan.windows)
     input_tokens = sum(window.budget["total_tokens"] for window in plan.windows)
     output_tokens = targets * output_tokens_per_target
-    multiplier = 1 + max_recheck_rounds
+    from ..llm.expression_review import REVIEW_VERSION
+
+    if review_protocol is not None and review_protocol != REVIEW_VERSION:
+        raise ApiError.validation("不支持的证据复核版本")
+    evidence_review = review_protocol == REVIEW_VERSION
+    multiplier = 1 + (3 if evidence_review else 1) * max_recheck_rounds
     input_tokens *= multiplier
     output_tokens *= multiplier
     notes = [
         "估算来自本地启发式 token 口径，不是真实计费依据；实际用量以提供方 usage 为准。",
         "输出预留按每条目标对白 20 token 粗估（可在预算里调整）。",
     ]
-    if max_recheck_rounds:
+    if evidence_review:
+        notes.append(
+            f"证据复核按首次处理加每轮最多三个阶段（独立复核、分歧裁决、挑战核验）估算：每窗最多{multiplier}个规划阶段。"
+            "裁决与核验按需要执行，0轮关闭；格式纠错、限流重试、候选证据提示和模型推理用量未构成上限，实际消耗可高于估算。"
+        )
+    elif max_recheck_rounds:
         notes.append(f"已计入最多 {max_recheck_rounds} 轮全窗口复核；"
                      "上下文补全、拆窗及输出重试可增加消耗，实际以调用用量为准。")
     if plan.stats.get("oversized_targets"):
@@ -174,7 +200,9 @@ def estimate_inference(
         output_tokens=output_tokens,
         total_tokens=input_tokens + output_tokens,
         estimator=plan.windows[0].budget["estimator"] if plan.windows else {},
-        policy=resolved_policy.as_key(),
+        policy={**resolved_policy.as_key(), **(
+            {"review_protocol": review_protocol} if review_protocol is not None else {}
+        )},
         notes=notes,
         windows=windows,
     )

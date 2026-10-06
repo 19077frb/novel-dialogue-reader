@@ -42,6 +42,7 @@ import { runSingleWorkflow, useSingleWorkflow } from '../processing/singleWorkfl
 import type { SingleWorkflow } from '../processing/singleWorkflow'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
 import { ThinkingSettings } from '../components/ThinkingSettings'
+import { DialogueStrategySettings } from '../components/DialogueStrategySettings'
 
 interface SingleWindowTask {
   windowId: string
@@ -256,11 +257,11 @@ export default function PreviewPage() {
   )
 
   const estimateQuery = useQuery({
-    queryKey: ['window-preview', bookId, book.data?.active_version_id, range, resolvedEnd, budget],
+    queryKey: ['window-preview', bookId, book.data?.active_version_id, range, resolvedEnd, budget, preferences.dialogueStrategy],
     queryFn: ({ signal }) =>
       estimateRange(bookId as string, {
         bookVersionId: book.data?.active_version_id ?? null,
-        range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
+        range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd, dialogueStrategy: preferences.dialogueStrategy },
         readingMode: PROCESSING_READING_MODE,
         visibleHorizonCp: null,
         budget,
@@ -316,7 +317,7 @@ export default function PreviewPage() {
           windowId: String(window.window_id), ordinal: String(window.ordinal), job: null, error: null,
           input: {
             bookId: bookId!, mode, bookVersionId: versionId,
-            range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
+            range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd, dialogueStrategy: preferences.dialogueStrategy },
             selectedWindowIds: plannedWindows.length ? [String(window.window_id)] : null,
             profileId: profileId || null, inferenceOptions: options, readingMode: PROCESSING_READING_MODE,
             visibleHorizonCp: null, runNow: true,
@@ -489,6 +490,9 @@ export default function PreviewPage() {
         disabledReason="当前处理任务尚未结束；请等待完成或先停止任务，再切换处理方式及模型配置。"
         profileId={profileId} onProfileChange={setProfileId}
         profileTestId={processingMode === 'batch' ? 'batch-profile' : 'preview-profile'} />
+      <DialogueStrategySettings value={preferences.dialogueStrategy} rounds={preferences.maxRecheckRounds}
+        disabled={batchProgress.running || singleRunning}
+        onChange={dialogueStrategy => setPreferences({ dialogueStrategy })} />
 
       {processingMode === 'single' && !batchProgress.running && (
         <>

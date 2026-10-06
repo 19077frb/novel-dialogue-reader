@@ -767,8 +767,12 @@ def _run_recheck_pass(
             reading_mode=reading_mode,
             visible_horizon_cp=horizon_cp,
             scene_ref=window.scene_ref,
-            policy=DEFAULT_POLICY,  # 复核一律回到保守策略：把压缩阶段丢掉的句子补回来
+            policy=policy if policy.full_source else DEFAULT_POLICY,
         )
+        if policy.full_source:
+            # Keep this original selected unit, not the whole chapter or a small quote-only slice.
+            source_start, source_end = window.budget["source_range"]
+            inputs = replace(inputs, source_ranges=((source_start, source_end),))
         priorities = {}
         candidate_hints = {}
         job = session.get(Job, job_id)

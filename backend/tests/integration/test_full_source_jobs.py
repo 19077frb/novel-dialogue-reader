@@ -2,6 +2,7 @@ import json
 from copy import deepcopy
 from dataclasses import replace
 
+import pytest
 from sqlalchemy import select
 
 from ndr.context.budget import CHAPTER_POLICY
@@ -41,7 +42,9 @@ def prepare(client, text=TEXT):
     return data, profile, inputs
 
 
-def create(client, data, profile, *, scope=None, selected=None, horizon=None, mode="initial"):
+def create(
+    client, data, profile, *, scope=None, selected=None, horizon=None, mode="initial", rounds=None
+):
     scope = {
         "context_policy": "context-chapter-1",
         "output_protocol": "expression-production-1",
@@ -56,7 +59,10 @@ def create(client, data, profile, *, scope=None, selected=None, horizon=None, mo
             "selected_window_ids": selected,
             "reading_mode": mode,
             "visible_horizon_cp": horizon,
-            "budget": {"max_format_retries": 0},
+            "budget": {
+                "max_format_retries": 0,
+                **({"max_recheck_rounds": rounds} if rounds is not None else {}),
+            },
             "run_now": False,
             "idempotency_key": "whole",
         },
@@ -98,7 +104,8 @@ def test_actual_job_request_sends_whole_chapter_not_next_chapter(migrated_client
         adapter_factory=lambda *_: adapter,
     )
     assert result.state is JobState.COMPLETED and result.calls == 1, (
-        result.errors, client.get(f"/api/jobs/{job['id']}").json()["data"]["last_error"]
+        result.errors,
+        client.get(f"/api/jobs/{job['id']}").json()["data"]["last_error"],
     )
     sent = json.loads(adapter.calls[0]["payload"]["messages"][1]["content"])
     assert "".join(f["text"] for f in sent["context"]) == inputs.canonical_text[:end]
@@ -182,6 +189,32 @@ def test_partial_range_never_expands_back_to_whole_book_or_chapter(migrated_clie
     )
 
 
+@pytest.mark.parametrize("evidence", [False, True])
+def test_complete_review_never_expands_a_selected_partial_range(migrated_client, evidence):
+    client = migrated_client
+    data, profile, inputs = prepare(client)
+    first = inputs.quotes[0]
+    scope = {"start_cp": first.start_cp, "end_cp": first.end_cp}
+    if evidence:
+        scope["review_protocol"] = "expression-evidence-review-1"
+    job = create(client, data, profile, scope=scope, rounds=1)
+    adapter = WholeAdapter()
+    result = run_job(
+        client.app.state.session_factory,
+        client.app.state.settings,
+        job_id=job["id"],
+        adapter_factory=lambda *_: adapter,
+    )
+    assert result.state is JobState.COMPLETED, result.errors
+    assert len(adapter.calls) == 2
+    for call in adapter.calls:
+        sent = json.loads(call["payload"]["messages"][1]["content"])
+        assert (
+            "".join(f["text"] for f in sent["context"])
+            == inputs.canonical_text[first.start_cp : first.end_cp]
+        )
+
+
 def test_oversized_unit_fails_zero_calls_instead_of_leaving_running(migrated_client):
     client = migrated_client
     data, profile, _ = prepare(client)
@@ -258,5 +291,121 @@ def test_reread_keeps_same_source_but_may_ignore_initial_horizon(migrated_client
     assert result.state is JobState.COMPLETED
     sent = json.loads(adapter.calls[0]["payload"]["messages"][1]["content"])
     with client.app.state.session_factory() as session:
-        assert json.loads(session.get(Job, job["id"]).range_json)["reading_mode"] == ReadingMode.REREAD.value
+        assert (
+            json.loads(session.get(Job, job["id"]).range_json)["reading_mode"]
+            == ReadingMode.REREAD.value
+        )
     assert "".join(f["text"] for f in sent["context"]) == inputs.canonical_text[:end]
+
+
+@pytest.mark.parametrize("rounds", [0, 1, 2])
+def test_estimate_includes_three_possible_evidence_stages_per_round(migrated_client, rounds):
+    client = migrated_client
+    data, _, inputs = prepare(client)
+    scope = {"context_policy": "context-chapter-1", "end_cp": inputs.source_ranges[0][1]}
+    baseline = client.post(f"/api/books/{data['book_id']}/estimates", json={"range": scope}).json()[
+        "data"
+    ]
+    response = client.post(
+        f"/api/books/{data['book_id']}/estimates",
+        json={
+            "range": {**scope, "review_protocol": "expression-evidence-review-1"},
+            "budget": {"max_recheck_rounds": rounds},
+        },
+    )
+    assert response.status_code == 200, response.text
+    estimate = response.json()["data"]
+    assert estimate["total_tokens"] == baseline["total_tokens"] * (1 + 3 * rounds)
+    assert estimate["windows"][0]["estimated_tokens"] == estimate["total_tokens"]
+    assert estimate["policy"]["review_protocol"] == "expression-evidence-review-1"
+    assert "未构成上限" in "".join(estimate["notes"])
+    assert (
+        client.post(
+            f"/api/books/{data['book_id']}/estimates",
+            json={
+                "range": {**scope, "review_protocol": "unrecognized"},
+            },
+        ).status_code
+        == 422
+    )
+
+
+@pytest.mark.parametrize("strategy", ["legacy", "complete", "complete-review"])
+def test_recheck_strategy_keeps_server_scope_and_does_not_call_at_creation(
+    migrated_client, strategy
+):
+    _recheck_strategy_creation(migrated_client, strategy)
+
+
+@pytest.mark.parametrize("strategy", ["complete", "complete-review"])
+def test_actual_local_recheck_runs_selected_strategy_and_full_window_review(
+    migrated_client, strategy
+):
+    client = migrated_client
+    _, profile, inputs = prepare(client)
+    response = client.post(
+        f"/api/quotes/{inputs.quotes[0].quote_id}/recheck",
+        json={
+            "profile_id": profile["id"],
+            "dialogue_strategy": strategy,
+            "budget": {"max_recheck_rounds": 1, "max_format_retries": 0},
+            "idempotency_key": "actual-local",
+            "run_now": False,
+        },
+    )
+    assert response.status_code == 202, response.text
+    job = response.json()["data"]
+    adapter = WholeAdapter()
+    result = run_job(
+        client.app.state.session_factory,
+        client.app.state.settings,
+        job_id=job["id"],
+        adapter_factory=lambda *_: adapter,
+    )
+    assert result.state is JobState.COMPLETED, result.errors
+    assert result.calls + result.recheck_calls == 2 and len(adapter.calls) == 2
+    for call in adapter.calls:
+        sent = json.loads(call["payload"]["messages"][1]["content"])
+        assert (
+            "".join(f["text"] for f in sent["context"])
+            == inputs.canonical_text[: inputs.source_ranges[0][1]]
+        )
+
+
+def _recheck_strategy_creation(migrated_client, strategy):
+    client = migrated_client
+    data, profile, inputs = prepare(client)
+    response = client.post(
+        f"/api/quotes/{inputs.quotes[0].quote_id}/recheck",
+        json={
+            "profile_id": profile["id"],
+            "dialogue_strategy": strategy,
+            "idempotency_key": "local-strategy",
+            "run_now": False,
+        },
+    )
+    assert response.status_code == 202, response.text
+    job = response.json()["data"]
+    assert job["calls"] == 0 and job["kind"] == "RECHECK"
+    scope = job["range"]
+    assert [scope["start_cp"], scope["end_cp"]] == list(inputs.source_ranges[0])
+    if strategy == "legacy":
+        assert "output_protocol" not in scope and "context_policy" not in scope
+    else:
+        assert scope["context_policy"] == "context-chapter-1"
+        assert scope["output_protocol"] == "expression-production-1"
+        assert (scope.get("review_protocol") == "expression-evidence-review-1") == (
+            strategy == "complete-review"
+        )
+    assert (
+        client.post(
+            f"/api/quotes/{inputs.quotes[0].quote_id}/recheck",
+            json={
+                "profile_id": profile["id"],
+                "dialogue_strategy": "unknown",
+                "idempotency_key": "invalid-local",
+                "run_now": False,
+            },
+        ).status_code
+        == 422
+    )

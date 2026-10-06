@@ -75,7 +75,7 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
     session.message = '正在估算当前章与后续章节（不消耗模型额度）…'
     const plans = await mapWithConcurrency(selected, 4, async chapter => ({ chapter,
       estimate: await estimateRange(bookId, { bookVersionId,
-        range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
+        range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp, dialogueStrategy: preferences.dialogueStrategy },
         readingMode: 'reread', budget: { maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: preferences.maxRecheckRounds } }) }))
     if (session.blocked || revision !== session.revision) return
     if (canAppendAutomaticProcessing(bookId, bookVersionId)) {

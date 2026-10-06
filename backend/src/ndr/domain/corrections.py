@@ -196,6 +196,9 @@ class RecheckIn(ApiModel):
     """`POST /api/quotes/{id}/recheck`：有上限的局部复核（**会创建真实付费任务**）。"""
 
     profile_id: str = Field(description="模型配置 ID；复核必须显式指定")
+    dialogue_strategy: Literal["legacy", "complete", "complete-review"] = Field(
+        default="legacy", description="对白策略；完整策略仍限定服务器选定的当前场景/章节范围",
+    )
     inference_options: InferenceOptions | None = None
     budget: BudgetIn = Field(default_factory=BudgetIn)
     reading_mode: ReadingMode = ReadingMode.INITIAL

@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { budgetPayload, freshIdempotencyKey } from '../src/api/jobs'
+import { budgetPayload, dialogueStrategyPayload, freshIdempotencyKey } from '../src/api/jobs'
 
 describe('freshIdempotencyKey', () => {
+  it('maps the same explicit strategy for estimate and execution without upgrading restored inputs', () => {
+    expect(dialogueStrategyPayload()).toEqual({})
+    expect(dialogueStrategyPayload('legacy')).toEqual({})
+    expect(dialogueStrategyPayload('complete')).toEqual({ context_policy: 'context-chapter-1', output_protocol: 'expression-production-1' })
+    expect(dialogueStrategyPayload('complete-review')).toEqual({ context_policy: 'context-chapter-1', output_protocol: 'expression-production-1', review_protocol: 'expression-evidence-review-1' })
+  })
   it('sends validation retries independently from unresolved quote rechecks', () => {
     expect(budgetPayload({ maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: 2, maxFormatRetries: 4 }))
       .toEqual({ max_input_tokens: null, max_output_tokens: null, max_recheck_rounds: 2, max_format_retries: 4 })

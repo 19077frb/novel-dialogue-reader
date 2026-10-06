@@ -27,7 +27,18 @@ export function fetchRecentJobs(input: { bookId?: string; versionId?: string; ch
   return apiData<JobDetailOut[]>(`/api/jobs/recent?${params}`, { signal })
 }
 
+export type DialogueStrategy = 'legacy' | 'complete' | 'complete-review'
+
+export function dialogueStrategyPayload(strategy?: DialogueStrategy) {
+  return strategy === 'complete' || strategy === 'complete-review' ? {
+    context_policy: 'context-chapter-1',
+    output_protocol: 'expression-production-1',
+    ...(strategy === 'complete-review' ? { review_protocol: 'expression-evidence-review-1' } : {}),
+  } : {}
+}
+
 export interface RangeInput {
+  dialogueStrategy?: DialogueStrategy
   chapterId: string | null
   startCp: number
   endCp: number | null
@@ -108,6 +119,7 @@ export function estimateRange(
         chapter_id: input.range.chapterId,
         start_cp: input.range.startCp,
         end_cp: input.range.endCp,
+        ...dialogueStrategyPayload(input.range.dialogueStrategy),
       },
       reading_mode: input.readingMode,
       visible_horizon_cp: input.visibleHorizonCp ?? null,
@@ -145,6 +157,7 @@ export function createJob(input: CreateJobInput, signal?: AbortSignal): Promise<
         chapter_id: input.range.chapterId,
         start_cp: input.range.startCp,
         end_cp: input.range.endCp,
+        ...dialogueStrategyPayload(input.range.dialogueStrategy),
       },
       selected_window_ids: input.selectedWindowIds ?? null,
       force_reprocess: input.forceReprocess ?? false,

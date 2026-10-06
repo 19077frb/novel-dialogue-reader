@@ -3339,6 +3339,13 @@ export interface components {
              * @description 模型配置 ID；复核必须显式指定
              */
             profile_id: string;
+            /**
+             * Dialogue Strategy
+             * @description 对白策略；完整策略仍限定服务器选定的当前场景/章节范围
+             * @default legacy
+             * @enum {string}
+             */
+            dialogue_strategy: "legacy" | "complete" | "complete-review";
             inference_options?: components["schemas"]["InferenceOptions"] | null;
             budget?: components["schemas"]["BudgetIn"];
             /** @default initial */

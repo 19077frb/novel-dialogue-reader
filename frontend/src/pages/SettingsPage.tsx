@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchProfiles, profileKeys } from '../api/profiles'
 import { ThinkingSettings } from '../components/ThinkingSettings'
+import { DialogueStrategySettings } from '../components/DialogueStrategySettings'
 import { ApplicationSettings } from '../components/ApplicationSettings'
 import { useProcessingPreferences } from '../processing/preferences'
 import { getProcessingPreferences, getDefaultProcessingPreferences } from '../processing/preferences'
@@ -71,13 +72,16 @@ export default function SettingsPage() {
         onProfileChange={profileId => updatePreferences({ profileId })} profileTestId="automatic-profile"
         draftPreferences={preferences} onPreferencesChange={updatePreferences} />
       {profiles.isError && <p className="status-error">模型配置读取失败：{profiles.error.message}<button onClick={() => void profiles.refetch()}>重新读取</button></p>}
+      <DialogueStrategySettings value={preferences.dialogueStrategy} rounds={preferences.maxRecheckRounds}
+        onChange={dialogueStrategy => updatePreferences({ dialogueStrategy })} />
+      <p className="hint">对白策略修改后也需点击“保存阅读与处理设置”；人物合并不使用此选项。</p>
       <p className="hint">这些模型、思考、并发和额度设置与单章、批量处理共用。自动处理额度按本页会话中每本书累计；接近上限时会提醒调整，阅读侧栏可停止或刷新额度并重试。修改设置不改变已启动的任务。</p>
       <Link className="ndr-button" to="/settings/models">管理模型账号</Link>
       <button onClick={() => {
-        if (!window.confirm('恢复本栏的自动处理开关、提前章节数、模型选择、思考、并发、复核和Token上限默认值？不删除模型账号，其他区域及未在本栏显示的参数不变，点击保存后生效。')) return
+        if (!window.confirm('恢复本栏的自动处理开关、提前章节数、模型选择、思考、对白策略、并发、复核和Token上限默认值？不删除模型账号，其他区域及未在本栏显示的参数不变，点击保存后生效。')) return
         update({ autoProcessing: defaultSettings.autoProcessing, lookAheadChapters: defaultSettings.lookAheadChapters })
-        const { profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort } = getDefaultProcessingPreferences()
-        updatePreferences({ profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort })
+        const { profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort, dialogueStrategy } = getDefaultProcessingPreferences()
+        updatePreferences({ profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort, dialogueStrategy })
       }}>恢复自动处理默认值</button>
       <p className="hint">恢复仅修改本栏草稿，不停止任务或删除模型账号；保存后生效。其他页面的输出上限和校验失败重试次数保持不变。</p>
     </section>

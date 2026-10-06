@@ -14,7 +14,7 @@ import { hasSingleWork } from '../processing/singleWorkflow'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
 import { createTaskLimiter, mapWithConcurrency } from '../processing/concurrency'
 import { waitForJobCompletion } from '../processing/jobCompletion'
-import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
+import { getProcessingPreferences, inferenceOptions, useProcessingPreferences } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
 import { OperationTimer } from './OperationTimer'
 import { readJournal, writeJournal, removeJournal, withWorkflowLock, assertWorkflowOwnership } from '../processing/journal'
@@ -335,6 +335,12 @@ export function canAppendAutomaticProcessing(bookId: string, versionId: string) 
 /** Extend the existing pool, never start a second pool or reset its allowance. */
 export function appendAutomaticProcessing(bookId: string, versionId: string, plans: ChapterPlan[]): number {
   if (!canAppendAutomaticProcessing(bookId, versionId)) return 0
+  const strategy = batchExecutions.get(bookId)?.execution.preferences.dialogueStrategy ?? 'legacy'
+  if (plans.some(plan => Boolean(plan.estimate.policy?.full_source) !== (strategy !== 'legacy')
+    || (plan.estimate.policy?.review_protocol === 'expression-evidence-review-1') !== (strategy === 'complete-review'))) {
+    publishBatch(bookId, { message: '当前批次已固定对白策略；新策略将在本批次结束后用于下一批，未追加不匹配的窗口。' })
+    return 0
+  }
   return expandableBatches.get(bookId)!.append(plans)
 }
 
@@ -367,7 +373,7 @@ export async function retryBatchTask(bookId: string, taskId: string, wholeChapte
     const chapter = chapters.find(item => item.id === task.chapterId)
     if (!chapter) throw new Error('章节已不存在，请重新读取目录。')
     const estimate = await estimateRange(bookId, { bookVersionId: saved.execution.bookVersionId,
-      range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp }, readingMode: 'reread',
+      range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp, dialogueStrategy: saved.execution.preferences.dialogueStrategy }, readingMode: 'reread',
       budget: { maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: saved.execution.preferences.maxRecheckRounds,
         maxRechecks: (saved.execution.preferences as ProcessingPreferences & { maxRechecks?: number }).maxRechecks,
         maxFormatRetries: saved.execution.preferences.maxFormatRetries } })
@@ -1056,7 +1062,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
                 bookId,
                 mode: 'process',
                 bookVersionId,
-                range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
+                range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp, dialogueStrategy: preferences.dialogueStrategy },
                 selectedWindowIds: [windowId],
                 forceReprocess,
                 profileId,
@@ -1285,7 +1291,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       setEstimatedTokens(null)
       setPlans([])
     }
-  }, [profileId, maxRecheckRounds, maxFormatRetries, tokenLimitText, running])
+  }, [profileId, maxRecheckRounds, maxFormatRetries, tokenLimitText, running, preferences.dialogueStrategy])
 
   const calculateEstimate = async () => {
     if (!validRange) return
@@ -1298,12 +1304,19 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       const estimates = await mapWithConcurrency(
         selected, 4, (chapter) => estimateRange(bookId, {
           bookVersionId,
-          range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
+          range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp, dialogueStrategy: preferences.dialogueStrategy },
           readingMode: 'reread',
           visibleHorizonCp: null,
           budget: { maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds, maxFormatRetries },
         }),
       )
+      const currentPreferences = getProcessingPreferences()
+      if (currentPreferences.dialogueStrategy !== preferences.dialogueStrategy
+        || currentPreferences.maxRecheckRounds !== maxRecheckRounds
+        || currentPreferences.profileId !== profileId) {
+        setProgress('处理配置已改变，请使用当前配置重新估算。')
+        return
+      }
       setPlans(selected.map((chapter, index) => ({ chapter, estimate: estimates[index] })))
       const rosterReserve = selected.reduce(
         (total, chapter) => total + Math.max(0, chapter.end_cp - chapter.start_cp) + 2_000,

@@ -9504,6 +9504,17 @@
             "title": "Profile Id",
             "description": "模型配置 ID；复核必须显式指定"
           },
+          "dialogue_strategy": {
+            "type": "string",
+            "enum": [
+              "legacy",
+              "complete",
+              "complete-review"
+            ],
+            "title": "Dialogue Strategy",
+            "description": "对白策略；完整策略仍限定服务器选定的当前场景/章节范围",
+            "default": "legacy"
+          },
           "inference_options": {
             "anyOf": [
               {

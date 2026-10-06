@@ -1,8 +1,10 @@
 import { useSyncExternalStore } from 'react'
 import type { InferenceOptions } from '../api/types'
+import type { DialogueStrategy } from '../api/jobs'
 
 export const PROCESSING_PREFERENCES_KEY = 'ndr:processing-preferences:v1'
 export interface ProcessingPreferences {
+  dialogueStrategy: DialogueStrategy
   profileId: string
   concurrency: number
   maxRecheckRounds: number
@@ -13,6 +15,7 @@ export interface ProcessingPreferences {
   thinkingEffort: NonNullable<InferenceOptions['reasoning_effort']>
 }
 const defaults: ProcessingPreferences = {
+  dialogueStrategy: 'legacy',
   profileId: '', concurrency: 2, maxRecheckRounds: 0, maxFormatRetries: 1, tokenLimit: null, maxOutputTokens: null,
   thinkingMode: 'default', thinkingEffort: 'default',
 }
@@ -30,6 +33,7 @@ function positive(value: unknown): number | null {
 }
 function normalize(value: Partial<ProcessingPreferences>): ProcessingPreferences {
   return {
+    dialogueStrategy: value.dialogueStrategy === 'complete' || value.dialogueStrategy === 'complete-review' ? value.dialogueStrategy : 'legacy',
     profileId: typeof value.profileId === 'string' ? value.profileId : '',
     concurrency: Math.min(16, positive(value.concurrency) ?? 2),
     maxRecheckRounds: typeof value.maxRecheckRounds === 'number' && Number.isSafeInteger(value.maxRecheckRounds)

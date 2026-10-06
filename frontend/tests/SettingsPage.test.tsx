@@ -16,6 +16,17 @@ beforeEach(() => {
   vi.mocked(applicationSettings.fetchApplicationSettings).mockResolvedValue({ fields: [], revision: 'missing', config_path: 'test', restart_required: [], restart_blocked_reason: '测试启动方式不重启' })
 })
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks() })
+it('keeps the dialogue strategy as a draft until save and restores it on reopening', async () => {
+  const page = renderWithProviders(<SettingsPage />)
+  await userEvent.selectOptions(screen.getByTestId('dialogue-strategy'), 'complete-review')
+  expect(getProcessingPreferences().dialogueStrategy).toBe('legacy')
+  await userEvent.click(screen.getByRole('button', { name: '保存阅读与处理设置' }))
+  expect(getProcessingPreferences().dialogueStrategy).toBe('complete-review')
+  page.unmount()
+  renderWithProviders(<SettingsPage />)
+  expect(screen.getByTestId('dialogue-strategy')).toHaveValue('complete-review')
+  expect(screen.getByText(/当前复核次数为 0/)).toBeInTheDocument()
+})
 it('后台更新人工人物默认关闭，开启后重新进入仍保留', async () => {
   const page = renderWithProviders(<SettingsPage />)
   const label = '允许后台人物识别更新人工姓名与说明'

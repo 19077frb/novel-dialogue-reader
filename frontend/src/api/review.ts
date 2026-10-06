@@ -190,6 +190,7 @@ export function undoCorrection(correctionId: string, signal?: AbortSignal): Prom
 }
 
 export interface RecheckInput {
+  dialogueStrategy?: import('./jobs').DialogueStrategy
   inferenceOptions?: InferenceOptions
   profileId: string
   maxInputTokens?: number | null
@@ -211,6 +212,7 @@ export function recheckQuote(
     signal,
     body: {
       profile_id: input.profileId,
+      ...(input.dialogueStrategy && input.dialogueStrategy !== 'legacy' ? { dialogue_strategy: input.dialogueStrategy } : {}),
       ...(input.inferenceOptions ? { inference_options: input.inferenceOptions } : {}),
       budget: {
         max_input_tokens: input.maxInputTokens ?? null,

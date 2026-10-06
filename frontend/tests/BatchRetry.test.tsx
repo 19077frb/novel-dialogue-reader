@@ -244,6 +244,7 @@ it('extends the same pool before old dialogue finishes, deduplicates and sequenc
   await vi.waitFor(() => expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1))
   const extra = [3, 2].map(ordinal => ({ chapter: { ...chapter, id: `c${ordinal}`, ordinal },
     estimate: { ...estimate, windows: [{ ...estimate.windows![0], window_id: `w${ordinal + 1}` }] } }))
+  expect(appendAutomaticProcessing('b1', 'v1', [{ ...extra[0], estimate: { ...estimate, policy: { full_source: true } } }])).toBe(0)
   expect(appendAutomaticProcessing('b1', 'v1', extra)).toBe(2)
   expect(appendAutomaticProcessing('b1', 'v1', extra)).toBe(0)
   expect(appendAutomaticProcessing('b1', 'other-version', extra)).toBe(0)

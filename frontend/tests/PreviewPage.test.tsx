@@ -496,7 +496,7 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('range-chapter')).toHaveValue('c2')
     expect(screen.getByTestId('range-summary')).toHaveTextContent('20 – 40')
     expect(jobsApi.estimateRange).toHaveBeenCalledWith('b1', expect.objectContaining({
-      range: { chapterId: 'c2', startCp: 20, endCp: 40 },
+      range: { chapterId: 'c2', startCp: 20, endCp: 40, dialogueStrategy: 'legacy' },
     }), expect.any(AbortSignal))
     await userEvent.selectOptions(screen.getByTestId('range-chapter'), 'c1')
     expect(screen.getByTestId('range-chapter')).toHaveValue('c1')
@@ -555,11 +555,15 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('annotation-span')
     await screen.findByTestId('window-picker')
+    await userEvent.selectOptions(screen.getByTestId('dialogue-strategy'), 'complete')
+    await waitFor(() => expect(screen.getByTestId('preview-process')).toBeEnabled())
 
     fireEvent.change(screen.getByTestId('preview-concurrency'), { target: { value: '2' } })
     await userEvent.click(screen.getByTestId('preview-process'))
 
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(jobsApi.createJob).mock.calls.every(([input]) => input.range.dialogueStrategy === 'complete')).toBe(true)
+    expect(jobsApi.estimateRange).toHaveBeenLastCalledWith('b1', expect.objectContaining({ range: expect.objectContaining({ dialogueStrategy: 'complete' }) }), expect.any(AbortSignal))
     expect(vi.mocked(jobsApi.createJob).mock.calls.map(([input]) => input.selectedWindowIds)).toEqual([
       ['w1'],
       ['w2'],
@@ -802,6 +806,7 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await userEvent.click(await screen.findByTestId('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
+    await userEvent.selectOptions(screen.getByTestId('dialogue-strategy'), 'complete-review')
     fireEvent.change(screen.getByTestId('processing-thinking-mode'), { target: { value: 'enabled' } })
     fireEvent.change(screen.getByTestId('processing-thinking-effort'), { target: { value: 'low' } })
     expect(screen.queryByTestId('preview-profile')).not.toBeInTheDocument()
@@ -832,7 +837,7 @@ describe('PreviewPage', () => {
     expect(jobsApi.createJob).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: 'process',
-        range: { chapterId: 'c1', startCp: 0, endCp: 20 },
+        range: { chapterId: 'c1', startCp: 0, endCp: 20, dialogueStrategy: 'complete-review' },
         selectedWindowIds: ['w1'],
         inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' },
         budget: expect.objectContaining({ maxRecheckRounds: 2 }),

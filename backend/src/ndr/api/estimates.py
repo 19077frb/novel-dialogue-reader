@@ -56,6 +56,7 @@ def estimate_route(
             visible_horizon_cp=payload.visible_horizon_cp,
             max_recheck_rounds=payload.budget.max_recheck_rounds or 0,
             policy=policy_for_version(payload.range.get("context_policy")),
+            review_protocol=payload.range.get("review_protocol"),
         )
     except FullContextError as exc:
         raise ApiError.validation(str(exc)) from exc
