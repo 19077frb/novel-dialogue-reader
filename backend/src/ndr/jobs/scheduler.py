@@ -206,6 +206,9 @@ def _apply_confirmed_roster(
             canonical_name=character.canonical_name or "",
             aliases=tuple(_json_list(character.aliases_json)),
             description=character.description or "",
+            source=character.source.value,
+            user_confirmed=character.user_confirmed,
+            confirmation_source=character.confirmation_source or "unknown",
         )
         for character in characters
     ]
@@ -215,6 +218,9 @@ def _apply_confirmed_roster(
             canonical_name=character.canonical_name or "",
             aliases=tuple(_json_list(character.aliases_json)),
             description=character.description or "",
+            source=character.source.value,
+            user_confirmed=character.user_confirmed,
+            confirmation_source=character.confirmation_source or "unknown",
         )
         for character in list_book_characters(session, version)
     ]

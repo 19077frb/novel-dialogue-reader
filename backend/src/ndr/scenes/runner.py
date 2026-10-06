@@ -216,6 +216,11 @@ def _messages_for(
         }
         for fragment in window.fragments
     ]
+    identity_provenance = {
+        item.character_id: {"source": item.source, "user_confirmed": item.user_confirmed,
+                            "confirmation_source": item.confirmation_source}
+        for item in state.identity_characters
+    }
     speaker_records = [
         {
             "speaker_ref": slot.display_label,
@@ -226,26 +231,17 @@ def _messages_for(
             "is_pov": slot.character_id is not None
             and slot.character_id == state.pov_character_id,
             "evidence_refs": [alias(ref) for ref in slot.evidence_refs if ref in stable_to_alias],
+            "identity_provenance": identity_provenance.get(
+                slot.character_id,
+                {"source": "unknown", "user_confirmed": None, "confirmation_source": "unknown"},
+            ),
         }
         for slot in state.participants
     ]
-    confirmed_records = [
-        {
-            "character_id": item.character_id,
-            "name": item.canonical_name,
-            "aliases": list(item.aliases),
-            "description": item.description,
-        }
-        for item in state.confirmed_characters
-    ]
+    confirmed_records = [item.prompt_record() for item in state.confirmed_characters]
     pov_character = next(
         (
-            {
-                "character_id": item.character_id,
-                "name": item.canonical_name,
-                "aliases": list(item.aliases),
-                "description": item.description,
-            }
+            item.prompt_record()
             for item in state.confirmed_characters
             if item.character_id == state.pov_character_id
         ),
@@ -268,11 +264,7 @@ def _messages_for(
             for name, description in state.known_characters.items()
         ],
         confirmed_characters=confirmed_records,
-        book_characters=[
-            {"character_id": item.character_id, "name": item.canonical_name,
-             "aliases": list(item.aliases), "description": item.description}
-            for item in state.book_characters
-        ],
+        book_characters=[item.prompt_record() for item in state.book_characters],
         pov_character=pov_character,
         evidence_ids=[alias(ref) for ref in window.fragment_ids],
         locked_summary=locked_summary or state.prompt_state(max_chars=600),

@@ -23,12 +23,15 @@ SCENE_STATE_VERSION = "scene-state-5"
 
 @dataclass(frozen=True)
 class ConfirmedCharacter:
-    """用户确认过的全书人物；跨场景保持同一个 character_id。"""
+    """章节目录人物及资料来源；确认目录不等于人工核实身份。"""
 
     character_id: str
     canonical_name: str
     aliases: tuple[str, ...] = ()
     description: str = ""
+    source: str = "unknown"
+    user_confirmed: bool | None = None
+    confirmation_source: str = "unknown"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -36,7 +39,15 @@ class ConfirmedCharacter:
             "canonical_name": self.canonical_name,
             "aliases": list(self.aliases),
             "description": self.description,
+            "source": self.source,
+            "user_confirmed": self.user_confirmed,
+            "confirmation_source": self.confirmation_source,
         }
+
+    def prompt_record(self) -> dict[str, Any]:
+        value = self.as_dict()
+        value["name"] = value.pop("canonical_name")
+        return value
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> ConfirmedCharacter:
@@ -45,6 +56,10 @@ class ConfirmedCharacter:
             canonical_name=str(payload.get("canonical_name", "")),
             aliases=tuple(str(item) for item in payload.get("aliases", [])),
             description=str(payload.get("description", "")),
+            source=str(payload.get("source", "unknown")),
+            user_confirmed=(payload.get("user_confirmed")
+                            if type(payload.get("user_confirmed")) is bool else None),
+            confirmation_source=str(payload.get("confirmation_source", "unknown")),
         )
 
 
