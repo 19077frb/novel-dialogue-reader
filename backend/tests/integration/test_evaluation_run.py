@@ -37,11 +37,11 @@ def fake_roster(monkeypatch):
     """人物阶段给有效候选，对白阶段仍然全部 UNKNOWN；不伪造模型效果。"""
     original = FakeProvider._roster_output
 
-    def roster(self):
+    def roster(self, payload=None):
         mode = self.labeling_mode
         self.labeling_mode = "deterministic"
         try:
-            return original(self)
+            return original(self, payload)
         finally:
             self.labeling_mode = mode
 

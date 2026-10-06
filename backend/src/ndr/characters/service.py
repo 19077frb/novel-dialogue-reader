@@ -33,6 +33,7 @@ from ..ingest.query import load_canonical_text
 from ..jobs.service import digest_request, profile_snapshot
 from ..llm.prompts import build_roster_messages
 from ..llm.schemas import RosterOutput
+from ..llm.sourced_roster import SOURCED_ROSTER_VERSION, SourcedRosterOutput
 from ..storage.chapter_status import complete_chapter_automatically
 from ..storage.models import (
     Book,
@@ -265,7 +266,13 @@ def store_roster_candidates(
     output: RosterOutput,
     job_id: str | None,
     allow_overwrite_manual: bool = False,
+    identity_facts=None,  # noqa: ANN001 - validated per-temp-ref identity blocks
+    original=None,  # noqa: ANN001 - immutable OriginalIdentitySnapshot
 ) -> ChapterCharacterRoster:
+    sourced = isinstance(output, SourcedRosterOutput)
+    if sourced and (original is None or identity_facts is None
+                    or set(identity_facts) != {c.temp_ref for c in output.characters}):
+        raise ValueError("逐事实人物提案缺少核验后的原文与事实块")
     roster = _roster_for_chapter(session, chapter.id)
     if roster is None:
         roster = ChapterCharacterRoster(
@@ -288,16 +295,19 @@ def store_roster_candidates(
         if not candidate.temp_ref or candidate.temp_ref in seen_refs:
             continue
         seen_refs.add(candidate.temp_ref)
-        matched = by_id.get(candidate.character_id) if candidate.character_id else _match_existing(
-            session,
-            version.id,
-            name=candidate.name,
-            aliases=candidate.aliases,
-            characters=existing,
+        matched = by_id.get(candidate.character_id) if candidate.character_id else (
+            None if sourced else _match_existing(
+                session,
+                version.id,
+                name=candidate.name,
+                aliases=candidate.aliases,
+                characters=existing,
+            )
         )
         character = matched
         if character is None:
-            temp_key = f"{chapter.id}:{candidate.temp_ref}"
+            temp_key = (f"{chapter.id}:{job_id}:{candidate.temp_ref}" if sourced
+                        else f"{chapter.id}:{candidate.temp_ref}")
             character = session.execute(
                 select(BookCharacter).where(
                     BookCharacter.book_version_id == version.id,
@@ -341,6 +351,19 @@ def store_roster_candidates(
             character.description = candidate.description
             character.version = (character.version or 0) + 1
         session.flush()
+        if sourced:
+            from .facts import append_identity_facts
+
+            # Analysis is still a proposal, even when a later confirmation is
+            # allowed to update human data. Do not change the fact-side profile
+            # before that confirmation.
+            protected = character.user_confirmed or character.name_locked
+            append_identity_facts(
+                character, version,
+                tuple(f.model_copy(update={"accepted": not protected})
+                      for f in identity_facts[candidate.temp_ref]),
+                original=original,
+            )
         proposed_name = revealed_name(
             character.canonical_name, candidate.real_name or candidate.name,
             locked=character.name_locked and not allow_overwrite_manual,
@@ -658,6 +681,7 @@ def create_roster_job(
                 "allow_overwrite_manual": allow_overwrite_manual,
                 "start_cp": chapter.start_cp,
                 "end_cp": chapter.end_cp,
+                "roster_protocol": SOURCED_ROSTER_VERSION,
             },
             ensure_ascii=False,
         ),
@@ -680,10 +704,15 @@ def roster_messages(
     job: Job,
     version: BookVersion,
     chapter: Chapter,
+    *,
+    canonical_text: str | None = None,
 ):
-    text = load_canonical_text(settings, version)[chapter.start_cp : chapter.end_cp]
+    canonical = (load_canonical_text(settings, version)
+                 if canonical_text is None else canonical_text)
+    text = canonical[chapter.start_cp : chapter.end_cp]
     return build_roster_messages(
         chapter_title=chapter.title,
         chapter_lines=text.splitlines() or [""],
         existing_characters=existing_characters_for_prompt(session, version),
+        sourced=json.loads(job.range_json or "{}").get("roster_protocol") == SOURCED_ROSTER_VERSION,
     )

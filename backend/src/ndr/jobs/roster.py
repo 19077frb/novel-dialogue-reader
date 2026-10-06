@@ -11,20 +11,22 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..characters.facts import OriginalIdentitySnapshot
 from ..characters.names import valid_display_name
 from ..characters.service import (
     chapter_has_body_text,
     complete_textless_chapter,
-    list_book_characters,
     roster_messages,
     store_roster_candidates,
 )
 from ..config import Settings
 from ..context.budget import estimate_tokens
 from ..domain.enums import CredentialMode, InferenceRunState, JobKind, JobState
+from ..ingest.query import load_canonical_text
 from ..llm.adapters import AdapterSpec, build_adapter
 from ..llm.errors import ProviderError
 from ..llm.schemas import RosterOutput
+from ..llm.sourced_roster import SOURCED_ROSTER_VERSION, compile_sourced_roster
 from ..storage.models import BookVersion, Chapter, InferenceRun, Job
 
 ROSTER_MAX_TOKENS = 2000
@@ -97,6 +99,19 @@ def _build_adapter(settings: Settings, credentials, snapshot: dict[str, Any]):  
     )
 
 
+def _prepare_input(session, settings, job, version, chapter):
+    source_text = load_canonical_text(settings, version)
+    sourced = _job_range(job).get("roster_protocol") == SOURCED_ROSTER_VERSION
+    original = (OriginalIdentitySnapshot(version.id, version.canonical_sha256, source_text)
+                if sourced else None)
+    messages = roster_messages(session, settings, job, version, chapter,
+                               canonical_text=source_text)
+    request_data = json.loads(messages[1]["content"].split("任务参数（JSON）：\n", 1)[1]
+                              .split("\n\n", 1)[0])
+    allowed_ids = {item["character_id"] for item in request_data["existing_characters"]}
+    return messages, original, sourced, allowed_ids
+
+
 def run_character_roster_job(
     session_factory: sessionmaker[Session],
     settings: Settings,
@@ -152,14 +167,19 @@ def run_character_roster_job(
                 outcome.errors.append(exc.code.value)
                 return outcome
 
-        job.state = JobState.RUNNING
-        job.progress_json = json.dumps({"stage": "running", "calls": 0}, ensure_ascii=False)
-        session.commit()
-
-        messages = roster_messages(session, settings, job, version, chapter)
-        # IDs must have been present in this exact request, not merely exist
-        # by the time a concurrent model call finishes.
-        allowed_character_ids = {item.id for item in list_book_characters(session, version)}
+        chapter_start, chapter_end = chapter.start_cp, chapter.end_cp
+        try:
+            messages, original, sourced, allowed_character_ids = _prepare_input(
+                session, settings, job, version, chapter,
+            )
+        except Exception as exc:  # noqa: BLE001 - no call or partial candidate writes
+            job.state = JobState.FAILED
+            job.last_error = f"人物分析输入准备失败：{exc}"
+            job.progress_json = json.dumps({"stage": "failed", "calls": 0}, ensure_ascii=False)
+            session.commit()
+            outcome.state = JobState.FAILED
+            outcome.errors.append("invalid_roster_input")
+            return outcome
         budget = json.loads(job.budget_json or "{}")
         max_input_tokens = budget.get("max_input_tokens")
         estimated_tokens = sum(estimate_tokens(message["content"]) for message in messages)
@@ -175,6 +195,8 @@ def run_character_roster_job(
         fingerprint = hashlib.sha256(
             json.dumps(messages, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
+        job.state = JobState.RUNNING
+        job.progress_json = json.dumps({"stage": "running", "calls": 0}, ensure_ascii=False)
         run = InferenceRun(
             job_id=job.id,
             window_id=f"roster:{chapter.id}",
@@ -195,6 +217,7 @@ def run_character_roster_job(
             adapter.generate_labels(
                 {
                     "task": "roster",
+                    "roster_protocol": SOURCED_ROSTER_VERSION if sourced else "legacy-roster-1",
                     "messages": messages,
                     "max_tokens": ROSTER_MAX_TOKENS,
                     "json_object": True,
@@ -207,7 +230,14 @@ def run_character_roster_job(
             for key, value in dict(raw).items()
             if not str(key).startswith("_")
         }
-        output = RosterOutput.model_validate(payload)
+        identity_facts = None
+        if sourced:
+            output, identity_facts = compile_sourced_roster(
+                payload, original=original, chapter_start=chapter_start, chapter_end=chapter_end,
+                allowed_character_ids=allowed_character_ids, source_ref=run_id,
+            )
+        else:
+            output = RosterOutput.model_validate(payload)
         if any(person.character_id and person.character_id not in allowed_character_ids
                for person in output.characters):
             raise ValueError("人物引用了未提供的全书人物 ID")
@@ -245,14 +275,28 @@ def run_character_roster_job(
             outcome.state = JobState.FAILED
             outcome.errors.append("job_not_found")
             return outcome
-        roster = store_roster_candidates(
-            session,
-            version=version,
-            chapter=chapter,
-            output=output,
-            job_id=job.id,
-            allow_overwrite_manual=bool(_job_range(job).get("allow_overwrite_manual", False)),
-        )
+        try:
+            with session.begin_nested():
+                roster = store_roster_candidates(
+                    session, version=version, chapter=chapter, output=output, job_id=job.id,
+                    allow_overwrite_manual=bool(
+                        _job_range(job).get("allow_overwrite_manual", False)),
+                    identity_facts=identity_facts, original=original,
+                )
+        except Exception as exc:  # noqa: BLE001 - persist charged storage failures
+            run = session.get(InferenceRun, run_id)
+            if run is not None:
+                run.state = InferenceRunState.FAILED
+                run.error_code = "ROSTER_STORAGE_FAILED"
+                run.elapsed_ms = int((time.monotonic() - started) * 1000)
+                run.usage_json = _attempt_usage_json(raw)
+            job.state = JobState.FAILED
+            job.last_error = f"人物保存失败：{exc}"
+            job.progress_json = json.dumps({"stage": "failed", "calls": 1}, ensure_ascii=False)
+            session.commit()
+            outcome.state = JobState.FAILED
+            outcome.errors.append("roster_storage_failed")
+            return outcome
         run = session.get(InferenceRun, run_id)
         if run is not None:
             run.state = InferenceRunState.SUCCEEDED

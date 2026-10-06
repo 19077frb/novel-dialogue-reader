@@ -74,13 +74,15 @@ def test_roster_attempt_usage_survives_validation_or_provider_failure(
                     details={"usage": deepcopy(usage)} if usage is not None else {},
                 )
             payload = {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "characters": [
                     {
                         "temp_ref": "c1",
                         "name": "林舟",
-                        "evidence_refs": ["L1"],
+                        "evidence_refs": ["L2"],
                         "pov_candidate": True,
+                        "pov_evidence_refs": ["L2"],
+                        "facts": [{"kind": "name", "value": "林舟", "evidence_refs": ["L2"]}],
                     }
                 ],
             }

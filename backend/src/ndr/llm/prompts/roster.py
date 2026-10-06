@@ -52,6 +52,7 @@ def build_roster_messages(
     chapter_title: str | None,
     chapter_lines: Sequence[str],
     existing_characters: Sequence[Mapping[str, object]],
+    sourced: bool = False,
 ) -> list[dict[str, str]]:
     task = {
         "schema_version": "1.0",
@@ -73,6 +74,43 @@ def build_roster_messages(
             ],
         },
     }
+    system = ROSTER_SYSTEM_PROMPT
+    if sourced:
+        from ..sourced_roster import SourcedRosterOutput
+
+        task["schema_version"] = "1.1"
+        task["output_schema"] = SourcedRosterOutput.model_json_schema()
+        system = system.replace(
+            "不确定时选择证据最强的候选。", "不确定时不强制选择视角人物。",
+        ).replace(
+            "temp_ref、character_id、name、real_name、aliases、description、evidence_refs、"
+            "pov_candidate 字段。",
+            "temp_ref、character_id、name、real_name、aliases、description、evidence_refs、"
+            "pov_candidate、pov_evidence_refs、facts 字段。",
+        ) + (
+            "\n本次必须输出schema_version=1.1，不得退回1.0。每个人物facts逐条记录"
+            "kind(name/alias/designation/description/relation)、value、evidence_refs。"
+            "每个姓名/别名必须出现在它自己引用的原文中，代称须有原文身份依据；"
+            "name对应name或designation事实，real_name对应name事实，aliases每项有自己的称呼事实，"
+            "关系不能放aliases。description必须对应description事实或用中文分号连接这些事实。"
+            "每条事实只引用支持该项的必要行；晚揭示的姓名、别名和关系保留自己的较晚依据。"
+            "关联已有character_id时evidence_refs另给同一身份的关联依据，"
+            "不能仅凭同名、同姓或相似泛称；匿名人物仍应区分。"
+            "pov_candidate=true必须填写pov_evidence_refs，引用叙述者身份的依据；"
+            "其他人物说我不等于叙述者。已有目录是带来源的候选，不是原文真值。"
+            "仅被提及的人不等于实际在场或本章说话人。"
+        )
+    example = {
+        "schema_version": "1.1" if sourced else "1.0",
+        "characters": [{"temp_ref": "c1", "name": "女同学", "aliases": [],
+                        "description": "" if sourced else "根据正文填写的人物说明",
+                        "evidence_refs": ["L1"], "pov_candidate": False}],
+    }
+    if sourced:
+        example["characters"][0].update(
+            facts=[{"kind": "designation", "value": "女同学", "evidence_refs": ["L1"]}],
+            pov_evidence_refs=[],
+        )
     records = [
         {"ref": f"L{index + 1}", "text": line}
         for index, line in enumerate(chapter_lines)
@@ -85,19 +123,7 @@ def build_roster_messages(
         + json.dumps(task, ensure_ascii=False, separators=(",", ":"))
         + "\n\n合法 JSON 输出示例（仅展示格式，不是本章答案）：\n"
         + json.dumps(
-            {
-                "schema_version": "1.0",
-                "characters": [
-                    {
-                        "temp_ref": "c1",
-                        "name": "女同学",
-                        "aliases": [],
-                        "description": "根据正文填写的人物说明",
-                        "evidence_refs": ["L1"],
-                        "pov_candidate": False,
-                    }
-                ],
-            },
+            example,
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -106,6 +132,6 @@ def build_roster_messages(
         + "\n\n请只输出符合 schema 的 JSON 对象。"
     )
     return [
-        {"role": "system", "content": ROSTER_SYSTEM_PROMPT},
+        {"role": "system", "content": system},
         {"role": "user", "content": user_content},
     ]
