@@ -6,6 +6,8 @@ quote/gap/node）。
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -102,6 +104,16 @@ def load_window_inputs(
     """
 
     material = _window_material(session, settings, version)
+    resolved_policy = policy or DEFAULT_POLICY
+    source_ranges = ()
+    if resolved_policy.full_source:
+        source_ranges = tuple(
+            (row.start_cp, row.end_cp) for row in session.execute(
+                select(Chapter.start_cp, Chapter.end_cp)
+                .where(Chapter.book_version_id == version.id, Chapter.end_cp > Chapter.start_cp)
+                .order_by(Chapter.start_cp, Chapter.end_cp)
+            )
+        )
     return WindowInputs(
         book_version_id=version.id,
         canonical_text=material.canonical_text,
@@ -114,7 +126,8 @@ def load_window_inputs(
         scene_state=scene_state,
         locked_summary=locked_summary,
         speaker_refs=speaker_refs,
-        policy=policy or DEFAULT_POLICY,
+        policy=resolved_policy,
+        source_ranges=source_ranges,
     )
 
 
@@ -132,6 +145,15 @@ def plan_range(
 
     inputs = load_window_inputs(session, settings, version, **kwargs)
     limit = version.canonical_length_cp if end_cp is None else end_cp
+    if inputs.policy.full_source:
+        from .full_source import FullContextError
+        if (type(start_cp) is not int or type(limit) is not int
+                or not 0 <= start_cp <= limit <= len(inputs.canonical_text)):
+            raise FullContextError("完整上下文的处理范围无效")
+        inputs = replace(inputs, source_ranges=tuple(
+            (max(start_cp, start), min(limit, end)) for start, end in inputs.source_ranges
+            if max(start_cp, start) < min(limit, end)
+        ))
     targets = [
         quote.quote_id
         for quote in inputs.quotes

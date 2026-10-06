@@ -9,6 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
+from ..context.budget import policy_for_version
+from ..context.full_source import FullContextError
 from ..domain.common import DataEnvelope
 from ..domain.jobs import EstimateIn, EstimateOut, UsageOut
 from ..ingest.query import active_version, get_book_or_404
@@ -43,16 +45,20 @@ def estimate_route(
             "书籍版本不存在或不属于该书籍", book_version_id=payload.book_version_id
         )
 
-    estimate = estimate_inference(
-        session,
-        settings,
-        version,
-        start_cp=int(payload.range.get("start_cp", 0) or 0),
-        end_cp=payload.range.get("end_cp"),
-        reading_mode=payload.reading_mode,
-        visible_horizon_cp=payload.visible_horizon_cp,
-        max_recheck_rounds=payload.budget.max_recheck_rounds or 0,
-    )
+    try:
+        estimate = estimate_inference(
+            session,
+            settings,
+            version,
+            start_cp=int(payload.range.get("start_cp", 0) or 0),
+            end_cp=payload.range.get("end_cp"),
+            reading_mode=payload.reading_mode,
+            visible_horizon_cp=payload.visible_horizon_cp,
+            max_recheck_rounds=payload.budget.max_recheck_rounds or 0,
+            policy=policy_for_version(payload.range.get("context_policy")),
+        )
+    except FullContextError as exc:
+        raise ApiError.validation(str(exc)) from exc
     return DataEnvelope(
         data=EstimateOut(book_id=book.id, book_version_id=version.id, **estimate.as_dict()),
         request_id=current_request_id(request),

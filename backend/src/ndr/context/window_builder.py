@@ -60,6 +60,7 @@ class WindowInputs:
     policy: BudgetPolicy = DEFAULT_POLICY
     prompt_version: str = LABELING_PROMPT_VERSION
     estimator: TokenEstimator = DEFAULT_ESTIMATOR
+    source_ranges: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -259,6 +260,10 @@ def plan_windows(
     overlap_between_windows: bool = True,
 ) -> WindowPlan:
     """把目标对白与证据组织成受预算约束的窗口列表。"""
+
+    if inputs.policy.full_source:
+        from .full_source import plan_full_source
+        return plan_full_source(inputs, target_quote_ids=target_quote_ids)
 
     quote_by_id = {quote.quote_id: quote for quote in inputs.quotes}
     ordered = [quote_by_id[quote_id] for quote_id in target_quote_ids if quote_id in quote_by_id]

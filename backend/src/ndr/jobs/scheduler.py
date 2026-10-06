@@ -28,6 +28,7 @@ from ..characters.input_view import IDENTITY_INPUT_VERSION, project_identity_sta
 from ..characters.service import confirmed_roster_context, list_book_characters
 from ..config import Settings
 from ..context.budget import DEFAULT_POLICY, BudgetPolicy, estimate_tokens, policy_for_version
+from ..context.full_source import FullContextError
 from ..context.recheck import plan_recheck, route_window
 from ..context.service import load_window_inputs, plan_range
 from ..context.window_builder import plan_windows
@@ -463,6 +464,8 @@ def _positions(inputs, window):  # noqa: ANN001, ANN202
     evidence_positions = dict(gap_positions)
     evidence_positions.update({quote.quote_id: quote.start_cp for quote in inputs.quotes})
     for fragment in window.fragments:
+        if fragment.kind.value in {"inner_gap", "outer_gap"}:
+            gap_positions.setdefault(fragment.fragment_id, fragment.start_cp)
         evidence_positions.setdefault(fragment.fragment_id, fragment.end_cp)
     return quote_positions, gap_positions, evidence_positions
 
@@ -1377,8 +1380,19 @@ def run_job(
         # 不要覆盖 PAUSING：让窗口之间的暂停检查有机会生效
         if job.state is not JobState.PAUSING:
             job.state = JobState.RUNNING
-        ensure_windows(session, settings, job, version, policy=policy)
-        plan = _plan(session, settings, job, version, policy)
+        try:
+            ensure_windows(session, settings, job, version, policy=policy)
+            plan = _plan(session, settings, job, version, policy)
+        except FullContextError as exc:
+            job.state = JobState.FAILED
+            job.last_error = str(exc)
+            job.progress_json = json.dumps(
+                {"stage": "invalid_full_context", "calls": 0}, ensure_ascii=False,
+            )
+            session.commit()
+            outcome.state = JobState.FAILED
+            outcome.errors.append("invalid_full_context")
+            return outcome
         inputs = load_window_inputs(
             session,
             settings,

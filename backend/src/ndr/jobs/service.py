@@ -234,6 +234,11 @@ def create_inference_job(
     protocol = range_payload.get("output_protocol")
     if protocol is not None and protocol != PRODUCTION_EXPRESSION_VERSION:
         raise ApiError.validation("不支持的对白输出协议")
+    from ..context.budget import CONTEXT_POLICY_CHAPTER
+
+    if (range_payload.get("context_policy") == CONTEXT_POLICY_CHAPTER
+            and protocol != PRODUCTION_EXPRESSION_VERSION):
+        raise ApiError.validation("完整章节上下文策略须配合短表达协议")
     from ..llm.expression_review import REVIEW_VERSION
 
     review_protocol = range_payload.get("review_protocol")

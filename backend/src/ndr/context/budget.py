@@ -98,6 +98,7 @@ class BudgetPolicy:
     recheck_max_rounds: int = 0
     # 可选强模型路由（默认关闭；>0 时才允许把困难窗口交给强模型）
     strong_model_share: float = 0.0
+    full_source: bool = False
 
     def as_key(self) -> dict[str, Any]:
         """参与依赖哈希/缓存键的字段（改动会影响缓存复用）。"""
@@ -114,6 +115,7 @@ class BudgetPolicy:
             "gap_compression_max_ratio": self.gap_compression_max_ratio,
             "recheck_max_targets": self.recheck_max_targets,
             "strong_model_share": self.strong_model_share,
+            **({"full_source": True} if self.full_source else {}),
         }
 
 
@@ -128,17 +130,22 @@ RECHECK_POLICY = BudgetPolicy(context_tokens=6000, overlap_tokens=300, state_tok
 
 CONTEXT_POLICY_CONSERVATIVE = "context-1"
 CONTEXT_POLICY_COMPRESSED = "context-2"
+CONTEXT_POLICY_CHAPTER = "context-chapter-1"
+CHAPTER_POLICY = BudgetPolicy(context_tokens=32000, full_source=True)
 
 
 def policy_version_for(policy: BudgetPolicy) -> str:
     """策略版本号：进入依赖哈希与缓存键，默认仍是 context-1。"""
 
+    if policy.full_source:
+        return CONTEXT_POLICY_CHAPTER
     return CONTEXT_POLICY_COMPRESSED if policy.gap_compression else CONTEXT_POLICY_CONSERVATIVE
 
 
 POLICY_BY_VERSION: dict[str, BudgetPolicy] = {
     CONTEXT_POLICY_CONSERVATIVE: DEFAULT_POLICY,
     CONTEXT_POLICY_COMPRESSED: COMPRESSED_POLICY,
+    CONTEXT_POLICY_CHAPTER: CHAPTER_POLICY,
 }
 
 
