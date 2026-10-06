@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,6 +34,7 @@ class ConfirmedCharacter:
     user_confirmed: bool | None = None
     confirmation_source: str = "unknown"
     relations: tuple[dict[str, Any], ...] = ()
+    identity_records: tuple[dict[str, Any], ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         value = {
@@ -46,6 +48,8 @@ class ConfirmedCharacter:
         }
         if self.relations:
             value["relations"] = [dict(item) for item in self.relations]
+        if self.identity_records:
+            value["identity_records"] = deepcopy(list(self.identity_records))
         return value
 
     def prompt_record(self) -> dict[str, Any]:
@@ -66,6 +70,8 @@ class ConfirmedCharacter:
             confirmation_source=str(payload.get("confirmation_source", "unknown")),
             relations=tuple(dict(item) for item in payload.get("relations", [])
                             if isinstance(item, dict)),
+            identity_records=tuple(deepcopy(item) for item in payload.get("identity_records", [])
+                                   if isinstance(item, dict)),
         )
 
 

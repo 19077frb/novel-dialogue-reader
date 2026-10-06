@@ -10,6 +10,7 @@ import pytest
 from ndr.characters.input_view import project_identity_state
 from ndr.characters.visibility import identity_presentation_history
 from ndr.domain.enums import ReadingMode
+from ndr.evaluation.owner_constraints import ConstrainedOwnerProtocol
 from ndr.llm.expression_compiler import compile_expression_output
 from ndr.llm.expression_task import build_production_expression_task
 from ndr.llm.validation import LabelingTargets, parse_and_validate
@@ -56,6 +57,38 @@ def test_effective_manual_fields_are_not_fabricated_literal_facts():
         "character": "C1", "basis": "direct", "evidence": ["E1"]}]}, task)
     assert result.output.new_speakers[0].character_id == "c"
     assert result.output.new_speakers[0].description == "新说明"
+
+
+def test_effective_field_sources_reach_actual_owner_request_without_inventing_quotes():
+    _, _, window, state = fixture()
+    task = build_production_expression_task(window, state)
+    messages = ConstrainedOwnerProtocol(task).messages()
+    records = json.loads(messages[1]["content"])["effective_identity_profiles"][0]["identity_records"]
+    assert {r.get("field") for r in records} == {"name", "aliases", "description"}
+    assert all(r["kind"] == "profile_update" and r["source"] == "user" for r in records)
+    assert all(r["source_ref"] == "original-fixture" for r in records)
+    assert all("evidence_spans" not in r for r in records)
+    rendered = json.dumps(messages, ensure_ascii=False)
+    assert "未来姓名" not in rendered and "旧称呼" not in rendered and "旧说明" not in rendered
+    assert "不是原文引文" in messages[0]["content"]
+    assert task.identity_facts == ()
+
+
+def test_provenance_changes_are_fingerprinted_and_future_sources_rejected():
+    _, _, window, state = fixture()
+    task = build_production_expression_task(window, state)
+    profiles = json.loads(json.dumps(task.effective_profiles))
+    profiles[0]["identity_records"][0]["source_ref"] = "another-real-call"
+    changed = replace(task, effective_profiles=tuple(profiles))
+    changed.validate_effective_profiles()
+    assert task.fingerprint() != changed.fingerprint()
+    profiles[0]["identity_records"][0]["visible_from_cp"] = 90
+    with pytest.raises(ValueError, match="Future"):
+        replace(task, effective_profiles=tuple(profiles)).validate_effective_profiles()
+    profiles[0]["identity_records"][0]["visible_from_cp"] = 2
+    profiles[0]["identity_records"][0]["evidence_spans"] = [[0, 1]]
+    with pytest.raises(ValueError, match="literal"):
+        replace(task, effective_profiles=tuple(profiles)).validate_effective_profiles()
 
 
 def test_stale_profile_or_horizon_is_rejected_before_dispatch():

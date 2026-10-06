@@ -40,6 +40,17 @@ class ProjectedCompactTask(CompactTask):
                 p["description"],
             ):
                 raise ValueError("Production candidate differs from its effective profile")
+            for record in p.get("identity_records", ()):
+                position = record.get("visible_from_cp")
+                if (type(position) is not int or position < 0
+                        or self.reading_mode == "initial" and position > self.visible_horizon_cp):
+                    raise ValueError("Future or invalid identity provenance")
+                if record.get("kind") == "profile_update" and "evidence_spans" in record:
+                    raise ValueError("Profile edits cannot claim literal identity evidence")
+                for span in record.get("evidence_spans", ()):
+                    if (len(span) != 2 or any(type(v) is not int for v in span)
+                            or not 0 <= span[0] < span[1] <= position):
+                        raise ValueError("Invalid identity provenance evidence positions")
 
     def messages(self):
         messages = super().messages()

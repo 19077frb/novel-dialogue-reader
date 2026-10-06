@@ -78,6 +78,44 @@ def test_visible_alias_reset_and_merge_gate_apply_to_model_input():
     projected = project_identity_state(SceneState(), [_person(records)], version,
                                         reading_mode=ReadingMode.INITIAL, horizon=30)["c1"]
     assert projected.canonical_name == "少女" and projected.aliases == ()
+    assert all(r["value"] != "旧别名" and r["value"] != "合并后的名字"
+               for r in projected.identity_records)
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_identity_provenance_preserves_model_source_and_transfer_reveal(accepted):
+    record = {**_fact("name", "林舟", 4), "source": "model", "source_ref": "model-call",
+              "evidence_spans": [[0, 4]], "identity_links": [{
+                  "source_id": "old", "target_id": "c1", "visible_from_cp": 80,
+                  "source": "user", "source_ref": "merge", "accepted": accepted}]}
+    person = _person([record])
+    version = SimpleNamespace(id="v1", canonical_sha256="a" * 64, canonical_length_cp=100)
+    for horizon in (30, 100):
+        state = SceneState()
+        projected = project_identity_state(state, [person], version,
+                                           reading_mode=ReadingMode.INITIAL, horizon=horizon)["c1"]
+        if accepted and horizon == 100:
+            assert projected.identity_records == ({"kind": "name", "value": "林舟",
+                "source": "model", "source_ref": "model-call", "visible_from_cp": 80,
+                "evidence_spans": [[0, 4]]},)
+            state.confirmed_characters = [projected]
+            restored = SceneState.from_snapshot(state.snapshot()).confirmed_characters[0]
+            assert restored.identity_records == projected.identity_records
+            exported = projected.as_dict()
+            exported["identity_records"][0]["evidence_spans"][0][1] = 90
+            assert projected.identity_records[0]["evidence_spans"] == [[0, 4]]
+        else:
+            assert projected.identity_records == ()
+            assert "identity_records" not in projected.as_dict()
+
+
+def test_legacy_metadata_does_not_acquire_fabricated_sources():
+    person = _person()
+    version = SimpleNamespace(id="v1", canonical_sha256="a" * 64, canonical_length_cp=100)
+    projected = project_identity_state(SceneState(), [person], version,
+                                       reading_mode=ReadingMode.REREAD, horizon=100)["c1"]
+    assert projected.canonical_name == "未来姓名"
+    assert projected.identity_records == () and "identity_records" not in projected.as_dict()
 
 
 def test_same_role_identities_are_not_collapsed_into_name_only_prompt_memory():

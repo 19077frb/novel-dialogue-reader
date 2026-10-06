@@ -12,11 +12,47 @@ from .facts import visible_identity_profile
 IDENTITY_INPUT_VERSION = "identity-input-1"
 
 
+def _profile_sources(profile):
+    """Only supporting visible records; profile edits are not literal evidence."""
+    records = []
+    for record in (*profile["facts"], *profile["updates"]):
+        if record.kind == "profile_update":
+            supports = (
+                record.value == profile["name"] if record.field == "name"
+                else record.value == profile["description"] if record.field == "description"
+                else record.value == profile["aliases"]
+            )
+        elif record.kind in {"name", "alias", "designation"}:
+            supports = record.value in (profile["name"], *profile["aliases"])
+        elif record.kind == "description":
+            supports = record.value == profile["description"]
+        else:
+            supports = record in profile["relations"]
+        if not supports:
+            continue
+        value = {
+            "kind": record.kind,
+            "value": record.value,
+            "source": record.source,
+            "source_ref": record.source_ref,
+            "visible_from_cp": max((
+                record.visible_from_cp, *(link.visible_from_cp for link in record.identity_links)
+            )),
+        }
+        if record.kind == "profile_update":
+            value["field"] = record.field
+        else:
+            value["evidence_spans"] = [list(span) for span in record.evidence_spans]
+        records.append(value)
+    return tuple(records)
+
+
 def project_identity_state(state: SceneState, people, version, *, reading_mode, horizon: int):
     """Keep identity references, never carry unseen mutable fields into a request."""
     projected = {}
     for person in people:
         relations = ()
+        identity_records = ()
         records = json.loads(person.identity_facts_json or "[]")
         if not isinstance(records, list):
             raise ValueError("人物事实不是列表")
@@ -28,6 +64,7 @@ def project_identity_state(state: SceneState, people, version, *, reading_mode, 
             profile = visible_identity_profile(person, version, horizon=horizon)
             name, aliases, description = (profile["name"] or "", profile["aliases"],
                                           profile["description"])
+            identity_records = _profile_sources(profile)
             relations = tuple({"value": fact.value, "visible_from_cp": fact.visible_from_cp,
                                "source": fact.source, "source_ref": fact.source_ref,
                                "evidence_spans": [list(span) for span in fact.evidence_spans]}
@@ -51,6 +88,7 @@ def project_identity_state(state: SceneState, people, version, *, reading_mode, 
             source=CharacterSource(person.source).value, user_confirmed=person.user_confirmed,
             confirmation_source=person.confirmation_source or "unknown",
             relations=relations,
+            identity_records=identity_records,
         )
     state.confirmed_characters = [projected[p.character_id] for p in state.confirmed_characters
                                   if p.character_id in projected]

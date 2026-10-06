@@ -56,6 +56,14 @@ class ConstrainedOwnerProtocol(ExplicitOwnerProtocol):
             )
             + json.dumps(self.schema, ensure_ascii=False)
         )
+        if any(p.get("identity_records") for p in getattr(task, "effective_profiles", ())):
+            self.system += (
+                "\n人物资料identity_records说明当前可见字段的来源；source=model仍是模型候选，"
+                "profile_update是资料修订，不是原文引文或说话人证据。"
+                "历史evidence_spans仅说明来源位置，未在context发送的原文不得引用。"
+                "资料或POV候选不能压倒当前原文；遇到遗漏可声明有证据的新N，"
+                "不得仅凭同名或泛称合并人物。"
+            )
 
     def fingerprint(self):
         return hashlib.sha256(
