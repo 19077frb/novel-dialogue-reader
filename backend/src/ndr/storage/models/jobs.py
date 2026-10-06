@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.enums import InferenceRunState, JobKind, JobPurpose, JobState
@@ -87,6 +87,7 @@ class InferenceRun(IdMixin, TimestampMixin, Base):
     usage_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    call_archive: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
 
 
 class ResultCache(IdMixin, TimestampMixin, Base):

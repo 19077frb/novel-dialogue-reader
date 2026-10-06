@@ -27,6 +27,7 @@ from ..adapter import (
 )
 from ..errors import InvalidModelOutput, ProviderError, ProviderErrorKind
 from ..prompts.connection import CONNECTION_PROMPT_VERSION, build_connection_messages
+from ..receipt import ProviderResult
 from ..validation import load_json_object, parse_output
 
 
@@ -176,6 +177,7 @@ class ChatCompletionsAdapter:
                 kind,
                 f"提供方返回 {response.status_code}",
                 details={"status_code": response.status_code, "body": snippet},
+                receipt={"http_status": response.status_code, "body": response.text},
             )
         try:
             data = response.json()
@@ -184,9 +186,11 @@ class ChatCompletionsAdapter:
                 ProviderErrorKind.INVALID_OUTPUT,
                 "提供方响应不是 JSON",
                 details={"body": sanitize(response.text)},
+                receipt={"http_status": response.status_code, "body": response.text},
             ) from exc
         if not isinstance(data, dict):
-            raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, "提供方响应顶层不是对象")
+            raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, "提供方响应顶层不是对象",
+                                receipt={"http_status": response.status_code, "body": data})
         return data, elapsed_ms
 
     @staticmethod
@@ -350,11 +354,19 @@ class ChatCompletionsAdapter:
             json_object=bool(payload.get("json_object", True)),
             max_tokens_override=override if isinstance(override, int) else None,
         )
-        data, _elapsed = await self._post(request)
+        try:
+            data, _elapsed = await self._post(request)
+        except ProviderError as exc:
+            exc.receipt = self._private_receipt(request, getattr(exc, "receipt", None))
+            exc.details = self._private_receipt({}, exc.details)["response"]
+            raise
+        receipt = self._private_receipt(request, data)
         usage = self.normalize_usage(data.get("usage")).as_dict()
         try:
             text = self._content_of(data)
         except ProviderError as exc:
+            exc.receipt = receipt
+            exc.details = self._private_receipt({}, exc.details)["response"]
             # 请求已得到提供方响应时，内容异常也要保留真实 usage，供任务层结算。
             exc.details.setdefault("usage", usage)
             if "max_tokens" in request:
@@ -378,10 +390,20 @@ class ChatCompletionsAdapter:
                     "finish_reason": finish_reason,
                     **(exc.details or {}),
                 },
+                receipt=receipt,
             ) from exc
         # This reserved field is transport metadata, never model-authored JSON.
         parsed["_usage"] = usage
-        return parsed
+        return ProviderResult(parsed, receipt=receipt)
+
+    def _private_receipt(self, request, response):
+        # Store no headers; remove the actual credential even if echoed in a
+        # provider body or parameter. Public errors still contain snippets only.
+        encoded = json.dumps({"request": request, "response": response}, ensure_ascii=False)
+        if self._api_key:
+            secret = json.dumps(self._api_key, ensure_ascii=False)[1:-1]
+            encoded = encoded.replace(secret, "[REDACTED]")
+        return json.loads(encoded)
 
     def estimate_tokens(self, text: str) -> TokenEstimate:
         """保守估算：CJK 约 1 token/字，其它字符约 1 token/4 字符（依据为启发式，置信度低）。"""

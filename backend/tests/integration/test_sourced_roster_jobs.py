@@ -53,6 +53,11 @@ def test_new_job_writes_original_bound_model_facts_and_old_job_stays_legacy(migr
     assert result.state == JobState.COMPLETED
     assert adapter.calls[0]["payload"]["roster_protocol"] == "sourced-roster-2"
     with client.app.state.session_factory() as session:
+        from ndr.storage.run_archive import decode_archive
+        saved_run = session.scalar(select(InferenceRun).where(InferenceRun.job_id == job["id"]))
+        archive = decode_archive(saved_run.call_archive)
+        assert archive["request"] == adapter.calls[0]["payload"]
+        assert archive["adapter_result"]["characters"] == response()["characters"]
         person = session.scalar(select(BookCharacter).where(
             BookCharacter.book_version_id == data["book_version_id"],
         ))
@@ -146,7 +151,7 @@ def test_new_protocol_failure_keeps_charges_and_no_partial_person(migrated_clien
     payload = response("1.0" if change == "old_output" else "1.1")
     if change == "bad_line":
         payload["characters"][0]["facts"][0]["evidence_refs"] = ["L99"]
-    result, _ = run(client, job, payload)
+    result, adapter = run(client, job, payload)
     assert result.state == JobState.FAILED
     with client.app.state.session_factory() as session:
         assert not list(session.scalars(select(BookCharacter).where(
@@ -154,6 +159,11 @@ def test_new_protocol_failure_keeps_charges_and_no_partial_person(migrated_clien
         )))
         attempt = session.scalar(select(InferenceRun).where(InferenceRun.job_id == job["id"]))
         assert json.loads(attempt.usage_json)["total_tokens"] == 19
+        from ndr.storage.run_archive import decode_archive
+        archive = decode_archive(attempt.call_archive)
+        assert archive["request"] == adapter.calls[0]["payload"]
+        assert archive["adapter_result"] == payload
+        assert archive["phase"] == "returned"
 
 
 @pytest.mark.parametrize("protocol", ["sourced-roster-1", "sourced-roster-2"])

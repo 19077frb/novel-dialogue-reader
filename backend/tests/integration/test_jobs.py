@@ -329,6 +329,18 @@ def test_short_jobs_format_retry_is_metered_and_unknown_usage_stops(
             runs = list(session.scalars(select(InferenceRun).where(InferenceRun.job_id == job["id"])))
             assert len(runs) == len(adapter.calls)
             assert all((r.usage_json is not None) is known_usage for r in runs)
+            from sqlalchemy import inspect
+
+            from ndr.storage.run_archive import decode_archive
+            archived_requests = []
+            for recorded in runs:
+                assert "call_archive" in inspect(recorded).unloaded
+                archive = decode_archive(recorded.call_archive)
+                archived_requests.append(json.dumps(archive["request"], sort_keys=True))
+                assert archive["phase"] == "returned"
+                assert "labels" in archive["adapter_result"]
+            assert sorted(archived_requests) == sorted(
+                json.dumps(call["payload"], sort_keys=True) for call in adapter.calls)
             if known_usage:
                 assert sum(json.loads(r.usage_json)["total_tokens"] for r in runs) == 60
                 people = list(session.scalars(select(BookCharacter)))

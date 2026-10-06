@@ -1154,6 +1154,8 @@ def _dispatch_with_bounded_retry(
             )
             session.add(run)
             session.flush()
+            from ..storage.run_archive import save_run_archive
+            save_run_archive(run, request_payload)
             run.state = InferenceRunState.DISPATCHED
             run_id = run.id
             session.commit()
@@ -1173,6 +1175,15 @@ def _dispatch_with_bounded_retry(
         except ProviderError as exc:
             error = exc
         elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+        # Commit transport evidence before semantic validation or application.
+        # A received invalid proposal must not vanish when those steps fail.
+        with session_factory() as session:
+            returned_run = session.get(InferenceRun, run_id)
+            if returned_run is not None:
+                save_run_archive(returned_run, request_payload, raw=raw, error=error,
+                                 elapsed_ms=elapsed_ms, phase="returned")
+                session.commit()
 
         if error is None or error.kind not in AUTO_RETRY_KINDS or index + 1 >= allowed:
             return raw, error, run_id, elapsed_ms
@@ -1977,11 +1988,12 @@ def _dispatch(
     )
     # An adapter cannot mutate the frozen request used by another retry or its ledger hash.
     raw = asyncio.run(adapter.generate_labels(deepcopy(payload)))
-    return (
-        raw
-        if state.production_expression_task is not None
-        else _restore_output_references(raw, window)
-    )
+    if state.production_expression_task is not None:
+        return raw
+    from ..llm.receipt import ProviderResult
+    restored = _restore_output_references(raw, window)
+    return ProviderResult(restored, receipt=getattr(raw, "receipt", None),
+                          original_result=getattr(raw, "original_result", raw))
 
 
 def reconcile_stale_runs(

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -216,21 +217,22 @@ def run_character_roster_job(
         chapter_id_value = chapter.id
 
     started = time.monotonic()
+    request_payload = {
+        "task": "roster", "roster_protocol": protocol, "messages": messages,
+        "max_tokens": ROSTER_MAX_TOKENS, "json_object": True, "target_quote_ids": [],
+    }
+    from ..storage.run_archive import save_run_archive
+    with session_factory() as session:
+        save_run_archive(session.get(InferenceRun, run_id), request_payload)
+        session.commit()
     raw = None
     outcome.calls = 1
     try:
-        raw = asyncio.run(
-            adapter.generate_labels(
-                {
-                    "task": "roster",
-                    "roster_protocol": protocol,
-                    "messages": messages,
-                    "max_tokens": ROSTER_MAX_TOKENS,
-                    "json_object": True,
-                    "target_quote_ids": [],
-                }
-            )
-        )
+        raw = asyncio.run(adapter.generate_labels(deepcopy(request_payload)))
+        with session_factory() as session:
+            save_run_archive(session.get(InferenceRun, run_id), request_payload, raw=raw,
+                             elapsed_ms=int((time.monotonic() - started) * 1000), phase="returned")
+            session.commit()
         payload = {
             key: value
             for key, value in dict(raw).items()
@@ -266,6 +268,9 @@ def run_character_roster_job(
             job = session.get(Job, job_id)
             run = session.get(InferenceRun, run_id)
             if run is not None:
+                save_run_archive(run, request_payload, raw=raw, error=exc,
+                                 elapsed_ms=int((time.monotonic() - started) * 1000),
+                                 phase="returned")
                 run.state = InferenceRunState.FAILED
                 run.error_code = "INVALID_MODEL_OUTPUT"
                 run.elapsed_ms = int((time.monotonic() - started) * 1000)

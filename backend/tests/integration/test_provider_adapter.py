@@ -44,6 +44,52 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+@pytest.mark.parametrize("content", ['{"labels":[]}', '{"labels":', ''])
+def test_generate_receipt_keeps_raw_response_on_success_or_parse_failure_without_public_leak(content):
+    secret = "private-credential"
+    body = {"model": "returned-model", "choices": [{"finish_reason": "stop", "message": {
+        "content": content, "reasoning_content": "private reasoning " + secret}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}}
+    def handler(request):
+        return httpx.Response(200, json=body)
+    adapter = _adapter(handler, api_key=secret)
+    request = {"messages": [{"role": "user", "content": "original fixture"}]}
+    try:
+        result = _run(adapter.generate_labels(request))
+        receipt = result.receipt
+        assert "reasoning_content" not in json.dumps(result)
+    except ProviderError as exc:
+        receipt = exc.receipt
+        assert "private reasoning " not in json.dumps(exc.as_dict) or not content
+        assert "receipt" not in exc.as_dict
+    assert receipt["request"]["messages"] == request["messages"]
+    assert receipt["response"]["model"] == "returned-model"
+    assert receipt["response"]["choices"][0]["message"]["content"] == content
+    assert secret not in json.dumps(receipt)
+
+
+def test_http_failure_receipt_keeps_body_but_public_error_remains_bounded():
+    def handler(request):
+        return httpx.Response(429, text="limited private-credential " + "x" * 1000)
+    with pytest.raises(ProviderError) as caught:
+        _run(_adapter(handler, api_key="private-credential").generate_labels({"messages": [{"role": "user", "content": "test"}]}))
+    assert len(caught.value.receipt["response"]["body"]) > 1000
+    assert len(caught.value.details["body"]) <= 200
+    assert "private-credential" not in json.dumps(caught.value.details)
+
+
+def test_timeout_receipt_has_actual_request_but_no_invented_response_or_usage():
+    def handler(request):
+        raise httpx.ReadTimeout("isolated timeout", request=request)
+
+    with pytest.raises(ProviderError) as caught:
+        _run(_adapter(handler).generate_labels({"messages": [{"role": "user", "content": "test"}]}))
+    assert caught.value.kind is ProviderErrorKind.TIMEOUT
+    assert caught.value.receipt["request"]["model"] == "example-model"
+    assert caught.value.receipt["response"] is None
+    assert "usage" not in caught.value.details
+
+
 def test_successful_connection_test_returns_usage_and_latency() -> None:
     seen: dict[str, str | None] = {}
 

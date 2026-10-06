@@ -66,6 +66,36 @@ def test_empty_database_migrates_to_head(tmp_settings: Settings) -> None:
         engine.dispose()
 
 
+def test_call_archive_upgrade_and_downgrade_preserve_old_attempt(tmp_settings):
+    run_migrations(tmp_settings, revision="0021")
+    engine = create_db_engine(tmp_settings)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO inference_runs (id, profile_snapshot_json, request_fingerprint,"
+                " state, usage_json, created_at, updated_at) VALUES"
+                " ('archive-old', '{}', :fp, 'SUCCEEDED', :usage, :now, :now)"
+            ), {"fp": "a" * 64, "usage": '{"total_tokens":42}', "now": utcnow()})
+        indexes = inspect(engine).get_indexes("inference_runs")
+        run_migrations(tmp_settings)
+        run_migrations(tmp_settings)
+        with engine.connect() as connection:
+            assert connection.execute(text(
+                "SELECT request_fingerprint, state, usage_json, call_archive"
+                " FROM inference_runs WHERE id='archive-old'"
+            )).one() == ("a" * 64, "SUCCEEDED", '{"total_tokens":42}', None)
+        assert inspect(engine).get_indexes("inference_runs") == indexes
+        command.downgrade(build_alembic_config(tmp_settings), "0021")
+        assert "call_archive" not in {c["name"] for c in inspect(engine).get_columns("inference_runs")}
+        with engine.connect() as connection:
+            assert connection.execute(text(
+                "SELECT state, usage_json FROM inference_runs WHERE id='archive-old'"
+            )).one() == ("SUCCEEDED", '{"total_tokens":42}')
+        run_migrations(tmp_settings)
+    finally:
+        engine.dispose()
+
+
 def test_identity_facts_migration_keeps_old_metadata_without_guessing_reveal_times(tmp_settings):
     run_migrations(tmp_settings, revision="0020")
     engine = create_db_engine(tmp_settings)
