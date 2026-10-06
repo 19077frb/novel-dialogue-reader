@@ -81,6 +81,24 @@ def test_type_conflict_remains_unknown_unless_third_judgment_corroborates():
     assert result["q1"].kind == "thought"
 
 
+@pytest.mark.parametrize("third", [d("c", evidence=("q1",)), d("c", basis="style_only"),
+    Decision("speech", None, "direct", ("e1",), "third:anonymous")])
+def test_novel_third_target_does_not_bypass_external_stable_identity_support(third):
+    result, why = reconcile({"q1": d()}, {"q1": d("b")}, adjudicated={"q1": third},
+        novel_adjudication_targets=frozenset({"q1"}))
+    assert result["q1"].character_id is None and why["q1"] == "unresolved_conflict"
+
+
+def test_novel_third_approval_cannot_change_an_agreement_or_missing_review():
+    for reviewed in ({"q1": d()}, {}):
+        result, _ = reconcile({"q1": d()}, reviewed, adjudicated={"q1": d("c")},
+            novel_adjudication_targets=frozenset({"q1"}))
+        assert result["q1"] == d()
+    with pytest.raises(ValueError, match="outside"):
+        reconcile({"q1": d()}, {"q1": d("b")},
+            novel_adjudication_targets=frozenset({"unsent"}))
+
+
 def test_locks_always_win_and_missing_review_does_not_erase_valid_output():
     result, why = reconcile({"q1": d(), "q2": d()}, {"q1": d("b")}, locked={"q1": d("a")})
     assert result["q1"].character_id == result["q2"].character_id == "a"

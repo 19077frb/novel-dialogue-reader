@@ -118,9 +118,13 @@ def reconcile(
     *,
     adjudicated: dict[str, Decision] | None = None,
     locked: dict[str, Decision] | None = None,
+    novel_adjudication_targets: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Decision], dict[str, str]]:
     """A third evidence-bearing decision may corroborate either candidate.
 
+    Explicit target approval can permit a supported third stable identity.
+    Callers must validate all proposals against the immutable task and compile
+    the entire resolved dependency block; this function does not validate refs.
     Evidence presence is necessary, not proof of truth; semantic performance
     still requires gold evaluation. Non-speech/type conflicts remain unknown
     unless corroborated. Missing or invalid review does not erase a valid base.
@@ -130,6 +134,7 @@ def reconcile(
         set(reviewed) - set(original)
         or set(adjudicated) - set(original)
         or set(locked) - set(original)
+        or set(novel_adjudication_targets) - set(original)
     ):
         raise ValueError("Review/lock includes a target outside the dependency block")
     result, reasons = {}, {}
@@ -157,6 +162,10 @@ def reconcile(
                 or third.supported(quote_id)
             ):
                 result[quote_id], reasons[quote_id] = third, "evidence_corroborated"
+                continue
+            if (quote_id in novel_adjudication_targets and not matches
+                    and third.supported(quote_id) and third.anonymous_ref is None):
+                result[quote_id], reasons[quote_id] = third, "evidence_new_identity"
                 continue
         # A conflict in speech type cannot be represented as certain speech.
         kind = "speech" if base.kind == second.kind == "speech" else "unknown"

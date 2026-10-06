@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 
 from ..llm.schemas import LlmOutput
+from ..storage.cache import fingerprint
 from .compact import CompactTask
 from .compact_trial import run_trial
 from .review import Decision, compile_decisions, decisions, reconcile
 from .risk import QuoteRisk, review_blocks
 from .window_review import expanded_review_task, union_review_context
 
-ADJUDICATION_VERSION = "explicit-risk-adjudication-1"
+ADJUDICATION_VERSION = "explicit-risk-adjudication-2"
 
 
 async def adjudicate_window(
@@ -28,16 +30,22 @@ async def adjudicate_window(
     anonymous_characters: dict[str, dict] | None = None,
     max_tokens: int = 16384,
     max_format_retries: int = 1,
+    allow_new_identity: bool = False,
 ) -> dict:
     """One independent judgment per linked risk block, including all failure cost.
 
     The caller chooses and journals a credential-free model/thinking scope.
     This module never switches model or increases output caps. A third answer
-    cannot introduce a different identity just because it used more reasoning.
+    can propose a different supplied stable identity only under an explicit
+    policy and the same evidence/whole-block validation as other conclusions.
     Neighbours supply context, but only triggered targets may change.
     """
-    if not model_scope or not 0 <= max_format_retries <= 5 or max_tokens <= 0:
+    if (not model_scope or not 0 <= max_format_retries <= 5 or max_tokens <= 0
+            or type(allow_new_identity) is not bool):
         raise ValueError("Explicit model scope and bounded budget required")
+    task, original, reviewed, locked, anonymous_characters, needs_context, breaks = deepcopy(
+        (task, original, reviewed, locked, anonymous_characters, needs_context, breaks)
+    )
     for row in task.context:
         a, b = row.get("start_cp"), row.get("end_cp")
         horizon = task.visible_horizon_cp if task.reading_mode == "initial" else len(text)
@@ -90,6 +98,17 @@ async def adjudicate_window(
         neighbours=2,
         max_targets=16,
     )
+    adjudication_fingerprint = fingerprint({
+        "version": ADJUDICATION_VERSION, "task": task.fingerprint(),
+        "text": text[:task.visible_horizon_cp] if task.reading_mode == "initial" else text,
+        "original": {q: asdict(d) for q, d in original.items()},
+        "reviewed": {q: asdict(d) for q, d in reviewed.items()},
+        "locked": {q: asdict(d) for q, d in (locked or {}).items()},
+        "needs_context": list(needs_context), "breaks": list(breaks),
+        "anonymous_characters": anonymous_characters or {},
+        "model_scope": model_scope, "max_tokens": max_tokens,
+        "max_format_retries": max_format_retries, "allow_new_identity": allow_new_identity,
+    })
     stages, review_tasks = [], []
     third = {}
     for index, group in enumerate(groups, 1):
@@ -110,7 +129,8 @@ async def adjudicate_window(
                 }
             )
             review_tasks.append(fresh)
-    final, final_reasons = reconcile(original, reviewed, adjudicated=third, locked=locked)
+    final, final_reasons = reconcile(original, reviewed, adjudicated=third, locked=locked,
+        novel_adjudication_targets=frozenset(eligible) if allow_new_identity else frozenset())
     for q, decision in third.items():
         if (
             reasons[q] != "unresolved_conflict"
@@ -150,4 +170,6 @@ async def adjudicate_window(
         "model_scope": model_scope,
         "max_tokens": max_tokens,
         "max_format_retries": max_format_retries,
+        "allow_new_identity": allow_new_identity,
+        "adjudication_fingerprint": adjudication_fingerprint,
     }
