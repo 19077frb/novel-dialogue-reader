@@ -131,6 +131,19 @@ def run_character_roster_job(
 
     with session_factory() as session:
         job = session.get(Job, job_id)
+        use_repair = (
+            job is not None
+            and _job_range(job).get("roster_repair_protocol") == "roster-repair-1"
+        )
+    if use_repair:
+        from .roster_pipeline import run_repaired_roster_job
+        return run_repaired_roster_job(
+            session_factory, settings, job_id=job_id, credentials=credentials,
+            adapter_factory=adapter_factory,
+        )
+
+    with session_factory() as session:
+        job = session.get(Job, job_id)
         if job is None or job.kind is not JobKind.CHARACTER_ROSTER:
             outcome.state = JobState.FAILED
             outcome.errors.append("job_not_found")

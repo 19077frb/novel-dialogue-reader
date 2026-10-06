@@ -1319,11 +1319,13 @@ def run_job(
             )
             return JobRunOutcome(job_id=job_id, state=state, calls=merge_calls)
         if job.kind is JobKind.CHARACTER_ROSTER:
+            session.close()
             roster_outcome = run_character_roster_job(
                 session_factory,
                 settings,
                 job_id=job_id,
                 credentials=credentials,
+                adapter_factory=adapter_factory,
             )
             return JobRunOutcome(
                 job_id=job_id,
@@ -2204,6 +2206,12 @@ def reconcile_job(session: Session, job: Job, *, action: str) -> dict[str, Any]:
     pending = [row for row in rows if row.state is JobState.NEEDS_RECONCILIATION]
     if action == "retry":
         checkpoint = _json_of(job.checkpoint_json)
+        roster_entry = checkpoint.get("roster_pipeline")
+        if (job.kind is JobKind.CHARACTER_ROSTER and roster_entry
+                and roster_entry.get("failed_stage")):
+            stage = roster_entry["failed_stage"]
+            generations = roster_entry.setdefault("retry_stages", {})
+            generations[stage] = generations.get(stage, 0) + 1
         for row in pending:
             row.state = JobState.QUEUED
             entry = checkpoint.get("expression_reviews", {}).get(row.window_id)
