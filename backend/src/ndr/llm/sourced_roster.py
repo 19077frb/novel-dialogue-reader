@@ -17,6 +17,14 @@ PERSONAL_PRONOUNS = frozenset({"我", "你", "您", "他", "她", "它", "我们
                               "他们", "她们", "它们", "自己", "本人"})
 
 
+class IsolatedRosterFailure(ValueError):
+    """Rejected nonempty proposal retaining its complete repair diagnostics."""
+
+    def __init__(self, message, diagnostics):
+        super().__init__(message)
+        self.diagnostics = deepcopy(diagnostics)
+
+
 class RosterFactProposal(ApiModel):
     kind: Literal["name", "alias", "designation", "description", "relation"]
     value: str = Field(min_length=1, max_length=512)
@@ -128,7 +136,8 @@ def compile_isolated_sourced_roster(payload, *, original, chapter_start, chapter
                          if isinstance(p, dict) and isinstance(p.get(key), str) and p.get(key))
         duplicates[key] = {value for value, count in counts.items() if count > 1}
     diagnostics = {"isolated_characters": 0, "discarded_auxiliary_facts": 0,
-                   "discarded_descriptions": 0, "details": []}
+                   "discarded_descriptions": 0, "details": [],
+                   "isolated_indices": [], "retained_indices": []}
 
     def note(index, code, error):
         if len(diagnostics["details"]) < 100:
@@ -182,11 +191,15 @@ def compile_isolated_sourced_roster(payload, *, original, chapter_start, chapter
             )
             people.extend(validated.characters)
             compiled.update(identity)
+            diagnostics["retained_indices"].append(index)
         except ValueError as exc:
             diagnostics["isolated_characters"] += 1
+            diagnostics["isolated_indices"].append(index)
             note(index, "invalid_identity_block", exc)
             if len(identity_errors) < 3:
                 identity_errors.append(f"第{index}个人物：{str(exc)[:240]}")
     if raw_people and not people:
-        raise ValueError("人物提案没有可保留的有效身份：" + "；".join(identity_errors))
+        raise IsolatedRosterFailure(
+            "人物提案没有可保留的有效身份：" + "；".join(identity_errors), diagnostics,
+        )
     return SourcedRosterOutput(characters=people), compiled, diagnostics

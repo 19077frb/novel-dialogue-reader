@@ -85,6 +85,8 @@ pwsh -File scripts/verify.ps1
 
 `ndr.characters.facts`提供绑定不可变原文的逐事实持久化与按位置读取。`OriginalIdentitySnapshot`先核对整份原文哈希，可在一次事务内复用；更新由调用方负责锁定与事务，返回内容指纹供未来任务快照与缓存使用。旧资料没有事实时返回空，不回填首见位置。`prepare_merged_identity_facts()`及`prepare_profile_updates()`不修改行，目录接口在既有事务和版本检查内提交完整准备结果；原文揭示与身份合并的关联时点独立保存。`read_identity_facts()`仅返回原文事实，`read_identity_records()`包含资料修订，写入/合并/缓存必须保留全账本；模型输入使用可见profile，不能把被用户删除的原始事实直接变回候选别名。启用实际模型事实写入前仍须接通任务、初读投影及导出回导，不能仅添加存储列就宣称完成防剧透。离线回归：`uv run --project backend python -m pytest backend/tests/unit/test_character_facts.py backend/tests/unit/test_identity_profile_updates.py backend/tests/integration/test_character_facts_storage.py backend/tests/integration/test_character_directory.py backend/tests/integration/test_schema.py backend/tests/integration/test_index_policy.py`。
 
+`ndr.llm.roster_repair`提供人物提案的定向修复计划和全名单编译，使用`prepare_roster_repair()`冻结有效人物及失败依赖组，`compile_roster_repair()`仅替换失败组并保留分别的调用来源。调用方仍需提供同一原文快照，并自行实现有界调用、计量、停止及恢复；模块本身不接通模型，也不修改实际人物任务的重试行为。离线验证：`uv run --project backend python -m pytest backend/tests/unit/test_roster_repair.py backend/tests/unit/test_sourced_roster.py backend/tests/integration/test_sourced_roster_jobs.py`。
+
 - `backend/src/ndr/api/`：HTTP 路由和请求/响应转换。
 - `backend/src/ndr/domain/`：Pydantic schema 与枚举，是 API 类型的权威来源。
 - `backend/src/ndr/ingest/`：TXT/EPUB 导入。
