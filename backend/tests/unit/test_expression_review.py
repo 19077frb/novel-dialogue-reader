@@ -1,5 +1,6 @@
 """Original expression fixtures; compiler legality is not semantic accuracy."""
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -8,6 +9,7 @@ from ndr.domain.enums import AnnotationStatus
 from ndr.evaluation.compact import Candidate, CompactTask
 from ndr.llm.expression_review import (
     agreed_challenges,
+    build_challenge_messages,
     compile_decisions,
     reconcile,
     review_effects,
@@ -26,6 +28,36 @@ def task():
         ),
         (Candidate("C1", "a", "林舟"), Candidate("C2", "b", "周遥"), Candidate("C3", "c", "江雨")),
     )
+
+
+def test_verification_messages_require_json_and_preserve_actual_context_and_short_mapping():
+    original_task = task()
+    original_messages = original_task.messages()
+    messages = build_challenge_messages(
+        original_task,
+        requested=["q"],
+        original={"seed": 1},
+        reviewed={"seed": 2},
+        challenger={"seed": 3},
+    )
+    assert "json" in messages[0]["content"].lower()
+    assert "ChallengeOutput" in messages[0]["content"]
+    assert messages[1] == original_messages[1]
+    assert json.loads(messages[-1]["content"]) == {
+        "targets": ["Q1"],
+        "first": {"seed": 1},
+        "review": {"seed": 2},
+        "challenger": {"seed": 3},
+    }
+    assert original_task.messages() == original_messages
+
+
+@pytest.mark.parametrize("requested", [[], ["q", "q"], ["outside"], ["e"], ["Q1"]])
+def test_verification_message_builder_rejects_non_target_or_duplicate_ranges(requested):
+    with pytest.raises(ValueError, match="distinct provided target"):
+        build_challenge_messages(
+            task(), requested=requested, original={}, reviewed={}, challenger={}
+        )
 
 
 def proposal(person="C1", kind="speech", *, basis="direct", scope="base"):

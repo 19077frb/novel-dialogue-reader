@@ -154,6 +154,35 @@ class ChallengeOutput(ApiModel):
     checks: list[ChallengeItem]
 
 
+def build_challenge_messages(task, *, requested, original, reviewed, challenger):
+    """Build JSON-mode verification with only actually provided target references."""
+    requested = tuple(requested)
+    targets = {task.references[q]: q for q in task.quote_ids}
+    if not requested or len(requested) != len(set(requested)) or set(requested) - targets.keys():
+        raise ValueError("Verification requires distinct provided target references")
+    messages = task.messages()
+    messages[0]["content"] = (
+        "根据完整原文独立核查一致答案受到的挑战，只输出包含checks的JSON对象；不是多数投票。"
+        "修改一致答案必须提供目标之外的矛盾原文。\n"
+        + json.dumps(ChallengeOutput.model_json_schema(), ensure_ascii=False)
+    )
+    messages.append(
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "targets": [targets[q] for q in requested],
+                    "first": original,
+                    "review": reviewed,
+                    "challenger": challenger,
+                },
+                ensure_ascii=False,
+            ),
+        }
+    )
+    return messages
+
+
 @dataclass(frozen=True)
 class VerifiedChallenge:
     decision: OwnerDecision

@@ -12,8 +12,8 @@ from ..llm.errors import ProviderError, ProviderErrorKind
 from ..llm.expression_compiler import compile_expression_output
 from ..llm.expression_review import (
     REVIEW_VERSION,
-    ChallengeOutput,
     agreed_challenges,
+    build_challenge_messages,
     decision_payload,
     reconcile,
     verify_payload,
@@ -421,25 +421,12 @@ def run_review_pipeline(
         requested = agreed_challenges(first["decisions"], reviewed["decisions"], third_decisions)
         verified = {}
         if requested:
-            short = {v: k for k, v in task.references.items()}
-            verification = task.messages()
-            verification[0]["content"] = (
-                "根据完整原文独立核查一致答案受到的挑战，只输出checks；不是多数投票。修改一致答案必须提供目标之外的矛盾原文。\n"
-                + json.dumps(ChallengeOutput.model_json_schema(), ensure_ascii=False)
-            )
-            verification.append(
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "targets": [short[q] for q in requested],
-                            "first": base,
-                            "review": second[0],
-                            "challenger": third[0],
-                        },
-                        ensure_ascii=False,
-                    ),
-                }
+            verification = build_challenge_messages(
+                task,
+                requested=requested,
+                original=base,
+                reviewed=second[0],
+                challenger=third[0],
             )
 
             def check_verification(

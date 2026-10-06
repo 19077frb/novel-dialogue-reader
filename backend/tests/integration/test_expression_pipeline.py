@@ -485,6 +485,8 @@ def test_agreement_challenge_requires_separate_actual_verification(fake_provider
     class ChallengeAdapter(StageAdapter):
         async def generate_labels(self, payload):
             if payload.get("review_stage", "").startswith("verification:"):
+                assert payload["json_object"] is True
+                assert "json" in payload["messages"][0]["content"].lower()
                 self.calls.append({"payload": deepcopy(payload)})
                 data = json.loads(payload["messages"][1]["content"])
                 request = json.loads(payload["messages"][-1]["content"])
