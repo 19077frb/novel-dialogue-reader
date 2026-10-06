@@ -807,6 +807,7 @@ describe('PreviewPage', () => {
     await userEvent.click(await screen.findByTestId('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
     await userEvent.selectOptions(screen.getByTestId('dialogue-strategy'), 'complete-review')
+    if (allow) await userEvent.click(screen.getByTestId('roster-repair-enabled'))
     fireEvent.change(screen.getByTestId('processing-thinking-mode'), { target: { value: 'enabled' } })
     fireEvent.change(screen.getByTestId('processing-thinking-effort'), { target: { value: 'low' } })
     expect(screen.queryByTestId('preview-profile')).not.toBeInTheDocument()
@@ -818,7 +819,7 @@ describe('PreviewPage', () => {
 
     await userEvent.type(screen.getByTestId('batch-token-limit'), '50000')
     await userEvent.click(screen.getByTestId('batch-run'))
-    expect(await screen.findByTestId('batch-estimate')).toHaveTextContent('3,280')
+    expect(await screen.findByTestId('batch-estimate')).toHaveTextContent(allow ? '7,320' : '3,280')
     expect(jobsApi.estimateRange).toHaveBeenCalledWith(
       'b1',
       expect.objectContaining({ budget: expect.objectContaining({ maxRecheckRounds: 2 }) }),
@@ -832,7 +833,8 @@ describe('PreviewPage', () => {
     expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledWith(
       'b1',
       'c1',
-      expect.objectContaining({ profileId: 'p1', maxInputTokens: 2020, allowOverwriteManual: allow, inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' } }),
+      expect.objectContaining({ profileId: 'p1', maxInputTokens: allow ? 6060 : 2020, allowOverwriteManual: allow, inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' },
+        ...(allow ? { rosterRepairEnabled: true, maxRosterRepairs: 1, maxFormatRetries: 1 } : {}) }),
     )
     expect(jobsApi.createJob).toHaveBeenCalledWith(
       expect.objectContaining({

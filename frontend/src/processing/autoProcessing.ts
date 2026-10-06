@@ -1,6 +1,7 @@
 import { fetchChapters, fetchProcessingStatus } from '../api/books'
 import { estimateRange } from '../api/jobs'
 import type { ProcessingPreferences } from './preferences'
+import { estimateRosterTokens } from './preferences'
 import { mapWithConcurrency } from './concurrency'
 import { appendAutomaticProcessing, automaticAllowance, refreshAutomaticAllowance, canAppendAutomaticProcessing, hasBatchWork, hasUnresolvedChapterResult, isBatchRunning, requestBatchStop, runBatchProcessing } from '../components/BatchProcessor'
 
@@ -100,7 +101,7 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
     }
     selected.forEach(chapter => session.attempted.add(`${bookVersionId}:${chapter.id}`))
     session.checked = signature
-    const estimated = plans.reduce((sum, plan) => sum + plan.estimate.total_tokens + plan.chapter.end_cp - plan.chapter.start_cp + 2000, 0)
+    const estimated = plans.reduce((sum, plan) => sum + plan.estimate.total_tokens + estimateRosterTokens(plan.chapter.end_cp - plan.chapter.start_cp, preferences), 0)
     session.message = `自动处理 ${selected.length} 章，预计约 ${estimated.toLocaleString()} Tokens。`
     // Release local-estimate admission while the shared model pool is running.
     releasePlanning()

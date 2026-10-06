@@ -14,7 +14,7 @@ import { hasSingleWork } from '../processing/singleWorkflow'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
 import { createTaskLimiter, mapWithConcurrency } from '../processing/concurrency'
 import { waitForJobCompletion } from '../processing/jobCompletion'
-import { getProcessingPreferences, inferenceOptions, useProcessingPreferences } from '../processing/preferences'
+import { getProcessingPreferences, inferenceOptions, useProcessingPreferences, rosterRepairOptions, estimateRosterTokens } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
 import { OperationTimer } from './OperationTimer'
 import { readJournal, writeJournal, removeJournal, withWorkflowLock, assertWorkflowOwnership } from '../processing/journal'
@@ -827,7 +827,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
       requested.push(...fresh.map(plan => plan.chapter).filter(chapter => !requested.some(old => old.id === chapter.id)))
       plans.push(...fresh)
       const estimated = fresh.reduce((total, plan) => total + plan.estimate.total_tokens
-        + Math.max(1, plan.chapter.end_cp - plan.chapter.start_cp) + 2000, 0)
+        + estimateRosterTokens(plan.chapter.end_cp - plan.chapter.start_cp, preferences), 0)
       const message = `已加入 ${fresh.length} 章，预计约 ${estimated.toLocaleString()} Tokens；有空闲位置时继续处理。`
       publishBatch(bookId, {
         tasks: [...current.tasks.filter(task => !fresh.some(plan => plan.chapter.id === task.chapterId)), ...fresh.flatMap(planTasks)],
@@ -960,7 +960,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         updateChapterProgress(bookId, chapter.id, { state: 'dialogue', error: null })
       })
       const prefix = `${index + 1}/${selectedPlans.length} ${chapter.title || `第 ${chapter.ordinal + 1} 章`}`
-      return runMetered(Math.max(1, chapter.end_cp - chapter.start_cp) + 2_000, async (available) => {
+      return runMetered(estimateRosterTokens(chapter.end_cp - chapter.start_cp, preferences), async (available) => {
         if (plan.cancelled) return
         updateChapterProgress(bookId, chapter.id, { state: 'roster', error: null })
         publishBatch(bookId, { message: `${prefix}：正在识别人物…` })
@@ -970,6 +970,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         try {
           const rosterJob = await waitForChapterJob(bookId, plan, taskId,
             submitBatchRequest(bookId, taskId, 'roster', {
+              ...rosterRepairOptions(preferences),
               bookVersionId,
               profileId,
               inferenceOptions: options,
@@ -1291,7 +1292,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       setEstimatedTokens(null)
       setPlans([])
     }
-  }, [profileId, maxRecheckRounds, maxFormatRetries, tokenLimitText, running, preferences.dialogueStrategy])
+  }, [profileId, maxRecheckRounds, maxFormatRetries, tokenLimitText, running, preferences.dialogueStrategy, preferences.rosterRepairEnabled, preferences.maxRosterRepairs])
 
   const calculateEstimate = async () => {
     if (!validRange) return
@@ -1312,6 +1313,9 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       )
       const currentPreferences = getProcessingPreferences()
       if (currentPreferences.dialogueStrategy !== preferences.dialogueStrategy
+        || currentPreferences.rosterRepairEnabled !== preferences.rosterRepairEnabled
+        || currentPreferences.maxRosterRepairs !== preferences.maxRosterRepairs
+        || currentPreferences.maxFormatRetries !== maxFormatRetries
         || currentPreferences.maxRecheckRounds !== maxRecheckRounds
         || currentPreferences.profileId !== profileId) {
         setProgress('处理配置已改变，请使用当前配置重新估算。')
@@ -1319,7 +1323,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       }
       setPlans(selected.map((chapter, index) => ({ chapter, estimate: estimates[index] })))
       const rosterReserve = selected.reduce(
-        (total, chapter) => total + Math.max(0, chapter.end_cp - chapter.start_cp) + 2_000,
+        (total, chapter) => total + estimateRosterTokens(chapter.end_cp - chapter.start_cp, preferences),
         0,
       )
       setEstimatedTokens(estimates.reduce((total, estimate) => total + estimate.total_tokens, 0) + rosterReserve)

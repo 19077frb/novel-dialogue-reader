@@ -12,6 +12,7 @@ describe('shared processing preferences', () => {
       profileId: 'chosen', concurrency: 5, maxRecheckRounds: 8, maxFormatRetries: 3, tokenLimit: 12345, maxOutputTokens: 200,
       thinkingMode: 'default', thinkingEffort: 'default',
       dialogueStrategy: 'legacy',
+      rosterRepairEnabled: false, maxRosterRepairs: 1,
     })
     rebooted.updateProcessingPreferences({ tokenLimit: null })
     expect(rebooted.getProcessingPreferences().profileId).toBe('chosen')
@@ -24,7 +25,7 @@ describe('shared processing preferences', () => {
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, '{bad')
     expect(module.getProcessingPreferences().concurrency).toBe(2)
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, JSON.stringify({ concurrency: 100, tokenLimit: -4, maxRecheckRounds: 1.5, profileId: 42 }))
-    expect(module.getProcessingPreferences()).toEqual({ profileId: '', concurrency: 16, tokenLimit: null, maxOutputTokens: null, maxRecheckRounds: 0, maxFormatRetries: 1, thinkingMode: 'default', thinkingEffort: 'default', dialogueStrategy: 'legacy' })
+    expect(module.getProcessingPreferences()).toEqual({ profileId: '', concurrency: 16, tokenLimit: null, maxOutputTokens: null, maxRecheckRounds: 0, maxFormatRetries: 1, thinkingMode: 'default', thinkingEffort: 'default', dialogueStrategy: 'legacy', rosterRepairEnabled: false, maxRosterRepairs: 1 })
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, 'null')
     expect(module.getProcessingPreferences().tokenLimit).toBeNull()
   })
@@ -55,5 +56,14 @@ describe('shared processing preferences', () => {
     expect((await import('../src/processing/preferences')).getProcessingPreferences().dialogueStrategy).toBe('complete-review')
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, JSON.stringify({ dialogueStrategy: 'new-future-mode' }))
     expect(module.getProcessingPreferences().dialogueStrategy).toBe('legacy')
+  })
+
+  it('persists explicit repair settings and safely normalizes old or invalid values', async () => {
+    const module = await import('../src/processing/preferences')
+    localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, JSON.stringify({ rosterRepairEnabled: 'true', maxRosterRepairs: -1 }))
+    expect(module.getProcessingPreferences()).toMatchObject({ rosterRepairEnabled: false, maxRosterRepairs: 1 })
+    module.updateProcessingPreferences({ rosterRepairEnabled: true, maxRosterRepairs: 9 })
+    vi.resetModules()
+    expect((await import('../src/processing/preferences')).getProcessingPreferences()).toMatchObject({ rosterRepairEnabled: true, maxRosterRepairs: 5 })
   })
 })

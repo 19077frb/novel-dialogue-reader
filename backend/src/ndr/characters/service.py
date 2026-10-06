@@ -634,6 +634,9 @@ def create_roster_job(
     max_input_tokens: int | None = None,
     inference_options: dict[str, Any] | None = None,
     allow_overwrite_manual: bool = False,
+    roster_repair_enabled: bool = False,
+    max_roster_repairs: int = 1,
+    max_format_retries: int = 1,
 ) -> tuple[Job, bool]:
     request_payload = {
         "kind": JobKind.CHARACTER_ROSTER.value,
@@ -648,6 +651,16 @@ def create_roster_job(
     # their original idempotency keys. Opting in is a distinct request.
     if allow_overwrite_manual:
         request_payload["allow_overwrite_manual"] = True
+    repair_range = {}
+    repair_budget = {}
+    if roster_repair_enabled:
+        repair_range = {"roster_repair_protocol": "roster-repair-1"}
+        repair_budget = {
+            "max_roster_repairs": max_roster_repairs,
+            "max_format_retries": max_format_retries,
+        }
+        request_payload.update(repair_range)
+        request_payload.update(repair_budget)
     digest = digest_request(request_payload)
     existing = session.execute(
         select(Job).where(Job.idempotency_key == idempotency_key)
@@ -690,13 +703,14 @@ def create_roster_job(
                 "end_cp": chapter.end_cp,
                 "roster_protocol": SOURCED_ROSTER_VERSION,
                 "identity_input_version": IDENTITY_INPUT_VERSION,
+                **repair_range,
             },
             ensure_ascii=False,
         ),
         profile_snapshot_json=json.dumps(
             profile_snapshot(profile, inference_options), ensure_ascii=False
         ),
-        budget_json=json.dumps({"max_input_tokens": max_input_tokens}),
+        budget_json=json.dumps({"max_input_tokens": max_input_tokens, **repair_budget}),
         progress_json=json.dumps({"stage": "queued", "calls": 0}, ensure_ascii=False),
         idempotency_key=idempotency_key,
         request_digest=digest,

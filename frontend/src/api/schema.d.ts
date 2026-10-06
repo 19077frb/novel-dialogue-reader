@@ -3517,6 +3517,21 @@ export interface components {
         /** RosterAnalyzeIn */
         RosterAnalyzeIn: {
             /**
+             * Roster Repair Enabled
+             * @default false
+             */
+            roster_repair_enabled: boolean;
+            /**
+             * Max Roster Repairs
+             * @default 1
+             */
+            max_roster_repairs: number;
+            /**
+             * Max Format Retries
+             * @default 1
+             */
+            max_format_retries: number;
+            /**
              * Allow Overwrite Manual
              * @default false
              */

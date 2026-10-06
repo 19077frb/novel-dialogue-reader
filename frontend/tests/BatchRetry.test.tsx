@@ -5,7 +5,7 @@ import * as characters from '../src/api/characters'
 import * as jobs from '../src/api/jobs'
 import { ApiError } from '../src/api/client'
 import { appendAutomaticProcessing, BatchRetryControls, canAppendAutomaticProcessing, cancelChapterProcessing, clearBatchProgress, hasBatchWork, requestBatchStop, retryBatchTask, retryChapterProcessing, runBatchProcessing, synchronizeManualChapterStatus, useBatchProgress } from '../src/components/BatchProcessor'
-import { getProcessingPreferences } from '../src/processing/preferences'
+import { getProcessingPreferences, updateProcessingPreferences } from '../src/processing/preferences'
 import { waitForJobCompletion } from '../src/processing/jobCompletion'
 import type { ChapterOut, EstimateOut, JobDetailOut } from '../src/api/types'
 
@@ -29,6 +29,7 @@ async function start() {
     preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: 1000 }, onUsage: usage })
 }
 beforeEach(() => {
+  localStorage.clear()
   vi.resetAllMocks(); clearBatchProgress('b1')
   vi.mocked(waitForJobCompletion).mockImplementation(async job => job)
   vi.mocked(books.fetchBook).mockResolvedValue({ active_version_id: 'v1' } as never)
@@ -189,6 +190,19 @@ it('retries failed people first and continues only remaining windows', async () 
   expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(2)
   expect(jobs.createJob).toHaveBeenCalledTimes(1)
   expect(jobs.createJob).toHaveBeenCalledWith(expect.objectContaining({ selectedWindowIds: ['w1'] }))
+})
+
+it('keeps original roster repair settings on failed-task retry after preferences change', async () => {
+  updateProcessingPreferences({ rosterRepairEnabled: true, maxRosterRepairs: 2, maxFormatRetries: 3 })
+  vi.mocked(characters.analyzeCharacterRoster).mockResolvedValueOnce(job('FAILED'))
+  await start()
+  updateProcessingPreferences({ rosterRepairEnabled: false, maxRosterRepairs: 0, maxFormatRetries: 0 })
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  await retryBatchTask('b1', 'roster:c1')
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(2)
+  for (const [, , input] of vi.mocked(characters.analyzeCharacterRoster).mock.calls) {
+    expect(input).toMatchObject({ rosterRepairEnabled: true, maxRosterRepairs: 2, maxFormatRetries: 3 })
+  }
 })
 
 it('chapter retry fills failed tasks without repeating successful windows or adding unselected windows', async () => {

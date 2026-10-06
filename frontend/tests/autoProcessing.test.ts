@@ -31,9 +31,11 @@ it('selects the current and next N chapters, skips completed and attempted chapt
 })
 
 it('plans automatic work with the frozen shared dialogue strategy', async () => {
-  await scheduleAutomaticProcessing('b1', 'v1', 'c1', 0, { ...preferences, dialogueStrategy: 'complete-review', maxRecheckRounds: 1 })
+  await scheduleAutomaticProcessing('b1', 'v1', 'c1', 0, { ...preferences, dialogueStrategy: 'complete-review', maxRecheckRounds: 1,
+    rosterRepairEnabled: true, maxRosterRepairs: 2, maxFormatRetries: 3 })
   expect(jobs.estimateRange).toHaveBeenCalledWith('b1', expect.objectContaining({ range: expect.objectContaining({ dialogueStrategy: 'complete-review' }) }))
-  expect(batch.runBatchProcessing).toHaveBeenCalledWith(expect.objectContaining({ preferences: expect.objectContaining({ dialogueStrategy: 'complete-review', maxRecheckRounds: 1 }) }))
+  expect(batch.runBatchProcessing).toHaveBeenCalledWith(expect.objectContaining({ preferences: expect.objectContaining({ dialogueStrategy: 'complete-review', maxRecheckRounds: 1,
+    rosterRepairEnabled: true, maxRosterRepairs: 2, maxFormatRetries: 3 }) }))
 })
 
 it('waits for manual jobs and never overlaps another automatic dispatch', async () => {

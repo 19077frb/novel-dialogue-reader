@@ -15,6 +15,7 @@ import { OperationTimer } from './OperationTimer'
 import { ReadErrorNotice } from './ReadErrorNotice'
 import { ProposalDiagnostics } from './ProposalDiagnostics'
 import { JOB_STATE_LABELS } from './JobPanel'
+import { getProcessingPreferences, rosterRepairOptions } from '../processing/preferences'
 import { readJournal, writeJournal, removeJournal } from '../processing/journal'
 import { freshIdempotencyKey, fetchRecentJobs } from '../api/jobs'
 import type {
@@ -306,6 +307,8 @@ export function CharacterRosterPanel({
                 return
               }
               analyze.mutate({
+                ...rosterRepairOptions(getProcessingPreferences()),
+                maxInputTokens: getProcessingPreferences().tokenLimit,
                 inferenceOptions,
                 bookVersionId,
                 profileId,

@@ -14,7 +14,7 @@ from ndr.storage.models import BookCharacter, BookVersion, InferenceRun, Job
 from ndr.storage.run_archive import decode_archive, encode_archive
 
 
-def prepare(client, **budget):
+def prepare(client, *, api_options=None, **budget):
     data = client.post(
         "/api/books/import",
         files={
@@ -38,9 +38,13 @@ def prepare(client, **budget):
     ).json()["data"]
     job = client.post(
         f"/api/books/{data['book_id']}/chapters/{chapter['id']}/character-roster/analyze",
-        json={"profile_id": profile["id"], "idempotency_key": "repair", "run_now": False},
+        json={
+            "profile_id": profile["id"], "idempotency_key": "repair", "run_now": False,
+            **(api_options or {}),
+        },
     ).json()["data"]
-    update(client, job, budget=budget)
+    if api_options is None:
+        update(client, job, budget=budget)
     return data, job
 
 
@@ -148,6 +152,56 @@ class CallbackAdapter(FakeProviderAdapter):
         if len(self.calls) == self.at:
             self.callback()
         return result
+
+
+def test_public_api_freezes_repair_limits_and_runs_real_pipeline(migrated_client):
+    client = migrated_client
+    data, job = prepare(client, api_options={
+        "roster_repair_enabled": True, "max_roster_repairs": 1, "max_format_retries": 0,
+    })
+    assert job["range"]["roster_repair_protocol"] == "roster-repair-1"
+    with client.app.state.session_factory() as session:
+        budget = json.loads(session.get(Job, job["id"]).budget_json)
+        assert budget["max_roster_repairs"] == 1
+        assert budget["max_format_retries"] == 0
+    adapter = FakeProviderAdapter(script=[primary(), fixed()])
+    outcome = run(client, job, adapter)
+    assert outcome.state is JobState.COMPLETED and outcome.calls == 2
+    with client.app.state.session_factory() as session:
+        people = list(session.scalars(select(BookCharacter).where(
+            BookCharacter.book_version_id == data["book_version_id"]
+        )))
+        assert {p.canonical_name for p in people} == {"林舟", "陆欣"}
+        assert all(not p.user_confirmed for p in people)
+
+
+def test_public_api_disabled_repair_preserves_legacy_digest_and_budget(migrated_client):
+    client = migrated_client
+    data, job = prepare(client, api_options={})
+    assert "roster_repair_protocol" not in job["range"]
+    with client.app.state.session_factory() as session:
+        stored = session.get(Job, job["id"])
+        assert json.loads(stored.budget_json) == {"max_input_tokens": None}
+        profile_id = json.loads(stored.profile_snapshot_json)["profile_id"]
+    endpoint = f"/api/books/{data['book_id']}/chapters/{job['range']['chapter_id']}/character-roster/analyze"
+    base = {"profile_id": profile_id, "idempotency_key": "repair", "run_now": False}
+    same = client.post(endpoint, json={**base, "roster_repair_enabled": False,
+        "max_roster_repairs": 5, "max_format_retries": 5})
+    assert same.status_code == 202 and same.json()["data"]["id"] == job["id"]
+    assert client.post(endpoint, json={**base, "roster_repair_enabled": True}).status_code == 409
+    for value in [-1, 6, True, "1", 1.5]:
+        for key in ["max_roster_repairs", "max_format_retries"]:
+            assert client.post(endpoint, json={**base, key: value}).status_code == 422
+
+
+def test_public_api_zero_repairs_keeps_valid_people_without_second_call(migrated_client):
+    client = migrated_client
+    _, job = prepare(client, api_options={"roster_repair_enabled": True, "max_roster_repairs": 0})
+    adapter = FakeProviderAdapter(script=[primary()])
+    result = run(client, job, adapter)
+    assert result.state is JobState.COMPLETED and result.calls == 1
+    assert len(adapter.calls) == 1
+    assert saved(client, job)[1]["proposal_diagnostics"]["unresolved_groups"]
 
 
 def test_actual_partial_repair_keeps_separate_receipts_and_identity_sources(migrated_client):

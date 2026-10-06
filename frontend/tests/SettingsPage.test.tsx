@@ -27,6 +27,19 @@ it('keeps the dialogue strategy as a draft until save and restores it on reopeni
   expect(screen.getByTestId('dialogue-strategy')).toHaveValue('complete-review')
   expect(screen.getByText(/当前复核次数为 0/)).toBeInTheDocument()
 })
+it('keeps roster repair as a draft until save and restores the saved values', async () => {
+  const page = renderWithProviders(<SettingsPage />)
+  await userEvent.click(screen.getByTestId('roster-repair-enabled'))
+  fireEvent.change(screen.getByLabelText(/人物证据最多修复次数/), { target: { value: '2' } })
+  expect(getProcessingPreferences().rosterRepairEnabled).toBe(false)
+  await userEvent.click(screen.getByRole('button', { name: '保存阅读与处理设置' }))
+  expect(getProcessingPreferences()).toMatchObject({ rosterRepairEnabled: true, maxRosterRepairs: 2 })
+  page.unmount()
+  renderWithProviders(<SettingsPage />)
+  expect(screen.getByTestId('roster-repair-enabled')).toBeChecked()
+  expect(screen.getByLabelText(/人物证据最多修复次数/)).toHaveValue(2)
+})
+
 it('后台更新人工人物默认关闭，开启后重新进入仍保留', async () => {
   const page = renderWithProviders(<SettingsPage />)
   const label = '允许后台人物识别更新人工姓名与说明'

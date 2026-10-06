@@ -43,6 +43,7 @@ import type { SingleWorkflow } from '../processing/singleWorkflow'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
 import { ThinkingSettings } from '../components/ThinkingSettings'
 import { DialogueStrategySettings } from '../components/DialogueStrategySettings'
+import { RosterRepairSettings } from '../components/RosterRepairSettings'
 
 interface SingleWindowTask {
   windowId: string
@@ -493,6 +494,8 @@ export default function PreviewPage() {
       <DialogueStrategySettings value={preferences.dialogueStrategy} rounds={preferences.maxRecheckRounds}
         disabled={batchProgress.running || singleRunning}
         onChange={dialogueStrategy => setPreferences({ dialogueStrategy })} />
+      <RosterRepairSettings preferences={preferences} onChange={setPreferences}
+        disabled={batchProgress.running || singleRunning} />
 
       {processingMode === 'single' && !batchProgress.running && (
         <>

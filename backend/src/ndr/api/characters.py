@@ -286,6 +286,9 @@ def analyze_character_roster_route(
             profile=profile,
             idempotency_key=payload.idempotency_key,
             max_input_tokens=payload.max_input_tokens,
+            roster_repair_enabled=payload.roster_repair_enabled,
+            max_roster_repairs=payload.max_roster_repairs,
+            max_format_retries=payload.max_format_retries,
             allow_overwrite_manual=payload.allow_overwrite_manual,
             inference_options=(
                 payload.inference_options.model_dump() if payload.inference_options else None

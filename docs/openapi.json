@@ -9915,6 +9915,25 @@
       },
       "RosterAnalyzeIn": {
         "properties": {
+          "roster_repair_enabled": {
+            "type": "boolean",
+            "title": "Roster Repair Enabled",
+            "default": false
+          },
+          "max_roster_repairs": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Max Roster Repairs",
+            "default": 1
+          },
+          "max_format_retries": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Max Format Retries",
+            "default": 1
+          },
           "allow_overwrite_manual": {
             "type": "boolean",
             "title": "Allow Overwrite Manual",

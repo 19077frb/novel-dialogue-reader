@@ -131,6 +131,9 @@ class ChapterRosterOut(ApiModel):
 
 
 class RosterAnalyzeIn(ApiModel):
+    roster_repair_enabled: bool = False
+    max_roster_repairs: int = Field(default=1, ge=0, le=5, strict=True)
+    max_format_retries: int = Field(default=1, ge=0, le=5, strict=True)
     allow_overwrite_manual: bool = False
     book_version_id: str | None = None
     profile_id: str
