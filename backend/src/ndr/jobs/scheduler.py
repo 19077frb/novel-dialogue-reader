@@ -16,6 +16,7 @@ import json
 import re
 import time
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -376,9 +377,7 @@ def _cache_key_for(
 ) -> str:
     snapshot = snapshot or {}
     # 缓存必须覆盖实际发给模型的动态人物状态，而不只是预先规划的正文片段。
-    messages = _messages_for(
-        window=window, state=state, locked_summary=None, correction=prompt_hint,
-    )
+    messages = _request_payload_for(window=window, state=state, correction=prompt_hint)["messages"]
     return compute_cache_key(
         CacheKeyParts(
             book_version_id=version.id,
@@ -719,10 +718,14 @@ def _run_recheck_pass(
                     return stats
                 max_input = _budget_of(job).get("max_input_tokens")
                 spent = spent_tokens(session, job_id)
-                reserve = sum(estimate_tokens(message["content"]) for message in _messages_for(
-                    window=recheck_window, state=state, locked_summary=None, correction=correction,
-                )) + max(_output_token_reserve(snapshot, len(recheck_window.target_quote_ids)),
-                         max_tokens_override or 0)
+                review_request = _request_payload_for(
+                    window=recheck_window, state=state, correction=correction,
+                )
+                reserve = sum(estimate_tokens(message["content"])
+                              for message in review_request["messages"]) + max(
+                    _output_token_reserve(snapshot, len(recheck_window.target_quote_ids)),
+                    max_tokens_override or 0,
+                )
                 if cached_result is None and max_input is not None and (
                     spent["input_tokens"] + (spent["unknown_runs"] + 1) * reserve > int(max_input)
                 ):
@@ -907,13 +910,18 @@ def _dispatch_with_bounded_retry(
     error: ProviderError | None = None
     run_id = ""
     elapsed_ms = 0
+    request_payload = _request_payload_for(
+        window=window, state=state, correction=correction,
+        max_tokens_override=max_tokens_override,
+    )
+    request_fingerprint = _request_fingerprint(request_payload, snapshot)
     for index in range(allowed):
         with session_factory() as session:
             run = InferenceRun(
                 job_id=job_id,
                 window_id=window.window_id,
                 profile_snapshot_json=json.dumps(snapshot or {}, ensure_ascii=False),
-                request_fingerprint=window.dependency_hash,
+                request_fingerprint=request_fingerprint,
                 state=InferenceRunState.PREPARED,
             )
             session.add(run)
@@ -932,6 +940,7 @@ def _dispatch_with_bounded_retry(
                 state=state,
                 correction=correction,
                 max_tokens_override=max_tokens_override,
+                request_payload=request_payload,
             )
         except ProviderError as exc:
             error = exc
@@ -1235,7 +1244,7 @@ def run_job(
         planned_reserve = window.budget["total_tokens"] + output_reserve
         actual_prompt_tokens = sum(
             estimate_tokens(message["content"])
-            for message in _messages_for(window=window, state=state, locked_summary=None)
+            for message in _request_payload_for(window=window, state=state)["messages"]
         )
         reserve = max(planned_reserve, actual_prompt_tokens + output_reserve)
         max_input = _budget_of(job_snapshot).get("max_input_tokens")
@@ -1378,8 +1387,8 @@ def run_job(
                     max_input = _budget_of(job).get("max_input_tokens")
                     retry_reserve = sum(
                         estimate_tokens(message["content"]) for message in
-                        _messages_for(window=window, state=state,
-                                      locked_summary=None, correction=correction)
+                        _request_payload_for(window=window, state=state,
+                                             correction=correction)["messages"]
                     ) + max(output_reserve, attempt_max_tokens or 0)
                     if max_input is not None and (
                         spent["input_tokens"] + spent["unknown_runs"] * reserve
@@ -1617,15 +1626,14 @@ def run_job(
     return outcome
 
 
-def _dispatch(
-    adapter: ProviderAdapter,
+def _request_payload_for(
     *,
     window,  # noqa: ANN001
     state: SceneState,
     correction: str | None = None,
     max_tokens_override: int | None = None,
-) -> Any:
-    # ``correction`` 用于「格式/契约错误后的有限纠错重发」
+) -> dict[str, Any]:
+    """The business request shared by dispatch, budgeting and message cache keys."""
     payload = {
         "messages": _messages_for(
             window=window, state=state, locked_summary=None, correction=correction
@@ -1636,7 +1644,37 @@ def _dispatch(
     }
     if isinstance(max_tokens_override, int) and max_tokens_override > 0:
         payload["max_tokens_override"] = int(max_tokens_override)
-    return _restore_output_references(asyncio.run(adapter.generate_labels(payload)), window)
+    return payload
+
+
+def _request_fingerprint(payload: dict[str, Any], snapshot: dict[str, Any] | None) -> str:
+    snapshot = snapshot or {}
+    return fingerprint({
+        "version": "production-request-1",
+        "request": payload,
+        "model_configuration": {
+            key: snapshot.get(key)
+            for key in ("protocol", "base_url", "model", "params", "inference_options")
+        },
+    })
+
+
+def _dispatch(
+    adapter: ProviderAdapter,
+    *,
+    window,  # noqa: ANN001
+    state: SceneState,
+    correction: str | None = None,
+    max_tokens_override: int | None = None,
+    request_payload: dict[str, Any] | None = None,
+) -> Any:
+    payload = request_payload if request_payload is not None else _request_payload_for(
+        window=window, state=state, correction=correction,
+        max_tokens_override=max_tokens_override,
+    )
+    # An adapter cannot mutate the frozen request used by another retry or its ledger hash.
+    raw = asyncio.run(adapter.generate_labels(deepcopy(payload)))
+    return _restore_output_references(raw, window)
 
 
 def reconcile_stale_runs(

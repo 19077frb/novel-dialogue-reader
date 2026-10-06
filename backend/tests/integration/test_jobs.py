@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -21,6 +22,7 @@ from ndr.jobs.scheduler import reconcile_stale_runs, run_job
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.llm.errors import ProviderError, ProviderErrorKind
 from ndr.scenes.state import ConfirmedCharacter, SceneState, SpeakerSlot
+from ndr.storage.cache import fingerprint
 from ndr.storage.engine import create_db_engine, create_session_factory
 from ndr.storage.models import (
     Annotation,
@@ -454,9 +456,58 @@ def test_configured_validation_retry_limit_counts_every_attempt(
     engine, factory = _factory(migrated_settings)
     try:
         with factory() as session:
-            runs = list(session.execute(select(InferenceRun).where(InferenceRun.job_id == job["id"])).scalars())
+            runs = list(session.execute(select(InferenceRun).where(
+                InferenceRun.job_id == job["id"]).order_by(InferenceRun.created_at)).scalars())
             assert len(runs) == expected_calls
             assert all(run.state in {InferenceRunState.FAILED, InferenceRunState.SUCCEEDED} for run in runs)
+            for run, call in zip(runs, adapter.calls, strict=True):
+                snapshot = json.loads(run.profile_snapshot_json)
+                assert run.request_fingerprint == fingerprint({
+                    "version": "production-request-1", "request": call["payload"],
+                    "model_configuration": {key: snapshot.get(key) for key in
+                        ("protocol", "base_url", "model", "params", "inference_options")},
+                })
+            if expected_calls > 1:
+                assert runs[0].request_fingerprint != runs[1].request_fingerprint
+    finally:
+        engine.dispose()
+
+
+def test_transport_retries_freeze_the_actual_request_and_keep_its_fingerprint(
+    fake_provider_client, migrated_settings,
+):
+    data = _import(fake_provider_client)
+    job = _create_job(fake_provider_client, data["book_id"], _fake_profile(fake_provider_client),
+                      key="frozen-rate-retry")
+    captured = []
+
+    class MutatingAdapter(FakeProviderAdapter):
+        async def generate_labels(self, payload):
+            captured.append(deepcopy(payload))
+            try:
+                return await super().generate_labels(payload)
+            finally:
+                payload["messages"][0]["content"] = "adapter-mutated"
+                payload["target_quote_ids"].clear()
+
+    migrated_settings.rate_limit_backoff_base_seconds = 0
+    adapter = MutatingAdapter(script=[ProviderError(ProviderErrorKind.RATE_LIMITED, "限流")])
+    outcome = _run_with_fake(migrated_settings, job["id"], adapter)
+    assert outcome.state is JobState.COMPLETED
+    assert len(captured) == 2 and captured[0] == captured[1]
+    engine, factory = _factory(migrated_settings)
+    try:
+        with factory() as session:
+            runs = list(session.scalars(select(InferenceRun).where(
+                InferenceRun.job_id == job["id"]).order_by(InferenceRun.created_at)))
+            assert [run.state for run in runs] == [InferenceRunState.FAILED, InferenceRunState.SUCCEEDED]
+            assert runs[0].request_fingerprint == runs[1].request_fingerprint
+            snapshot = json.loads(runs[0].profile_snapshot_json)
+            assert runs[0].request_fingerprint == fingerprint({
+                "version": "production-request-1", "request": captured[0],
+                "model_configuration": {key: snapshot.get(key) for key in
+                    ("protocol", "base_url", "model", "params", "inference_options")},
+            })
     finally:
         engine.dispose()
 
