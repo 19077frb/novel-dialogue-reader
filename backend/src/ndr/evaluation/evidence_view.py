@@ -87,8 +87,26 @@ class NonblankEvidenceViewAdapter(GroundedTurnFrameAdapter):
         hidden = evidence.intersection(self.hidden_references | self.boundary_map.keys())
         hidden.update(set(proposed.breaks).intersection(self.hidden_references))
         if hidden:
+            locations = []
+            for person in proposed.new_characters:
+                for ref in person.evidence:
+                    if ref in hidden:
+                        locations.append(f"{person.ref[:40]}.evidence={ref[:40]}")
+            for label in proposed.labels:
+                if isinstance(label, FrameSpeech):
+                    for field in ("evidence", "addressee_evidence"):
+                        for ref in getattr(label, field):
+                            if ref in hidden:
+                                locations.append(f"{label.q[:40]}.{field}={ref[:40]}")
+            locations.extend(f"breaks={ref[:40]}" for ref in proposed.breaks if ref in hidden)
             raise InvalidModelOutput(
-                "Evidence view did not provide these reference IDs: " + ",".join(sorted(hidden))
+                "Evidence view did not provide these reference IDs: "
+                + ",".join(ref[:40] for ref in sorted(hidden)[:6])
+                + "；只能引用context实际ref，不可按Q编号计算G编号；B编号仅用于breaks。"
+                "人物依据不足时保留kind，使用character=null、basis=insufficient、evidence=[]，"
+                "不要换一个猜测编号。错误位置："
+                + "; ".join(dict.fromkeys(locations))[:300]
+                + f"（共{len(locations)}处）"
             )
         translated = proposed.model_dump(mode="json")
         translated["breaks"] = [self.boundary_map.get(ref, ref) for ref in proposed.breaks]

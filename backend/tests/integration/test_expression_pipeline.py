@@ -149,6 +149,56 @@ class StageAdapter(FakeProviderAdapter):
         return result
 
 
+@pytest.mark.parametrize("retries", [0, 1])
+def test_primary_blank_evidence_retry_is_targeted_counted_and_strict(fake_provider_client, retries):
+    client = fake_provider_client
+    create, factory = prepare(
+        client,
+        all_quotes=True,
+        context_policy="context-chapter-2",
+        text="第一章\n林舟说：「早上好。」 「你好。」\n顾宁点头。",
+    )
+    job = create("blank-evidence-format-retry")
+    with transaction(factory) as session:
+        stored = session.get(Job, job["id"])
+        settings = json.loads(stored.range_json)
+        settings.pop("review_protocol")
+        stored.range_json = json.dumps(settings)
+        stored.budget_json = json.dumps(
+            {"max_recheck_rounds": 0, "max_format_retries": retries}
+        )
+
+    class BlankEvidenceAdapter(StageAdapter):
+        async def generate_labels(self, payload):
+            result = await super().generate_labels(payload)
+            if len(self.calls) == 1:
+                view = json.loads(payload["messages"][1]["content"])
+                boundaries = [row["boundary_ref"] for row in view["context"] if "boundary_ref" in row]
+                assert boundaries, view["context"]
+                boundary = boundaries[0]
+                result["labels"][0]["evidence"] = [boundary]
+            return result
+
+    adapter = BlankEvidenceAdapter(["林舟"])
+    result = run_job(
+        factory, client.app.state.settings, job_id=job["id"], adapter_factory=lambda *_: adapter
+    )
+    assert result.state is (JobState.COMPLETED if retries else JobState.FAILED), result.errors
+    assert len(adapter.calls) == 1 + retries
+    if retries:
+        initial, corrected = (row["payload"]["messages"] for row in adapter.calls)
+        assert initial[:2] == corrected[:2]
+        diagnostic = corrected[-1]["content"]
+        assert "Q1.evidence=B" in diagnostic
+        assert "不可按Q编号计算G编号" in diagnostic
+    with factory() as session:
+        runs = list(session.scalars(select(InferenceRun).where(InferenceRun.job_id == job["id"])))
+        assert len(runs) == 1 + retries
+        assert sum(json.loads(run.usage_json)["total_tokens"] for run in runs) == 30 * (1 + retries)
+        assert sum(run.state is InferenceRunState.FAILED for run in runs) == 1
+        assert bool(session.scalar(select(Annotation))) is bool(retries)
+
+
 @pytest.mark.parametrize(
     "owners,expected,calls",
     [

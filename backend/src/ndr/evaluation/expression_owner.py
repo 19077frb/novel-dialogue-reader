@@ -11,6 +11,8 @@ from ndr.domain.common import ApiModel
 from ndr.evaluation.compact import DiscoveredCharacter
 from ndr.scenes.acceptance import decide_acceptance
 
+from .enumerated_view import ENUMERATED_VIEW_POLICY
+from .evidence_view import EVIDENCE_VIEW_POLICY
 from .simple_grounded_compact import SimpleGroundedCompactAdapter
 
 VERSION = "explicit-expression-owner-1"
@@ -70,6 +72,10 @@ class ExplicitOwnerProtocol:
             "新N需简短name/description和原文evidence；同姓、泛称、关系不足以合并。"
             "breaks仅使用gap_next_quote中有后继的编号，不改变原文位置和人物可见范围。"
             "needs_context只填目标Q编号。无需受话对象或其他辅助字段。\n"
+            + EVIDENCE_VIEW_POLICY
+            + "\n"
+            + ENUMERATED_VIEW_POLICY
+            + "\n"
             + json.dumps(schema, ensure_ascii=False)
         )
 

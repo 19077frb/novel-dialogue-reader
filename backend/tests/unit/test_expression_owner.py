@@ -1,5 +1,6 @@
 """Original fixtures for the opt-in expression-owner compiler, not model quality."""
 
+import json
 from copy import deepcopy
 from dataclasses import replace
 
@@ -8,7 +9,9 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from ndr.evaluation.compact import Candidate, CompactTask
+from ndr.evaluation.enumerated_view import ENUMERATED_VIEW_POLICY
 from ndr.evaluation.evidence import EvidenceIndex, EvidencePerson, IdentityFact
+from ndr.evaluation.evidence_view import EVIDENCE_VIEW_POLICY
 from ndr.evaluation.expression_owner import ExplicitOwnerProtocol
 from ndr.evaluation.owner_constraints import ConstrainedOwnerProtocol
 from ndr.evaluation.owner_scoring import score_owners
@@ -44,6 +47,23 @@ def payload(kind="speech", character="C1"):
             for q in ("Q1", "Q2")
         ]
     }
+
+
+@pytest.mark.parametrize("protocol_type", [ExplicitOwnerProtocol, ConstrainedOwnerProtocol])
+def test_production_prompt_preserves_nonblank_and_independent_numbering_rules(protocol_type):
+    source = task()
+    frozen = deepcopy(source)
+    protocol = protocol_type(source)
+    system, user = (m["content"] for m in protocol.messages())
+    assert EVIDENCE_VIEW_POLICY in system
+    assert ENUMERATED_VIEW_POLICY in system
+    assert json.loads(system.rsplit("\n", 1)[1]) == protocol.schema
+    view = json.loads(user)
+    assert set(protocol.schema["$defs"]["OriginalEvidenceReference"]["enum"]) == {
+        row["ref"] for row in view["context"] if "ref" in row
+    }
+    assert "G1" not in protocol.schema["$defs"]["OriginalEvidenceReference"]["enum"]
+    assert source == frozen
 
 
 @pytest.mark.parametrize("kind", ["speech", "thought", "quotation"])
