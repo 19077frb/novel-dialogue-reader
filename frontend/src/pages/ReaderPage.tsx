@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 
 import { annotationKeys, fetchAnnotations } from '../api/annotations'
 import { fetchReviewQueue } from '../api/review'
@@ -60,10 +60,12 @@ export function findCurrentStartCp(nodes: HTMLElement[], clipTop = 0): number | 
  */
 export default function ReaderPage() {
   const { bookId } = useParams<{ bookId: string }>()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const requestedChapterId = searchParams.get('chapterId')
   const requestedPosition = searchParams.get('positionCp')
   const [resumeCp, setResumeCp] = useState<number | null>(null)
+  const [resumeRequestKey, setResumeRequestKey] = useState<string | null>(null)
   const restoredRef = useRef<string | null>(null)
   const initializedChapterRef = useRef<string | null>(null)
   const queryClient = useQueryClient()
@@ -122,9 +124,10 @@ export default function ReaderPage() {
     enabled: Boolean(bookId) && chapterId !== null,
   })
 
-  // 明确跳转的章节优先于最后阅读位置；只初始化一次，不覆盖用户后续目录选择。
+  // Each real navigation may repeat a bookmark URL; data refreshes must not
+  // reinitialize it or override later manual chapter selections.
   useEffect(() => {
-    const key = JSON.stringify([bookId, requestedChapterId, requestedPosition])
+    const key = JSON.stringify([bookId, requestedChapterId, requestedPosition, location.key])
     if (!book.data || !chapters.data?.length || initializedChapterRef.current === key) return
     const position = !getGeneralSettings().resumeReading || (book.data.read_position_version_id && book.data.read_position_version_id !== book.data.active_version_id) ? 0 : book.data.read_position_cp
     const match =
@@ -135,8 +138,9 @@ export default function ReaderPage() {
     setChapterId(match ? match.id : null)
     const target = requestedPosition !== null ? Number(requestedPosition) : requestedChapterId ? null : position
     setResumeCp(match && target !== null && Number.isInteger(target) && target >= match.start_cp && target < match.end_cp ? target : null)
+    setResumeRequestKey(key)
     restoredRef.current = null
-  }, [bookId, requestedChapterId, requestedPosition, book.data, chapters.data])
+  }, [bookId, requestedChapterId, requestedPosition, location.key, book.data, chapters.data])
 
   useEffect(() => {
     setPages([])
@@ -168,7 +172,7 @@ export default function ReaderPage() {
   onError: (error) => setNotice(`添加书签失败：${error.message}`) })
 
   useEffect(() => {
-    const key = `${chapterId}:${resumeCp}`
+    const key = `${resumeRequestKey}:${chapterId}:${resumeCp}`
     if (resumeCp === null || !nodes.length || restoredRef.current === key) return
     const paragraph = Array.from(documentRef.current?.querySelectorAll<HTMLElement>('[data-paragraph-start]') ?? [])
       .find(item => Number(item.dataset.paragraphStart) <= resumeCp && Number(item.dataset.paragraphEnd) > resumeCp)
@@ -178,7 +182,7 @@ export default function ReaderPage() {
     else if (content.data?.chapter_id === chapterId && content.data.next_cursor && !content.isFetching) {
       setCursor(content.data.next_cursor)
     }
-  }, [nodes, chapterId, resumeCp, content.data, content.isFetching])
+  }, [nodes, chapterId, resumeCp, resumeRequestKey, content.data, content.isFetching])
 
   // 初读 horizon：本章末端。
   // 后文才出现的证据不会提前着色，也不会提前把两个声音合成同一个颜色。

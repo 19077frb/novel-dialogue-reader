@@ -1,9 +1,11 @@
 import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useQueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as annotationsApi from '../src/api/annotations'
 import * as booksApi from '../src/api/books'
+import * as bookmarksApi from '../src/api/bookmarks'
 import * as batch from '../src/components/BatchProcessor'
 import * as automatic from '../src/processing/autoProcessing'
 import type { BookOut, ChapterOut, ContentNodeOut } from '../src/api/types'
@@ -337,6 +339,69 @@ describe('ReaderPage', () => {
     } finally {
       pending.mockRestore(); cancel.mockRestore(); notify.mockRestore()
       act(() => updateGeneralSettings({ doubleClickChapterStatus: false }))
+    }
+  })
+
+  it('侧栏书签每次点击都重新定位，同章不同书签和手动换章后也能跳转', async () => {
+    const fetchMarks = vi.spyOn(bookmarksApi, 'fetchBookmarks').mockResolvedValue({ items: [21, 40].map(position => ({
+      id: `mark-${position}`, version: 1, book_id: 'b1', book_version_id: 'v1', chapter_id: 'c2',
+      chapter_title: '第二章', position_cp: position, excerpt: `书签${position}`, note: '', created_at: '2026-09-28T00:00:00Z',
+    })), next_cursor: null } as never)
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
+    const scroll = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+    vi.mocked(booksApi.fetchContent).mockImplementation(async (_bookId, query) => ({
+      book_id: 'b1', book_version_id: 'v1', canonical_length_cp: 60, chapter_id: query?.chapterId ?? null,
+      start_cp: 0, end_cp: 60, next_cursor: null,
+      nodes: query?.chapterId === 'c2' ? [...nodesFor('c2'), { ...nodesFor('c2')[0], node_id: 'later',
+        ordinal: 1, start_cp: 40, end_cp: 45, text: '第二段正文。' }] : nodesFor('c1'),
+    }))
+    function Fixture() {
+      const client = useQueryClient()
+      return <><button onClick={() => {
+        void client.invalidateQueries({ queryKey: booksApi.queryKeys.book('b1') })
+        void client.invalidateQueries({ queryKey: booksApi.queryKeys.chapters('b1') })
+      }}>测试刷新资料</button><ReaderPage /></>
+    }
+    const view = renderRoute('/books/:bookId/read', <Fixture />, '/books/b1/read?chapterId=c2')
+    try {
+      await screen.findByText(/第二章的正文/)
+      await userEvent.click(screen.getByRole('tab', { name: '书签' }))
+      const links = await screen.findAllByRole('link', { name: '跳转阅读' })
+      const targetPosition = () => (scroll.mock.contexts.at(-1) as HTMLElement)?.dataset.paragraphStart
+      for (let i = 1; i <= 3; i++) {
+        scroll.mockClear()
+        await userEvent.click(links[0])
+        await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1))
+        expect(targetPosition()).toBe('21')
+      }
+      scroll.mockClear()
+      await userEvent.click(links[1])
+      await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1))
+      expect(targetPosition()).toBe('40')
+      await userEvent.click(links[0])
+      await userEvent.click(screen.getByRole('tab', { name: '目录' }))
+      await userEvent.click(screen.getByRole('button', { name: /第一章/ }))
+      await screen.findByText(/第一章的正文/)
+      scroll.mockClear()
+      const calls = vi.mocked(booksApi.fetchChapters).mock.calls.length
+      vi.mocked(booksApi.fetchBook).mockResolvedValue({ ...BOOK, version: 4, read_position_cp: 40 })
+      await userEvent.click(screen.getByRole('button', { name: '测试刷新资料' }))
+      await waitFor(() => expect(booksApi.fetchChapters).toHaveBeenCalledTimes(calls + 1))
+      expect(screen.getByRole('button', { current: true })).toHaveTextContent('第一章')
+      expect(scroll).not.toHaveBeenCalled()
+      await userEvent.click(screen.getByRole('tab', { name: '书签' }))
+      await userEvent.click(screen.getAllByRole('link', { name: '跳转阅读' })[0])
+      await screen.findByText(/第二章的正文/)
+      await waitFor(() => expect(targetPosition()).toBe('21'))
+      expect(scroll).toHaveBeenCalledTimes(1)
+      // Jumping does not trap the sidebar: the directory tab remains selectable.
+      await userEvent.click(screen.getByRole('tab', { name: '目录' }))
+      expect(screen.getByRole('tab', { name: '目录' })).toHaveAttribute('aria-selected', 'true')
+    } finally {
+      view.unmount(); fetchMarks.mockRestore()
+      if (descriptor) Object.defineProperty(Element.prototype, 'scrollIntoView', descriptor)
+      else Reflect.deleteProperty(Element.prototype, 'scrollIntoView')
     }
   })
 
