@@ -28,6 +28,30 @@ const GROUPS: SceneGroupRefOut[] = [
 ]
 
 describe('CorrectionForm', () => {
+  it('当前人物按真实分组ID显示姓名而非编号，选项与悬停说明一致', async () => {
+    const onSubmit = vi.fn()
+    render(<CorrectionForm annotation={{ ...ANNOTATION, speaker_group_id: 'g2', label: 'S99' }}
+      sceneGroups={GROUPS} sceneVersion={2} onSubmit={onSubmit} />)
+    expect(screen.getByTestId('correction-version')).toHaveTextContent('人物归属：绫濑沙季')
+    expect(screen.getByTestId('correction-version')).not.toHaveTextContent('S99')
+    await userEvent.selectOptions(screen.getByTestId('correction-speaker'), 'g2')
+    expect(screen.getByTestId('correction-speaker')).toHaveAttribute('title', '主人公的义妹')
+    await userEvent.click(screen.getByTestId('correction-submit'))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ speakerRef: 'g2', expectedVersion: 4 }))
+  })
+
+  it('遗留编号不能成为人物名称，缺少姓名时用已有说明而非编造', () => {
+    render(<CorrectionForm annotation={ANNOTATION} sceneGroups={[
+      { group_id: 'g1', label: 'S1', canonical_name: 'S1', description: '后排的男同学' },
+      { group_id: 'g2', label: 'S2', canonical_name: null, description: '' },
+    ]} sceneVersion={1} onSubmit={vi.fn()} />)
+    expect(screen.getByTestId('correction-version')).toHaveTextContent('后排的男同学')
+    expect(screen.getByRole('option', { name: '后排的男同学' })).toHaveAttribute('value', 'g1')
+    expect(screen.getByRole('option', { name: '尚未确定人物' })).toHaveAttribute('value', 'g2')
+    expect(screen.getByTestId('correction-form')).not.toHaveTextContent('S1')
+    expect(screen.getByTestId('correction-form')).not.toHaveTextContent('S2')
+  })
+
   it('术语可改为非人物文本，不要求选择人物', async () => {
     const onSubmit = vi.fn()
     render(<CorrectionForm annotation={ANNOTATION} sceneGroups={GROUPS} sceneVersion={1} onSubmit={onSubmit} />)

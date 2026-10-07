@@ -4,6 +4,7 @@
  * 场景边界问题必须走 Gap 接口，不能误用说话人确认接口。
  */
 import type { GapDecision, GapOut } from '../api/types'
+import { gapDecisionLabel } from '../ui/labels'
 
 const DECISIONS: { value: GapDecision; label: string; hint: string }[] = [
   { value: 'CONTINUE', label: '继续', hint: '同一场对话继续' },
@@ -21,7 +22,7 @@ export interface GapDecisionControlsProps {
 export function GapDecisionControls({ gap, busy = false, onDecide }: GapDecisionControlsProps) {
   return (
     <div className="ndr-gap-decision" data-testid="gap-decision">
-      <p className="hint">Gap 决策（不调用模型）：当前为 {gap.decision}</p>
+      <p className="hint">场景间隔确认（不调用模型）：当前为{gapDecisionLabel(gap.decision)}</p>
       <ul className="ndr-candidates">
         {DECISIONS.map((item) => (
           <li key={item.value}>

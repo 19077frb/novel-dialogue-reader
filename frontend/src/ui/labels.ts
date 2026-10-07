@@ -1,4 +1,27 @@
 /** Display only: keep API values and unknown provider identifiers intact. */
+import type { AnnotationStateOut, SceneGroupRefOut } from '../api/types'
+
+const internalSpeakerRef = /^(?:[scgp]\d+|(?:speaker|character|group|scene)[_-]?\d+|UNKNOWN|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/iu
+const readableIdentity = (value?: string | null) => {
+  const text = value?.trim() ?? ''
+  return text && !internalSpeakerRef.test(text) ? text : ''
+}
+
+export function sceneSpeakerName(group: SceneGroupRefOut): string {
+  return readableIdentity(group.canonical_name) || readableIdentity(group.description) || '尚未确定人物'
+}
+
+export function annotationSpeakerName(annotation: AnnotationStateOut, groups: SceneGroupRefOut[]): string {
+  if (annotation.kind === 'other') return '无需归属'
+  if (annotation.kind === 'group') return '集体声音'
+  const group = groups.find(item => item.group_id === annotation.speaker_group_id)
+  return group ? sceneSpeakerName(group) : readableIdentity(annotation.label) || '尚未确定人物'
+}
+
+export const gapDecisionLabel = (value: string): string => ({
+  CONTINUE: '同一场对话继续', UPDATE: '场景内部推进', BREAK: '切换场景', UNCERTAIN: '场景待确认',
+} as Record<string, string>)[value] ?? '场景待确认'
+
 export const protocolLabel = (value: string): string => ({
   'chat-completions-compatible': '兼容聊天接口',
   'fake-provider': '模拟服务（仅测试，不调用模型）',

@@ -8,8 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { QuoteCorrectionInput } from '../api/review'
 import type { AnnotationStateOut, QuoteKind, SceneGroupRefOut } from '../api/types'
-import { labelText } from '../styles/palette'
-import { annotationStatusLabel } from '../ui/labels'
+import { annotationSpeakerName, annotationStatusLabel, sceneSpeakerName } from '../ui/labels'
 
 const KINDS: { value: QuoteKind; label: string }[] = [
   { value: 'speech', label: '对白（发声）' },
@@ -110,7 +109,7 @@ export function CorrectionForm({
       <p className="hint" data-testid="correction-version">
         当前标注：
         {annotation
-          ? `${annotationStatusLabel(annotation.status)} · ${labelText(annotation.label) || '（无色/无编号）'} · 版本 ${annotation.version}`
+          ? `${annotationStatusLabel(annotation.status)} · 人物归属：${annotationSpeakerName(annotation, sceneGroups)} · 版本 ${annotation.version}`
           : '还没有标注（更正会建立一条人工标注）'}
       </p>
       <label className="ndr-field">
@@ -137,6 +136,7 @@ export function CorrectionForm({
             value={speakerRef}
             onChange={(event) => setSpeakerRef(event.target.value)}
             data-testid="correction-speaker"
+            title={sceneGroups.find(group => group.group_id === speakerRef)?.description || undefined}
           >
             {sceneGroups.map((group) => (
               <option
@@ -144,7 +144,7 @@ export function CorrectionForm({
                 value={group.group_id}
                 title={group.description || undefined}
               >
-                {group.canonical_name || group.description || '未确认说话人'}
+                {sceneSpeakerName(group)}
               </option>
             ))}
           </select>
