@@ -6,6 +6,9 @@ import * as jobs from '../src/api/jobs'
 import { ApiError } from '../src/api/client'
 import { appendAutomaticProcessing, BatchRetryControls, canAppendAutomaticProcessing, cancelChapterProcessing, clearBatchProgress, hasBatchWork, requestBatchStop, retryBatchTask, retryChapterProcessing, runBatchProcessing, synchronizeManualChapterStatus, useBatchProgress } from '../src/components/BatchProcessor'
 import { getProcessingPreferences, updateProcessingPreferences } from '../src/processing/preferences'
+import { updateGeneralSettings } from '../src/settings/preferences'
+import { restoreBatchProcessing } from '../src/components/BatchProcessor'
+import { readJournal, writeJournal } from '../src/processing/journal'
 import { waitForJobCompletion } from '../src/processing/jobCompletion'
 import type { ChapterOut, EstimateOut, JobDetailOut } from '../src/api/types'
 
@@ -42,6 +45,52 @@ beforeEach(() => {
   vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: estimate.windows!.map(window => ({ ...window, processing_status: window.window_id === 'w2' ? 'completed' : 'failed' })) })
 })
 afterEach(() => { cleanup(); clearBatchProgress('b1') })
+
+it('skips filtered chapters even on forced redo, without model calls or completion writes', async () => {
+  updateGeneralSettings({ chapterFilterEnabled: true, chapterFilterTerms: ['第一章'] })
+  await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1' }, forceReprocess: true })
+  render(<Snapshot />)
+  expect(readSnapshot().chapterStates.c1.state).toBe('skipped')
+  expect(readSnapshot().message).toContain('自动跳过处理 1 章')
+  expect(readSnapshot().running).toBe(false)
+  expect(characters.analyzeCharacterRoster).not.toHaveBeenCalled()
+  expect(jobs.createJob).not.toHaveBeenCalled()
+  expect(books.completeChapterProcessing).not.toHaveBeenCalled()
+  expect(books.setChapterProcessingStatus).not.toHaveBeenCalled()
+  expect(readJournal<{ execution: { chapterFilter: unknown } }>('batch:b1')?.execution.chapterFilter).toMatchObject({ chapterFilterEnabled: true, chapterFilterTerms: ['第一章'] })
+})
+
+it.each([true, false])('restores the saved filter and treats an old missing filter as disabled (%s)', async frozen => {
+  updateGeneralSettings({ chapterFilterEnabled: !frozen, chapterFilterTerms: ['第一章'] })
+  writeJournal('batch:b1', { schema: 1, requests: {}, accounted: [], spent: 0, totalSpent: 0, unknownRuns: 0,
+    snapshot: { running: true, startedAt: 1, finishedAt: null, stopRequested: false, message: '', tasks: [],
+      chapterStates: {}, annotationRevisions: {}, catalogRevision: 0, revision: 0 },
+    execution: { bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+      preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: null },
+      ...(frozen ? { chapterFilter: { chapterFilterEnabled: true, chapterFilterMode: 'contains', chapterFilterTerms: ['第一章'] } } : {}) } })
+  await restoreBatchProcessing('b1')
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(frozen ? 0 : 1)
+  expect(jobs.createJob).toHaveBeenCalledTimes(frozen ? 0 : 2)
+})
+
+it('keeps a batch filter frozen when settings change while a chapter is running', async () => {
+  updateGeneralSettings({ chapterFilterEnabled: true, chapterFilterTerms: ['彩页'] })
+  let finishFirst!: (value: JobDetailOut) => void
+  vi.mocked(characters.analyzeCharacterRoster).mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve }))
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  const filtered = { ...chapter, id: 'c2', title: '彩页', ordinal: 1 }
+  const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter, filtered],
+    plans: [{ chapter, estimate }, { chapter: filtered, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 2, tokenLimit: null }, expandable: true })
+  await vi.waitFor(() => expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1))
+  updateGeneralSettings({ chapterFilterEnabled: false })
+  expect(appendAutomaticProcessing('b1', 'v1', [{ chapter: filtered, estimate }])).toBe(0)
+  finishFirst(job('COMPLETED')); await run
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
+  render(<Snapshot />)
+  expect(readSnapshot().message).toContain('按名单自动跳过 1 章')
+})
 
 it('readmits a manually cancelled queued chapter into the same pool without duplicate tasks or counts', async () => {
   let finishFirst!: (value: JobDetailOut) => void

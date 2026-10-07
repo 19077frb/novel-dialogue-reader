@@ -34,6 +34,7 @@ interface CharacterRosterPanelProps {
   profileId: string
   inferenceOptions?: InferenceOptions
   disabled?: boolean
+  skipReason?: string | null
   onConfirmedChange: (confirmed: boolean) => void
 }
 
@@ -85,6 +86,7 @@ export function CharacterRosterPanel({
   profileId,
   inferenceOptions,
   disabled = false,
+  skipReason = null,
   onConfirmedChange,
 }: CharacterRosterPanelProps) {
   const queryClient = useQueryClient()
@@ -164,8 +166,10 @@ export function CharacterRosterPanel({
   }, [bookId, job.data, queryClient, rosterJobId, rosterKey])
 
   const analyze = useMutation({
-    mutationFn: (input: AnalyzeRosterInput) =>
-      analyzeCharacterRoster(bookId, chapterId as string, input),
+    mutationFn: (input: AnalyzeRosterInput) => {
+      if (skipReason) throw new Error(skipReason)
+      return analyzeCharacterRoster(bookId, chapterId as string, input)
+    },
     onSuccess: (detail) => {
       setRosterJobId(detail.id)
       setError(null)
@@ -228,6 +232,7 @@ export function CharacterRosterPanel({
       .every((item) => Boolean(item.character_id || item.canonical_name.trim()))
 
   const analyzeBlocker = disabled ? '本书处理任务正在运行，请等待结束或先停止任务。'
+    : skipReason ? skipReason
     : analyze.isPending ? '正在创建人物分析任务，请等待提交完成。'
     : textlessCompleted ? '本章没有正文文字，已完成，无需再分析人物。'
     : recent.isPending ? '正在读取已有的人物任务，读取完成后再分析。'
@@ -318,7 +323,7 @@ export function CharacterRosterPanel({
                 ),
               })
             }}
-            disabled={disabled || profileId === '' || analyze.isPending || textlessCompleted || recent.isPending || recent.isError || Boolean(job.data && !TERMINAL_JOB_STATES.has(job.data.state))}
+            disabled={disabled || Boolean(skipReason) || profileId === '' || analyze.isPending || textlessCompleted || recent.isPending || recent.isError || Boolean(job.data && !TERMINAL_JOB_STATES.has(job.data.state))}
             data-testid="roster-analyze"
             title={analyzeBlocker ?? undefined}
           >

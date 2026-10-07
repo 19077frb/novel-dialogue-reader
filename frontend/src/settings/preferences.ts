@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from 'react'
+import { defaultChapterFilter, normalizeChapterFilter } from '../processing/chapterFilter'
 
 export const SETTINGS_KEY = 'ndr:general-settings:v1'
-export const defaultSettings = { fontSize: 16, lineHeight: 1.95, resumeReading: true, showCandidates: true, showAnnotations: true, autoProcessing: false, lookAheadChapters: 2, doubleClickChapterStatus: false, allowOverwriteManualCharacters: false }
+export const defaultSettings = { ...defaultChapterFilter(), fontSize: 16, lineHeight: 1.95, resumeReading: true, showCandidates: true, showAnnotations: true, autoProcessing: false, lookAheadChapters: 2, doubleClickChapterStatus: false, allowOverwriteManualCharacters: false }
 export type GeneralSettings = typeof defaultSettings
 let fallback = JSON.stringify(defaultSettings)
 let rawCache: string | undefined
@@ -14,7 +15,7 @@ export function getGeneralSettings(): GeneralSettings {
     rawCache = raw
     try {
       const value = JSON.parse(raw)
-      cache = { fontSize: Number.isFinite(value.fontSize) ? Math.min(28, Math.max(14, value.fontSize)) : 16,
+      cache = { ...normalizeChapterFilter(value), fontSize: Number.isFinite(value.fontSize) ? Math.min(28, Math.max(14, value.fontSize)) : 16,
         lineHeight: Number.isFinite(value.lineHeight) ? Math.min(2.6, Math.max(1.5, value.lineHeight)) : 1.95,
         resumeReading: typeof value.resumeReading === 'boolean' ? value.resumeReading : true,
         showCandidates: typeof value.showCandidates === 'boolean' ? value.showCandidates : true,

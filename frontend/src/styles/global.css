@@ -609,6 +609,11 @@ textarea:focus-visible {
   border-left: 4px solid var(--ndr-muted);
 }
 
+.ndr-chapter-skipped {
+  border-left: 4px solid var(--ndr-muted);
+  background: color-mix(in srgb, var(--ndr-muted) 8%, transparent);
+}
+
 .ndr-chapter-queued {
   border-left: 4px solid var(--ndr-st-queued);
   background: color-mix(in srgb, var(--ndr-st-queued) 8%, transparent);

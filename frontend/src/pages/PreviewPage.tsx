@@ -45,6 +45,8 @@ import { inferenceOptions, useProcessingPreferences } from '../processing/prefer
 import { ThinkingSettings } from '../components/ThinkingSettings'
 import { DialogueStrategySettings } from '../components/DialogueStrategySettings'
 import { RosterRepairSettings } from '../components/RosterRepairSettings'
+import { getGeneralSettings, useGeneralSettings } from '../settings/preferences'
+import { chapterFilterReason } from '../processing/chapterFilter'
 
 interface SingleWindowTask {
   windowId: string
@@ -81,6 +83,7 @@ export default function PreviewPage() {
   const [range, setRange] = useState<RangeValue>({ chapterId: null, startCp: 0, endCp: null })
   const [processingMode, setProcessingMode] = useState<'single' | 'batch'>('single')
   const [preferences, setPreferences] = useProcessingPreferences()
+  const [settings] = useGeneralSettings()
   const { concurrency, profileId } = preferences
   const options = inferenceOptions(preferences)
   const budget = useMemo<BudgetInput>(() => ({
@@ -140,6 +143,11 @@ export default function PreviewPage() {
     queryKey: profileKeys.profiles(),
     queryFn: ({ signal }) => fetchProfiles(signal),
   })
+  const filterReasonFor = (filter = settings) => range.chapterId
+    ? chapterFilterReason(chapters.data?.find(chapter => chapter.id === range.chapterId)?.title, filter)
+    : filter.chapterFilterEnabled && filter.chapterFilterTerms.some(term => term.trim())
+      ? '已启用章节过滤名单，请先选择一个章节再处理。' : null
+  const filterReason = filterReasonFor()
   const recentJobs = useQuery({ queryKey: ['recent-single-jobs', bookId, book.data?.active_version_id, range.chapterId],
     queryFn: ({ signal }) => fetchRecentJobs({ bookId: bookId!, versionId: book.data!.active_version_id!,
       chapterId: range.chapterId ?? undefined, kind: 'INFERENCE' }, signal),
@@ -289,6 +297,8 @@ export default function PreviewPage() {
 
   const jobMutation = useMutation({
     mutationFn: async (mode: 'preview' | 'process') => {
+      const skipReason = filterReasonFor(getGeneralSettings())
+      if (skipReason) throw new Error(skipReason)
       const reason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, budget.maxRecheckRounds)
       if (reason) throw new Error(reason)
       manuallySelectedJobRef.current = null
@@ -397,6 +407,7 @@ export default function PreviewPage() {
     (task) => task.job && !TERMINAL_JOB_STATES.has(task.job.state),
   ) || Boolean(currentJob && !TERMINAL_JOB_STATES.has(currentJob.state))
   const runBlockers: string[] = []
+  if (filterReason) runBlockers.push(filterReason)
   const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, budget.maxRecheckRounds)
   if (strategyReason) runBlockers.push(strategyReason)
   if (singleRunning) runBlockers.push('当前单章任务尚未结束，请等待或在任务面板停止')
@@ -553,6 +564,7 @@ export default function PreviewPage() {
       </section>
 
       <CharacterRosterPanel
+        skipReason={filterReason}
         step={2}
         bookId={bookId}
         bookVersionId={book.data?.active_version_id ?? null}
