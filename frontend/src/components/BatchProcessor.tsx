@@ -897,7 +897,8 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         const mergedTasks = [...current.tasks.filter(task => !tasks.some(replacement => replacement.id === task.id)), ...tasks]
         publishBatch(bookId, {
           tasks: mergedTasks,
-          chapterStates: { ...current.chapterStates, [plan.chapter.id]: { state: 'queued',
+          chapterStates: { ...current.chapterStates, [plan.chapter.id]: { state: mergedTasks.some(task => task.chapterId === plan.chapter.id && task.state === 'running')
+            ? current.chapterStates[plan.chapter.id]?.state === 'roster' ? 'roster' : 'dialogue' : 'queued',
             completedWindows: Math.max(current.chapterStates[plan.chapter.id]?.completedWindows ?? 0, plan.completedWindows ?? 0), totalWindows: plan.totalWindows ?? plan.estimate.windows?.length ?? 0,
             error: null, cancelRequested: false, manualStatusCleared: true, pendingTasks: mergedTasks.filter(task => task.chapterId === plan.chapter.id && ['queued', 'running'].includes(task.state)).length } }, message: '已将未完成任务加入重试队列，其他任务继续处理。',
         })
@@ -1161,6 +1162,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         return runMetered(Number(window.estimated_tokens) || 1, async (available) => {
           if (plan.cancelled) return
           updateBatchTask(bookId, taskId, 'running')
+          updateChapterProgress(bookId, chapter.id, { state: 'dialogue', error: null })
           let retryable = false
           try {
             const dialogueJob = await waitForChapterJob(bookId, plan, taskId,

@@ -61,6 +61,7 @@ it.each([1, 2])('admits different windows from the retry buttons into one pool w
   await waitFor(() => expect(readSnapshot().tasks.find((task: { id: string }) => task.id === 'dialogue:c1:w2').state)
     .toBe(concurrency === 1 ? 'queued' : 'running'))
   expect(finishers).toHaveLength(concurrency)
+  expect(readSnapshot().chapterStates.c1.state).toBe('dialogue')
   expect(readJournal<{ execution: { plans: Array<{ estimate: EstimateOut }> } }>('batch:b1')?.execution.plans[0].estimate.windows).toHaveLength(2)
   expect(books.completeChapterProcessing).not.toHaveBeenCalled()
   await act(async () => { await expect(retryBatchTask('b1', 'dialogue:c1:w1')).rejects.toThrow(/不能直接重试|正在准备/) })
