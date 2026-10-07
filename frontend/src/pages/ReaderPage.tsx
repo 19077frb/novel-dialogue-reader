@@ -460,6 +460,7 @@ export default function ReaderPage() {
                 nodes={nodes}
                 candidates={showCandidates ? candidates : []}
                 annotations={annotationItems}
+                pendingReviewQuotes={annotations.data?.pending_review_quotes}
                 onQuoteClick={(quoteId) => setSelectedQuote({ quoteId, reviewItemId: null })}
                 bookmarkPending={bookmark.isPending}
                 onBookmark={(cp, text) => {

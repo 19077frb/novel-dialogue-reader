@@ -4233,6 +4233,14 @@
             "type": "array",
             "title": "Items"
           },
+          "pending_review_quotes": {
+            "items": {
+              "$ref": "#/components/schemas/PendingReviewQuoteOut"
+            },
+            "type": "array",
+            "title": "Pending Review Quotes",
+            "description": "范围内存在待确认记录的对白，含未标注和嵌套对白；不含人物资料"
+          },
           "identity_reverts": {
             "type": "integer",
             "minimum": 0.0,
@@ -8884,6 +8892,32 @@
         "additionalProperties": false,
         "type": "object",
         "title": "ModelProfilePatch"
+      },
+      "PendingReviewQuoteOut": {
+        "properties": {
+          "quote_id": {
+            "type": "string",
+            "title": "Quote Id"
+          },
+          "start_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start Cp"
+          },
+          "end_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "End Cp"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quote_id",
+          "start_cp",
+          "end_cp"
+        ],
+        "title": "PendingReviewQuoteOut"
       },
       "ProtocolCapabilitiesOut": {
         "properties": {

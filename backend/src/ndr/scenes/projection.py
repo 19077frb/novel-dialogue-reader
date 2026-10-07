@@ -23,13 +23,15 @@ from ..domain.annotations import (
     AnnotationCountsOut,
     AnnotationItemOut,
     AnnotationsResponse,
+    PendingReviewQuoteOut,
     SpeakerLegendItemOut,
 )
-from ..domain.enums import AnnotationStatus, ReadingMode
+from ..domain.enums import AnnotationStatus, ReadingMode, ReviewQueueStatus
 from ..storage.models import (
     Annotation,
     IdentityRevision,
     Quote,
+    ReviewItem,
     Scene,
 )
 
@@ -115,10 +117,25 @@ def build_projection(
     end_cp: int,
     reading_mode: ReadingMode = ReadingMode.INITIAL,
     visible_horizon_cp: int | None = None,
+    include_pending_reviews: bool = True,
 ) -> AnnotationsResponse:
     """按范围返回有效投影（颜色/编号/图例/统计）。"""
 
     horizon = visible_horizon_cp if reading_mode is ReadingMode.INITIAL else None
+    pending_review_quotes = [
+        PendingReviewQuoteOut(quote_id=row.id, start_cp=row.start_cp, end_cp=row.end_cp)
+        for row in (session.execute(
+            select(Quote.id, Quote.start_cp, Quote.end_cp).where(
+                Quote.book_version_id == book_version_id,
+                Quote.start_cp < end_cp,
+                Quote.end_cp > start_cp,
+                select(ReviewItem.id).where(
+                    ReviewItem.quote_id == Quote.id,
+                    ReviewItem.queue_status == ReviewQueueStatus.PENDING,
+                ).exists(),
+            ).order_by(Quote.start_cp, Quote.id)
+        ) if include_pending_reviews else [])
+    ]
     revert_quotes, revert_groups, reverted_revisions = horizon_identity_reverts(
         session, book_version_id=book_version_id, horizon=horizon
     )
@@ -296,6 +313,7 @@ def build_projection(
     ]
 
     return AnnotationsResponse(
+        pending_review_quotes=pending_review_quotes,
         book_id=book_id,
         book_version_id=book_version_id,
         reading_mode=reading_mode,

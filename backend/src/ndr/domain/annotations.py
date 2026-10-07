@@ -63,6 +63,12 @@ class AnnotationCountsOut(ApiModel):
     unprocessed_quotes: int = Field(ge=0, description="候选里还没有标注的对白数")
 
 
+class PendingReviewQuoteOut(ApiModel):
+    quote_id: str
+    start_cp: int = Field(ge=0)
+    end_cp: int = Field(ge=0)
+
+
 class AnnotationsResponse(ApiModel):
     book_id: str
     book_version_id: str
@@ -71,6 +77,10 @@ class AnnotationsResponse(ApiModel):
     start_cp: int = Field(ge=0)
     end_cp: int = Field(ge=0)
     items: list[AnnotationItemOut] = Field(default_factory=list)
+    pending_review_quotes: list[PendingReviewQuoteOut] = Field(
+        default_factory=list,
+        description="范围内存在待确认记录的对白，含未标注和嵌套对白；不含人物资料",
+    )
     identity_reverts: int = Field(
         default=0,
         ge=0,

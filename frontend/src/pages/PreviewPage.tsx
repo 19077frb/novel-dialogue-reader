@@ -796,6 +796,7 @@ export default function PreviewPage() {
               nodes={nodes}
               candidates={viewMode === 'annotated' ? candidates : []}
               annotations={visibleItems}
+              pendingReviewQuotes={annotations.data?.pending_review_quotes}
             />
           )}
         </div>

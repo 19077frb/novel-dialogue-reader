@@ -1246,6 +1246,11 @@ export interface components {
             /** Items */
             items?: components["schemas"]["AnnotationItemOut"][];
             /**
+             * Pending Review Quotes
+             * @description 范围内存在待确认记录的对白，含未标注和嵌套对白；不含人物资料
+             */
+            pending_review_quotes?: components["schemas"]["PendingReviewQuoteOut"][];
+            /**
              * Identity Reverts
              * @description 初读 horizon 之下被还原（不提前合并/拆分）的身份修订条数
              * @default 0
@@ -3094,6 +3099,15 @@ export interface components {
             remove_api_key: boolean;
             /** Expected Version */
             expected_version?: number | null;
+        };
+        /** PendingReviewQuoteOut */
+        PendingReviewQuoteOut: {
+            /** Quote Id */
+            quote_id: string;
+            /** Start Cp */
+            start_cp: number;
+            /** End Cp */
+            end_cp: number;
         };
         /** ProtocolCapabilitiesOut */
         ProtocolCapabilitiesOut: {

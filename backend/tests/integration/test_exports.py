@@ -79,6 +79,29 @@ def _export(client: TestClient, book_id: str, snapshot_id: str, fmt: str, *, key
     return response.json()["data"]
 
 
+def test_review_markers_do_not_enter_export_snapshot_or_change_fingerprint(
+    fake_provider_client: TestClient, migrated_settings: Settings,
+) -> None:
+    from ndr.domain.enums import ReviewReason, ReviewTargetType
+    from ndr.storage.models import Quote, ReviewItem
+
+    client = fake_provider_client
+    data = _prepared_book(client, migrated_settings, key="k-export-review-marker")
+    first = _preview(client, data["book_id"])
+    with transaction(client.app.state.session_factory) as session:
+        quote = session.scalar(select(Quote).where(
+            Quote.book_version_id == data["book_version_id"],
+        ).order_by(Quote.start_cp))
+        session.add(ReviewItem(target_type=ReviewTargetType.QUOTE,
+                               quote_id=quote.id, reason=ReviewReason.USER_FLAGGED))
+    second = _preview(client, data["book_id"])
+    with transaction(client.app.state.session_factory) as session:
+        old = session.get(ExportSnapshot, first["snapshot_id"])
+        new = session.get(ExportSnapshot, second["snapshot_id"])
+        assert old.snapshot_hash == new.snapshot_hash
+        assert "pending_review_quotes" not in json.loads(new.annotation_projection_json)
+
+
 def test_f21_txt_export_epub_and_html_without_model_calls(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:
