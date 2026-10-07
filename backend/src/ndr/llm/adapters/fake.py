@@ -77,7 +77,7 @@ class FakeProviderAdapter:
                 raise response
             return response
         if kind == "roster":
-            return self._roster_output()
+            return self._roster_output(payload)
         if kind == "connection":
             return json.dumps(
                 {
@@ -196,7 +196,7 @@ class FakeProviderAdapter:
             "needs_context": [],
         }
 
-    def _roster_output(self) -> dict[str, Any]:
+    def _roster_output(self, payload=None) -> dict[str, Any]:  # noqa: ANN001
         """离线人物名单：仅测试/演示使用。
 
         非确定性模式不编造人物（返回空名单，界面只能手动添加）；
@@ -205,8 +205,11 @@ class FakeProviderAdapter:
         """
 
         if self.labeling_mode != "deterministic":
-            return {"schema_version": OUTPUT_SCHEMA_VERSION, "characters": []}
-        return {
+            return {"schema_version": ("1.1" if (payload or {}).get("roster_protocol")
+                                       in {"sourced-roster-1", "sourced-roster-2"}
+                                       else OUTPUT_SCHEMA_VERSION),
+                    "characters": []}
+        result = {
             "schema_version": OUTPUT_SCHEMA_VERSION,
             "characters": [
                 {
@@ -227,6 +230,16 @@ class FakeProviderAdapter:
                 },
             ],
         }
+        if (payload or {}).get("roster_protocol") in {"sourced-roster-1", "sourced-roster-2"}:
+            result["schema_version"] = "1.1"
+            for person in result["characters"]:
+                person["facts"] = [
+                    {"kind": "designation", "value": person["name"], "evidence_refs": ["L1"]},
+                    {"kind": "description", "value": person["description"],
+                     "evidence_refs": ["L1"]},
+                ]
+                person["pov_evidence_refs"] = ["L1"] if person["pov_candidate"] else []
+        return result
 
     def _deterministic_labels(self, payload: Mapping[str, Any] | None) -> dict[str, Any]:
         """离线确定性脚本：第一句建立新分组，其余沿用同一分组（DIRECT 证据 → ACCEPTED）。

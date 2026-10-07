@@ -27,7 +27,25 @@ export function fetchRecentJobs(input: { bookId?: string; versionId?: string; ch
   return apiData<JobDetailOut[]>(`/api/jobs/recent?${params}`, { signal })
 }
 
+export type DialogueStrategy = 'legacy' | 'complete' | 'complete-review' | 'complete-blocks' | 'complete-blocks-review' | 'complete-blocks-isolated' | 'complete-blocks-isolated-review' | 'complete-blocks-isolated-feedback-review'
+
+export function dialogueStrategyDisabledReason(strategy: DialogueStrategy | undefined, rounds: number): string | null {
+  return strategy === 'complete-blocks-isolated-feedback-review' && rounds < 1
+    ? '人物名单反馈需要独立复核，请将每个窗口最多复核次数设为至少 1。' : null
+}
+
+export function dialogueStrategyPayload(strategy?: DialogueStrategy) {
+  return strategy && ['complete', 'complete-review', 'complete-blocks', 'complete-blocks-review', 'complete-blocks-isolated', 'complete-blocks-isolated-review', 'complete-blocks-isolated-feedback-review'].includes(strategy) ? {
+    context_policy: strategy.startsWith('complete-blocks') ? 'context-chapter-2' : 'context-chapter-1',
+    output_protocol: 'expression-production-1',
+    ...(strategy.includes('-isolated') ? { auxiliary_protocol: 'expression-auxiliary-isolation-1' } : {}),
+    ...(strategy.endsWith('-review') ? { review_protocol: 'expression-evidence-review-1' } : {}),
+    ...(strategy === 'complete-blocks-isolated-feedback-review' ? { identity_feedback_protocol: 'identity-feedback-1' } : {}),
+  } : {}
+}
+
 export interface RangeInput {
+  dialogueStrategy?: DialogueStrategy
   chapterId: string | null
   startCp: number
   endCp: number | null
@@ -99,6 +117,8 @@ export function estimateRange(
   input: EstimateInput,
   signal?: AbortSignal,
 ): Promise<EstimateOut> {
+  const reason = dialogueStrategyDisabledReason(input.range.dialogueStrategy, input.budget.maxRecheckRounds ?? 0)
+  if (reason) return Promise.reject(new Error(reason))
   return apiData<EstimateOut>(`/api/books/${bookId}/estimates`, {
     method: 'POST',
     signal,
@@ -108,6 +128,7 @@ export function estimateRange(
         chapter_id: input.range.chapterId,
         start_cp: input.range.startCp,
         end_cp: input.range.endCp,
+        ...dialogueStrategyPayload(input.range.dialogueStrategy),
       },
       reading_mode: input.readingMode,
       visible_horizon_cp: input.visibleHorizonCp ?? null,
@@ -133,6 +154,8 @@ export interface CreateJobInput {
 }
 
 export function createJob(input: CreateJobInput, signal?: AbortSignal): Promise<JobDetailOut> {
+  const reason = dialogueStrategyDisabledReason(input.range.dialogueStrategy, input.budget.maxRecheckRounds ?? 0)
+  if (reason) return Promise.reject(new Error(reason))
   return apiData<JobDetailOut>('/api/jobs', {
     method: 'POST',
     signal,
@@ -145,6 +168,7 @@ export function createJob(input: CreateJobInput, signal?: AbortSignal): Promise<
         chapter_id: input.range.chapterId,
         start_cp: input.range.startCp,
         end_cp: input.range.endCp,
+        ...dialogueStrategyPayload(input.range.dialogueStrategy),
       },
       selected_window_ids: input.selectedWindowIds ?? null,
       force_reprocess: input.forceReprocess ?? false,

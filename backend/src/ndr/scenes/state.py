@@ -12,31 +12,50 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..characters.names import GENERIC_NAMES, matches_name, undecorated_name
 from ..domain.enums import GapDecision, SceneStatus
 
-SCENE_STATE_VERSION = "scene-state-5"
+SCENE_STATE_VERSION = "scene-state-6"
 
 
 @dataclass(frozen=True)
 class ConfirmedCharacter:
-    """用户确认过的全书人物；跨场景保持同一个 character_id。"""
+    """章节目录人物及资料来源；确认目录不等于人工核实身份。"""
 
     character_id: str
     canonical_name: str
     aliases: tuple[str, ...] = ()
     description: str = ""
+    source: str = "unknown"
+    user_confirmed: bool | None = None
+    confirmation_source: str = "unknown"
+    relations: tuple[dict[str, Any], ...] = ()
+    identity_records: tuple[dict[str, Any], ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "character_id": self.character_id,
             "canonical_name": self.canonical_name,
             "aliases": list(self.aliases),
             "description": self.description,
+            "source": self.source,
+            "user_confirmed": self.user_confirmed,
+            "confirmation_source": self.confirmation_source,
         }
+        if self.relations:
+            value["relations"] = [dict(item) for item in self.relations]
+        if self.identity_records:
+            value["identity_records"] = deepcopy(list(self.identity_records))
+        return value
+
+    def prompt_record(self) -> dict[str, Any]:
+        value = self.as_dict()
+        value["name"] = value.pop("canonical_name")
+        return value
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> ConfirmedCharacter:
@@ -45,6 +64,14 @@ class ConfirmedCharacter:
             canonical_name=str(payload.get("canonical_name", "")),
             aliases=tuple(str(item) for item in payload.get("aliases", [])),
             description=str(payload.get("description", "")),
+            source=str(payload.get("source", "unknown")),
+            user_confirmed=(payload.get("user_confirmed")
+                            if type(payload.get("user_confirmed")) is bool else None),
+            confirmation_source=str(payload.get("confirmation_source", "unknown")),
+            relations=tuple(dict(item) for item in payload.get("relations", [])
+                            if isinstance(item, dict)),
+            identity_records=tuple(deepcopy(item) for item in payload.get("identity_records", [])
+                                   if isinstance(item, dict)),
         )
 
 
@@ -99,6 +126,13 @@ class SceneState:
     # Refreshed from storage before a call; not duplicated in every checkpoint.
     book_characters: list[ConfirmedCharacter] = field(default_factory=list)
     pov_character_id: str | None = None
+    explicit_identity: bool = False
+    # Ephemeral input flag; restored jobs re-project using their frozen range version.
+    projected_identity_input: bool = False
+    identity_input_horizon: int | None = None
+    identity_input_mode: str = "initial"
+    production_expression_task: Any = None
+    projected_presentation_cache: dict[str, list[dict]] = field(default_factory=dict)
     known_characters: dict[str, str] = field(default_factory=dict)
     unresolved: list[str] = field(default_factory=list)
     version: int = 1
@@ -142,6 +176,8 @@ class SceneState:
         )
 
     def _confirmed_by_name(self, value: str | None) -> ConfirmedCharacter | None:
+        if self.explicit_identity:
+            return None
         key = (value or "").strip().casefold()
         if not key:
             return None
@@ -266,7 +302,13 @@ class SceneState:
             unique.append(slot)
         self.participants = unique
 
+        counts = {}
+        if self.projected_identity_input:
+            for character in self.identity_characters:
+                counts[character.canonical_name] = counts.get(character.canonical_name, 0) + 1
         for character in self.confirmed_characters:
+            if self.projected_identity_input and counts.get(character.canonical_name, 0) != 1:
+                continue
             self.remember_character(character.canonical_name, character.description)
 
     def prompt_state(self, *, max_chars: int = 300) -> str:
@@ -361,6 +403,7 @@ class SceneState:
             "participants": [slot.as_dict() for slot in self.participants],
             "confirmed_characters": [item.as_dict() for item in self.confirmed_characters],
             "pov_character_id": self.pov_character_id,
+            "explicit_identity": self.explicit_identity,
             "known_characters": dict(self.known_characters),
             "unresolved": list(self.unresolved),
             "version": self.version,
@@ -390,6 +433,7 @@ class SceneState:
                 if isinstance(item, dict)
             ],
             pov_character_id=payload.get("pov_character_id"),
+            explicit_identity=payload.get("explicit_identity") is True,
             known_characters=dict(payload.get("known_characters", {})),
             unresolved=list(payload.get("unresolved", [])),
             version=int(payload.get("version", 1)),

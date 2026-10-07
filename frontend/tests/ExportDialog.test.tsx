@@ -77,6 +77,25 @@ describe('ExportDialog', () => {
     vi.mocked(exportsApi.previewExport).mockResolvedValue(preview())
   })
 
+  it('人物资料因节选遗漏时显示数量和完整迁移建议，仍允许下载正文', async () => {
+    vi.mocked(exportsApi.createExport).mockResolvedValue(artifact({
+      validation: {
+        internal: { ok: true, checks: { text_consistency: true } },
+        standard: { state: 'NOT_RUN' },
+        identity_ledger: { characters: 3, omitted: 2 },
+      },
+    }))
+    renderWithProviders(
+      <ExportDialog bookId="b1" open onClose={vi.fn()} chapters={CHAPTERS} readPositionCp={12} />,
+    )
+    await screen.findByTestId('export-preview')
+    await userEvent.click(screen.getByTestId('export-generate'))
+    expect(await screen.findByTestId('export-identity-omitted')).toHaveTextContent('有 2 位人物')
+    expect(screen.getByTestId('export-identity-omitted')).toHaveTextContent('请导出整本')
+    expect(screen.getByTestId('export-state')).toHaveTextContent('已完成')
+    expect(screen.getByTestId('export-download-link')).toBeInTheDocument()
+  })
+
   it('冻结快照、展示覆盖统计/警告/沙箱样张，并按所选格式生成', async () => {
     vi.mocked(exportsApi.createExport).mockResolvedValue(artifact())
     renderWithProviders(

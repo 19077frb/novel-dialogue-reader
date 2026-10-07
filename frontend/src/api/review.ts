@@ -5,6 +5,7 @@
  * 局部更正只影响选中对白；结构调整只标记实际受影响范围。
  */
 import { apiData } from './client'
+import { dialogueStrategyDisabledReason } from './jobs'
 import type {
   CorrectionOut,
   GapCorrectionOut,
@@ -190,6 +191,7 @@ export function undoCorrection(correctionId: string, signal?: AbortSignal): Prom
 }
 
 export interface RecheckInput {
+  dialogueStrategy?: import('./jobs').DialogueStrategy
   inferenceOptions?: InferenceOptions
   profileId: string
   maxInputTokens?: number | null
@@ -206,11 +208,14 @@ export function recheckQuote(
   input: RecheckInput,
   signal?: AbortSignal,
 ): Promise<JobDetailOut> {
+  const reason = dialogueStrategyDisabledReason(input.dialogueStrategy, input.maxRecheckRounds ?? 0)
+  if (reason) return Promise.reject(new Error(reason))
   return apiData<JobDetailOut>(`/api/quotes/${quoteId}/recheck`, {
     method: 'POST',
     signal,
     body: {
       profile_id: input.profileId,
+      ...(input.dialogueStrategy && input.dialogueStrategy !== 'legacy' ? { dialogue_strategy: input.dialogueStrategy } : {}),
       ...(input.inferenceOptions ? { inference_options: input.inferenceOptions } : {}),
       budget: {
         max_input_tokens: input.maxInputTokens ?? null,

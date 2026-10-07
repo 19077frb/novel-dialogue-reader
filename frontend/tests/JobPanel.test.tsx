@@ -74,6 +74,40 @@ const RECOVERY = {
 } as unknown as JobRecoveryOut
 
 describe('JobPanel', () => {
+  it.each([
+    ['identity_feedback:1', '正在检查人物名单反馈'],
+    ['review:2', '正在独立复核本窗口全部对白：第 2 轮'],
+    ['adjudication:2', '正在裁决本窗口的归属争议：第 2 轮'],
+    ['verification:2', '正在核验新的归属建议：第 2 轮'],
+  ])('renders the real stage %s without undefined round counts', async (stage, label) => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, progress: { stage: 'rechecking', review_stage: stage } })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText(label)).toBeInTheDocument()
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument()
+  })
+
+  it('restores Chinese feedback reasons as suggestions in a collapsible block, without a new request', async () => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, checkpoint: { expression_reviews: { w1: {
+      identity_feedback: { issues: [
+        { kind: 'incorrect_association', reason: '姓名指向同一个人', targets: ['Q1'] },
+        { kind: 'incorrect_pov', reason: '叙述者可能是林舟', targets: ['Q2'] },
+      ] },
+    } } } })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText(/提出 2 个问题/)).toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: '展开人物名单反馈' })
+    await userEvent.click(toggle)
+    expect(screen.getByText(/人物关联有争议：姓名指向同一个人/)).toBeVisible()
+    expect(screen.getByText(/第一视角建议：叙述者可能是林舟/)).toBeVisible()
+    expect(screen.getByText(/不会自动修改本章主人公/)).toBeVisible()
+    expect(booksApi.fetchJob).toHaveBeenCalledTimes(1)
+  })
+  it('keeps bounded auxiliary diagnostics visible from a restored checkpoint', async () => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, checkpoint: { auxiliary_warnings: ['已隔离无效受话信息', 42] } })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText('已隔离无效受话信息')).toBeInTheDocument()
+    expect(screen.getByLabelText('辅助信息校验提示')).not.toHaveTextContent('42')
+  })
   beforeEach(() => {
     vi.mocked(booksApi.fetchJob).mockReset()
     vi.mocked(jobsApi.fetchJobRecovery).mockReset()
@@ -81,6 +115,44 @@ describe('JobPanel', () => {
     vi.mocked(jobsApi.reconcileJob).mockReset()
     vi.mocked(booksApi.fetchJob).mockResolvedValue(JOB)
     vi.mocked(jobsApi.fetchJobRecovery).mockResolvedValue(RECOVERY)
+  })
+
+  it('shows retained roster proposal warnings instead of an opaque diagnostic object', async () => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, kind: 'CHARACTER_ROSTER',
+      state: 'COMPLETED', last_error: null,
+      progress: { proposal_diagnostics: { isolated_characters: 1, discarded_auxiliary_facts: 2,
+        discarded_descriptions: 1, details: [{ character_index: 2, message: '姓名依据无效' }] } },
+    })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText(/已保留有效人物提案/)).toHaveTextContent('隔离 1 个人物')
+    expect(screen.queryByText(/proposal_diagnostics:/)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '展开人物分析提示' }))
+    expect(screen.getByText('第 2 个人物：姓名依据无效')).toBeVisible()
+  })
+
+  it('区分初次隔离记录与已经完成的定向修复', async () => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, kind: 'CHARACTER_ROSTER',
+      state: 'COMPLETED', last_error: null,
+      progress: { proposal_diagnostics: { isolated_characters: 2, repair_succeeded: true,
+        details: [{ character_index: 1, message: '初次姓名引用缺失' }] } },
+    })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText(/初次隔离的 2 个人物已完成定向修复/)).toBeVisible()
+    expect(screen.queryByText(/已保留有效人物提案；隔离/)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '展开人物分析提示' }))
+    expect(screen.getByText(/仍需核对人物是否正确/)).toBeVisible()
+  })
+
+  it('显示修复失败原因且不把字符串标记误认为成功', async () => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, kind: 'CHARACTER_ROSTER',
+      state: 'COMPLETED', last_error: null,
+      progress: { proposal_diagnostics: { isolated_characters: 1, repair_succeeded: 'true',
+        repair_error: '修复仍缺少姓名原文依据' } },
+    })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText(/已保留有效人物提案/)).toHaveTextContent('隔离 1 个人物')
+    await userEvent.click(screen.getByRole('button', { name: '展开人物分析提示' }))
+    expect(screen.getByText('人物修复未通过：修复仍缺少姓名原文依据')).toBeVisible()
   })
 
   it('显示真实计数、未知用量、退避建议与后端给出的恢复动作', async () => {

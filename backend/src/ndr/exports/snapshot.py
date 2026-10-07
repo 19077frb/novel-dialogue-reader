@@ -19,6 +19,7 @@ from ..storage.cache import fingerprint
 from ..storage.models import (
     Annotation,
     Book,
+    BookCharacter,
     BookVersion,
     Chapter,
     ExportSnapshot,
@@ -26,8 +27,9 @@ from ..storage.models import (
     Scene,
     SpeakerGroup,
 )
+from .identities import IDENTITY_SNAPSHOT_VERSION, freeze_identity
 
-EXPORT_SNAPSHOT_VERSION = "export-snapshot-2"
+EXPORT_SNAPSHOT_VERSION = "export-snapshot-3"
 
 
 @dataclass(frozen=True)
@@ -119,6 +121,24 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
     import json
     payload["speaker_histories"] = {}
     payload["speaker_identities"] = {}
+    payload["character_snapshot"] = {
+        "schema_version": IDENTITY_SNAPSHOT_VERSION,
+        "canonical_sha256": version.canonical_sha256,
+        "characters": [],
+    }
+    frozen_character_ids = set()
+    for character in session.scalars(select(BookCharacter).where(
+        BookCharacter.book_version_id == version.id,
+    ).order_by(BookCharacter.id)):
+        try:
+            frozen = freeze_identity(character, version, horizon=horizon)
+        except (ValueError, TypeError, AttributeError):
+            warnings.append("一位人物的资料记录未通过校验，未纳入人物资料快照；正文与对白标注仍可导出。")
+            continue
+        if frozen is not None:
+            payload["character_snapshot"]["characters"].append(frozen)
+            frozen_character_ids.add(character.id)
+    payload["speaker_characters"] = {}
     for group in session.scalars(select(SpeakerGroup).join(Scene).where(
         Scene.book_version_id == version.id,
     )):
@@ -130,6 +150,11 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
             "private_identity": f"group:{group.id}",
             "name": group.canonical_name or "", "description": group.description or "",
         })
+        character_identity = f"character:{group.character_id}"
+        if group.character_id in frozen_character_ids and (
+            horizon is None or presentation["identity"] == character_identity
+        ):
+            payload["speaker_characters"][group.id] = character_identity
         payload["speaker_identities"][group.id] = presentation["identity"]
         if reading_mode is ReadingMode.INITIAL and horizon is not None:
             history = [entry for entry in history if entry["cp"] <= horizon]

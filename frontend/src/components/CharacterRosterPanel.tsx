@@ -13,7 +13,9 @@ import {
 import { fetchJob } from '../api/books'
 import { OperationTimer } from './OperationTimer'
 import { ReadErrorNotice } from './ReadErrorNotice'
+import { ProposalDiagnostics } from './ProposalDiagnostics'
 import { JOB_STATE_LABELS } from './JobPanel'
+import { getProcessingPreferences, rosterRepairOptions } from '../processing/preferences'
 import { readJournal, writeJournal, removeJournal } from '../processing/journal'
 import { freshIdempotencyKey, fetchRecentJobs } from '../api/jobs'
 import type {
@@ -44,6 +46,13 @@ interface DraftCandidate {
   description: string
   evidence_refs: string[]
   pov_candidate: boolean
+}
+
+interface RosterDraftJournal {
+  version: number
+  source?: string
+  drafts: DraftCandidate[]
+  pov: string | null
 }
 
 const TERMINAL_JOB_STATES = new Set<JobDetailOut['state']>([
@@ -84,7 +93,7 @@ export function CharacterRosterPanel({
   const [rosterJobId, setRosterJobId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [draftVersion, setDraftVersion] = useState<number | null>(null)
+  const [draftBasis, setDraftBasis] = useState<{ key: string; source: string; version: number } | null>(null)
   const draftKey = `roster-draft:${bookId}:${bookVersionId}:${chapterId}`
 
   const rosterKey = useMemo(
@@ -97,6 +106,8 @@ export function CharacterRosterPanel({
       fetchCharacterRoster(bookId, chapterId as string, bookVersionId, signal),
     enabled: Boolean(chapterId),
   })
+  const rosterSource = useMemo(() => roster.data ? JSON.stringify(roster.data) : null, [roster.data])
+  const draftCurrent = Boolean(roster.data && draftBasis?.key === draftKey && draftBasis.source === rosterSource)
   const characters = useQuery({
     queryKey: characterKeys.book(bookId, bookVersionId),
     queryFn: ({ signal }) => fetchBookCharacters(bookId, bookVersionId, signal),
@@ -120,22 +131,25 @@ export function CharacterRosterPanel({
   })
 
   useEffect(() => {
-    if (!roster.data) return
-    const saved = readJournal<{ version: number; drafts: DraftCandidate[]; pov: string | null }>(draftKey)
+    if (!roster.data || !rosterSource) return
+    const saved = readJournal<RosterDraftJournal>(draftKey)
     const next = (roster.data.candidates ?? []).map(draftFromCandidate)
-    setDrafts(saved?.version === roster.data.version ? saved.drafts : next)
+    const restore = roster.data.status !== 'CONFIRMED' && saved?.version === roster.data.version
+      && (saved.source === rosterSource
+        || (saved.source === undefined && (saved.drafts.length > 0 || next.length === 0)))
+    setDrafts(restore ? saved!.drafts : next)
     const suggested = (roster.data.candidates ?? []).find((item) => item.pov_candidate)
-    setPovTempRef(saved?.version === roster.data.version ? saved.pov : suggested?.temp_ref ?? null)
-    setDraftVersion(roster.data.version)
+    setPovTempRef(restore ? saved!.pov : suggested?.temp_ref ?? null)
+    setDraftBasis({ key: draftKey, source: rosterSource, version: roster.data.version })
     setMessage(null)
     setError(null)
-  }, [roster.data, draftKey])
+  }, [roster.data, rosterSource, draftKey])
 
   useEffect(() => {
-    if (roster.data && draftVersion === roster.data.version && roster.data.status !== 'CONFIRMED') {
-      writeJournal(draftKey, { version: draftVersion, drafts, pov: povTempRef })
+    if (draftCurrent && draftBasis && roster.data?.status !== 'CONFIRMED') {
+      writeJournal(draftKey, { version: draftBasis.version, source: draftBasis.source, drafts, pov: povTempRef })
     }
-  }, [draftKey, draftVersion, drafts, povTempRef, roster.data])
+  }, [draftKey, draftBasis, draftCurrent, drafts, povTempRef, roster.data])
 
   useEffect(() => {
     onConfirmedChange(roster.data?.status === 'CONFIRMED')
@@ -165,6 +179,7 @@ export function CharacterRosterPanel({
 
   const confirm = useMutation({
     mutationFn: () => {
+      if (!draftCurrent || !draftBasis) throw new Error('人物名单正在更新，请等待读取完成后再确认。')
       const candidates: RosterConfirmCandidateIn[] = drafts.map((item) => ({
         temp_ref: item.temp_ref,
         accepted: item.accepted,
@@ -180,7 +195,7 @@ export function CharacterRosterPanel({
         bookVersionId,
         candidates,
         povTempRef,
-        expectedVersion: roster.data?.version ?? 1,
+        expectedVersion: draftBasis.version,
       })
     },
     onSuccess: () => {
@@ -204,6 +219,7 @@ export function CharacterRosterPanel({
     && !roster.data.pov_character_id && (roster.data.confirmed_characters ?? []).length === 0
     && (roster.data.candidates ?? []).length === 0
   const canConfirm =
+    draftCurrent &&
     acceptedCount > 0 &&
     Boolean(povTempRef) &&
     drafts.some((item) => item.accepted && item.temp_ref === povTempRef) &&
@@ -219,6 +235,7 @@ export function CharacterRosterPanel({
     : job.data && !TERMINAL_JOB_STATES.has(job.data.state) ? '人物分析尚未结束，请等待完成或先停止任务。'
     : !profileId ? '请先在上方选择模型配置，再分析本章人物。' : null
   const confirmBlocker = confirm.isPending ? '正在保存人物名单，请等待保存完成。'
+    : !draftCurrent ? '人物名单正在更新，请等待读取完成后再确认。'
     : textlessCompleted ? '无文字章节无需确认人物或主人公，不必为了启用按钮而添加人物。'
     : acceptedCount === 0 ? '请先分析或手动添加人物，并勾选至少一个“确认本章出现”。'
     : !drafts.some(item => item.accepted && item.temp_ref === povTempRef) ? '请先为已勾选的人物选择“本章第一视角主人公”。'
@@ -290,6 +307,8 @@ export function CharacterRosterPanel({
                 return
               }
               analyze.mutate({
+                ...rosterRepairOptions(getProcessingPreferences()),
+                maxInputTokens: getProcessingPreferences().tokenLimit,
                 inferenceOptions,
                 bookVersionId,
                 profileId,
@@ -305,7 +324,9 @@ export function CharacterRosterPanel({
           >
             分析本章人物
           </button>
-          <button type="button" onClick={addDraft} data-testid="roster-add-character">
+          <button type="button" onClick={addDraft} data-testid="roster-add-character"
+            disabled={!draftCurrent}
+            title={!draftCurrent ? '人物名单正在读取，请等待读取完成后再添加。' : undefined}>
             手动添加人物
           </button>
         </div>
@@ -338,6 +359,9 @@ export function CharacterRosterPanel({
       {rosterJobId && job.data && <OperationTimer startedAt={Date.parse(job.data.created_at)}
         finishedAt={TERMINAL_JOB_STATES.has(job.data.state) ? Date.parse(job.data.updated_at) : null} />}
       {rosterJobId && job.isError && <ReadErrorNotice label="人物任务读取失败" error={job.error} retrying={job.isFetching} onRetry={() => void job.refetch()} />}
+      {job.data?.state === 'COMPLETED' && job.data.range?.chapter_id === chapterId && (
+        <ProposalDiagnostics value={job.data.progress?.proposal_diagnostics} />
+      )}
       {rosterJobId && job.data?.state === 'FAILED' && (
         <p className="status-error">人物分析失败：{job.data.last_error ?? '未知错误'}</p>
       )}

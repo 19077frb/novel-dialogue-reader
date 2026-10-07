@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -38,6 +39,7 @@ from ..domain.enums import (
     SceneStatus,
     SpeakerBasis,
 )
+from ..llm.expression_contract import has_owner_contract
 from ..llm.schemas import IdentityProposal, LlmOutput, NewSpeaker
 from ..llm.validation import LabelingTargets, parse_and_validate
 from ..speakers.groups import SpeakerRegistry
@@ -52,7 +54,7 @@ from ..storage.models import (
     SceneMembership,
     SpeakerGroup,
 )
-from .acceptance import compute_visible_from_cp, decide_acceptance
+from .acceptance import AcceptanceDecision, compute_visible_from_cp, decide_acceptance
 from .review_sync import ENGINE_REASONS, MODEL_REASONS, sync_attribution_reviews
 from .state import SCENE_STATE_VERSION, ConfirmedCharacter, SceneState
 
@@ -157,7 +159,13 @@ def _ensure_group(
     scene_id: str,
     visible_from_cp: int | None = None,
 ) -> str:
-    from ..characters.visibility import baseline, capture, history, initialize
+    from ..characters.visibility import (
+        baseline,
+        capture,
+        history,
+        identity_presentation_history,
+        initialize,
+    )
     from ..storage.models import BookVersion
     cp = visible_from_cp
     if cp is None:
@@ -166,9 +174,19 @@ def _ensure_group(
     # Confirmed book identities remain authoritative, regardless of who accepted the roster.
     character = session.get(BookCharacter, slot.character_id) if slot.character_id else None
     character_history = history(character) if character else []
-    if character_history:
+    projected = state.production_expression_task is not None
+    display_history = None
+    if projected and character is not None:
+        if character.id not in state.projected_presentation_cache:
+            version_id = session.get(Scene, scene_id).book_version_id
+            state.projected_presentation_cache[character.id] = identity_presentation_history(
+                character, session.get(BookVersion, version_id))
+        display_history = state.projected_presentation_cache[character.id]
+    if projected:
+        cp = max(cp, state.identity_input_horizon or 0)
+    elif character_history:
         cp = max(cp, max(item["cp"] for item in character_history))
-    if character is not None and (
+    if not projected and character is not None and (
         character.user_confirmed or character.confirmation_source == "automatic"
     ):
         slot.canonical_name = character.canonical_name or ""
@@ -176,11 +194,19 @@ def _ensure_group(
     if slot.group_id:
         row = session.get(SpeakerGroup, slot.group_id)
         if row is not None:
-            baseline(row)
+            if not projected:
+                baseline(row)
             row.canonical_name = slot.canonical_name or None
             row.description = slot.description or None
             row.character_id = slot.character_id
+            if projected and not history(row) and display_history:
+                row.presentation_history_json = json.dumps(display_history, ensure_ascii=False)
             capture(row, cp)
+            if projected and character is not None:
+                row.canonical_name = (display_history[-1]["name"] if display_history
+                                      else character.canonical_name) or None
+                row.description = (display_history[-1]["description"] if display_history
+                                   else character.description) or None
         return slot.group_id
     row = SpeakerGroup(
         scene_id=scene_id,
@@ -193,8 +219,16 @@ def _ensure_group(
     )
     session.add(row)
     session.flush()
-    initialize(row, cp, character)
+    if display_history:
+        row.presentation_history_json = json.dumps(display_history, ensure_ascii=False)
+    else:
+        initialize(row, cp, character if not projected else None)
     capture(row, cp)
+    if projected and character is not None:
+        row.canonical_name = (display_history[-1]["name"] if display_history
+                              else character.canonical_name) or None
+        row.description = (display_history[-1]["description"] if display_history
+                           else character.description) or None
     slot.group_id = row.id
     return row.id
 
@@ -211,22 +245,39 @@ def _discover_character(
     character = session.get(BookCharacter, character_id) if character_id else None
     if character is not None and character.book_version_id != version_id:
         raise ValueError("人物 ID 不属于当前书籍版本")
+    if (state.production_expression_task is not None and declaration.character_id
+            and character is not None):
+        # A supplied ID is already authoritative; never refill its visible
+        # profile from mutable future metadata or treat old fields as new facts.
+        return character.id
     # With a confirmed chapter roster, a genuinely new named person discovered
     # during attribution must also be available to subsequent chapter analysis.
-    if (character is None and state.confirmed_characters and declaration.evidence_refs
-            and valid_display_name(declaration.name) and declaration.name not in GENERIC_NAMES):
-        rows = list(session.scalars(select(BookCharacter).where(
-            BookCharacter.book_version_id == version_id,
-        )))
-        matches = [row for row in rows if matches_name(
-            declaration.name, [row.canonical_name or "", *json.loads(row.aliases_json or "[]")],
-        )]
+    if (character is None and (state.confirmed_characters or state.explicit_identity)
+            and declaration.evidence_refs and valid_display_name(declaration.name)
+            and (state.explicit_identity or declaration.name not in GENERIC_NAMES)):
+        temp_key = None
+        if state.explicit_identity:
+            temp_key = hashlib.sha256(json.dumps(
+                ["expression-identity-1", declaration.temp_ref, declaration.first_quote_id],
+                ensure_ascii=False,
+            ).encode()).hexdigest()
+            matches = list(session.scalars(select(BookCharacter).where(
+                BookCharacter.book_version_id == version_id, BookCharacter.temp_key == temp_key,
+            )))
+        else:
+            rows = list(session.scalars(select(BookCharacter).where(
+                BookCharacter.book_version_id == version_id,
+            )))
+            matches = [row for row in rows if matches_name(
+                declaration.name, [row.canonical_name or "", *json.loads(row.aliases_json or "[]")],
+            )]
         if len(matches) > 1:
             return None
         character = matches[0] if matches else BookCharacter(
             book_version_id=version_id, canonical_name=declaration.name,
             description=declaration.description, aliases_json="[]",
             source=CharacterSource.MODEL, user_confirmed=False, first_seen_cp=first_seen_cp,
+            temp_key=temp_key,
         )
         if not matches:
             session.add(character)
@@ -274,6 +325,8 @@ def _discover_character(
     refreshed = ConfirmedCharacter(
         character.id, character.canonical_name or "",
         tuple(json.loads(character.aliases_json or "[]")), character.description or "",
+        source=CharacterSource(character.source).value, user_confirmed=character.user_confirmed,
+        confirmation_source=character.confirmation_source or "unknown",
     )
     state.book_characters = [item for item in state.book_characters
                              if item.character_id != character.id] + [refreshed]
@@ -429,11 +482,14 @@ def apply_window(
     run_id: str | None = None,
     update_dependency_hash: bool = True,
     preserve_existing_candidates: bool = False,
+    expected_schema_version: str = "1.0",
+    acceptance_ceilings: Mapping[str, AnnotationStatus] | None = None,
 ) -> WindowApplication:
     """应用一次模型输出：校验 → 锁定检查 → 可见时点 → 接受策略 → 落库。"""
 
     state = state or SceneState()
-    state.sync_confirmed_participants()
+    if expected_schema_version == "1.0":
+        state.sync_confirmed_participants()
     registry = SpeakerRegistry(state)
     quote_positions = dict(quote_positions or {})
     gap_positions = dict(gap_positions or {})
@@ -441,6 +497,9 @@ def apply_window(
     locked_quote_ids = set(locked_quote_ids or ())
 
     targets = LabelingTargets(
+        known_declaration_ids=tuple(item.character_id for item in state.identity_characters)
+        if expected_schema_version == "1.1" and state.production_expression_task is not None
+        else (),
         character_ids=tuple(item.character_id for item in state.identity_characters),
         quote_ids=tuple(window.target_quote_ids),
         gap_ids=tuple(
@@ -457,7 +516,7 @@ def apply_window(
         ),
         evidence_ids=tuple(window.fragment_ids),
     )
-    report = parse_and_validate(output, targets)
+    report = parse_and_validate(output, targets, expected_schema_version=expected_schema_version)
     application = WindowApplication(
         window_id=window.window_id,
         scene_state=state,
@@ -470,6 +529,28 @@ def apply_window(
 
     parsed = report.output
     accepted = report.accepted_labels
+    ceilings = dict(acceptance_ceilings or {})
+    owner_ids = {row.quote_id for row in accepted if has_owner_contract(row)}
+    if acceptance_ceilings is not None and (
+        expected_schema_version != "1.1" or set(ceilings) - owner_ids
+        or any(value is not AnnotationStatus.PROVISIONAL for value in ceilings.values())
+    ):
+        application.validation_ok = False
+        application.validation_codes.append("invalid_acceptance_ceiling")
+        return application
+    if expected_schema_version == "1.1":
+        declared_ids = {person.character_id for person in parsed.new_speakers
+                        if person.character_id}
+        valid_ids = set(session.scalars(select(BookCharacter.id).where(
+            BookCharacter.book_version_id == book_version_id,
+            BookCharacter.id.in_(declared_ids),
+        ))) if declared_ids else set()
+        if declared_ids != valid_ids:
+            application.validation_ok = False
+            application.validation_codes.append("invalid_explicit_character_id")
+            return application
+    state.explicit_identity = expected_schema_version == "1.1"
+    state.sync_confirmed_participants()
     effective_hash = (
         dependency_hash or getattr(window, "dependency_hash", "")
     )
@@ -533,7 +614,7 @@ def apply_window(
         scene_id = _ensure_scene(session, state, book_version_id)
         application.scene_id = scene_id
         speaker_id: str | None = None
-        if label.kind is QuoteKind.SPEECH and label.assignment is not None:
+        if has_owner_contract(label) and label.assignment is not None:
             if label.assignment is Assignment.NEW and label.speaker_ref:
                 declaration = next(
                     (
@@ -583,10 +664,13 @@ def apply_window(
                         # speaker_ref 已指向用户确认人物时，姓名与说明只能来自确认名单。
                         # 模型即使返回另一个已确认姓名，也只记录冲突，不反向改写。
                         incoming = state._confirmed_by_name(label.speaker_name)
-                        if label.speaker_name and (
-                            incoming is None
-                            or incoming.character_id != authoritative.character_id
-                        ):
+                        name_matches = (
+                            matches_name(label.speaker_name, [authoritative.canonical_name,
+                                                              *authoritative.aliases])
+                            if state.explicit_identity else incoming is not None
+                            and incoming.character_id == authoritative.character_id
+                        )
+                        if label.speaker_name and not name_matches:
                             application.warnings.append(
                                 "confirmed_identity_conflict:"
                                 f"{label.speaker_ref}:{label.speaker_name}"
@@ -617,7 +701,7 @@ def apply_window(
 
         stored_label = label
         if (
-            label.kind is QuoteKind.SPEECH
+            has_owner_contract(label)
             and label.assignment in {Assignment.EXISTING, Assignment.NEW}
             and speaker_id is None
         ):
@@ -633,7 +717,13 @@ def apply_window(
                 }
             )
         decision_out = decide_acceptance(stored_label, cold_start=cold_start)
-        if preserve_existing_candidates and decision_out.status is not AnnotationStatus.ACCEPTED:
+        if label.quote_id in ceilings and decision_out.status is AnnotationStatus.ACCEPTED:
+            decision_out = AcceptanceDecision(
+                status=AnnotationStatus.PROVISIONAL, reason="unapproved_expression_owner",
+                needs_review=True, review_reason=ReviewReason.LOW_CONFIDENCE,
+            )
+        if (preserve_existing_candidates and label.quote_id not in ceilings
+                and decision_out.status is not AnnotationStatus.ACCEPTED):
             previous = session.scalar(select(Annotation).where(
                 Annotation.quote_id == label.quote_id))
             if (previous is not None and not previous.stale and previous.speaker_id

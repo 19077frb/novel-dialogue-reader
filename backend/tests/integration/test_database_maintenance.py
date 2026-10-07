@@ -15,7 +15,12 @@ from sqlalchemy.orm import Session
 from ndr.ingest.service import import_txt
 from ndr.portable import LibraryInUseError, LibraryLock
 from ndr.storage.engine import create_db_engine, head_revision
-from ndr.storage.maintenance import _logical_digest, compact_database, inspect_database
+from ndr.storage.maintenance import (
+    _business_columns,
+    _logical_digest,
+    compact_database,
+    inspect_database,
+)
 from ndr.storage.migrate import build_alembic_config, run_migrations
 
 
@@ -46,6 +51,7 @@ def test_statistics_are_read_only_and_do_not_create_missing_databases(tmp_settin
 def test_migration_compaction_and_backup_preserve_all_business_data(tmp_settings, tmp_path):
     seed(tmp_settings)
     with closing(sqlite3.connect(tmp_settings.database_path)) as db:
+        old_columns = _business_columns(db)
         digest = _logical_digest(db)
         old_indexes = db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
     outcome = compact_database(tmp_settings)
@@ -61,7 +67,8 @@ def test_migration_compaction_and_backup_preserve_all_business_data(tmp_settings
         assert _logical_digest(db) == digest
         assert db.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall() == old_indexes
     with closing(sqlite3.connect(tmp_settings.database_path)) as db:
-        assert _logical_digest(db) == digest
+        assert _logical_digest(db, columns_by_table=old_columns) == digest
+        upgraded_digest = _logical_digest(db)
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (head_revision(),)
     config = build_alembic_config(tmp_settings)
     command.downgrade(config, "0018")
@@ -70,6 +77,8 @@ def test_migration_compaction_and_backup_preserve_all_business_data(tmp_settings
         assert _logical_digest(db) == digest
     run_migrations(tmp_settings)
     run_migrations(tmp_settings)  # Normal restarts must not recreate obsolete indexes.
+    with closing(sqlite3.connect(tmp_settings.database_path)) as db:
+        assert _logical_digest(db) == upgraded_digest
     second = compact_database(tmp_settings)
     assert second["business_data_unchanged"]
     assert second["saved_bytes"] >= 0  # Downgrade/re-upgrade freed rebuilt index pages.
@@ -122,6 +131,67 @@ def test_lock_remains_held_during_backup_migration_and_validation(tmp_settings):
 
     compact_database(tmp_settings, progress=progress)
     assert len(checked) == 3
+
+
+def test_changed_original_data_rolls_back_migration_before_compaction(tmp_settings, monkeypatch):
+    seed(tmp_settings)
+    with closing(sqlite3.connect(tmp_settings.database_path)) as db:
+        before = _logical_digest(db)
+
+    def corrupt_migration(settings, *, connection):
+        run_migrations(settings, connection=connection)
+        connection.exec_driver_sql("UPDATE books SET title='incorrect migration'")
+
+    monkeypatch.setattr("ndr.storage.maintenance.run_migrations", corrupt_migration)
+    with pytest.raises(RuntimeError, match="原有业务数据不一致"):
+        compact_database(tmp_settings)
+    with closing(sqlite3.connect(tmp_settings.database_path)) as db:
+        assert _logical_digest(db) == before
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0018",)
+        assert "identity_facts_json" not in _business_columns(db)["book_characters"]
+    assert len(list((tmp_settings.data_dir / "backups").glob("*.sqlite3.gz"))) == 1
+
+
+def test_new_fact_field_is_included_in_post_upgrade_compaction_digest(tmp_settings, monkeypatch):
+    seed(tmp_settings)
+    with closing(sqlite3.connect(tmp_settings.database_path)) as db:
+        db.execute(
+            "INSERT INTO book_characters (id,book_version_id,canonical_name,aliases_json,"
+            "source,user_confirmed,name_locked,confirmation_source,presentation_history_json,"
+            "version,created_at,updated_at) SELECT 'fact-person',id,'林舟','[]',"
+            "'MODEL',0,0,'model','[]',1,'2026-10-06','2026-10-06' FROM book_versions LIMIT 1",
+        )
+        db.commit()
+    real_digest = _logical_digest
+    full_calls = 0
+
+    def change_new_fact_before_final_check(db, **kwargs):
+        nonlocal full_calls
+        if not kwargs:
+            full_calls += 1
+            if full_calls == 2:
+                db.execute("UPDATE book_characters SET identity_facts_json='[{}]'")
+        return real_digest(db, **kwargs)
+
+    monkeypatch.setattr("ndr.storage.maintenance._logical_digest", change_new_fact_before_final_check)
+    with pytest.raises(RuntimeError, match="维护前后的业务数据不一致"):
+        compact_database(tmp_settings)
+    assert full_calls == 2
+    assert len(list((tmp_settings.data_dir / "backups").glob("*.sqlite3.gz"))) == 1
+
+
+@pytest.mark.parametrize("removed", ["table", "column"])
+def test_old_schema_digest_does_not_hide_removed_fields(removed):
+    with closing(sqlite3.connect(":memory:")) as db:
+        db.execute("CREATE TABLE people (id TEXT PRIMARY KEY, name TEXT)")
+        db.execute("INSERT INTO people VALUES ('a','林舟')")
+        columns = _business_columns(db)
+        if removed == "table":
+            db.execute("DROP TABLE people")
+        else:
+            db.execute("ALTER TABLE people DROP COLUMN name")
+        with pytest.raises(RuntimeError, match="原有业务表或字段"):
+            _logical_digest(db, columns_by_table=columns)
 
 
 @pytest.mark.parametrize("failure", ["disk", "backup"])

@@ -5,13 +5,13 @@ import * as characters from '../src/api/characters'
 import * as jobs from '../src/api/jobs'
 import { ApiError } from '../src/api/client'
 import { appendAutomaticProcessing, BatchRetryControls, canAppendAutomaticProcessing, cancelChapterProcessing, clearBatchProgress, hasBatchWork, requestBatchStop, retryBatchTask, retryChapterProcessing, runBatchProcessing, synchronizeManualChapterStatus, useBatchProgress } from '../src/components/BatchProcessor'
-import { getProcessingPreferences } from '../src/processing/preferences'
+import { getProcessingPreferences, updateProcessingPreferences } from '../src/processing/preferences'
 import { waitForJobCompletion } from '../src/processing/jobCompletion'
 import type { ChapterOut, EstimateOut, JobDetailOut } from '../src/api/types'
 
 vi.mock('../src/api/books', () => ({ completeChapterProcessing: vi.fn(), fetchBook: vi.fn(), fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn(), setChapterProcessingStatus: vi.fn() }))
 vi.mock('../src/api/characters', () => ({ analyzeCharacterRoster: vi.fn(), confirmCharacterRoster: vi.fn(), fetchCharacterRoster: vi.fn() }))
-vi.mock('../src/api/jobs', () => ({ pauseJob: vi.fn(), createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
+vi.mock('../src/api/jobs', async importOriginal => ({ ...await importOriginal<typeof import('../src/api/jobs')>(), pauseJob: vi.fn(), createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
 vi.mock('../src/processing/jobCompletion', () => ({ waitForJobCompletion: vi.fn(async job => job) }))
 
 const chapter = { id: 'c1', title: '第一章', ordinal: 0, start_cp: 0, end_cp: 100, dialogue_processed: false } as ChapterOut
@@ -29,6 +29,7 @@ async function start() {
     preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: 1000 }, onUsage: usage })
 }
 beforeEach(() => {
+  localStorage.clear()
   vi.resetAllMocks(); clearBatchProgress('b1')
   vi.mocked(waitForJobCompletion).mockImplementation(async job => job)
   vi.mocked(books.fetchBook).mockResolvedValue({ active_version_id: 'v1' } as never)
@@ -191,6 +192,19 @@ it('retries failed people first and continues only remaining windows', async () 
   expect(jobs.createJob).toHaveBeenCalledWith(expect.objectContaining({ selectedWindowIds: ['w1'] }))
 })
 
+it('keeps original roster repair settings on failed-task retry after preferences change', async () => {
+  updateProcessingPreferences({ rosterRepairEnabled: true, maxRosterRepairs: 2, maxFormatRetries: 3 })
+  vi.mocked(characters.analyzeCharacterRoster).mockResolvedValueOnce(job('FAILED'))
+  await start()
+  updateProcessingPreferences({ rosterRepairEnabled: false, maxRosterRepairs: 0, maxFormatRetries: 0 })
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  await retryBatchTask('b1', 'roster:c1')
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(2)
+  for (const [, , input] of vi.mocked(characters.analyzeCharacterRoster).mock.calls) {
+    expect(input).toMatchObject({ rosterRepairEnabled: true, maxRosterRepairs: 2, maxFormatRetries: 3 })
+  }
+})
+
 it('chapter retry fills failed tasks without repeating successful windows or adding unselected windows', async () => {
   await start()
   vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: [
@@ -244,6 +258,7 @@ it('extends the same pool before old dialogue finishes, deduplicates and sequenc
   await vi.waitFor(() => expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1))
   const extra = [3, 2].map(ordinal => ({ chapter: { ...chapter, id: `c${ordinal}`, ordinal },
     estimate: { ...estimate, windows: [{ ...estimate.windows![0], window_id: `w${ordinal + 1}` }] } }))
+  expect(appendAutomaticProcessing('b1', 'v1', [{ ...extra[0], estimate: { ...estimate, policy: { full_source: true } } }])).toBe(0)
   expect(appendAutomaticProcessing('b1', 'v1', extra)).toBe(2)
   expect(appendAutomaticProcessing('b1', 'v1', extra)).toBe(0)
   expect(appendAutomaticProcessing('b1', 'other-version', extra)).toBe(0)
@@ -255,6 +270,36 @@ it('extends the same pool before old dialogue finishes, deduplicates and sequenc
   finishOldWindow(job('COMPLETED')); await run
   expect(canAppendAutomaticProcessing('b1', 'v1')).toBe(false)
   expect(books.completeChapterProcessing).toHaveBeenCalledTimes(3)
+})
+
+it.each(['complete', 'complete-blocks', 'complete-blocks-isolated', 'complete-blocks-isolated-feedback-review'] as const)('keeps %s block-version frozen when extending an automatic batch', async dialogueStrategy => {
+  let finishFirstRoster!: (job: JobDetailOut) => void
+  vi.mocked(characters.analyzeCharacterRoster).mockImplementationOnce(() => new Promise(resolve => { finishFirstRoster = resolve }))
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  const blocks = dialogueStrategy.startsWith('complete-blocks')
+  const auxiliary_protocol = dialogueStrategy.includes('-isolated') ? 'expression-auxiliary-isolation-1' : undefined
+  const identity_feedback_protocol = dialogueStrategy.includes('-feedback') ? 'identity-feedback-1' : undefined
+  const policy = { full_source: true, ...(blocks ? { dialogue_blocks: true } : {}), ...(auxiliary_protocol ? { auxiliary_protocol } : {}),
+    ...(identity_feedback_protocol ? { identity_feedback_protocol, review_protocol: 'expression-evidence-review-1' } : {}) }
+  const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate: { ...estimate, policy } }],
+    preferences: { ...getProcessingPreferences(), dialogueStrategy, maxRecheckRounds: 1, profileId: 'p1', concurrency: 2, tokenLimit: null }, expandable: true })
+  await vi.waitFor(() => expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1))
+  const next = { chapter: { ...chapter, id: 'c2', ordinal: 1 }, estimate: { ...estimate, policy } }
+  expect(appendAutomaticProcessing('b1', 'v1', [{ ...next, estimate: { ...estimate, policy: { full_source: true, dialogue_blocks: !blocks } } }])).toBe(0)
+  expect(appendAutomaticProcessing('b1', 'v1', [{ ...next, estimate: { ...estimate, policy: { ...policy, auxiliary_protocol: auxiliary_protocol ? undefined : 'expression-auxiliary-isolation-1' } } }])).toBe(0)
+  expect(appendAutomaticProcessing('b1', 'v1', [{ ...next, estimate: { ...estimate, policy: { ...policy, identity_feedback_protocol: identity_feedback_protocol ? undefined : 'identity-feedback-1' } } }])).toBe(0)
+  expect(appendAutomaticProcessing('b1', 'v1', [next])).toBe(1)
+  finishFirstRoster(job('COMPLETED'))
+  await run
+  expect(books.completeChapterProcessing).toHaveBeenCalledTimes(2)
+})
+
+it('blocks a zero-round feedback batch before any roster or dialogue request', async () => {
+  await expect(runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', dialogueStrategy: 'complete-blocks-isolated-feedback-review', maxRecheckRounds: 0 },
+  })).rejects.toThrow('至少 1')
+  expect(characters.analyzeCharacterRoster).not.toHaveBeenCalled()
+  expect(jobs.createJob).not.toHaveBeenCalled()
 })
 
 it('stops admission and dispatch of appended chapters when the user stops the queue', async () => {

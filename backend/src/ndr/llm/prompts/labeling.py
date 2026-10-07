@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from ..schemas import output_json_schema
 
-LABELING_PROMPT_VERSION = "labeling-16"
+LABELING_PROMPT_VERSION = "labeling-18"
 DATA_DELIMITER = "<<<NDR_DATA>>>"
 ESCAPED_DELIMITER = "<<<NDR_DATA_ESCAPED>>>"
 
@@ -41,7 +41,8 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
     必须用 assignment=NEW，并在 `new_speakers` 声明临时引用，同时把 labels[].speaker_name
     写成目录中的同一姓名；程序会把新场景分组关联回稳定人物。不得仅因人物出现在全章目录中，
     就把当前对白归给他。切换场景后必须重新依据原文判断谁实际在场。
-11. `pov_character` 是用户选择的本章第一视角人物。第一人称“我”不能仅因 POV 存在就自动归属；
+11. `pov_character` 是本章已选定的第一视角候选，可能由用户选择或批量自动确认。
+    第一人称“我”不能仅因 POV 存在就自动归属；
     只有叙述结构、称呼、应答关系或上下文支持时才归给 POV。证据冲突或不足时仍必须 UNKNOWN。
 12. 真实姓名规则：只有原文明示姓名，或能由明确称呼与本章已知人物唯一确认时，才填写
     labels[].speaker_name；不确定时省略该字段或填 null，不要在每条对白重复已确认姓名。
@@ -68,8 +69,8 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
 18. 每个 new_speakers[].name 必须填写简短姓名或称呼（不超过32字）。有明确姓名时只写姓名；
     没有姓名时写“轻浮男客”“女同学”“门外的男声”等可区分称呼。不得填 null、空字符串、
     S1/S2、new1、“未知人物”或整句描述。详细身份、动作、关系只写在 description。
-    例如 name="读卖栞"、description="书店女店员，悠太的打工前辈"；
-    name="浅村悠太"，而不是“浅村悠太（本章第一人称叙述者，书店店员）”；
+    例如 name="周遥"、description="书店女店员，林舟的打工前辈"；
+    name="林舟"，而不是“林舟（本章第一人称叙述者，书店店员）”；
     name="轻浮男客"，而不是“在书店向女店员搭讪的轻浮男客”。称呼不等于真实身份已确认。
 19. 在声明新人物前，必须先逐一核对 existing_speakers、confirmed_chapter_characters 和
     known_book_characters、known_chapter_characters 的姓名、别名与描述。
@@ -78,18 +79,24 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
     即使本章名单遗漏，也可引用 known_book_characters 中的人物。不另造
     “姓名+身份描述”的人物；本场景已出现则用 EXISTING，跨场景首次出现仍用 NEW，
     复用 character_id；姓名可沿用已知称呼或填写原文揭示的新姓名。
-    不得仅因同叫“男同学”就合并；关系描述如“悠太的父亲”不代表该人就是悠太。
+    不得仅因同叫“男同学”就合并；关系描述如“林舟的父亲”不代表该人就是林舟。
 20. 当前场景已有人物后来揭示姓名时，labels 仍用 EXISTING 和原 speaker_ref；
     另在 new_speakers 提供该人物的姓名补充声明，character_id 必须与该 speaker_ref 的
     character_id 相同，first_quote_id 为揭示姓名的目标对白，aliases 补充新称呼并给出证据。
     real_name填写原文明示姓名，否则null。该声明补充同一身份的姓名，
     不代表出现另一个人；程序只把未由用户指定的代称升级为明确姓名，不改已有具体姓名。
 21. DIRECT 不是“我认为判断很确定”：必须引用目标自身之外、明确说明谁开口的片段。
-    例如对白后有“绫濑同学立刻吐槽”，应引用包含这句叙述的 G/E；不能省略 evidence_refs。
+    例如对白后有“周遥立刻吐槽”，应引用包含这句叙述的 G/E；不能省略 evidence_refs。
     问答承接用 RESPONSE_LINK 并引用相关对白，指代或动作关联用 COREFERENCE 并引用相关片段。
     输出前检查：不得整段把有候选人物的对白写成 DIRECT + 空证据。
     同一次输出新声明的人物首次出现必须用 NEW，之后才用 EXISTING 引用其 temp_ref。
     复核时旧候选只是待验证建议，不是答案；优先补充缺失证据，证据不足仍保留 UNKNOWN。
+22. 人物目录及 identity_provenance 的 source 表示资料来源，user_confirmed 表示是否曾被用户确认，
+    confirmation_source 表示确认方式；model/automatic 不等于人工核实，
+    unknown/legacy/imported 不推定人工确认。
+    用户确认也不是原文身份证明；不能凭任何确认标记断定同一身份、当前在场或当前说话人。
+    应核对给定原文，发现遗漏或身份冲突时保留 UNKNOWN 或提出有证据的身份建议，
+    不把先前接受的模型资料当作不可质疑的真值；人工锁定仍不得覆盖。
 """.strip()
 
 

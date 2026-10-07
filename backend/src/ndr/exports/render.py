@@ -24,7 +24,7 @@ from ..ingest.query import load_canonical_text
 from ..intervals import SpanIndex
 from ..storage.models import Book, BookVersion, Chapter, ContentNode
 
-EXPORTER_VERSION = "exporter-4"
+EXPORTER_VERSION = "exporter-5"
 
 EXPORT_PALETTE = BASE_COLORS
 
@@ -67,6 +67,8 @@ class RenderedBlock:
     resource_id: str | None = None
     media_type: str | None = None
     alt: str = ""
+    start_cp: int | None = None
+    end_cp: int | None = None
 
     @property
     def plain_text(self) -> str:
@@ -301,12 +303,16 @@ def render_book(
                         node_type=ContentNodeType.HEADING,
                         level=int(payload.get("level") or 1),
                         runs=[RenderedRun(text=text)],
+                        start_cp=start,
+                        end_cp=end,
                     )
                 )
                 continue
             blocks.append(
                 RenderedBlock(
                     node_type=ContentNodeType.PARAGRAPH,
+                    start_cp=start,
+                    end_cp=end,
                     runs=_runs_for_node(
                         text,
                         node_start=start,

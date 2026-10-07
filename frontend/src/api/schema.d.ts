@@ -3130,7 +3130,7 @@ export interface components {
              * @description 已有分组：可以是 group_id，也可以是场景内编号（S1、S2…）
              */
             speaker_ref?: string | null;
-            /** @description set_kind 必填 */
+            /** @description set_kind 必填；指定/新建人物可选 speech/thought/quotation，省略仍为 speech */
             kind?: components["schemas"]["QuoteKind"] | null;
             /**
              * Description
@@ -3339,6 +3339,13 @@ export interface components {
              * @description 模型配置 ID；复核必须显式指定
              */
             profile_id: string;
+            /**
+             * Dialogue Strategy
+             * @description 对白策略；完整策略仍限定服务器选定的当前场景/章节范围
+             * @default legacy
+             * @enum {string}
+             */
+            dialogue_strategy: "legacy" | "complete" | "complete-review" | "complete-blocks" | "complete-blocks-review" | "complete-blocks-isolated" | "complete-blocks-isolated-review" | "complete-blocks-isolated-feedback-review";
             inference_options?: components["schemas"]["InferenceOptions"] | null;
             budget?: components["schemas"]["BudgetIn"];
             /** @default initial */
@@ -3509,6 +3516,21 @@ export interface components {
         ReviewTargetType: "quote" | "gap";
         /** RosterAnalyzeIn */
         RosterAnalyzeIn: {
+            /**
+             * Roster Repair Enabled
+             * @default false
+             */
+            roster_repair_enabled: boolean;
+            /**
+             * Max Roster Repairs
+             * @default 1
+             */
+            max_roster_repairs: number;
+            /**
+             * Max Format Retries
+             * @default 1
+             */
+            max_format_retries: number;
             /**
              * Allow Overwrite Manual
              * @default false

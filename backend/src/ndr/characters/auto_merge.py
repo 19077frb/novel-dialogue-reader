@@ -26,6 +26,7 @@ from ..llm.errors import ProviderError, ProviderErrorKind
 from ..storage.models import Book, BookCharacter, BookVersion, InferenceRun, Job
 from ..storage.transactions import transaction
 from .directory import _guard, _sync, directory, edit, merge
+from .facts import IdentityProfileUpdate, prepare_profile_updates
 from .merge_diagnostics import MergePlanError, character_refs, saved_model_groups
 from .names import GENERIC_NAMES, is_role_name, name_key, undecorated_name, valid_display_name
 from .visibility import baseline
@@ -363,11 +364,12 @@ def _confirmation_source(entry):
     return "model"
 
 
-def _apply(session, job, output, entries, visible_from_cp=None):
+def _apply(session, job, output, entries, visible_from_cp=None, *, settings=None):
     version = _check_current(session, job, entries)
     cp = visibility_position(version, visible_from_cp)
     by_id = _validate_plan(output, entries)
     applied = []
+    identity_originals = {}
     skipped = merged_count = 0
     for group in output.groups:
         if group.confidence < 0.95:
@@ -388,6 +390,7 @@ def _apply(session, job, output, entries, visible_from_cp=None):
                     expected_version=by_id[target_id]["version"],
                 ),
                 active_job_id=job.id,
+                record_profile_updates=False,
             ).character_id
         target = session.get(BookCharacter, target_id)
         baseline(target)
@@ -405,6 +408,20 @@ def _apply(session, job, output, entries, visible_from_cp=None):
                  if name and name != target.canonical_name], ensure_ascii=False,
             )
             target.version += 1
+        fields = [("description", description)]
+        if group.preferred_name:
+            fields.extend((("name", target.canonical_name),
+                           ("aliases", tuple(json.loads(target.aliases_json)))))
+        updated_facts = prepare_profile_updates(target, version, tuple(
+            IdentityProfileUpdate(
+                field=field, value=value, visible_from_cp=cp,
+                canonical_sha256=version.canonical_sha256, source="model",
+                source_ref=f"merge-decision:{job.id}", accepted=True,
+            ) for field, value in fields
+        ))
+        if updated_facts != target.identity_facts_json and not group.preferred_name:
+            target.version += 1
+        target.identity_facts_json = updated_facts
         _sync(session, version, target, visible_from_cp=cp)
         for source_id in group.source_ids:
             merge(
@@ -419,6 +436,8 @@ def _apply(session, job, output, entries, visible_from_cp=None):
                 ),
                 active_job_id=job.id,
                 model_decision=True,
+                settings=settings,
+                identity_originals=identity_originals,
             )
             merged_count += 1
         applied.append(
@@ -433,7 +452,7 @@ def _apply(session, job, output, entries, visible_from_cp=None):
     return {"merged_count": merged_count, "skipped_groups": skipped, "merges": applied}
 
 
-def confirm_auto_merge(session, job, selected_ids, visible_from_cp=None):
+def confirm_auto_merge(session, job, selected_ids, visible_from_cp=None, *, settings=None):
     checkpoint = json.loads(job.checkpoint_json or "{}")
     selected = sorted(selected_ids)
     if len(selected) != len(set(selected)):
@@ -461,12 +480,13 @@ def confirm_auto_merge(session, job, selected_ids, visible_from_cp=None):
     )
     if claimed.rowcount != 1:
         session.refresh(job)
-        return confirm_auto_merge(session, job, selected, visible_from_cp)
+        return confirm_auto_merge(session, job, selected, visible_from_cp, settings=settings)
     result = {"merged_count": 0, "merges": [], "skipped_groups": proposal.get("skipped_groups", 0)}
     if selected:
         output = MergeOutput.model_validate({"groups": [groups[key] for key in selected]})
         result = _apply(
             session, job, output, json.loads(job.range_json)["entries"], visible_from_cp,
+            settings=settings,
         )
         result["skipped_groups"] += proposal.get("skipped_groups", 0)
     checkpoint.update(

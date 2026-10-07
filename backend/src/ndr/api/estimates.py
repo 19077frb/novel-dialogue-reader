@@ -9,6 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
+from ..context.budget import policy_for_version
+from ..context.full_source import FullContextError
 from ..domain.common import DataEnvelope
 from ..domain.jobs import EstimateIn, EstimateOut, UsageOut
 from ..ingest.query import active_version, get_book_or_404
@@ -43,16 +45,31 @@ def estimate_route(
             "书籍版本不存在或不属于该书籍", book_version_id=payload.book_version_id
         )
 
-    estimate = estimate_inference(
-        session,
-        settings,
-        version,
-        start_cp=int(payload.range.get("start_cp", 0) or 0),
-        end_cp=payload.range.get("end_cp"),
-        reading_mode=payload.reading_mode,
-        visible_horizon_cp=payload.visible_horizon_cp,
-        max_recheck_rounds=payload.budget.max_recheck_rounds or 0,
-    )
+    try:
+        if (
+            (
+                payload.range.get("auxiliary_protocol") is not None
+                or payload.range.get("identity_feedback_protocol") is not None
+            )
+            and payload.range.get("output_protocol") != "expression-production-1"
+        ):
+            raise ApiError.validation("辅助诊断或人物名单反馈须使用短表达协议")
+        estimate = estimate_inference(
+            session,
+            settings,
+            version,
+            start_cp=int(payload.range.get("start_cp", 0) or 0),
+            end_cp=payload.range.get("end_cp"),
+            reading_mode=payload.reading_mode,
+            visible_horizon_cp=payload.visible_horizon_cp,
+            max_recheck_rounds=payload.budget.max_recheck_rounds or 0,
+            policy=policy_for_version(payload.range.get("context_policy")),
+            review_protocol=payload.range.get("review_protocol"),
+            auxiliary_protocol=payload.range.get("auxiliary_protocol"),
+            identity_feedback_protocol=payload.range.get("identity_feedback_protocol"),
+        )
+    except FullContextError as exc:
+        raise ApiError.validation(str(exc)) from exc
     return DataEnvelope(
         data=EstimateOut(book_id=book.id, book_version_id=version.id, **estimate.as_dict()),
         request_id=current_request_id(request),

@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
+from ..characters.input_view import IDENTITY_INPUT_VERSION
 from ..config import Settings
 from ..context.budget import DEFAULT_POLICY, BudgetPolicy
 from ..context.service import plan_range
@@ -72,6 +73,42 @@ def digest_request(payload: dict[str, Any]) -> str:
     return fingerprint(payload)
 
 
+def dialogue_strategy_range(strategy: str) -> dict[str, str]:
+    if strategy == "legacy":
+        return {}
+    if strategy not in {
+        "complete",
+        "complete-review",
+        "complete-blocks",
+        "complete-blocks-review",
+        "complete-blocks-isolated",
+        "complete-blocks-isolated-review",
+        "complete-blocks-isolated-feedback-review",
+    }:
+        raise ApiError.validation("不支持的对白处理策略")
+    return {
+        "context_policy": "context-chapter-2"
+        if strategy.startswith("complete-blocks")
+        else "context-chapter-1",
+        "output_protocol": "expression-production-1",
+        **(
+            {"auxiliary_protocol": "expression-auxiliary-isolation-1"}
+            if "-isolated" in strategy
+            else {}
+        ),
+        **(
+            {"review_protocol": "expression-evidence-review-1"}
+            if strategy.endswith("-review")
+            else {}
+        ),
+        **(
+            {"identity_feedback_protocol": "identity-feedback-1"}
+            if strategy == "complete-blocks-isolated-feedback-review"
+            else {}
+        ),
+    }
+
+
 def estimate_inference(
     session: Session,
     settings: Settings,
@@ -84,10 +121,17 @@ def estimate_inference(
     policy: BudgetPolicy | None = None,
     output_tokens_per_target: int = 20,
     max_recheck_rounds: int = 0,
+    review_protocol: str | None = None,
+    auxiliary_protocol: str | None = None,
+    identity_feedback_protocol: str | None = None,
 ) -> JobEstimate:
     """纯本地估算：不调用模型、不写数据库。"""
 
     resolved_policy = policy or DEFAULT_POLICY
+    from ..llm.expression_diagnostics import DIAGNOSTICS_VERSION
+
+    if auxiliary_protocol not in (None, DIAGNOSTICS_VERSION):
+        raise ApiError.validation("不支持的辅助诊断版本")
     plan = plan_range(
         session,
         settings,
@@ -101,16 +145,40 @@ def estimate_inference(
     targets = sum(len(window.target_quote_ids) for window in plan.windows)
     input_tokens = sum(window.budget["total_tokens"] for window in plan.windows)
     output_tokens = targets * output_tokens_per_target
-    multiplier = 1 + max_recheck_rounds
+    from ..llm.expression_review import REVIEW_VERSION
+
+    if review_protocol is not None and review_protocol != REVIEW_VERSION:
+        raise ApiError.validation("不支持的证据复核版本")
+    evidence_review = review_protocol == REVIEW_VERSION
+    from ..llm.identity_feedback import FEEDBACK_VERSION
+
+    if identity_feedback_protocol is not None and (
+        identity_feedback_protocol != FEEDBACK_VERSION
+        or not evidence_review
+        or max_recheck_rounds < 1
+    ):
+        raise ApiError.validation("人物名单反馈须配合证据复核并设置至少一轮复核")
+    multiplier = 1 + (3 if evidence_review else 1) * max_recheck_rounds + int(
+        identity_feedback_protocol is not None
+    )
     input_tokens *= multiplier
     output_tokens *= multiplier
     notes = [
         "估算来自本地启发式 token 口径，不是真实计费依据；实际用量以提供方 usage 为准。",
         "输出预留按每条目标对白 20 token 粗估（可在预算里调整）。",
     ]
-    if max_recheck_rounds:
-        notes.append(f"已计入最多 {max_recheck_rounds} 轮全窗口复核；"
-                     "上下文补全、拆窗及输出重试可增加消耗，实际以调用用量为准。")
+    if evidence_review:
+        notes.append(
+            f"证据复核按首次处理加每轮最多三个阶段（独立复核、分歧裁决、挑战核验）估算：每窗最多{multiplier}个规划阶段。"
+            "裁决与核验按需要执行，0轮关闭；格式纠错、限流重试、候选证据提示和模型推理用量未构成上限，实际消耗可高于估算。"
+        )
+        if identity_feedback_protocol:
+            notes.append("已计入每窗最多一次有证据的人物名单反馈；反馈不直接修改人物目录。")
+    elif max_recheck_rounds:
+        notes.append(
+            f"已计入最多 {max_recheck_rounds} 轮全窗口复核；"
+            "上下文补全、拆窗及输出重试可增加消耗，实际以调用用量为准。"
+        )
     if plan.stats.get("oversized_targets"):
         notes.append(f"其中 {plan.stats['oversized_targets']} 条目标超长，会单独成窗口或保留待定。")
     target_ids = [quote_id for window in plan.windows for quote_id in window.target_quote_ids]
@@ -120,23 +188,33 @@ def estimate_inference(
     }
     canonical = load_canonical_text(settings, version)
     # One bounded result per planned window; never fetch the entire task history.
-    processed_ids = set(session.scalars(
-        select(Annotation.quote_id).where(Annotation.quote_id.in_(target_ids or [""]))
-    ))
-    latest_windows = select(
-        JobWindow.window_id, JobWindow.state, Job.last_error,
-        func.row_number().over(
-            partition_by=JobWindow.window_id,
-            order_by=(Job.created_at.desc(), Job.id.desc()),
-        ).label("rank"),
-    ).join(Job, Job.id == JobWindow.job_id).where(
-        Job.book_version_id == version.id,
-        JobWindow.window_id.in_([window.window_id for window in plan.windows] or [""]),
-    ).subquery()
-    last_attempts = {
-        row.window_id: row for row in session.execute(
-            select(latest_windows).where(latest_windows.c.rank == 1)
+    processed_ids = set(
+        session.scalars(
+            select(Annotation.quote_id).where(Annotation.quote_id.in_(target_ids or [""]))
         )
+    )
+    latest_windows = (
+        select(
+            JobWindow.window_id,
+            JobWindow.state,
+            Job.last_error,
+            func.row_number()
+            .over(
+                partition_by=JobWindow.window_id,
+                order_by=(Job.created_at.desc(), Job.id.desc()),
+            )
+            .label("rank"),
+        )
+        .join(Job, Job.id == JobWindow.job_id)
+        .where(
+            Job.book_version_id == version.id,
+            JobWindow.window_id.in_([window.window_id for window in plan.windows] or [""]),
+        )
+        .subquery()
+    )
+    last_attempts = {
+        row.window_id: row
+        for row in session.execute(select(latest_windows).where(latest_windows.c.rank == 1))
     }
     windows: list[dict[str, Any]] = []
     for index, window in enumerate(plan.windows):
@@ -156,8 +234,11 @@ def estimate_inference(
                 "start_cp": window_start,
                 "end_cp": window_end,
                 "target_count": len(window.target_quote_ids),
-                "estimated_tokens": (int(window.budget["total_tokens"])
-                + len(window.target_quote_ids) * output_tokens_per_target) * multiplier,
+                "estimated_tokens": (
+                    int(window.budget["total_tokens"])
+                    + len(window.target_quote_ids) * output_tokens_per_target
+                )
+                * multiplier,
                 "preview": canonical[window_start : min(window_end, window_start + 160)].strip(),
                 "processing_status": (
                     "completed" if completed else "failed" if failed else "unprocessed"
@@ -173,7 +254,15 @@ def estimate_inference(
         output_tokens=output_tokens,
         total_tokens=input_tokens + output_tokens,
         estimator=plan.windows[0].budget["estimator"] if plan.windows else {},
-        policy=resolved_policy.as_key(),
+        policy={
+            **resolved_policy.as_key(),
+            **({"auxiliary_protocol": auxiliary_protocol} if auxiliary_protocol else {}),
+            **({"review_protocol": review_protocol} if review_protocol is not None else {}),
+            **(
+                {"identity_feedback_protocol": identity_feedback_protocol}
+                if identity_feedback_protocol is not None else {}
+            ),
+        },
         notes=notes,
         windows=windows,
     )
@@ -228,6 +317,42 @@ def create_inference_job(
 
     if budget.get("max_recheck_rounds") is None:
         budget = {key: value for key, value in budget.items() if key != "max_recheck_rounds"}
+    from ..llm.expression_task import PRODUCTION_EXPRESSION_VERSION
+
+    protocol = range_payload.get("output_protocol")
+    if protocol is not None and protocol != PRODUCTION_EXPRESSION_VERSION:
+        raise ApiError.validation("不支持的对白输出协议")
+    from ..llm.expression_diagnostics import DIAGNOSTICS_VERSION
+
+    auxiliary_protocol = range_payload.get("auxiliary_protocol")
+    if auxiliary_protocol is not None and (
+        auxiliary_protocol != DIAGNOSTICS_VERSION or protocol != PRODUCTION_EXPRESSION_VERSION
+    ):
+        raise ApiError.validation("辅助诊断隔离须选择受支持的版本与短表达协议")
+    from ..context.budget import CONTEXT_POLICY_CHAPTER, CONTEXT_POLICY_DIALOGUE_BLOCKS
+
+    if (
+        range_payload.get("context_policy")
+        in {CONTEXT_POLICY_CHAPTER, CONTEXT_POLICY_DIALOGUE_BLOCKS}
+        and protocol != PRODUCTION_EXPRESSION_VERSION
+    ):
+        raise ApiError.validation("完整章节上下文策略须配合短表达协议")
+    from ..llm.expression_review import REVIEW_VERSION
+
+    review_protocol = range_payload.get("review_protocol")
+    if review_protocol is not None and (
+        review_protocol != REVIEW_VERSION or protocol != PRODUCTION_EXPRESSION_VERSION
+    ):
+        raise ApiError.validation("证据裁决复核必须显式选择短表达协议及受支持的复核版本")
+    from ..llm.identity_feedback import FEEDBACK_VERSION
+
+    identity_feedback_protocol = range_payload.get("identity_feedback_protocol")
+    if identity_feedback_protocol is not None and (
+        identity_feedback_protocol != FEEDBACK_VERSION
+        or review_protocol != REVIEW_VERSION
+        or int(budget.get("max_recheck_rounds") or 0) < 1
+    ):
+        raise ApiError.validation("人物名单反馈须配合短表达证据复核并设置至少一轮复核")
     snapshot = profile_snapshot(profile, inference_options)
     request_payload = {
         "kind": kind.value,
@@ -290,12 +415,11 @@ def create_inference_job(
                 **range_payload,
                 "reading_mode": reading_mode.value,
                 "visible_horizon_cp": visible_horizon_cp,
+                "identity_input_version": IDENTITY_INPUT_VERSION,
             },
             ensure_ascii=False,
         ),
-        profile_snapshot_json=json.dumps(snapshot, ensure_ascii=False)
-        if profile
-        else None,
+        profile_snapshot_json=json.dumps(snapshot, ensure_ascii=False) if profile else None,
         budget_json=json.dumps(budget, ensure_ascii=False),
         progress_json=json.dumps({"stage": "queued", "windows_done": 0}, ensure_ascii=False),
         idempotency_key=idempotency_key,

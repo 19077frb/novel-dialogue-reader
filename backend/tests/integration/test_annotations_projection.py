@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -13,7 +15,7 @@ from ndr.jobs.scheduler import run_job
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.storage.engine import create_db_engine, create_session_factory
 from ndr.storage.migrate import run_migrations
-from ndr.storage.models import Annotation, InferenceRun
+from ndr.storage.models import Annotation, BookCharacter, InferenceRun, Quote, Scene, SpeakerGroup
 from ndr.storage.transactions import transaction
 
 SAMPLE = (
@@ -73,6 +75,45 @@ def _create_and_run(client: TestClient, settings: Settings, book_id: str, profil
     finally:
         engine.dispose()
     return job["id"]
+
+
+@pytest.mark.parametrize("character_history", ["matching", "different", "future"])
+def test_historical_color_requires_matching_visible_identity(
+    fake_provider_client, migrated_settings, character_history,
+):
+    from ndr.characters.colors import color_projection
+
+    client = fake_provider_client
+    data = _import(client)
+    factory = client.app.state.session_factory
+    with transaction(factory) as session:
+        scene = Scene(book_version_id=data["book_version_id"], start_cp=0, end_cp=len(SAMPLE))
+        character = BookCharacter(book_version_id=data["book_version_id"],
+                                  canonical_name="最终身份", preferred_color_index=7)
+        session.add_all([scene, character])
+        session.flush()
+        quote = session.scalar(select(Quote).where(
+            Quote.book_version_id == data["book_version_id"],
+        ).order_by(Quote.start_cp))
+        group = SpeakerGroup(scene_id=scene.id, first_quote_id=quote.id,
+                             character_id=character.id, canonical_name="最终身份", display_label="S1")
+        session.add(group)
+        session.flush()
+        group.presentation_history_json = json.dumps([
+            {"cp": 0, "identity": "imported-history:early", "name": "早期人物", "description": ""},
+        ])
+        character.presentation_history_json = json.dumps([
+            {"cp": 50 if character_history == "future" else 0,
+             "identity": "imported-history:other" if character_history == "different"
+             else "imported-history:early", "name": "早期人物", "description": ""},
+        ])
+        group_id, character_id = group.id, character.id
+    with factory() as session:
+        _, presentations, colors = color_projection(session, data["book_version_id"], horizon=10)
+        assert (colors[presentations[group_id]["identity"]] == 7) == (character_history == "matching")
+        _, presentations, colors = color_projection(session, data["book_version_id"])
+        assert presentations[group_id]["identity"] == f"character:{character_id}"
+        assert colors[f"character:{character_id}"] == 7
 
 
 def test_nested_quotes_are_not_counted_as_unprocessed_targets(

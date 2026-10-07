@@ -58,7 +58,7 @@ describe('CorrectionForm', () => {
     expect(onSubmit).toHaveBeenCalledWith({
       action: 'assign_existing',
       speakerRef: 'g2',
-      kind: null,
+      kind: 'speech',
       description: '',
       expectedVersion: 4,
       expectedSceneVersion: null,
@@ -132,6 +132,53 @@ describe('CorrectionForm', () => {
     await userEvent.click(screen.getByTestId('correction-submit'))
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ action: 'set_kind', kind: 'thought' }))
+  })
+
+  it.each(['thought', 'quotation'] as const)('指定人物保留当前%s类型，可单独改类型', async (kind) => {
+    const onSubmit = vi.fn()
+    render(<CorrectionForm annotation={{ ...ANNOTATION, kind }} sceneGroups={GROUPS}
+      sceneVersion={1} onSubmit={onSubmit} />)
+    expect(screen.getByTestId('correction-owner-kind')).toHaveValue(kind)
+    await userEvent.selectOptions(screen.getByTestId('correction-speaker'), 'g2')
+    await userEvent.click(screen.getByTestId('correction-submit'))
+    expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({
+      action: 'assign_existing', kind, speakerRef: 'g2',
+    }))
+    await userEvent.selectOptions(screen.getByTestId('correction-action'), 'create_speaker')
+    await userEvent.selectOptions(screen.getByTestId('correction-owner-kind'), 'speech')
+    await userEvent.click(screen.getByTestId('correction-submit'))
+    expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({
+      action: 'create_speaker', kind: 'speech',
+    }))
+  })
+
+  it('集体类型指定个人默认发声，切句重置类型，同句刷新保留未保存选择', async () => {
+    const props = { sceneGroups: GROUPS, sceneVersion: 1, onSubmit: vi.fn() }
+    const { rerender } = render(<CorrectionForm {...props}
+      annotation={{ ...ANNOTATION, kind: 'group' }} />)
+    expect(screen.getByTestId('correction-owner-kind')).toHaveValue('speech')
+    await userEvent.selectOptions(screen.getByTestId('correction-owner-kind'), 'quotation')
+    rerender(<CorrectionForm {...props} annotation={{ ...ANNOTATION, kind: 'speech', version: 5 }} />)
+    expect(screen.getByTestId('correction-owner-kind')).toHaveValue('quotation')
+    rerender(<CorrectionForm {...props} annotation={{ ...ANNOTATION, quote_id: 'q2', kind: 'thought' }} />)
+    expect(screen.getByTestId('correction-owner-kind')).toHaveValue('thought')
+    await userEvent.selectOptions(screen.getByTestId('correction-action'), 'set_kind')
+    expect(screen.getByTestId('correction-kind')).toHaveValue('thought')
+    expect(screen.getByText(/会保留已有归属/)).toBeInTheDocument()
+  })
+
+  it('同句已保存新类型后，未编辑的指定人物类型跟随更新，不退回发声', async () => {
+    const onSubmit = vi.fn()
+    const props = { sceneGroups: GROUPS, sceneVersion: 1, onSubmit }
+    const { rerender } = render(<CorrectionForm {...props} annotation={ANNOTATION} />)
+    await userEvent.selectOptions(screen.getByTestId('correction-action'), 'set_kind')
+    await userEvent.selectOptions(screen.getByTestId('correction-kind'), 'thought')
+    await userEvent.click(screen.getByTestId('correction-submit'))
+    rerender(<CorrectionForm {...props} annotation={{ ...ANNOTATION, kind: 'thought', version: 5 }} />)
+    await userEvent.selectOptions(screen.getByTestId('correction-action'), 'assign_existing')
+    expect(screen.getByTestId('correction-owner-kind')).toHaveValue('thought')
+    await userEvent.click(screen.getByTestId('correction-submit'))
+    expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'thought', expectedVersion: 5 }))
   })
 
   it('提交中禁用提交按钮（不会重复提交）', () => {

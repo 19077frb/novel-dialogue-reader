@@ -27,12 +27,19 @@ from ..domain.enums import (
     JobKind,
     JobPurpose,
     JobState,
+    ReadingMode,
 )
 from ..ingest.document import collapse_whitespace, has_chapter_body_text
 from ..ingest.query import load_canonical_text
 from ..jobs.service import digest_request, profile_snapshot
 from ..llm.prompts import build_roster_messages
 from ..llm.schemas import RosterOutput
+from ..llm.sourced_roster import (
+    SOURCED_ROSTER_VERSION,
+    SOURCED_ROSTER_VERSIONS,
+    SourcedRosterOutput,
+)
+from ..scenes.state import SceneState
 from ..storage.chapter_status import complete_chapter_automatically
 from ..storage.models import (
     Book,
@@ -45,6 +52,7 @@ from ..storage.models import (
     ModelProfile,
 )
 from .identity import supplement_aliases
+from .input_view import IDENTITY_INPUT_VERSION, project_identity_state
 from .names import GENERIC_NAMES, matches_name, revealed_name, undecorated_name
 
 
@@ -265,14 +273,23 @@ def store_roster_candidates(
     output: RosterOutput,
     job_id: str | None,
     allow_overwrite_manual: bool = False,
+    identity_facts=None,  # noqa: ANN001 - validated per-temp-ref identity blocks
+    original=None,  # noqa: ANN001 - immutable OriginalIdentitySnapshot
 ) -> ChapterCharacterRoster:
+    sourced = isinstance(output, SourcedRosterOutput)
+    if sourced and (original is None or identity_facts is None
+                    or set(identity_facts) != {c.temp_ref for c in output.characters}):
+        raise ValueError("逐事实人物提案缺少核验后的原文与事实块")
     roster = _roster_for_chapter(session, chapter.id)
     if roster is None:
         roster = ChapterCharacterRoster(
             chapter_id=chapter.id,
             book_version_id=version.id,
+            version=2,  # Version 1 is the empty GET placeholder before analysis.
         )
         session.add(roster)
+    else:
+        roster.version += 1
 
     records: list[dict[str, Any]] = []
     existing = list_book_characters(session, version)
@@ -285,16 +302,19 @@ def store_roster_candidates(
         if not candidate.temp_ref or candidate.temp_ref in seen_refs:
             continue
         seen_refs.add(candidate.temp_ref)
-        matched = by_id.get(candidate.character_id) if candidate.character_id else _match_existing(
-            session,
-            version.id,
-            name=candidate.name,
-            aliases=candidate.aliases,
-            characters=existing,
+        matched = by_id.get(candidate.character_id) if candidate.character_id else (
+            None if sourced else _match_existing(
+                session,
+                version.id,
+                name=candidate.name,
+                aliases=candidate.aliases,
+                characters=existing,
+            )
         )
         character = matched
         if character is None:
-            temp_key = f"{chapter.id}:{candidate.temp_ref}"
+            temp_key = (f"{chapter.id}:{job_id}:{candidate.temp_ref}" if sourced
+                        else f"{chapter.id}:{candidate.temp_ref}")
             character = session.execute(
                 select(BookCharacter).where(
                     BookCharacter.book_version_id == version.id,
@@ -338,6 +358,19 @@ def store_roster_candidates(
             character.description = candidate.description
             character.version = (character.version or 0) + 1
         session.flush()
+        if sourced:
+            from .facts import append_identity_facts
+
+            # Analysis is still a proposal, even when a later confirmation is
+            # allowed to update human data. Do not change the fact-side profile
+            # before that confirmation.
+            protected = character.user_confirmed or character.name_locked
+            append_identity_facts(
+                character, version,
+                tuple(f.model_copy(update={"accepted": not protected})
+                      for f in identity_facts[candidate.temp_ref]),
+                original=original,
+            )
         proposed_name = revealed_name(
             character.canonical_name, candidate.real_name or candidate.name,
             locked=character.name_locked and not allow_overwrite_manual,
@@ -601,6 +634,9 @@ def create_roster_job(
     max_input_tokens: int | None = None,
     inference_options: dict[str, Any] | None = None,
     allow_overwrite_manual: bool = False,
+    roster_repair_enabled: bool = False,
+    max_roster_repairs: int = 1,
+    max_format_retries: int = 1,
 ) -> tuple[Job, bool]:
     request_payload = {
         "kind": JobKind.CHARACTER_ROSTER.value,
@@ -615,6 +651,21 @@ def create_roster_job(
     # their original idempotency keys. Opting in is a distinct request.
     if allow_overwrite_manual:
         request_payload["allow_overwrite_manual"] = True
+    repair_range = {}
+    repair_budget = {}
+    if roster_repair_enabled:
+        from ..llm.isolated_roster_repair import ISOLATED_REPAIR_POLICY
+
+        repair_range = {"roster_repair_protocol": "roster-repair-1",
+                        "roster_repair_policy": ISOLATED_REPAIR_POLICY}
+        repair_budget = {
+            "max_roster_repairs": max_roster_repairs,
+            "max_format_retries": max_format_retries,
+        }
+        # Same user request/key must still return its original frozen legacy job.
+        # Only a newly created job receives the new internal compilation policy.
+        request_payload["roster_repair_protocol"] = repair_range["roster_repair_protocol"]
+        request_payload.update(repair_budget)
     digest = digest_request(request_payload)
     existing = session.execute(
         select(Job).where(Job.idempotency_key == idempotency_key)
@@ -655,13 +706,16 @@ def create_roster_job(
                 "allow_overwrite_manual": allow_overwrite_manual,
                 "start_cp": chapter.start_cp,
                 "end_cp": chapter.end_cp,
+                "roster_protocol": SOURCED_ROSTER_VERSION,
+                "identity_input_version": IDENTITY_INPUT_VERSION,
+                **repair_range,
             },
             ensure_ascii=False,
         ),
         profile_snapshot_json=json.dumps(
             profile_snapshot(profile, inference_options), ensure_ascii=False
         ),
-        budget_json=json.dumps({"max_input_tokens": max_input_tokens}),
+        budget_json=json.dumps({"max_input_tokens": max_input_tokens, **repair_budget}),
         progress_json=json.dumps({"stage": "queued", "calls": 0}, ensure_ascii=False),
         idempotency_key=idempotency_key,
         request_digest=digest,
@@ -677,10 +731,27 @@ def roster_messages(
     job: Job,
     version: BookVersion,
     chapter: Chapter,
+    *,
+    canonical_text: str | None = None,
 ):
-    text = load_canonical_text(settings, version)[chapter.start_cp : chapter.end_cp]
+    canonical = (load_canonical_text(settings, version)
+                 if canonical_text is None else canonical_text)
+    text = canonical[chapter.start_cp : chapter.end_cp]
+    identity_version = json.loads(job.range_json or "{}").get("identity_input_version")
+    if identity_version is None:
+        existing = existing_characters_for_prompt(session, version)
+    elif identity_version == IDENTITY_INPUT_VERSION:
+        people = list_book_characters(session, version)
+        projected = project_identity_state(SceneState(), people, version,
+                                           reading_mode=ReadingMode.INITIAL, horizon=chapter.end_cp)
+        existing = [{**projected[p.id].prompt_record(), "name_locked": p.name_locked}
+                    for p in people]
+    else:
+        raise ValueError("人物输入版本不受支持")
     return build_roster_messages(
         chapter_title=chapter.title,
         chapter_lines=text.splitlines() or [""],
-        existing_characters=existing_characters_for_prompt(session, version),
+        existing_characters=existing,
+        sourced=(json.loads(job.range_json or "{}").get("roster_protocol")
+                 in SOURCED_ROSTER_VERSIONS),
     )

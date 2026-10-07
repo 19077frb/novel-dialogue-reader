@@ -119,7 +119,7 @@ def build_epub(
                     alt = escape(block.alt)
                     body_parts.append(
                         f'<figure><img src="../images/{filename}" alt="{alt}"/>'
-                        f"<figcaption>{alt}</figcaption></figure>"
+                        f'<figcaption data-ndr-auxiliary="true">{alt}</figcaption></figure>'
                     )
                     continue
                 body_parts.append(render_block(block, images={}))

@@ -1,6 +1,7 @@
 import { fetchChapters, fetchProcessingStatus } from '../api/books'
-import { estimateRange } from '../api/jobs'
+import { estimateRange, dialogueStrategyDisabledReason } from '../api/jobs'
 import type { ProcessingPreferences } from './preferences'
+import { estimateRosterTokens } from './preferences'
 import { mapWithConcurrency } from './concurrency'
 import { appendAutomaticProcessing, automaticAllowance, refreshAutomaticAllowance, canAppendAutomaticProcessing, hasBatchWork, hasUnresolvedChapterResult, isBatchRunning, requestBatchStop, runBatchProcessing } from '../components/BatchProcessor'
 
@@ -39,6 +40,8 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
   lookAhead: number, preferences: ProcessingPreferences, onFinished: () => void = () => undefined) {
   const session = sessionFor(bookId)
   session.spent = automaticAllowance(bookId) ?? session.spent
+  const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, preferences.maxRecheckRounds)
+  if (strategyReason) { session.message = strategyReason; return }
   const appending = canAppendAutomaticProcessing(bookId, bookVersionId)
   if (planningBooks.has(bookId) || (activeBook && !appending) || (hasBatchWork() && !appending)
     || session.blocked || !preferences.profileId) return
@@ -75,7 +78,7 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
     session.message = '正在估算当前章与后续章节（不消耗模型额度）…'
     const plans = await mapWithConcurrency(selected, 4, async chapter => ({ chapter,
       estimate: await estimateRange(bookId, { bookVersionId,
-        range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
+        range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp, dialogueStrategy: preferences.dialogueStrategy },
         readingMode: 'reread', budget: { maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: preferences.maxRecheckRounds } }) }))
     if (session.blocked || revision !== session.revision) return
     if (canAppendAutomaticProcessing(bookId, bookVersionId)) {
@@ -100,7 +103,7 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
     }
     selected.forEach(chapter => session.attempted.add(`${bookVersionId}:${chapter.id}`))
     session.checked = signature
-    const estimated = plans.reduce((sum, plan) => sum + plan.estimate.total_tokens + plan.chapter.end_cp - plan.chapter.start_cp + 2000, 0)
+    const estimated = plans.reduce((sum, plan) => sum + plan.estimate.total_tokens + estimateRosterTokens(plan.chapter.end_cp - plan.chapter.start_cp, preferences), 0)
     session.message = `自动处理 ${selected.length} 章，预计约 ${estimated.toLocaleString()} Tokens。`
     // Release local-estimate admission while the shared model pool is running.
     releasePlanning()

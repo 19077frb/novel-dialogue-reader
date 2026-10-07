@@ -66,6 +66,9 @@ export function fetchBookCharacters(
 }
 
 export interface AnalyzeRosterInput {
+  rosterRepairEnabled?: boolean
+  maxRosterRepairs?: number
+  maxFormatRetries?: number
   allowOverwriteManual?: boolean
   inferenceOptions?: InferenceOptions
   bookVersionId: string | null | undefined
@@ -89,6 +92,11 @@ export function analyzeCharacterRoster(
       body: {
         book_version_id: input.bookVersionId ?? null,
         profile_id: input.profileId,
+        ...(input.rosterRepairEnabled ? {
+          roster_repair_enabled: true,
+          max_roster_repairs: input.maxRosterRepairs ?? 1,
+          max_format_retries: input.maxFormatRetries ?? 1,
+        } : {}),
         allow_overwrite_manual: input.allowOverwriteManual ?? false,
         ...(input.inferenceOptions ? { inference_options: input.inferenceOptions } : {}),
         idempotency_key: input.idempotencyKey,

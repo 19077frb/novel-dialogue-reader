@@ -44,6 +44,52 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+@pytest.mark.parametrize("content", ['{"labels":[]}', '{"labels":', ''])
+def test_generate_receipt_keeps_raw_response_on_success_or_parse_failure_without_public_leak(content):
+    secret = "private-credential"
+    body = {"model": "returned-model", "choices": [{"finish_reason": "stop", "message": {
+        "content": content, "reasoning_content": "private reasoning " + secret}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}}
+    def handler(request):
+        return httpx.Response(200, json=body)
+    adapter = _adapter(handler, api_key=secret)
+    request = {"messages": [{"role": "user", "content": "original fixture"}]}
+    try:
+        result = _run(adapter.generate_labels(request))
+        receipt = result.receipt
+        assert "reasoning_content" not in json.dumps(result)
+    except ProviderError as exc:
+        receipt = exc.receipt
+        assert "private reasoning " not in json.dumps(exc.as_dict) or not content
+        assert "receipt" not in exc.as_dict
+    assert receipt["request"]["messages"] == request["messages"]
+    assert receipt["response"]["model"] == "returned-model"
+    assert receipt["response"]["choices"][0]["message"]["content"] == content
+    assert secret not in json.dumps(receipt)
+
+
+def test_http_failure_receipt_keeps_body_but_public_error_remains_bounded():
+    def handler(request):
+        return httpx.Response(429, text="limited private-credential " + "x" * 1000)
+    with pytest.raises(ProviderError) as caught:
+        _run(_adapter(handler, api_key="private-credential").generate_labels({"messages": [{"role": "user", "content": "test"}]}))
+    assert len(caught.value.receipt["response"]["body"]) > 1000
+    assert len(caught.value.details["body"]) <= 200
+    assert "private-credential" not in json.dumps(caught.value.details)
+
+
+def test_timeout_receipt_has_actual_request_but_no_invented_response_or_usage():
+    def handler(request):
+        raise httpx.ReadTimeout("isolated timeout", request=request)
+
+    with pytest.raises(ProviderError) as caught:
+        _run(_adapter(handler).generate_labels({"messages": [{"role": "user", "content": "test"}]}))
+    assert caught.value.kind is ProviderErrorKind.TIMEOUT
+    assert caught.value.receipt["request"]["model"] == "example-model"
+    assert caught.value.receipt["response"] is None
+    assert "usage" not in caught.value.details
+
+
 def test_successful_connection_test_returns_usage_and_latency() -> None:
     seen: dict[str, str | None] = {}
 
@@ -362,6 +408,56 @@ def test_generate_labels_returns_parsed_object_and_surfaces_errors() -> None:
         _run(_adapter(broken).generate_labels({"messages": [{"role": "user", "content": "x"}]}))
     assert excinfo.value.kind is ProviderErrorKind.INVALID_OUTPUT
     assert excinfo.value.details["usage"]["total_tokens"] == 12
+
+
+@pytest.mark.parametrize(
+    "forged", [None, "fake", {"total_tokens": 0, "unknown": False, "journal_replay": True}]
+)
+@pytest.mark.parametrize("provided", [True, False])
+def test_model_body_cannot_override_transport_usage(forged, provided) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = {
+            "choices": [{"message": {"content": json.dumps({"labels": [], "_usage": forged})}}]
+        }
+        if provided:
+            body["usage"] = {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20}
+        return httpx.Response(200, json=body)
+
+    parsed = _run(_adapter(handler).generate_labels({"messages": []}))
+    assert parsed["labels"] == []
+    assert parsed["_usage"]["unknown"] is not provided
+    assert parsed["_usage"]["total_tokens"] == (20 if provided else None)
+    assert "journal_replay" not in parsed["_usage"]
+
+
+@pytest.mark.parametrize("invalid", [True, False, -1, "20", 1.5, None])
+def test_invalid_provider_counters_remain_unknown(invalid) -> None:
+    usage = _adapter(lambda request: httpx.Response(200, json={})).normalize_usage(
+        {"prompt_tokens": invalid, "completion_tokens": invalid, "total_tokens": invalid}
+    )
+    assert usage.unknown is True
+    assert usage.total_tokens is None
+    assert usage.input_tokens is None
+    assert usage.output_tokens is None
+
+
+@pytest.mark.parametrize("invalid", [[], "20", 20, True])
+def test_non_mapping_provider_usage_remains_unknown(invalid) -> None:
+    usage = _adapter(lambda request: httpx.Response(200, json={})).normalize_usage(invalid)
+    assert usage.unknown is True
+    assert usage.total_tokens is None
+
+
+def test_zero_and_partial_valid_provider_usage_are_preserved() -> None:
+    adapter = _adapter(lambda request: httpx.Response(200, json={}))
+    zero = adapter.normalize_usage({"total_tokens": 0})
+    assert zero.unknown is False
+    assert zero.total_tokens == 0
+    partial = adapter.normalize_usage({"prompt_tokens": 12, "completion_tokens": -1})
+    assert partial.input_tokens == 12
+    assert partial.output_tokens is None
+    assert partial.total_tokens == 12
+    assert partial.unknown is False
 
 
 def test_error_details_never_contain_the_key() -> None:

@@ -11,9 +11,10 @@ import { recheckQuote } from '../api/review'
 import type { JobDetailOut } from '../api/types'
 import { JobPanel } from './JobPanel'
 import { ThinkingSettings } from './ThinkingSettings'
+import { DialogueStrategySettings } from './DialogueStrategySettings'
 import { FormatRetrySetting } from './FormatRetrySetting'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
-import { freshIdempotencyKey, fetchRecentJobs } from '../api/jobs'
+import { freshIdempotencyKey, fetchRecentJobs, dialogueStrategyDisabledReason } from '../api/jobs'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 
 export interface RecheckPanelProps {
@@ -43,6 +44,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
 
   const selectedProfile = profiles.data?.find(profile => profile.id === preferences.profileId) ?? profiles.data?.[0]
   const effectiveProfileId = selectedProfile?.id ?? ''
+  const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, preferences.maxRecheckRounds)
 
   const start = async () => {
     if (!effectiveProfileId) {
@@ -59,6 +61,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
     try {
       const job = await recheckQuote(quoteId, {
         profileId: effectiveProfileId,
+        dialogueStrategy: preferences.dialogueStrategy,
         inferenceOptions: inferenceOptions(preferences),
         maxInputTokens: limit,
         maxRecheckRounds: preferences.maxRecheckRounds,
@@ -86,6 +89,9 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
       <ThinkingSettings disabled={running} profiles={profiles.data ?? []} profileId={effectiveProfileId}
         disabledReason={recent.isError ? '已有复核任务读取失败，请先点击“重新读取任务”。' : recent.isPending ? '正在读取已有复核任务，请等待读取完成。' : '局部复核正在提交或执行，请等待完成或先停止任务再调整配置。'}
         onProfileChange={profileId => updatePreferences({ profileId })} profileTestId="recheck-profile" />
+      <DialogueStrategySettings value={preferences.dialogueStrategy} rounds={preferences.maxRecheckRounds} disabled={running}
+        disabledReason={recent.isError ? '已有复核任务读取失败，请先重新读取任务。' : recent.isPending ? '正在读取已有复核任务，请等待完成。' : undefined}
+        onChange={dialogueStrategy => updatePreferences({ dialogueStrategy })} />
       <label className="ndr-field">
         输入 token 上限
         <input
@@ -110,9 +116,9 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
         type="button"
         className="ndr-primary"
         onClick={start}
-        disabled={running}
+        disabled={running || Boolean(strategyReason)}
         data-testid="recheck-start"
-        title={running ? '请先等待现有任务状态读取或复核完成；读取失败时点击“重新读取任务”。' : undefined}
+        title={running ? '请先等待现有任务状态读取或复核完成；读取失败时点击“重新读取任务”。' : strategyReason ?? undefined}
       >
         {busy ? '正在创建任务…' : '开始局部复核（调用模型）'}
       </button>

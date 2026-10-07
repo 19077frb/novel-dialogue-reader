@@ -6,7 +6,7 @@ import { autoMessage, notifyManualChapterStatus, resetAutomaticProcessing, sched
 import { getProcessingPreferences } from '../src/processing/preferences'
 
 vi.mock('../src/api/books', () => ({ fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn() }))
-vi.mock('../src/api/jobs', () => ({ estimateRange: vi.fn() }))
+vi.mock('../src/api/jobs', async importOriginal => ({ ...await importOriginal<typeof import('../src/api/jobs')>(), estimateRange: vi.fn() }))
 vi.mock('../src/components/BatchProcessor', () => ({ automaticAllowance: vi.fn(), refreshAutomaticAllowance: vi.fn(), appendAutomaticProcessing: vi.fn(), canAppendAutomaticProcessing: vi.fn(), hasBatchWork: vi.fn(), hasUnresolvedChapterResult: vi.fn(), isBatchRunning: vi.fn(), requestBatchStop: vi.fn(), runBatchProcessing: vi.fn() }))
 const chapters = [0, 1, 2, 3].map(index => ({ id: `c${index}`, ordinal: index, title: `第${index}章`, start_cp: index * 100, end_cp: index * 100 + 100, dialogue_processed: index === 0 }))
 const preferences = { ...getProcessingPreferences(), profileId: 'p1', concurrency: 2, tokenLimit: null }
@@ -28,6 +28,24 @@ it('selects the current and next N chapters, skips completed and attempted chapt
   expect(batch.runBatchProcessing).toHaveBeenLastCalledWith(expect.objectContaining({ initialSpent: 25, plans: [expect.objectContaining({ chapter: chapters[3] })] }))
   await scheduleAutomaticProcessing('b1', 'v1', 'c1', 2, preferences)
   expect(batch.runBatchProcessing).toHaveBeenCalledTimes(2)
+})
+
+it('plans automatic work with the frozen shared dialogue strategy', async () => {
+  await scheduleAutomaticProcessing('b1', 'v1', 'c1', 0, { ...preferences, dialogueStrategy: 'complete-review', maxRecheckRounds: 1,
+    rosterRepairEnabled: true, maxRosterRepairs: 2, maxFormatRetries: 3 })
+  expect(jobs.estimateRange).toHaveBeenCalledWith('b1', expect.objectContaining({ range: expect.objectContaining({ dialogueStrategy: 'complete-review' }) }))
+  expect(batch.runBatchProcessing).toHaveBeenCalledWith(expect.objectContaining({ preferences: expect.objectContaining({ dialogueStrategy: 'complete-review', maxRecheckRounds: 1,
+    rosterRepairEnabled: true, maxRosterRepairs: 2, maxFormatRetries: 3 }) }))
+})
+
+it('explains zero feedback rounds without any reads or paid work, and continues after correction', async () => {
+  const selected = { ...preferences, dialogueStrategy: 'complete-blocks-isolated-feedback-review' as const, maxRecheckRounds: 0 }
+  await scheduleAutomaticProcessing('b1', 'v1', 'c1', 0, selected)
+  expect(autoMessage('b1')).toContain('至少 1')
+  expect(books.fetchChapters).not.toHaveBeenCalled()
+  expect(batch.runBatchProcessing).not.toHaveBeenCalled()
+  await scheduleAutomaticProcessing('b1', 'v1', 'c1', 0, { ...selected, maxRecheckRounds: 1 })
+  expect(batch.runBatchProcessing).toHaveBeenCalledTimes(1)
 })
 
 it('waits for manual jobs and never overlaps another automatic dispatch', async () => {

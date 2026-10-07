@@ -1,8 +1,12 @@
 import { useSyncExternalStore } from 'react'
 import type { InferenceOptions } from '../api/types'
+import type { DialogueStrategy } from '../api/jobs'
 
 export const PROCESSING_PREFERENCES_KEY = 'ndr:processing-preferences:v1'
 export interface ProcessingPreferences {
+  rosterRepairEnabled: boolean
+  maxRosterRepairs: number
+  dialogueStrategy: DialogueStrategy
   profileId: string
   concurrency: number
   maxRecheckRounds: number
@@ -13,6 +17,8 @@ export interface ProcessingPreferences {
   thinkingEffort: NonNullable<InferenceOptions['reasoning_effort']>
 }
 const defaults: ProcessingPreferences = {
+  rosterRepairEnabled: false, maxRosterRepairs: 1,
+  dialogueStrategy: 'legacy',
   profileId: '', concurrency: 2, maxRecheckRounds: 0, maxFormatRetries: 1, tokenLimit: null, maxOutputTokens: null,
   thinkingMode: 'default', thinkingEffort: 'default',
 }
@@ -30,6 +36,10 @@ function positive(value: unknown): number | null {
 }
 function normalize(value: Partial<ProcessingPreferences>): ProcessingPreferences {
   return {
+    rosterRepairEnabled: value.rosterRepairEnabled === true,
+    maxRosterRepairs: typeof value.maxRosterRepairs === 'number' && Number.isSafeInteger(value.maxRosterRepairs)
+      && value.maxRosterRepairs >= 0 ? Math.min(5, value.maxRosterRepairs) : 1,
+    dialogueStrategy: ['complete', 'complete-review', 'complete-blocks', 'complete-blocks-review', 'complete-blocks-isolated', 'complete-blocks-isolated-review', 'complete-blocks-isolated-feedback-review'].includes(value.dialogueStrategy ?? '') ? value.dialogueStrategy! : 'legacy',
     profileId: typeof value.profileId === 'string' ? value.profileId : '',
     concurrency: Math.min(16, positive(value.concurrency) ?? 2),
     maxRecheckRounds: typeof value.maxRecheckRounds === 'number' && Number.isSafeInteger(value.maxRecheckRounds)
@@ -45,6 +55,19 @@ function normalize(value: Partial<ProcessingPreferences>): ProcessingPreferences
 export function inferenceOptions(preferences: ProcessingPreferences): InferenceOptions | undefined {
   if (preferences.thinkingMode === 'default' && preferences.thinkingEffort === 'default') return undefined
   return { thinking_mode: preferences.thinkingMode, reasoning_effort: preferences.thinkingEffort }
+}
+/** Old persisted execution snapshots must not enable a new paid pipeline. */
+export function rosterRepairOptions(preferences: ProcessingPreferences) {
+  return preferences.rosterRepairEnabled === true ? {
+    rosterRepairEnabled: true, maxRosterRepairs: preferences.maxRosterRepairs ?? 1,
+    maxFormatRetries: preferences.maxFormatRetries ?? 1,
+  } : {}
+}
+/** Heuristic only: reasoning/output/error feedback may cost more than this estimate. */
+export function estimateRosterTokens(characters: number, preferences: ProcessingPreferences): number {
+  const base = Math.max(1, characters) + 2000
+  return preferences.rosterRepairEnabled === true
+    ? base * (1 + (preferences.maxRosterRepairs ?? 1) + (preferences.maxFormatRetries ?? 1)) : base
 }
 export function getProcessingPreferences(): ProcessingPreferences {
   let raw = fallbackRaw

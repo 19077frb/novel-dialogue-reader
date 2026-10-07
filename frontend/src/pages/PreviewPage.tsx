@@ -15,6 +15,7 @@ import {
 } from '../api/books'
 import {
   estimateRange,
+  dialogueStrategyDisabledReason,
   freshIdempotencyKey,
   fetchUsage,
   fetchRecentJobs,
@@ -42,6 +43,8 @@ import { runSingleWorkflow, useSingleWorkflow } from '../processing/singleWorkfl
 import type { SingleWorkflow } from '../processing/singleWorkflow'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
 import { ThinkingSettings } from '../components/ThinkingSettings'
+import { DialogueStrategySettings } from '../components/DialogueStrategySettings'
+import { RosterRepairSettings } from '../components/RosterRepairSettings'
 
 interface SingleWindowTask {
   windowId: string
@@ -256,17 +259,18 @@ export default function PreviewPage() {
   )
 
   const estimateQuery = useQuery({
-    queryKey: ['window-preview', bookId, book.data?.active_version_id, range, resolvedEnd, budget],
+    queryKey: ['window-preview', bookId, book.data?.active_version_id, range, resolvedEnd, budget, preferences.dialogueStrategy],
     queryFn: ({ signal }) =>
       estimateRange(bookId as string, {
         bookVersionId: book.data?.active_version_id ?? null,
-        range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
+        range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd, dialogueStrategy: preferences.dialogueStrategy },
         readingMode: PROCESSING_READING_MODE,
         visibleHorizonCp: null,
         budget,
       }, signal),
     enabled: Boolean(bookId) && rangeValid && range.chapterId !== null
-      && processingMode === 'single' && !batchProgress.running,
+      && processingMode === 'single' && !batchProgress.running
+      && !dialogueStrategyDisabledReason(preferences.dialogueStrategy, budget.maxRecheckRounds),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     retry: false,
@@ -285,6 +289,8 @@ export default function PreviewPage() {
 
   const jobMutation = useMutation({
     mutationFn: async (mode: 'preview' | 'process') => {
+      const reason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, budget.maxRecheckRounds)
+      if (reason) throw new Error(reason)
       manuallySelectedJobRef.current = null
       setDetailRequest(0)
       const versionId = book.data?.active_version_id ?? null
@@ -316,7 +322,7 @@ export default function PreviewPage() {
           windowId: String(window.window_id), ordinal: String(window.ordinal), job: null, error: null,
           input: {
             bookId: bookId!, mode, bookVersionId: versionId,
-            range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd },
+            range: { chapterId: range.chapterId, startCp: range.startCp, endCp: resolvedEnd, dialogueStrategy: preferences.dialogueStrategy },
             selectedWindowIds: plannedWindows.length ? [String(window.window_id)] : null,
             profileId: profileId || null, inferenceOptions: options, readingMode: PROCESSING_READING_MODE,
             visibleHorizonCp: null, runNow: true,
@@ -391,6 +397,8 @@ export default function PreviewPage() {
     (task) => task.job && !TERMINAL_JOB_STATES.has(task.job.state),
   ) || Boolean(currentJob && !TERMINAL_JOB_STATES.has(currentJob.state))
   const runBlockers: string[] = []
+  const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, budget.maxRecheckRounds)
+  if (strategyReason) runBlockers.push(strategyReason)
   if (singleRunning) runBlockers.push('当前单章任务尚未结束，请等待或在任务面板停止')
   if (!singleProgress && recentJobs.isPending) runBlockers.push('正在读取已有任务')
   if (recentJobs.isError) runBlockers.push('已有任务读取失败，请重新读取后再处理')
@@ -489,6 +497,11 @@ export default function PreviewPage() {
         disabledReason="当前处理任务尚未结束；请等待完成或先停止任务，再切换处理方式及模型配置。"
         profileId={profileId} onProfileChange={setProfileId}
         profileTestId={processingMode === 'batch' ? 'batch-profile' : 'preview-profile'} />
+      <DialogueStrategySettings value={preferences.dialogueStrategy} rounds={preferences.maxRecheckRounds}
+        disabled={batchProgress.running || singleRunning}
+        onChange={dialogueStrategy => setPreferences({ dialogueStrategy })} />
+      <RosterRepairSettings preferences={preferences} onChange={setPreferences}
+        disabled={batchProgress.running || singleRunning} />
 
       {processingMode === 'single' && !batchProgress.running && (
         <>
@@ -579,9 +592,9 @@ export default function PreviewPage() {
           <button
             type="button"
             onClick={() => void estimateQuery.refetch()}
-            disabled={!rangeValid || estimateQuery.isFetching || jobMutation.isPending}
+            disabled={!rangeValid || estimateQuery.isFetching || jobMutation.isPending || Boolean(strategyReason)}
             data-testid="preview-estimate"
-            title={!rangeValid ? '请先选择有效的处理范围。' : estimateQuery.isFetching ? '正在生成窗口预览，请等待完成。' : jobMutation.isPending ? '正在提交窗口任务，请等待完成。' : undefined}
+            title={!rangeValid ? '请先选择有效的处理范围。' : estimateQuery.isFetching ? '正在生成窗口预览，请等待完成。' : jobMutation.isPending ? '正在提交窗口任务，请等待完成。' : strategyReason ?? undefined}
           >
             重新预览窗口与估算（不调用模型）
           </button>

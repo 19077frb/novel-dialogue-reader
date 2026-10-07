@@ -49,11 +49,14 @@ class ProviderError(RuntimeError):
         *,
         details: dict[str, Any] | None = None,
         retryable: bool | None = None,
+        receipt: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.kind = kind
         self.message = message
         self.details = details or {}
+        # Private evidence is never included in as_dict or public diagnostics.
+        self.receipt = receipt
         self.retryable = RETRYABLE_KINDS.__contains__(kind) if retryable is None else retryable
 
     @property

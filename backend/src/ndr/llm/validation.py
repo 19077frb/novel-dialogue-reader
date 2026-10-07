@@ -18,8 +18,9 @@ from typing import Any
 from pydantic import ValidationError
 
 from ..characters.names import valid_display_name
-from ..domain.enums import Assignment, GapDecision, QuoteKind
+from ..domain.enums import Assignment, GapDecision
 from .errors import InvalidModelOutput, ProviderError, ProviderErrorKind
+from .expression_contract import ExpressionLlmOutput, has_owner_contract
 from .schemas import LlmOutput, NewSpeaker, QuoteLabel
 
 MAX_LABEL_ATTEMPTS = 2
@@ -37,6 +38,7 @@ class LabelingTargets:
     confirmed_names: tuple[str, ...] = ()
     character_ids: tuple[str, ...] = ()
     require_display_names: bool = False
+    known_declaration_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -118,14 +120,23 @@ def load_json_object(payload: str) -> dict[str, Any]:
     return data
 
 
-def parse_output(payload: str | Mapping[str, Any]) -> LlmOutput:
+def parse_output(
+    payload: str | Mapping[str, Any], *, expected_schema_version: str = "1.0",
+) -> LlmOutput:
     """把模型输出解析成契约对象；坏 JSON/字段类型错都抛 :class:`InvalidModelOutput`。"""
 
     if isinstance(payload, str):
         payload = load_json_object(payload)
+    elif isinstance(payload, LlmOutput):
+        # Pydantic otherwise trusts existing subclass instances and can let a
+        # typed 1.1 object bypass a caller's explicitly selected 1.0 boundary.
+        payload = payload.model_dump(mode="json")
 
+    contracts = {"1.0": LlmOutput, "1.1": ExpressionLlmOutput}
+    if expected_schema_version not in contracts:
+        raise ValueError("Unsupported output contract")
     try:
-        return LlmOutput.model_validate(payload)
+        return contracts[expected_schema_version].model_validate(payload)
     except ValidationError as exc:
         issues = [
             {
@@ -158,7 +169,7 @@ def repair_undeclared_speakers(
     existing = set(targets.speaker_refs)
     missing: dict[str, str] = {}  # temp_ref -> scene_ref
     for label in output.labels:
-        if label.kind is not QuoteKind.SPEECH or label.assignment is not Assignment.NEW:
+        if not has_owner_contract(label) or label.assignment is not Assignment.NEW:
             continue
         ref = label.speaker_ref
         if not ref or ref in declared or ref in existing or ref in missing:
@@ -198,7 +209,7 @@ def repair_declared_first_speakers(
     warnings = []
     for ref, speaker in declarations.items():
         uses = [label for label in output.labels if label.speaker_ref == ref
-                and label.kind is QuoteKind.SPEECH]
+                and has_owner_contract(label)]
         if not uses or counts[ref] != 1 or ref in targets.speaker_refs:
             continue
         first = min(uses, key=lambda label: positions.get(label.quote_id, len(positions)))
@@ -246,7 +257,7 @@ def repair_confirmed_speakers_after_break(
         should_repair = (
             label.scene_ref in new_scene_refs
             and label.scene_ref not in initial_scenes
-            and label.kind is QuoteKind.SPEECH
+            and has_owner_contract(label)
             and label.assignment is Assignment.EXISTING
             and label.speaker_ref in targets.speaker_refs
             and name_key in confirmed
@@ -397,7 +408,11 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
                 "missing_character_evidence", "关联已有全书人物必须提供原文证据",
                 speaker.temp_ref,
             ))
-        if targets.require_display_names and not valid_display_name(speaker.name):
+        if (targets.require_display_names or isinstance(output, ExpressionLlmOutput)) and (
+            not valid_display_name(speaker.name)
+            and not (speaker.name is None and speaker.character_id
+                     and speaker.character_id in targets.known_declaration_ids)
+        ):
             issues.append(ValidationIssue(
                 "missing_speaker_name", "新人物必须在 name 填写简短姓名或称呼，详细描述另填",
                 speaker.temp_ref,
@@ -456,7 +471,7 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
     positions = {ref: index for index, ref in enumerate(targets.quote_ids)}
     for speaker in output.new_speakers:
         uses = [label for label in output.labels if label.speaker_ref == speaker.temp_ref
-                and label.kind is QuoteKind.SPEECH]
+                and has_owner_contract(label)]
         if not uses or speaker.temp_ref in allowed_speakers:
             continue  # Name supplements need not create a second group.
         first = min(uses, key=lambda label: positions.get(label.quote_id, len(positions)))
@@ -507,7 +522,7 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
                 )
             )
             continue
-        if label.kind is QuoteKind.SPEECH and label.assignment is not None:
+        if has_owner_contract(label) and label.assignment is not None:
             if label.assignment is Assignment.EXISTING:
                 # BREAK 后旧场景的 S1/S2 立即失效；新场景只能复用本次输出中
                 # 已经以 NEW 声明、且属于同一 scene_ref 的临时人物。
@@ -599,12 +614,13 @@ def validate_output(output: LlmOutput, targets: LabelingTargets) -> ValidationRe
 
 
 def parse_and_validate(
-    payload: str | Mapping[str, Any], targets: LabelingTargets
+    payload: str | Mapping[str, Any], targets: LabelingTargets,
+    *, expected_schema_version: str = "1.0",
 ) -> ValidationReport:
     """解析 + 校验；解析失败时返回一条带 ``invalid_output`` 的报告（不抛异常）。"""
 
     try:
-        output = parse_output(payload)
+        output = parse_output(payload, expected_schema_version=expected_schema_version)
     except InvalidModelOutput as exc:
         message = str(exc)
         schema_issues = exc.details.get("issues")

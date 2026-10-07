@@ -75,6 +75,20 @@ pwsh -File scripts/verify.ps1
 
 ## 5. API 和模块边界
 
+推理尝试的内部证据由`ndr.storage.run_archive`压缩保存，适配器通过`ProviderResult.receipt`/`ProviderError.receipt`私有属性传递实际请求和已接收响应，不添加模型JSON字段或公开错误正文。归档包含已发送小说文本和提供方响应，应与书库同等保护，禁止上传仓库。迁移0022仅新增可空、按需加载的列，不回填历史证据、不自动压缩整库；8MiB上限、不完整标记和使用边界见[契约](docs/CONTRACTS.md#模型配置任务和恢复)。当前归档覆盖调度器对白及章节人物分析，读取成功不等于结果通过校验，也不等于已实现自动重放恢复。
+
+`ndr.jobs.expression_pipeline`为显式短表达任务提供正式多阶段复核。`ReviewedExpression`将完整短提案、任务绑定和接受上限一起传给领域编译，不能用普通模型JSON伪造该类型。缓存使用独立版本并恢复上限；检查点只存调用引用，原始输出读内部压缩归档。阶段恢复不增加用量、不推断未收到的响应；实际产品选择及模型质量另验收。离线回归可运行`uv run --project backend python -m pytest backend/tests/integration/test_expression_pipeline.py`，仅用原创文本和隔离库。
+
+模型输出默认仍为1.0。显式1.1领域契约允许心声和引用保留人物，必须由调用方在解析及应用时指定版本；结构生成使用`expression_output_json_schema()`，不得直接把评测模块的内部speech视图提交书库。版本和缓存边界见[契约](docs/CONTRACTS.md#模型配置任务和恢复)。正式Jobs API可显式选择`range.output_protocol=expression-production-1`，由短协议编译为1.1；页面提供完整对白策略试验选项，默认未切换。人物反馈试验选择、前置条件及任务展示见[用户指南](docs/USER_GUIDE.md)。相关回归可运行`uv run --project backend python -m pytest backend/tests/unit/test_expression_contract.py backend/tests/integration/test_attribution_engine.py`，仅使用原创文本和隔离数据库，不调用模型。
+
+内部`run_window(expression_task=...)`可显式使用短表达协议：任务正文、目标、片段类型和边界必须与实际窗口一致，候选人物须来自当前状态；初读候选字段必须匹配范围内的身份事实。`compile_expression_output()`返回完整1.1输出与独立的接受上限，二者须一起应用；仅取`output`会丢失复核限制。调用方完整的`owner_approvals`表只能降低接受性，不能批准缺乏依据的归属。该路径保留每次原始响应及用量；用量未知时不自动重复格式失败请求，鉴权/限流/超时也不在此重发。内部入口不代表Job调度器、缓存、预算和刷新恢复已经接入。编译测试另见`backend/tests/unit/test_expression_compiler.py`。
+
+`ndr.characters.facts`提供绑定不可变原文的逐事实持久化与按位置读取。`OriginalIdentitySnapshot`先核对整份原文哈希，可在一次事务内复用；更新由调用方负责锁定与事务，返回内容指纹供未来任务快照与缓存使用。旧资料没有事实时返回空，不回填首见位置。`prepare_merged_identity_facts()`及`prepare_profile_updates()`不修改行，目录接口在既有事务和版本检查内提交完整准备结果；原文揭示与身份合并的关联时点独立保存。`read_identity_facts()`仅返回原文事实，`read_identity_records()`包含资料修订，写入/合并/缓存必须保留全账本；模型输入使用可见profile，不能把被用户删除的原始事实直接变回候选别名。启用实际模型事实写入前仍须接通任务、初读投影及导出回导，不能仅添加存储列就宣称完成防剧透。离线回归：`uv run --project backend python -m pytest backend/tests/unit/test_character_facts.py backend/tests/unit/test_identity_profile_updates.py backend/tests/integration/test_character_facts_storage.py backend/tests/integration/test_character_directory.py backend/tests/integration/test_schema.py backend/tests/integration/test_index_policy.py`。
+
+`ndr.llm.roster_repair`提供人物提案的定向修复计划和全名单编译，使用`prepare_roster_repair()`冻结有效人物及失败依赖组，`compile_roster_repair()`仅替换失败组并保留分别的调用来源。内部生成的人物任务可显式指定range.roster_repair_protocol=roster-repair-1，由ndr.jobs.roster_pipeline实现有界调用、计量、停止及恢复；须同时使用sourced-roster-2。页面默认尚未启用，模块编译器本身不调用模型。离线验证：`uv run --project backend python -m pytest backend/tests/unit/test_roster_repair.py backend/tests/unit/test_sourced_roster.py backend/tests/integration/test_sourced_roster_jobs.py backend/tests/integration/test_roster_pipeline.py`。
+
+`ndr.llm.isolated_roster_repair`是新任务冻结的identity-blocks-2编译策略；旧严格编译器保留。它在完整组覆盖及全名单校验下隔离辅助信息、保留独立成功组，再生成仅含剩余组的计划。保留块含原索引及实际来源，不能把多次修复来源统一重标；策略/计划绑定进入阶段指纹。同一幂等请求复用旧任务而非升级。离线边界用例为`backend/tests/unit/test_isolated_roster_repair.py`，正式暂停/恢复与来源用例仍在`test_roster_pipeline.py`；契约细节见[人物身份与颜色](docs/CONTRACTS.md#人物身份与颜色)。
+
 - `backend/src/ndr/api/`：HTTP 路由和请求/响应转换。
 - `backend/src/ndr/domain/`：Pydantic schema 与枚举，是 API 类型的权威来源。
 - `backend/src/ndr/ingest/`：TXT/EPUB 导入。
@@ -171,7 +185,7 @@ uv run --project backend python -m ndr.storage.maintenance
 uv run --project backend python -m ndr.storage.maintenance --apply
 ```
 
-可用 `--data-dir "实际书库目录"` 指定其他书库。维护会先生成校验过的 `backups/before-compact-*.sqlite3.gz` 备份，再升级索引、压缩并核对业务数据；数据库被占用、存在未结束任务或空间不足时拒绝执行。不会清理旧备份、回收文件或模型缓存，完成前不要启动服务。
+可用 `--data-dir "实际书库目录"` 指定其他书库。维护会先生成校验过的 `backups/before-compact-*.sqlite3.gz` 备份，再升级数据库并压缩。升级事务提交前核对原有全部业务表与字段，缺失或内容变化则拒绝并回滚；压缩前后另核对升级后的完整业务数据，包括新增字段，避免将合法新增列误报为数据变化。数据库被占用、存在未结束任务或空间不足时拒绝执行。不会清理旧备份、回收文件或模型缓存，完成前不要启动服务。
 
 免安装版没有维护按钮；维护其书库前，须准备与当前迁移版本匹配的 EXE，旧 EXE 可能无法打开升级后的书库。恢复备份时先停服，解压为独立文件并检查后再替换，不能在服务运行中覆盖数据库或手改迁移版本。
 

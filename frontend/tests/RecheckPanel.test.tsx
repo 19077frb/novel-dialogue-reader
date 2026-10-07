@@ -36,8 +36,25 @@ it('finds an existing recheck after remount without creating a new model request
   expect(reviewApi.recheckQuote).not.toHaveBeenCalled()
 })
 
+it('explains feedback prerequisites and unlocks only when the user sets a review round', async () => {
+  updateProcessingPreferences({ profileId: 'p1', dialogueStrategy: 'complete-blocks-isolated-feedback-review', maxRecheckRounds: 0 })
+  renderWithProviders(<RecheckPanel quoteId="q1" />)
+  await screen.findByTestId('profile-thinking-defaults')
+  expect(screen.getByTestId('recheck-start')).toBeDisabled()
+  expect(screen.getByTestId('recheck-start')).toHaveAttribute('title', expect.stringContaining('至少 1'))
+  expect(reviewApi.recheckQuote).not.toHaveBeenCalled()
+  const input = screen.getByLabelText(/每个窗口最多复核次数/)
+  await userEvent.clear(input)
+  await userEvent.type(input, '1')
+  expect(screen.getByTestId('recheck-start')).toBeEnabled()
+  await userEvent.click(screen.getByTestId('recheck-start'))
+  expect(reviewApi.recheckQuote).toHaveBeenCalledWith('q1', expect.objectContaining({
+    dialogueStrategy: 'complete-blocks-isolated-feedback-review', maxRecheckRounds: 1,
+  }))
+})
+
 it('inherits shared thinking preferences, sends overrides and locks the running task', async () => {
-  updateProcessingPreferences({ profileId: 'p1', thinkingMode: 'enabled', thinkingEffort: 'low', maxFormatRetries: 3 })
+  updateProcessingPreferences({ profileId: 'p1', thinkingMode: 'enabled', thinkingEffort: 'low', maxFormatRetries: 3, dialogueStrategy: 'complete-review', maxRecheckRounds: 1 })
   const mounted = renderWithProviders(<RecheckPanel quoteId="q1" />)
   expect(await screen.findByTestId('profile-thinking-defaults')).toHaveTextContent('模式 自适应；强度 高')
   const settings = screen.getByTestId('model-thinking-settings')
@@ -49,10 +66,12 @@ it('inherits shared thinking preferences, sends overrides and locks the running 
   await waitFor(() => expect(reviewApi.recheckQuote).toHaveBeenCalled())
   expect(reviewApi.recheckQuote).toHaveBeenCalledWith('q1', expect.objectContaining({
     profileId: 'p1', inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'low' }, maxInputTokens: 20000, maxFormatRetries: 3,
+    dialogueStrategy: 'complete-review', maxRecheckRounds: 1,
   }))
   expect(screen.getByTestId('processing-thinking-mode')).toBeDisabled()
   expect(screen.getByTestId('recheck-start')).toBeDisabled()
   expect(screen.getByTestId('recheck-format-retries')).toBeDisabled()
+  expect(screen.getByTestId('dialogue-strategy')).toBeDisabled()
   await userEvent.click(screen.getByText('模拟任务完成'))
   await userEvent.selectOptions(screen.getByTestId('processing-thinking-effort'), 'high')
   await userEvent.click(screen.getByTestId('recheck-start'))

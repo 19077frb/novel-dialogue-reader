@@ -20,6 +20,8 @@ from ndr.llm.prompts import (
     build_connection_messages,
     build_labeling_messages,
 )
+from ndr.llm.prompts.labeling import SYSTEM_PROMPT
+from ndr.llm.prompts.roster import ROSTER_PROMPT_VERSION, ROSTER_SYSTEM_PROMPT
 from ndr.llm.validation import (
     LabelingTargets,
     RetryPolicy,
@@ -541,3 +543,20 @@ class FakeUnavailableSystem:
 
     def delete(self, ref: str) -> None:
         return None
+
+
+def test_prompt_examples_use_original_names_without_rewriting_input_characters():
+    assert LABELING_PROMPT_VERSION == "labeling-18"
+    assert ROSTER_PROMPT_VERSION == "roster-6"
+    for prompt in (SYSTEM_PROMPT, ROSTER_SYSTEM_PROMPT):
+        assert "林舟" in prompt and "周遥" in prompt
+        assert all(
+            name not in prompt for name in ("浅村", "悠太", "读卖", "绫濑", "阿库娅", "达克妮丝")
+        )
+    messages = build_labeling_messages(
+        context_lines=["浅村悠太说：你好。"],
+        target_ids=["q1"],
+        known_characters=[{"name": "浅村悠太", "description": "用户原有资料"}],
+    )
+    assert "浅村悠太" in messages[1]["content"]
+    assert "用户原有资料" in messages[1]["content"]

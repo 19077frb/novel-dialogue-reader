@@ -71,6 +71,9 @@ class QuoteKind(StrEnum):
     UNKNOWN = "unknown"
 
 
+EXPRESSION_OWNER_KINDS = frozenset({QuoteKind.SPEECH, QuoteKind.THOUGHT, QuoteKind.QUOTATION})
+
+
 class QuoteNormalizationSource(StrEnum):
     AUTO = "AUTO"
     USER = "USER"

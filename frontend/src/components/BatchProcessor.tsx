@@ -8,13 +8,13 @@ import {
   confirmCharacterRoster,
   fetchCharacterRoster,
 } from '../api/characters'
-import { createJob, estimateRange, freshIdempotencyKey, pauseJob, fetchRecentJobs } from '../api/jobs'
+import { createJob, estimateRange, freshIdempotencyKey, pauseJob, fetchRecentJobs, dialogueStrategyDisabledReason } from '../api/jobs'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 import { hasSingleWork } from '../processing/singleWorkflow'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
 import { createTaskLimiter, mapWithConcurrency } from '../processing/concurrency'
 import { waitForJobCompletion } from '../processing/jobCompletion'
-import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
+import { getProcessingPreferences, inferenceOptions, useProcessingPreferences, rosterRepairOptions, estimateRosterTokens } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
 import { OperationTimer } from './OperationTimer'
 import { readJournal, writeJournal, removeJournal, withWorkflowLock, assertWorkflowOwnership } from '../processing/journal'
@@ -335,6 +335,15 @@ export function canAppendAutomaticProcessing(bookId: string, versionId: string) 
 /** Extend the existing pool, never start a second pool or reset its allowance. */
 export function appendAutomaticProcessing(bookId: string, versionId: string, plans: ChapterPlan[]): number {
   if (!canAppendAutomaticProcessing(bookId, versionId)) return 0
+  const strategy = batchExecutions.get(bookId)?.execution.preferences.dialogueStrategy ?? 'legacy'
+  if (plans.some(plan => Boolean(plan.estimate.policy?.full_source) !== (strategy !== 'legacy')
+    || Boolean(plan.estimate.policy?.dialogue_blocks) !== strategy.startsWith('complete-blocks')
+    || plan.estimate.policy?.auxiliary_protocol !== (strategy.includes('-isolated') ? 'expression-auxiliary-isolation-1' : undefined)
+    || (plan.estimate.policy?.review_protocol === 'expression-evidence-review-1') !== strategy.endsWith('-review')
+    || plan.estimate.policy?.identity_feedback_protocol !== (strategy === 'complete-blocks-isolated-feedback-review' ? 'identity-feedback-1' : undefined))) {
+    publishBatch(bookId, { message: '当前批次已固定对白策略；新策略将在本批次结束后用于下一批，未追加不匹配的窗口。' })
+    return 0
+  }
   return expandableBatches.get(bookId)!.append(plans)
 }
 
@@ -367,7 +376,7 @@ export async function retryBatchTask(bookId: string, taskId: string, wholeChapte
     const chapter = chapters.find(item => item.id === task.chapterId)
     if (!chapter) throw new Error('章节已不存在，请重新读取目录。')
     const estimate = await estimateRange(bookId, { bookVersionId: saved.execution.bookVersionId,
-      range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp }, readingMode: 'reread',
+      range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp, dialogueStrategy: saved.execution.preferences.dialogueStrategy }, readingMode: 'reread',
       budget: { maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: saved.execution.preferences.maxRecheckRounds,
         maxRechecks: (saved.execution.preferences as ProcessingPreferences & { maxRechecks?: number }).maxRechecks,
         maxFormatRetries: saved.execution.preferences.maxFormatRetries } })
@@ -654,6 +663,8 @@ export interface BatchExecution {
 
 /** Shared sequenced roster/window pipeline for manual batches and reader look-ahead. */
 export async function runBatchProcessing(execution: BatchExecution) {
+  const reason = dialogueStrategyDisabledReason(execution.preferences.dialogueStrategy, execution.preferences.maxRecheckRounds)
+  if (reason) throw new Error(reason)
   return withWorkflowLock(`processing:${execution.bookId}`, () => runBatchInternal(execution))
 }
 
@@ -821,7 +832,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
       requested.push(...fresh.map(plan => plan.chapter).filter(chapter => !requested.some(old => old.id === chapter.id)))
       plans.push(...fresh)
       const estimated = fresh.reduce((total, plan) => total + plan.estimate.total_tokens
-        + Math.max(1, plan.chapter.end_cp - plan.chapter.start_cp) + 2000, 0)
+        + estimateRosterTokens(plan.chapter.end_cp - plan.chapter.start_cp, preferences), 0)
       const message = `已加入 ${fresh.length} 章，预计约 ${estimated.toLocaleString()} Tokens；有空闲位置时继续处理。`
       publishBatch(bookId, {
         tasks: [...current.tasks.filter(task => !fresh.some(plan => plan.chapter.id === task.chapterId)), ...fresh.flatMap(planTasks)],
@@ -954,7 +965,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         updateChapterProgress(bookId, chapter.id, { state: 'dialogue', error: null })
       })
       const prefix = `${index + 1}/${selectedPlans.length} ${chapter.title || `第 ${chapter.ordinal + 1} 章`}`
-      return runMetered(Math.max(1, chapter.end_cp - chapter.start_cp) + 2_000, async (available) => {
+      return runMetered(estimateRosterTokens(chapter.end_cp - chapter.start_cp, preferences), async (available) => {
         if (plan.cancelled) return
         updateChapterProgress(bookId, chapter.id, { state: 'roster', error: null })
         publishBatch(bookId, { message: `${prefix}：正在识别人物…` })
@@ -964,6 +975,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         try {
           const rosterJob = await waitForChapterJob(bookId, plan, taskId,
             submitBatchRequest(bookId, taskId, 'roster', {
+              ...rosterRepairOptions(preferences),
               bookVersionId,
               profileId,
               inferenceOptions: options,
@@ -1056,7 +1068,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
                 bookId,
                 mode: 'process',
                 bookVersionId,
-                range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
+                range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp, dialogueStrategy: preferences.dialogueStrategy },
                 selectedWindowIds: [windowId],
                 forceReprocess,
                 profileId,
@@ -1248,6 +1260,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const [endId, setEndId] = useState('')
   const [preferences, setPreferences] = useProcessingPreferences()
   const { profileId, maxRecheckRounds, maxFormatRetries, concurrency } = preferences
+  const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, maxRecheckRounds)
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
   const setMaxRecheckRounds = (value: number) => setPreferences({ maxRecheckRounds: value })
   const setTokenLimitText = (value: string) => setPreferences({ tokenLimit: positiveIntegerOrNull(value) })
@@ -1285,7 +1298,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       setEstimatedTokens(null)
       setPlans([])
     }
-  }, [profileId, maxRecheckRounds, maxFormatRetries, tokenLimitText, running])
+  }, [profileId, maxRecheckRounds, maxFormatRetries, tokenLimitText, running, preferences.dialogueStrategy, preferences.rosterRepairEnabled, preferences.maxRosterRepairs])
 
   const calculateEstimate = async () => {
     if (!validRange) return
@@ -1298,15 +1311,25 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       const estimates = await mapWithConcurrency(
         selected, 4, (chapter) => estimateRange(bookId, {
           bookVersionId,
-          range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp },
+          range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp, dialogueStrategy: preferences.dialogueStrategy },
           readingMode: 'reread',
           visibleHorizonCp: null,
           budget: { maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds, maxFormatRetries },
         }),
       )
+      const currentPreferences = getProcessingPreferences()
+      if (currentPreferences.dialogueStrategy !== preferences.dialogueStrategy
+        || currentPreferences.rosterRepairEnabled !== preferences.rosterRepairEnabled
+        || currentPreferences.maxRosterRepairs !== preferences.maxRosterRepairs
+        || currentPreferences.maxFormatRetries !== maxFormatRetries
+        || currentPreferences.maxRecheckRounds !== maxRecheckRounds
+        || currentPreferences.profileId !== profileId) {
+        setProgress('处理配置已改变，请使用当前配置重新估算。')
+        return
+      }
       setPlans(selected.map((chapter, index) => ({ chapter, estimate: estimates[index] })))
       const rosterReserve = selected.reduce(
-        (total, chapter) => total + Math.max(0, chapter.end_cp - chapter.start_cp) + 2_000,
+        (total, chapter) => total + estimateRosterTokens(chapter.end_cp - chapter.start_cp, preferences),
         0,
       )
       setEstimatedTokens(estimates.reduce((total, estimate) => total + estimate.total_tokens, 0) + rosterReserve)
@@ -1467,7 +1490,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       )}
       <p className="hint">并发数同时约束人物识别和对白窗口；设为 1 即按顺序处理，建议从 2 开始。</p>
       <div className="ndr-form-actions">
-        <button type="button" className="ndr-primary" title={running ? '批量处理正在运行，请等待结束或先停止任务。' : estimating ? '正在估算 Token，请等待估算完成。' : !bookVersionId ? '书籍版本尚未读取，请先重新读取书籍。' : !validRange ? '请选择有效的开始和结束章节，结束章节不能早于开始章节。' : !profileId ? '请先选择模型配置，再估算和启动批量处理。' : undefined} disabled={running || estimating || !validRange || !profileId || !bookVersionId} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
+        <button type="button" className="ndr-primary" title={running ? '批量处理正在运行，请等待结束或先停止任务。' : estimating ? '正在估算 Token，请等待估算完成。' : !bookVersionId ? '书籍版本尚未读取，请先重新读取书籍。' : !validRange ? '请选择有效的开始和结束章节，结束章节不能早于开始章节。' : !profileId ? '请先选择模型配置，再估算和启动批量处理。' : strategyReason ?? undefined} disabled={running || estimating || !validRange || !profileId || !bookVersionId || Boolean(strategyReason)} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
           {running ? '批量处理中…' : estimating ? '正在估算…' : estimatedTokens === null ? '预估 Token' : '确认并开始批量处理'}
         </button>
       </div>
@@ -1479,6 +1502,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
           {positiveIntegerOrNull(tokenLimitText) !== null && estimatedTokens > (positiveIntegerOrNull(tokenLimitText) ?? 0) ? ' 预计会超过当前上限，系统只会在剩余额度允许时派发新任务。' : ''}
         </p>
       )}
+      {strategyReason && <p className="hint">{strategyReason}</p>}
       {!profileId && <p className="hint">请选择批量处理使用的模型配置。</p>}
       {!validRange && <p className="status-error">结束章节不能早于开始章节。</p>}
       {progress && <p className="hint" data-testid="batch-progress">{progress}</p>}
