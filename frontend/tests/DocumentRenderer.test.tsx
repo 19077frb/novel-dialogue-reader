@@ -1,5 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { updateGeneralSettings } from '../src/settings/preferences'
+
+afterEach(() => act(() => updateGeneralSettings({ showReviewMarkers: false })))
 
 import type { AnnotationItemOut, ContentNodeOut } from '../src/api/types'
 import { DocumentRenderer, sliceByAnnotations } from '../src/components/DocumentRenderer'
@@ -247,13 +250,44 @@ describe('DocumentRenderer 标注投影', () => {
     expect(span).toHaveTextContent('「雨停了。」')
   })
 
-  it('候选人物显示警告并保留说明，初读未揭示时不显示', () => {
-    const view = render(<DocumentRenderer bookId="b1" nodes={[node]} annotations={[annotation({ status: 'PROVISIONAL' })]} />)
-    expect(screen.getByRole('img', { name: '候选人物，待确认' })).toHaveClass('status-warning')
+  it('默认关闭，开启后按队列标记并保留说明，初读隐藏身份不隐藏待确认状态', () => {
+    const pending = [{ quote_id: 'q1', start_cp: node.start_cp, end_cp: node.start_cp + 6 }]
+    const view = render(<DocumentRenderer bookId="b1" nodes={[node]} pendingReviewQuotes={pending} annotations={[annotation({ status: 'PROVISIONAL' })]} />)
+    expect(screen.queryByRole('img', { name: '对白待确认' })).not.toBeInTheDocument()
+    act(() => updateGeneralSettings({ showReviewMarkers: true }))
+    view.rerender(<DocumentRenderer bookId="b1" nodes={[node]} pendingReviewQuotes={pending} annotations={[annotation({ status: 'ACCEPTED' })]} />)
+    expect(screen.getByRole('img', { name: '对白待确认' })).toHaveClass('status-warning')
     expect(screen.getByTestId('annotation-span').title).toContain('戴着红围巾的女同学')
-    expect(screen.getByTestId('annotation-span').title).toContain('待确认')
-    view.rerender(<DocumentRenderer bookId="b1" nodes={[node]} annotations={[annotation({ status: 'PROVISIONAL', withheld: true })]} />)
-    expect(screen.queryByRole('img', { name: '候选人物，待确认' })).not.toBeInTheDocument()
+    view.rerender(<DocumentRenderer bookId="b1" nodes={[node]} pendingReviewQuotes={pending} annotations={[annotation({ status: 'PROVISIONAL', withheld: true })]} />)
+    expect(screen.getByRole('img', { name: '对白待确认' })).toBeInTheDocument()
+    expect(screen.queryByTestId('annotation-span')).not.toBeInTheDocument()
+    view.rerender(<DocumentRenderer bookId="b1" nodes={[node]} annotations={[annotation({ status: 'PROVISIONAL' })]} />)
+    expect(screen.queryByRole('img', { name: '对白待确认' })).not.toBeInTheDocument()
+  })
+
+  it('无标注、嵌套及跨节点的待确认对白标记一次且可以打开对应对白', () => {
+    act(() => updateGeneralSettings({ showReviewMarkers: true }))
+    const click = vi.fn()
+    render(<DocumentRenderer bookId="b1" nodes={[node, { ...node, node_id: 'n2', start_cp: node.end_cp, end_cp: node.end_cp + 2, text: '后文' }]}
+      pendingReviewQuotes={[{ quote_id: 'outer', start_cp: node.start_cp, end_cp: node.end_cp + 2 }, { quote_id: 'inner', start_cp: node.start_cp + 2, end_cp: node.start_cp + 4 }]}
+      candidates={[{ quoteId: 'outer', startCp: node.start_cp, endCp: node.end_cp + 2 }, { quoteId: 'inner', startCp: node.start_cp + 2, endCp: node.start_cp + 4 }]}
+      onQuoteClick={click} />)
+    const markers = screen.getAllByRole('img', { name: '对白待确认' })
+    expect(markers).toHaveLength(2)
+    fireEvent.click(markers[1])
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(click).toHaveBeenCalledWith('inner')
+    expect(screen.getByTestId('document-renderer').textContent?.replaceAll('⚠', '')).toContain('雨停了。')
+  })
+
+  it.each(['UNKNOWN', 'USER_CONFIRMED'] as const)('队列中的%s对白也标记，清除队列后移除', status => {
+    act(() => updateGeneralSettings({ showReviewMarkers: true }))
+    const view = render(<DocumentRenderer bookId="b1" nodes={[node]}
+      pendingReviewQuotes={[{ quote_id: 'q1', start_cp: node.start_cp, end_cp: node.start_cp + 6 }]}
+      annotations={[annotation({ status })]} />)
+    expect(screen.getAllByRole('img', { name: '对白待确认' })).toHaveLength(1)
+    view.rerender(<DocumentRenderer bookId="b1" nodes={[node]} annotations={[annotation({ status })]} />)
+    expect(screen.queryByRole('img', { name: '对白待确认' })).not.toBeInTheDocument()
   })
 
   it('withheld 的标注既不着色也不下发编号', () => {

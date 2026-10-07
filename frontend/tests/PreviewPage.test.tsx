@@ -142,6 +142,7 @@ const NODES = [
 ] as ContentNodeOut[]
 
 const ANNOTATIONS = {
+  pending_review_quotes: [{ quote_id: 'q1', start_cp: 0, end_cp: 6 }],
   identity_reverts: 0,
   book_id: 'b1',
   book_version_id: 'v1',
@@ -797,6 +798,16 @@ describe('PreviewPage', () => {
     expect(vi.mocked(jobsApi.estimateRange).mock.calls.length).toBe(estimateCalls)
     expect(vi.mocked(jobsApi.createJob).mock.calls.length).toBe(jobCalls)
     expect(vi.mocked(annotationsApi.fetchAnnotations).mock.calls.length).toBe(annotationCalls)
+  })
+
+  it('开启设置后原文和标注预览都显示待确认标记并提示去队列核对', async () => {
+    updateGeneralSettings({ showReviewMarkers: true })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    expect(await screen.findByRole('img', { name: '对白待确认' })).toHaveAttribute('title',
+      '这句对白在待确认队列中，可前往待确认队列查看并确认。')
+    await userEvent.click(screen.getByTestId('view-original'))
+    expect(screen.queryByTestId('annotation-span')).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '对白待确认' })).toBeInTheDocument()
   })
 
   it('没有模型配置时不显示可运行入口的假成功', async () => {

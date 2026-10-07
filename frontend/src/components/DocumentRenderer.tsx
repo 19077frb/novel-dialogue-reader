@@ -1,7 +1,8 @@
 import { useMemo, type ReactNode } from 'react'
 
 import { resourceUrl } from '../api/books'
-import type { AnnotationItemOut, ContentNodeOut, RubyAnnotation } from '../api/types'
+import type { AnnotationItemOut, AnnotationsResponse, ContentNodeOut, RubyAnnotation } from '../api/types'
+import { useGeneralSettings } from '../settings/preferences'
 import { nodePayload } from '../api/types'
 import { cpLength, sliceByCodepoints, utf16IndexForCp } from '../text/codepoints'
 import { SpanIndex } from '../text/intervals'
@@ -25,6 +26,7 @@ export interface DocumentRendererProps {
    * 只有这里的颜色/编号才会显示；`withheld` 不下发颜色与编号（不提前泄漏后文证据）。
    */
   annotations?: AnnotationItemOut[]
+  pendingReviewQuotes?: AnnotationsResponse['pending_review_quotes']
   /** 点击节点时的回调：用于定位（保存阅读位置）。 */
   onNodeClick?: (node: ContentNodeOut) => void
   /** 点击某段引语：普通对白详情入口（打开确认抽屉）。 */
@@ -127,11 +129,25 @@ function renderAnnotatedText(
   from: number,
   to: number,
   onQuoteClick?: (quoteId: string) => void,
+  pendingReviewQuotes: NonNullable<AnnotationsResponse['pending_review_quotes']> = [],
 ): ReactNode[] {
   const parts: ReactNode[] = []
   for (const slice of sliceByAnnotations(annotations, from, to)) {
-    const segment = sliceByCodepoints(text, baseCp, slice.start, slice.end)
-    const inner = renderTextWithRuby(segment, slice.start, ruby)
+    const inner: ReactNode[] = []
+    let cursor = slice.start
+    for (const quote of pendingReviewQuotes) {
+      if (quote.start_cp < slice.start || quote.start_cp >= slice.end) continue
+      if (quote.start_cp > cursor) inner.push(renderTextWithRuby(
+        sliceByCodepoints(text, baseCp, cursor, quote.start_cp), cursor, ruby))
+      inner.push(<span key={`review-${quote.quote_id}`} className="status-warning" role="img"
+        aria-label="对白待确认" title={onQuoteClick
+          ? '这句对白在待确认队列中，点击可查看并确认。'
+          : '这句对白在待确认队列中，可前往待确认队列查看并确认。'}
+        data-quote-id={quote.quote_id}
+        onClick={onQuoteClick ? event => { event.stopPropagation(); onQuoteClick(quote.quote_id) } : undefined}>⚠</span>)
+      cursor = quote.start_cp
+    }
+    inner.push(renderTextWithRuby(sliceByCodepoints(text, baseCp, cursor, slice.end), cursor, ruby))
     const annotation = slice.annotation
     if (annotation === null || annotation.withheld) {
       parts.push(inner)
@@ -162,17 +178,14 @@ function renderAnnotatedText(
           annotation.status === 'UNKNOWN'
             ? '证据不足：不指定说话人（无色无编号）'
             : annotation.speaker_description
-              ? `${annotation.status === 'PROVISIONAL' ? '⚠ 候选人物，待确认。' : ''}${label ?? '说话人'}：${annotation.speaker_description}`
-              : `${annotation.status === 'PROVISIONAL' ? '⚠ 候选人物，待确认。' : ''}${label ?? '说话人'}`
+              ? `${label ?? '说话人'}：${annotation.speaker_description}`
+              : `${label ?? '说话人'}`
         }
       >
         {showLabel ? (
           <span className="ndr-annotation-label" data-testid="annotation-label">
             {labelText(label)}
           </span>
-        ) : null}
-        {slice.start === annotation.start_cp && annotation.status === 'PROVISIONAL' ? (
-          <span className="status-warning" role="img" aria-label="候选人物，待确认" title="此人物尚未确认，请在待确认队列核对。">⚠</span>
         ) : null}
         {inner}
       </span>,
@@ -217,6 +230,7 @@ function renderNodes(
   from: number,
   to: number,
   onQuoteClick?: (quoteId: string) => void,
+  pendingReviewQuotes: NonNullable<AnnotationsResponse['pending_review_quotes']> = [],
 ): ReactNode[] {
   const parts: ReactNode[] = []
   let cursor = from
@@ -225,7 +239,7 @@ function renderNodes(
     const start = Math.max(cursor, node.start)
     if (start > cursor) {
       parts.push(
-        ...renderAnnotatedText(text, baseCp, ruby, annotations, cursor, start, onQuoteClick),
+        ...renderAnnotatedText(text, baseCp, ruby, annotations, cursor, start, onQuoteClick, pendingReviewQuotes),
       )
     }
     const end = Math.min(to, node.end)
@@ -247,13 +261,13 @@ function renderNodes(
             : undefined
         }
       >
-        {renderNodes(node.children, text, baseCp, ruby, annotations, start, end, onQuoteClick)}
+        {renderNodes(node.children, text, baseCp, ruby, annotations, start, end, onQuoteClick, pendingReviewQuotes)}
       </span>,
     )
     cursor = end
   }
   if (cursor < to) {
-    parts.push(...renderAnnotatedText(text, baseCp, ruby, annotations, cursor, to, onQuoteClick))
+    parts.push(...renderAnnotatedText(text, baseCp, ruby, annotations, cursor, to, onQuoteClick, pendingReviewQuotes))
   }
   return parts
 }
@@ -263,6 +277,7 @@ function NodeView({
   bookId,
   candidates,
   annotations,
+  pendingReviewQuotes,
   onNodeClick,
   onQuoteClick,
   onBookmark,
@@ -272,6 +287,7 @@ function NodeView({
   bookId: string
   candidates: CandidateRange[]
   annotations: AnnotationItemOut[]
+  pendingReviewQuotes: NonNullable<AnnotationsResponse['pending_review_quotes']>
   onNodeClick?: (node: ContentNodeOut) => void
   onQuoteClick?: (quoteId: string) => void
   onBookmark?: (positionCp: number, text: string) => void
@@ -338,6 +354,7 @@ function NodeView({
           from,
           to,
           onQuoteClick,
+          pendingReviewQuotes,
         )
       : renderAnnotatedText(
           node.text,
@@ -347,6 +364,7 @@ function NodeView({
           from,
           to,
           onQuoteClick,
+          pendingReviewQuotes,
         )
   const text = onBookmark && node.node_type === 'paragraph'
     ? <span className="ndr-paragraph" data-paragraph-start={node.start_cp} data-paragraph-end={nodeEnd}>
@@ -384,11 +402,15 @@ export function DocumentRenderer({
   nodes,
   candidates = [],
   annotations = [],
+  pendingReviewQuotes = [],
   onNodeClick,
   onQuoteClick,
   onBookmark,
   bookmarkPending,
 }: DocumentRendererProps) {
+  const [settings] = useGeneralSettings()
+  const reviewIndex = useMemo(() => new SpanIndex(pendingReviewQuotes,
+    item => item.start_cp, item => item.end_cp), [pendingReviewQuotes])
   const candidateIndex = useMemo(() => new SpanIndex(candidates,
     (item) => item.startCp, (item) => item.endCp), [candidates])
   const annotationIndex = useMemo(() => new SpanIndex(annotations,
@@ -396,8 +418,10 @@ export function DocumentRenderer({
   const spans = useMemo(() => nodes.map((node) => {
     const end = node.end_cp > node.start_cp ? node.end_cp : node.start_cp + cpLength(node.text)
     return { candidates: candidateIndex.overlapping(node.start_cp, end),
+      pendingReviews: settings.showReviewMarkers
+        ? reviewIndex.overlapping(node.start_cp, end).sort((a, b) => a.start_cp - b.start_cp) : [],
       annotations: annotationIndex.overlapping(node.start_cp, end) }
-  }), [nodes, candidateIndex, annotationIndex])
+  }), [nodes, candidateIndex, annotationIndex, reviewIndex, settings.showReviewMarkers])
   return (
     <AnnotationLayer annotations={annotations}>
       <div className="ndr-document" data-testid="document-renderer">
@@ -408,6 +432,7 @@ export function DocumentRenderer({
             bookId={bookId}
             candidates={spans[index].candidates}
             annotations={spans[index].annotations}
+            pendingReviewQuotes={spans[index].pendingReviews}
             onNodeClick={onNodeClick}
             onQuoteClick={onQuoteClick}
             onBookmark={onBookmark}

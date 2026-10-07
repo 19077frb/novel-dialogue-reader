@@ -172,6 +172,7 @@ describe('ReaderPage', () => {
     expect(screen.getByRole('button', { name: '下一章' })).toBeDisabled()
   })
   beforeEach(() => {
+    act(() => updateGeneralSettings({ showReviewMarkers: false }))
     act(() => batch.clearBatchProgress('b1'))
     vi.mocked(booksApi.fetchBook).mockReset()
     vi.mocked(booksApi.fetchChapters).mockReset()
@@ -198,6 +199,7 @@ describe('ReaderPage', () => {
     )
     vi.mocked(annotationsApi.fetchAnnotations).mockResolvedValue({
       identity_reverts: 0,
+      pending_review_quotes: [{ quote_id: 'q-c2', start_cp: 21, end_cp: 30 }],
       book_id: 'b1',
       book_version_id: 'v1',
       reading_mode: 'initial',
@@ -384,6 +386,18 @@ describe('ReaderPage', () => {
 
     await userEvent.click(screen.getByTestId('toggle-candidates'))
     await waitFor(() => expect(screen.queryAllByTestId('candidate-quote')).toHaveLength(0))
+  })
+
+  it('保存的开关显示当前队列标记，关闭人物和候选显示后仍保留', async () => {
+    updateGeneralSettings({ showReviewMarkers: true })
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
+    expect(await screen.findByRole('img', { name: '对白待确认' })).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('toggle-candidates'))
+    await userEvent.click(screen.getByTestId('toggle-annotations'))
+    expect(screen.queryByTestId('annotation-span')).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '对白待确认' })).toBeInTheDocument()
+    act(() => updateGeneralSettings({ showReviewMarkers: false }))
+    expect(screen.queryByRole('img', { name: '对白待确认' })).not.toBeInTheDocument()
   })
 
   it('显示后端投影的颜色/编号，并可关闭标注（原文不变）', async () => {

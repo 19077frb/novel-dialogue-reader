@@ -30,6 +30,54 @@ SAMPLE = (
 )
 
 
+def test_pending_review_ranges_include_unannotated_and_nested_quotes(fake_provider_client):
+    from ndr.domain.enums import ReviewQueueStatus, ReviewReason, ReviewTargetType
+    from ndr.storage.models import ReviewItem
+
+    client = fake_provider_client
+    data = _import(client)
+    factory = client.app.state.session_factory
+    with transaction(factory) as session:
+        quotes = list(session.scalars(select(Quote).where(
+            Quote.book_version_id == data["book_version_id"],
+        ).order_by(Quote.start_cp)))
+        first, second, third = quotes[:3]
+        nested = Quote(book_version_id=first.book_version_id,
+                       chapter_id=first.chapter_id, start_cp=first.start_cp + 1,
+                       end_cp=first.end_cp - 1, nesting_depth=1,
+                       delimiter="「」", scanner_version=first.scanner_version,
+                       parent_quote_id=first.id)
+        session.add(nested)
+        session.flush()
+        for quote, reason, state in [
+            (first, ReviewReason.UNKNOWN_SPEAKER, ReviewQueueStatus.PENDING),
+            (first, ReviewReason.LOW_CONFIDENCE, ReviewQueueStatus.PENDING),
+            (nested, ReviewReason.UNKNOWN_SPEAKER, ReviewQueueStatus.PENDING),
+            (second, ReviewReason.UNKNOWN_SPEAKER, ReviewQueueStatus.RESOLVED),
+            (third, ReviewReason.UNKNOWN_SPEAKER, ReviewQueueStatus.DEFERRED),
+        ]:
+            session.add(ReviewItem(target_type=ReviewTargetType.QUOTE,
+                                   quote_id=quote.id, reason=reason, queue_status=state))
+        first_id, nested_id = first.id, nested.id
+        start, end = first.start_cp, first.end_cp
+    response = client.get(f'/api/books/{data["book_id"]}/annotations').json()["data"]
+    assert response["items"] == []
+    assert {item["quote_id"] for item in response["pending_review_quotes"]} == {first_id, nested_id}
+    assert len(response["pending_review_quotes"]) == 2
+    response = client.get(f'/api/books/{data["book_id"]}/annotations',
+                          params={"start_cp": end, "end_cp": len(SAMPLE)}).json()["data"]
+    assert response["pending_review_quotes"] == []
+    with transaction(factory) as session:
+        for item in session.scalars(select(ReviewItem).where(ReviewItem.quote_id == first_id)):
+            item.queue_status = ReviewQueueStatus.RESOLVED
+    response = client.get(f'/api/books/{data["book_id"]}/annotations',
+                          params={"start_cp": start, "end_cp": end, "reading_mode": "initial",
+                                  "visible_horizon_cp": 0}).json()["data"]
+    assert response["pending_review_quotes"] == [
+        {"quote_id": nested_id, "start_cp": start + 1, "end_cp": end - 1},
+    ]
+
+
 def _import(client: TestClient) -> dict:
     response = client.post(
         "/api/books/import",
