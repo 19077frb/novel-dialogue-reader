@@ -13,12 +13,13 @@ export const annotationStatusLabel = (value: string): string => ({
 } as Record<string, string>)[value] ?? value
 
 export const quoteKindLabel = (value: string): string => ({
-  speech: '对白（发声）', thought: '心声', quotation: '引用', group: '集体声音', other: '其他', unknown: '未知类型',
+  speech: '对白（发声）', thought: '心声', quotation: '人物原话引用', group: '集体声音', other: '非人物文本（无需归属）', unknown: '表达类型待确认',
 } as Record<string, string>)[value] ?? value
 
 export const reviewReasonLabel = (value: string): string => ({
   MODEL_OUTPUT_WARNING: '模型结果校验警告',
   LOW_CONFIDENCE: '置信度低', AMBIGUOUS_SPEAKER: '说话人有歧义', UNKNOWN_SPEAKER: '无法确定说话人',
+  UNKNOWN_QUOTE_KIND: '表达类型待确认', UNKNOWN_QUOTE_SOURCE: '引用来源待确认',
   POSSIBLE_NEW_SPEAKER: '可能是新说话人', SCENE_BOUNDARY: '场景边界待确认',
   STALE_DEPENDENCY: '人物或场景调整后需复核', USER_FLAGGED: '用户标记', OTHER: '其他',
 } as Record<string, string>)[value] ?? value

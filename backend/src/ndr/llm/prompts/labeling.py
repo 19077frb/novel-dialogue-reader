@@ -10,9 +10,10 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping, Sequence
 
+from ..nonperson_policy import NONPERSON_POLICY
 from ..schemas import output_json_schema
 
-LABELING_PROMPT_VERSION = "labeling-18"
+LABELING_PROMPT_VERSION = "labeling-19"
 DATA_DELIMITER = "<<<NDR_DATA>>>"
 ESCAPED_DELIMITER = "<<<NDR_DATA_ESCAPED>>>"
 
@@ -97,7 +98,7 @@ SYSTEM_PROMPT = """你是中文轻小说对白的标注助手。
     用户确认也不是原文身份证明；不能凭任何确认标记断定同一身份、当前在场或当前说话人。
     应核对给定原文，发现遗漏或身份冲突时保留 UNKNOWN 或提出有证据的身份建议，
     不把先前接受的模型资料当作不可质疑的真值；人工锁定仍不得覆盖。
-""".strip()
+""".strip() + "\n" + NONPERSON_POLICY
 
 
 def escape_data_markers(text: str) -> str:

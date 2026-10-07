@@ -9,6 +9,7 @@ from pydantic import Field
 
 from ndr.domain.common import ApiModel
 from ndr.evaluation.compact import DiscoveredCharacter
+from ndr.llm.nonperson_policy import NONPERSON_POLICY
 from ndr.scenes.acceptance import decide_acceptance
 
 from .enumerated_view import ENUMERATED_VIEW_POLICY
@@ -62,7 +63,7 @@ class ExplicitOwnerProtocol:
             "speech=现实发声，thought=心声，quotation=引用。三类都必须给character/basis/evidence。"
             "character是表达归属的人物，不因判为心声或引用就删除人物。"
             "心声归思考者；引用归原文能够明确支持的原表达者，不把文中被提到的人自动当表达者。"
-            "术语、假想无明确人物的引文保持character=null，不默认分配叙述者。"
+            "人物原话或假想话语的来源不明时保持character=null，不默认分配叙述者。"
             "人物只用已提供C或声明的新N；未知null/insufficient/[]。"
             "direct须引用目标以外明确支持人物归属的原文；coreference引用指代依据，response_link引用关联表达。"
             "同一个人物可以连续表达；动作人物、受话对象与叙述者不自动是表达者。"
@@ -75,6 +76,8 @@ class ExplicitOwnerProtocol:
             + EVIDENCE_VIEW_POLICY
             + "\n"
             + ENUMERATED_VIEW_POLICY
+            + "\n"
+            + NONPERSON_POLICY
             + "\n"
             + json.dumps(schema, ensure_ascii=False)
         )

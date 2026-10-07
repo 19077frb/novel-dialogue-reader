@@ -14,10 +14,10 @@ import { annotationStatusLabel } from '../ui/labels'
 const KINDS: { value: QuoteKind; label: string }[] = [
   { value: 'speech', label: '对白（发声）' },
   { value: 'thought', label: '心声' },
-  { value: 'quotation', label: '引用' },
+  { value: 'quotation', label: '人物原话引用' },
   { value: 'group', label: '集体声音' },
-  { value: 'other', label: '其他' },
-  { value: 'unknown', label: '未知类型' },
+  { value: 'other', label: '非人物文本（无需归属）' },
+  { value: 'unknown', label: '表达类型待确认' },
 ]
 
 const OWNER_KINDS = KINDS.filter((item) =>

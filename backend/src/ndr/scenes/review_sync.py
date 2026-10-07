@@ -11,6 +11,7 @@ from ..domain.enums import ReviewQueueStatus, ReviewReason
 from ..storage.models import Annotation, ReviewItem
 
 MODEL_REASONS = {ReviewReason.MODEL_OUTPUT_WARNING, ReviewReason.UNKNOWN_SPEAKER,
+                 ReviewReason.UNKNOWN_QUOTE_KIND, ReviewReason.UNKNOWN_QUOTE_SOURCE,
                  ReviewReason.LOW_CONFIDENCE,
                  ReviewReason.AMBIGUOUS_SPEAKER}
 ENGINE_REASONS = {"insufficient_evidence", "unknown_quote_kind", "style_only_basis",

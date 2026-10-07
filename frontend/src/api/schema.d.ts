@@ -3555,7 +3555,7 @@ export interface components {
          * ReviewReason
          * @enum {string}
          */
-        ReviewReason: "MODEL_OUTPUT_WARNING" | "LOW_CONFIDENCE" | "AMBIGUOUS_SPEAKER" | "UNKNOWN_SPEAKER" | "POSSIBLE_NEW_SPEAKER" | "SCENE_BOUNDARY" | "STALE_DEPENDENCY" | "USER_FLAGGED" | "OTHER";
+        ReviewReason: "MODEL_OUTPUT_WARNING" | "LOW_CONFIDENCE" | "AMBIGUOUS_SPEAKER" | "UNKNOWN_SPEAKER" | "UNKNOWN_QUOTE_KIND" | "UNKNOWN_QUOTE_SOURCE" | "POSSIBLE_NEW_SPEAKER" | "SCENE_BOUNDARY" | "STALE_DEPENDENCY" | "USER_FLAGGED" | "OTHER";
         /**
          * ReviewTargetType
          * @enum {string}

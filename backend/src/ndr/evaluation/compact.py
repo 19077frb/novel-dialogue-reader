@@ -16,11 +16,12 @@ from pydantic import Field
 from ..domain.common import ApiModel
 from ..domain.enums import Assignment, GapDecision, QuoteKind, SpeakerBasis
 from ..llm.errors import InvalidModelOutput
+from ..llm.nonperson_policy import NONPERSON_POLICY
 from ..llm.schemas import GapDecisionOut, LlmOutput, NewSpeaker, QuoteLabel, SceneUpdate
 from ..llm.validation import LabelingTargets, load_json_object, validate_output
 
 PROTOCOL_VERSION = "compact-attribution-2"
-PROMPT_VERSION = "compact-prompt-2"
+PROMPT_VERSION = "compact-prompt-3"
 COMPILER_VERSION = "scene-local-compiler-2"
 
 
@@ -174,6 +175,7 @@ class CompactTask:
             '{"labels":[{"q":"Q1","kind":"speech","character":"C1",'
             '"basis":"direct","evidence":["G1"]},{"q":"Q2","kind":"thought"}],'
             '"breaks":[],"new_characters":[],"needs_context":[]}\n'
+            + NONPERSON_POLICY + "\n"
             + json.dumps(CompactOutput.model_json_schema(), ensure_ascii=False)
         )
         if self.evidence_hints or self.relay:
