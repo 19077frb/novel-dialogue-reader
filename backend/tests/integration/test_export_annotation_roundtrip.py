@@ -99,12 +99,12 @@ def test_nested_thought_colors_and_owners_survive_epub_roundtrip(
     raw = _export(client, data["book_id"], _preview(client, data["book_id"])["snapshot_id"])
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         manifest = json.loads(archive.read("OEBPS/annotations.json"))
-        assert [entry["nesting_depth"] for entry in manifest["annotations"]] == [0, 1, 0]
+        assert [entry.get("nesting_depth", 0) for entry in manifest["annotations"]] == [0, 1, 0]
     if depth_metadata != "current":
         def change_depth(manifest):  # noqa: ANN001 - 测试回调
             if depth_metadata == "legacy":
                 manifest["annotations"] = [
-                    entry for entry in manifest["annotations"] if entry["nesting_depth"] == 0
+                    entry for entry in manifest["annotations"] if not entry.get("nesting_depth", 0)
                 ]
                 for entry in manifest["annotations"]:
                     entry.pop("nesting_depth", None)

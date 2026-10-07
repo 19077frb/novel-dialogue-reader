@@ -123,9 +123,6 @@ def build_annotations_manifest(
                 entry = {
                     "chapter_index": chapter_index,
                     "quote_text": normalize_for_match(quote_text),
-                    "nesting_depth": projection_payload.get("quote_depths", {}).get(
-                        run.quote_id, 0,
-                    ),
                     "speaker": key,
                     "kind": str(item.get("kind") or "other"),
                     "assignment": item.get("assignment"),
@@ -134,6 +131,9 @@ def build_annotations_manifest(
                     "source": str(item.get("source") or "MODEL"),
                     "stale": bool(item.get("stale")),
                 }
+                depth = projection_payload.get("quote_depths", {}).get(run.quote_id, 0)
+                if depth:
+                    entry["nesting_depth"] = depth
                 entries.append((start, entry))
     entries.sort(key=lambda pair: pair[0])
     manifest = {
