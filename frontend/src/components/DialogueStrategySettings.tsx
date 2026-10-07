@@ -15,22 +15,26 @@ export function DialogueStrategySettings({ value, onChange, disabled = false, di
     <label className="ndr-field">对白处理策略
       <select data-testid="dialogue-strategy" value={value} disabled={disabled} {...disabledHint(disabled && reason)}
         onChange={event => onChange(event.target.value as DialogueStrategy)}>
-        <option value="legacy">原有窗口流程</option>
+        <option value="legacy">分窗处理：精选上下文［默认·小窗口］</option>
         <optgroup label="完整对话块：整章优先，长章自动分窗（试验）">
-        <option value="complete-blocks">对话块：简短归属</option>
-        <option value="complete-blocks-review">对话块：独立复核</option>
-        <option value="complete-blocks-isolated">对话块：辅助信息隔离</option>
-        <option value="complete-blocks-isolated-review">对话块：辅助隔离与独立复核</option>
-        <option value="complete-blocks-isolated-feedback-review">对话块：人物反馈与独立复核</option>
+        <option value="complete-blocks">对话块：简短归属［较省用量］</option>
+        <option value="complete-blocks-review">对话块：独立复核［全窗复核］</option>
+        <option value="complete-blocks-isolated">对话块：辅助信息隔离［辅助容错］</option>
+        <option value="complete-blocks-isolated-review">对话块：辅助隔离与独立复核{rounds > 0 ? '［推荐·质量优先］' : '［需开启复核］'}</option>
+        <option value="complete-blocks-isolated-feedback-review">对话块：人物反馈与独立复核［额外人物检查］</option>
         </optgroup>
         <optgroup label="其他完整上下文方式（试验）">
-        <option value="complete">完整上下文：简短归属</option>
-        <option value="complete-review">完整上下文：独立复核裁决</option>
+        <option value="complete">完整上下文：简短归属［短范围·不分窗］</option>
+        <option value="complete-review">完整上下文：独立复核裁决［短范围·不分窗］</option>
         </optgroup>
       </select>
     </label>
     <DisabledHint reason={disabled && reason} />
     <DisabledHint reason={dialogueStrategyDisabledReason(value, rounds)} />
+    <p className="hint">怎么选：质量优先，建议选择“对话块：辅助隔离与独立复核”，并将复核次数设为至少 1。
+      想减少附加调用，可选择“对话块：简短归属”。已有选择不会自动更改。</p>
+    <p className="hint">推荐基于目前有限样本和流程能力，不代表所有书籍、模型上都最准确；模型支持时可配合高思考，需在思考设置中另行选择。
+      “较省用量”仅指相同输入与模型下省去独立复核、人物反馈等附加调用，不保证总 Token 最少；常规复核仍按复核次数执行，重试、思考和章节长度也会影响消耗。</p>
     <p className="hint" role="status">{value === 'legacy'
       ? '按较小窗口处理对白，使用预算内挑选的上下文。'
       : value.startsWith('complete-blocks')
@@ -39,6 +43,7 @@ export function DialogueStrategySettings({ value, onChange, disabled = false, di
       {value !== 'legacy' && ' 试验策略不保证更准确，也不会自动开启模型思考。'}
       {value.includes('-isolated') && ' 无效辅助信息单独隔离，主归属仍需通过校验。'}
       {value.endsWith('-review') && (rounds > 0 ? ` 最多 ${rounds} 轮复核，裁决与核验可能额外调用模型并消耗 Tokens。` : ' 复核次数为 0，独立复核已关闭。')}
+      {value === 'complete-blocks-isolated-feedback-review' && ' 人物反馈每窗额外调用一次模型，目前未证明有稳定质量收益。'}
     </p>
     <CollapsibleBlock title="策略区别与使用说明" defaultOpen={false}>
     {value === 'complete-blocks-isolated-feedback-review' && <p className="hint">每窗额外调用一次人物名单反馈，可提出遗漏人物、身份关联或第一视角问题；反馈不是事实，会交由独立复核与裁决判断，不直接修改全书人物或第一视角。需要至少 1 次复核，额外消耗 Tokens；任务详情可查看反馈分类和理由。</p>}
