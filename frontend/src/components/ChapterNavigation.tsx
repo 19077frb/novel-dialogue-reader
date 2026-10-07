@@ -4,6 +4,7 @@ import type { ChapterOut } from '../api/types'
 import { cancelChapterProcessing, retryChapterProcessing } from './BatchProcessor'
 import type { ChapterProcessingProgress, ChapterProcessingState } from './BatchProcessor'
 import { CollapsibleBlock } from './CollapsibleBlock'
+import { chapterFilterReason } from '../processing/chapterFilter'
 
 function chapterGroups(chapters: ChapterOut[]) {
   const groups: { key: string; volume: string | null; chapters: ChapterOut[] }[] = []
@@ -34,16 +35,17 @@ const STATE_LABELS: Record<ChapterProcessingState, string> = {
   processed: '已完成',
   failed: '失败',
   stopped: '已停止',
+  skipped: '自动跳过处理',
 }
 
-const SUMMARY_STATES = ['unprocessed', 'queued', 'roster', 'dialogue', 'processed', 'failed'] as const
+const SUMMARY_STATES = ['unprocessed', 'queued', 'roster', 'dialogue', 'processed', 'failed', 'skipped'] as const
 
 function VolumeProgressSummary({ volume, chapters, progressOf }: {
   volume: string
   chapters: ChapterOut[]
   progressOf: (chapter: ChapterOut) => ChapterProcessingProgress
 }) {
-  const counts = { unprocessed: 0, queued: 0, roster: 0, dialogue: 0, processed: 0, failed: 0 }
+  const counts = { unprocessed: 0, queued: 0, roster: 0, dialogue: 0, processed: 0, failed: 0, skipped: 0 }
   for (const chapter of chapters) {
     const state = progressOf(chapter).state
     counts[state === 'stopped' ? 'failed' : state] += 1
@@ -87,7 +89,13 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
   const effectiveProgress = (chapter: ChapterOut): ChapterProcessingProgress => {
     const manual = manualUpdates[chapter.id]
     chapter = manual?.source === chapter ? manual.saved : chapter
-    const recorded = processingStates[chapter.id]
+    const filterReason = chapterFilterReason(chapter.title, settings)
+    const original = processingStates[chapter.id]
+    const recorded = original?.state === 'skipped' && !filterReason ? undefined : original
+    if (filterReason && !recorded?.cancelRequested && !(recorded?.pendingTasks ?? 0)
+      && !['queued', 'roster', 'dialogue'].includes(recorded?.state ?? '')) {
+      return { state: 'skipped', completedWindows: 0, totalWindows: 0, error: filterReason }
+    }
     const manualStatus = chapter.processing_status_override === true
       || chapter.processing_status_override === false && !recorded?.manualStatusCleared
     return manualStatus
@@ -179,6 +187,7 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
             <span className="dialogue">处理对白</span>
             <span className="processed">已完成</span>
             <span className="failed">失败/已停止</span>
+            <span className="skipped">自动跳过处理</span>
           </p>
           {groups.map(group => group.volume ? (
             <CollapsibleBlock key={group.key} title={group.volume}

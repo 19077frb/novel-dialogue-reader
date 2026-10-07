@@ -3,6 +3,9 @@ import { estimateRange, dialogueStrategyDisabledReason } from '../api/jobs'
 import type { ProcessingPreferences } from './preferences'
 import { estimateRosterTokens } from './preferences'
 import { mapWithConcurrency } from './concurrency'
+import { getGeneralSettings } from '../settings/preferences'
+import { chapterFilterReason, normalizeChapterFilter } from './chapterFilter'
+import { automaticChapterFilter } from '../components/BatchProcessor'
 import { appendAutomaticProcessing, automaticAllowance, refreshAutomaticAllowance, canAppendAutomaticProcessing, hasBatchWork, hasUnresolvedChapterResult, isBatchRunning, requestBatchStop, runBatchProcessing } from '../components/BatchProcessor'
 
 interface AutoSession { spent: number; attempted: Set<string>; blocked: boolean; message: string; checked: string; revision: number }
@@ -46,7 +49,9 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
   if (planningBooks.has(bookId) || (activeBook && !appending) || (hasBatchWork() && !appending)
     || session.blocked || !preferences.profileId) return
   const revision = session.revision
-  const signature = JSON.stringify([bookVersionId, chapterId, lookAhead, preferences, revision])
+  const chapterFilter = automaticChapterFilter(bookId) ?? normalizeChapterFilter(getGeneralSettings())
+  const filterSignature = JSON.stringify(chapterFilter)
+  const signature = JSON.stringify([bookVersionId, chapterId, lookAhead, preferences, revision, chapterFilter])
   if (session.checked === signature) return
   const planningToken = Symbol('automatic-estimate')
   planningBooks.set(bookId, planningToken)
@@ -67,6 +72,7 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
     if (index < 0) return
     const requested = chapters.slice(index, index + Math.max(0, Math.min(100, lookAhead)) + 1)
     const selected = requested.filter(chapter => {
+      if (chapterFilterReason(chapter.title, chapterFilter)) return false
       if (chapter.dialogue_processed || session.attempted.has(`${bookVersionId}:${chapter.id}`)) return false
       if (hasUnresolvedChapterResult(bookId, bookVersionId, chapter.id)) {
         session.message = '本章请求结果尚不明确，请在预览与处理中查看任务详情后恢复。'
@@ -74,13 +80,18 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
       }
       return true
     })
-    if (selected.length === 0) { session.checked = signature; return }
+    if (selected.length === 0) {
+      const filtered = requested.filter(chapter => chapterFilterReason(chapter.title, chapterFilter)).length
+      if (filtered) session.message = `按过滤名单自动跳过处理 ${filtered} 章。`
+      session.checked = signature; return
+    }
     session.message = '正在估算当前章与后续章节（不消耗模型额度）…'
     const plans = await mapWithConcurrency(selected, 4, async chapter => ({ chapter,
       estimate: await estimateRange(bookId, { bookVersionId,
         range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp, dialogueStrategy: preferences.dialogueStrategy },
         readingMode: 'reread', budget: { maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: preferences.maxRecheckRounds } }) }))
     if (session.blocked || revision !== session.revision) return
+    if (filterSignature !== JSON.stringify(automaticChapterFilter(bookId) ?? normalizeChapterFilter(getGeneralSettings()))) return
     if (canAppendAutomaticProcessing(bookId, bookVersionId)) {
       let added = 0
       for (const plan of plans) {
@@ -107,7 +118,7 @@ export async function scheduleAutomaticProcessing(bookId: string, bookVersionId:
     session.message = `自动处理 ${selected.length} 章，预计约 ${estimated.toLocaleString()} Tokens。`
     // Release local-estimate admission while the shared model pool is running.
     releasePlanning()
-    await runBatchProcessing({ bookId, bookVersionId, requested, plans, preferences, expandable: true,
+    await runBatchProcessing({ bookId, bookVersionId, requested, plans, preferences, expandable: true, chapterFilter,
       initialSpent: session.spent, onUsage: spent => { session.spent = spent },
       onError: message => { session.blocked = Boolean(message); if (message) session.message = message },
       onProgress: message => { session.message = message }, onFinished })

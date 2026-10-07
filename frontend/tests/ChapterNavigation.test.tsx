@@ -14,6 +14,25 @@ const CHAPTERS = [
 
 describe('ChapterNavigation', () => {
   beforeEach(() => { vi.restoreAllMocks(); localStorage.clear() })
+  it('shows filtered chapters without changing completion, preserves active work and clears stale skipped states', () => {
+    updateGeneralSettings({ chapterFilterEnabled: true })
+    const chapters = [{ ...CHAPTERS[0], title: '封面', dialogue_processed: false },
+      { ...CHAPTERS[1], title: '彩页', dialogue_processed: false }]
+    const select = vi.fn()
+    const states = { c1: { state: 'skipped' as const, completedWindows: 0, totalWindows: 0, error: '旧过滤提示' },
+      c2: { state: 'roster' as const, completedWindows: 0, totalWindows: 1, pendingTasks: 1, error: null } }
+    const page = render(<ChapterNavigation bookId="b1" chapters={chapters} activeChapterId="c1" onSelect={select} processingStates={states} />)
+    expect(screen.getByText('封面').closest('button')).toHaveAttribute('data-processing-state', 'skipped')
+    expect(screen.getByText('彩页').closest('button')).toHaveAttribute('data-processing-state', 'roster')
+    expect(screen.getByRole('button', { name: '取消彩页的任务' })).toBeVisible()
+    fireEvent.click(screen.getByText('封面'))
+    expect(select).toHaveBeenCalledWith(chapters[0])
+    expect(chapters[0].dialogue_processed).toBe(false)
+    page.unmount()
+    updateGeneralSettings({ chapterFilterEnabled: false })
+    render(<ChapterNavigation chapters={chapters} activeChapterId="c1" onSelect={select} processingStates={states} />)
+    expect(screen.getByText('封面').closest('button')).toHaveAttribute('data-processing-state', 'unprocessed')
+  })
   it('卷目录可折叠，切换当前章自动展开所属卷，保留原章节选择', () => {
     const chapters = CHAPTERS.map((chapter, index) => ({ ...chapter,
       title: `${index < 2 ? '第一卷' : '第二卷'} · ${chapter.title}` }))

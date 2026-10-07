@@ -6,6 +6,7 @@ import { ThinkingSettings } from '../components/ThinkingSettings'
 import { DialogueStrategySettings } from '../components/DialogueStrategySettings'
 import { RosterRepairSettings } from '../components/RosterRepairSettings'
 import { ApplicationSettings } from '../components/ApplicationSettings'
+import { ChapterFilterSettings } from '../components/ChapterFilterSettings'
 import { useProcessingPreferences } from '../processing/preferences'
 import { getProcessingPreferences, getDefaultProcessingPreferences } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
@@ -57,6 +58,7 @@ export default function SettingsPage() {
         }
       }}>恢复人物资料更新默认值</button>
     </section>
+    <ChapterFilterSettings value={settings} onChange={update} />
     <section className="card" data-testid="automatic-processing-settings">
       <h3>自动提前处理章节</h3>
       <label><input type="checkbox" checked={settings.autoProcessing} onChange={event => {

@@ -22,7 +22,9 @@ import type { AnalyzeRosterInput } from '../api/characters'
 import type { CreateJobInput } from '../api/jobs'
 import { FormatRetrySetting } from './FormatRetrySetting'
 import { CollapsibleBlock } from './CollapsibleBlock'
-import { getGeneralSettings } from '../settings/preferences'
+import { getGeneralSettings, useGeneralSettings } from '../settings/preferences'
+import { chapterFilterReason, defaultChapterFilter, normalizeChapterFilter } from '../processing/chapterFilter'
+import type { ChapterFilter } from '../processing/chapterFilter'
 
 class BatchAbortError extends Error {}
 
@@ -45,6 +47,7 @@ export type ChapterProcessingState =
   | 'processed'
   | 'failed'
   | 'stopped'
+  | 'skipped'
 export interface ChapterProcessingProgress {
   state: ChapterProcessingState
   completedWindows: number
@@ -332,6 +335,11 @@ export function canAppendAutomaticProcessing(bookId: string, versionId: string) 
   return expandableBatches.get(bookId)?.automatic === true && expandableBatches.get(bookId)?.versionId === versionId && !batchStopRequests.has(bookId)
 }
 
+export function automaticChapterFilter(bookId: string): ChapterFilter | undefined {
+  const execution = batchExecutions.get(bookId)?.execution
+  return execution?.expandable && isBatchRunning(bookId) ? execution.chapterFilter ?? defaultChapterFilter() : undefined
+}
+
 /** Extend the existing pool, never start a second pool or reset its allowance. */
 export function appendAutomaticProcessing(bookId: string, versionId: string, plans: ChapterPlan[]): number {
   if (!canAppendAutomaticProcessing(bookId, versionId)) return 0
@@ -375,6 +383,8 @@ export async function retryBatchTask(bookId: string, taskId: string, wholeChapte
     if (book.active_version_id !== saved.execution.bookVersionId) throw new Error('书籍版本已改变，请重新进入预览与处理。')
     const chapter = chapters.find(item => item.id === task.chapterId)
     if (!chapter) throw new Error('章节已不存在，请重新读取目录。')
+    const filterReason = chapterFilterReason(chapter.title, getGeneralSettings())
+    if (filterReason) throw new Error(filterReason)
     const estimate = await estimateRange(bookId, { bookVersionId: saved.execution.bookVersionId,
       range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp, dialogueStrategy: saved.execution.preferences.dialogueStrategy }, readingMode: 'reread',
       budget: { maxInputTokens: null, maxOutputTokens: null, maxRecheckRounds: saved.execution.preferences.maxRecheckRounds,
@@ -642,6 +652,7 @@ interface BatchProcessorProps {
 }
 
 export interface BatchExecution {
+  chapterFilter?: ChapterFilter
   restoring?: boolean
   bookId: string
   bookVersionId: string
@@ -665,7 +676,8 @@ export interface BatchExecution {
 export async function runBatchProcessing(execution: BatchExecution) {
   const reason = dialogueStrategyDisabledReason(execution.preferences.dialogueStrategy, execution.preferences.maxRecheckRounds)
   if (reason) throw new Error(reason)
-  return withWorkflowLock(`processing:${execution.bookId}`, () => runBatchInternal(execution))
+  const chapterFilter = normalizeChapterFilter(execution.chapterFilter ?? getGeneralSettings())
+  return withWorkflowLock(`processing:${execution.bookId}`, () => runBatchInternal({ ...execution, chapterFilter }))
 }
 
 export function automaticAllowance(bookId: string) {
@@ -682,7 +694,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
   forceReprocess = false, initialSpent = 0, initialTotalSpent = initialSpent, initialUnknownRuns = 0,
   onUsage, onProgress = () => undefined,
   onError = () => undefined, onTokenLimit = () => undefined, onFinished = () => undefined, retryTaskId,
-  expandable = false, restoring = false }: BatchExecution) {
+  expandable = false, restoring = false, chapterFilter = defaultChapterFilter() }: BatchExecution) {
   if (isBatchRunning(bookId) && !restoring) throw new Error('本书已有批量任务运行，请先等待或停止。')
   const restoredSnapshot = restoring ? batchSnapshots.get(bookId) : undefined
   if (!restoring) { batchRequests.set(bookId, {}); accountedJobs.set(bookId, new Set()) }
@@ -692,7 +704,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
   requested = [...requested]
   plans = [...plans]
   const execution: BatchExecution = { bookId, bookVersionId, requested, plans, preferences: { ...preferences },
-    forceReprocess, onUsage, onProgress, onError, onTokenLimit, onFinished, expandable }
+    forceReprocess, onUsage, onProgress, onError, onTokenLimit, onFinished, expandable, chapterFilter }
   const savedExecution = { execution, spent: initialSpent, totalSpent: initialTotalSpent, unknownRuns: initialUnknownRuns }
   batchExecutions.set(bookId, savedExecution)
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
@@ -700,7 +712,8 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
   const setError = onError
   const setTokenLimitText = onTokenLimit
   const stopRef = { current: false }
-    const selectedPlans: ChapterPlan[] = plans.filter(({ chapter }) => forceReprocess || !chapter.dialogue_processed).map(plan => ({ ...plan,
+    const selectedPlans: ChapterPlan[] = plans.filter(({ chapter }) => !chapterFilterReason(chapter.title, chapterFilter)
+      && (forceReprocess || !chapter.dialogue_processed)).map(plan => ({ ...plan,
       cancelled: plan.cancelled || Boolean(restoredSnapshot?.stopRequested) || restoredSnapshot?.chapterStates[plan.chapter.id]?.state === 'stopped' || restoredSnapshot?.chapterStates[plan.chapter.id]?.cancelRequested }))
     selectedPlans.forEach(plan => chapterStopRequests.get(bookId)?.delete(plan.chapter.id))
     let tokenLimit = positiveIntegerOrNull(tokenLimitText)
@@ -762,11 +775,11 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
       chapterStates: { ...(retryTaskId ? batchSnapshots.get(bookId)?.chapterStates : {}), ...Object.fromEntries(requested.map((chapter) => {
         const plan = selectedPlans.find((item) => item.chapter.id === chapter.id)
         return [chapter.id, {
-          state: plan ? 'queued' : chapter.dialogue_processed ? 'processed' : 'unprocessed',
+          state: plan ? 'queued' : chapterFilterReason(chapter.title, chapterFilter) ? 'skipped' : chapter.dialogue_processed ? 'processed' : 'unprocessed',
           completedWindows: restoredSnapshot?.chapterStates[chapter.id]?.completedWindows ?? plan?.completedWindows ?? 0,
           totalWindows: plan?.totalWindows ?? plan?.estimate.windows?.length ?? 0,
           pendingTasks: plan ? (plan.estimate.windows?.length ?? 0) + (plan.reuseRoster ? 0 : 1) : 0,
-          error: null,
+          error: chapterFilterReason(chapter.title, chapterFilter),
           manualStatusCleared: true,
           ...restoredSnapshot?.chapterStates[chapter.id],
         } satisfies ChapterProcessingProgress]
@@ -811,7 +824,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         || task.state === 'failed' && !task.retryable).map(task => task.chapterId))
       const seen = new Set(selectedPlans.filter(plan => !plan.cancelled || runningChapters.has(plan.chapter.id)).map(plan => plan.chapter.id))
       const fresh = additions.filter(plan => {
-        if (plan.chapter.dialogue_processed || seen.has(plan.chapter.id)) return false
+        if (chapterFilterReason(plan.chapter.title, chapterFilter) || plan.chapter.dialogue_processed || seen.has(plan.chapter.id)) return false
         seen.add(plan.chapter.id)
         return true
       })
@@ -1151,7 +1164,9 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
 
     try {
       if (selectedPlans.length === 0) {
-        const message = `所选 ${requested.length} 章均已处理，无需重复调用模型。`
+        const filtered = requested.filter(chapter => chapterFilterReason(chapter.title, chapterFilter)).length
+        const message = filtered ? `自动跳过处理 ${filtered} 章，其余章节已处理；本次无需调用模型。`
+          : `所选 ${requested.length} 章均已处理，无需重复调用模型。`
         setProgress(message)
         publishBatch(bookId, { running: false, stopRequested: false, message })
         onFinished()
@@ -1212,9 +1227,11 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
       )
       if (abortOutcome?.status === 'rejected') throw abortOutcome.reason
       const selectedCount = new Set(selectedPlans.map(plan => plan.chapter.id)).size
-      const skipped = requested.length - selectedCount
+      const filteredCount = requested.filter(chapter => chapterFilterReason(chapter.title, chapterFilter)).length
+      const skipped = requested.length - selectedCount - filteredCount
       const succeededCount = selectedCount - failedChapterIds.size - skippedEmptyChapterIds.size - cancelledChapterIds.size
-      const emptySummary = (skippedEmptyChapterIds.size ? `，跳过无人物章节 ${skippedEmptyChapterIds.size} 章` : '')
+      const emptySummary = (filteredCount ? `，按名单自动跳过 ${filteredCount} 章` : '')
+        + (skippedEmptyChapterIds.size ? `，跳过无人物章节 ${skippedEmptyChapterIds.size} 章` : '')
         + (cancelledChapterIds.size ? `，已取消 ${cancelledChapterIds.size} 章` : '')
       const summary = failedChapterIds.size > 0
         ? `批量处理结束：成功 ${succeededCount} 章，失败 ${failedChapterIds.size} 章${emptySummary}${skipped ? `，跳过已处理 ${skipped} 章` : ''}，${usageLabel()}。`
@@ -1259,6 +1276,8 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const [startId, setStartId] = useState('')
   const [endId, setEndId] = useState('')
   const [preferences, setPreferences] = useProcessingPreferences()
+  const [filterSettings] = useGeneralSettings()
+  const filterSignature = JSON.stringify(normalizeChapterFilter(filterSettings))
   const { profileId, maxRecheckRounds, maxFormatRetries, concurrency } = preferences
   const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, maxRecheckRounds)
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
@@ -1298,7 +1317,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       setEstimatedTokens(null)
       setPlans([])
     }
-  }, [profileId, maxRecheckRounds, maxFormatRetries, tokenLimitText, running, preferences.dialogueStrategy, preferences.rosterRepairEnabled, preferences.maxRosterRepairs])
+  }, [profileId, maxRecheckRounds, maxFormatRetries, tokenLimitText, running, preferences.dialogueStrategy, preferences.rosterRepairEnabled, preferences.maxRosterRepairs, filterSignature])
 
   const calculateEstimate = async () => {
     if (!validRange) return
@@ -1307,7 +1326,8 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     setProgress('')
     try {
       const requested = chapters.slice(startIndex, endIndex + 1)
-      const selected = requested.filter((chapter) => forceReprocess || !chapter.dialogue_processed)
+      const selected = requested.filter((chapter) => !chapterFilterReason(chapter.title, filterSettings)
+        && (forceReprocess || !chapter.dialogue_processed))
       const estimates = await mapWithConcurrency(
         selected, 4, (chapter) => estimateRange(bookId, {
           bookVersionId,
@@ -1318,7 +1338,8 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         }),
       )
       const currentPreferences = getProcessingPreferences()
-      if (currentPreferences.dialogueStrategy !== preferences.dialogueStrategy
+      if (JSON.stringify(normalizeChapterFilter(getGeneralSettings())) !== filterSignature
+        || currentPreferences.dialogueStrategy !== preferences.dialogueStrategy
         || currentPreferences.rosterRepairEnabled !== preferences.rosterRepairEnabled
         || currentPreferences.maxRosterRepairs !== preferences.maxRosterRepairs
         || currentPreferences.maxFormatRetries !== maxFormatRetries
@@ -1333,7 +1354,8 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         0,
       )
       setEstimatedTokens(estimates.reduce((total, estimate) => total + estimate.total_tokens, 0) + rosterReserve)
-      if (selected.length < requested.length) setProgress(`已跳过 ${requested.length - selected.length} 个已处理章节。`)
+      const filtered = requested.filter(chapter => chapterFilterReason(chapter.title, filterSettings)).length
+      if (selected.length < requested.length) setProgress(`自动跳过处理 ${filtered} 章，跳过已处理 ${requested.length - selected.length - filtered} 章。`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '批量 Token 估算失败')
     } finally {
@@ -1347,6 +1369,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     try {
       await runBatchProcessing({ bookId, bookVersionId,
         requested: chapters.slice(startIndex, endIndex + 1), plans, preferences, forceReprocess,
+        chapterFilter: normalizeChapterFilter(filterSettings),
         onProgress: setProgress, onError: setError, onTokenLimit: setTokenLimitText, onFinished })
     } finally { setRunning(false) }
   }
@@ -1489,6 +1512,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         <p className="hint">所选范围内的全部章节将重新识别人物和处理对白，保留人工确认或锁定的标注。</p>
       )}
       <p className="hint">并发数同时约束人物识别和对白窗口；设为 1 即按顺序处理，建议从 2 开始。</p>
+      {filterSettings.chapterFilterEnabled && <p className="hint">已启用章节过滤名单，匹配的章节会自动跳过处理，强制重做也不例外。<a href="/settings/general">调整过滤名单</a></p>}
       <div className="ndr-form-actions">
         <button type="button" className="ndr-primary" title={running ? '批量处理正在运行，请等待结束或先停止任务。' : estimating ? '正在估算 Token，请等待估算完成。' : !bookVersionId ? '书籍版本尚未读取，请先重新读取书籍。' : !validRange ? '请选择有效的开始和结束章节，结束章节不能早于开始章节。' : !profileId ? '请先选择模型配置，再估算和启动批量处理。' : strategyReason ?? undefined} disabled={running || estimating || !validRange || !profileId || !bookVersionId || Boolean(strategyReason)} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
           {running ? '批量处理中…' : estimating ? '正在估算…' : estimatedTokens === null ? '预估 Token' : '确认并开始批量处理'}

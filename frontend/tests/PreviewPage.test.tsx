@@ -552,6 +552,19 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('preview-notice')).toHaveTextContent('阅读标注')
   })
 
+  it('命中过滤名单时禁止人物分析与对白调用，但保留手动添加人物', async () => {
+    updateGeneralSettings({ chapterFilterEnabled: true, chapterFilterTerms: ['第一章'] })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview?chapterId=c1')
+    await screen.findByTestId('window-picker')
+    expect(screen.getByTestId('roster-analyze')).toBeDisabled()
+    expect(screen.getByTestId('roster-analyze')).toHaveAttribute('title', expect.stringContaining('自动跳过处理'))
+    expect(screen.getByTestId('preview-process')).toBeDisabled()
+    expect(screen.getByTestId('preview-run')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '手动添加人物' })).toBeEnabled()
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+  })
+
   it('单章正式处理按并发配置拆分所选窗口并在全覆盖后标记完成', async () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('annotation-span')

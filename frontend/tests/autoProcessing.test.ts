@@ -4,19 +4,42 @@ import * as jobs from '../src/api/jobs'
 import * as batch from '../src/components/BatchProcessor'
 import { autoMessage, notifyManualChapterStatus, resetAutomaticProcessing, scheduleAutomaticProcessing, stopAutomaticProcessing } from '../src/processing/autoProcessing'
 import { getProcessingPreferences } from '../src/processing/preferences'
+import { updateGeneralSettings } from '../src/settings/preferences'
 
 vi.mock('../src/api/books', () => ({ fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn() }))
 vi.mock('../src/api/jobs', async importOriginal => ({ ...await importOriginal<typeof import('../src/api/jobs')>(), estimateRange: vi.fn() }))
-vi.mock('../src/components/BatchProcessor', () => ({ automaticAllowance: vi.fn(), refreshAutomaticAllowance: vi.fn(), appendAutomaticProcessing: vi.fn(), canAppendAutomaticProcessing: vi.fn(), hasBatchWork: vi.fn(), hasUnresolvedChapterResult: vi.fn(), isBatchRunning: vi.fn(), requestBatchStop: vi.fn(), runBatchProcessing: vi.fn() }))
+vi.mock('../src/components/BatchProcessor', () => ({ automaticChapterFilter: vi.fn(), automaticAllowance: vi.fn(), refreshAutomaticAllowance: vi.fn(), appendAutomaticProcessing: vi.fn(), canAppendAutomaticProcessing: vi.fn(), hasBatchWork: vi.fn(), hasUnresolvedChapterResult: vi.fn(), isBatchRunning: vi.fn(), requestBatchStop: vi.fn(), runBatchProcessing: vi.fn() }))
 const chapters = [0, 1, 2, 3].map(index => ({ id: `c${index}`, ordinal: index, title: `第${index}章`, start_cp: index * 100, end_cp: index * 100 + 100, dialogue_processed: index === 0 }))
 const preferences = { ...getProcessingPreferences(), profileId: 'p1', concurrency: 2, tokenLimit: null }
 beforeEach(() => {
+  localStorage.clear()
   vi.resetAllMocks()
   for (const id of ['b1', 'b2', 'b3']) resetAutomaticProcessing(id)
   vi.mocked(books.fetchProcessingStatus).mockResolvedValue({ active_jobs: 0 })
   vi.mocked(books.fetchChapters).mockResolvedValue(chapters)
   vi.mocked(jobs.estimateRange).mockResolvedValue({ total_tokens: 100, windows: [] } as never)
   vi.mocked(batch.runBatchProcessing).mockImplementation(async input => { input.onUsage?.(25); input.onFinished?.() })
+})
+
+it('filters automatic estimates and dispatch, and readmits skipped chapters when the filter is disabled', async () => {
+  updateGeneralSettings({ chapterFilterEnabled: true, chapterFilterTerms: ['第1章'] })
+  await scheduleAutomaticProcessing('b1', 'v1', 'c1', 0, preferences)
+  expect(autoMessage('b1')).toContain('自动跳过处理 1 章')
+  expect(jobs.estimateRange).not.toHaveBeenCalled()
+  expect(batch.runBatchProcessing).not.toHaveBeenCalled()
+  updateGeneralSettings({ chapterFilterEnabled: false })
+  await scheduleAutomaticProcessing('b1', 'v1', 'c1', 0, preferences)
+  expect(batch.runBatchProcessing).toHaveBeenCalledWith(expect.objectContaining({ plans: [expect.objectContaining({ chapter: chapters[1] })] }))
+})
+
+it('keeps the running automatic pool filter when saved settings change', async () => {
+  vi.mocked(batch.automaticChapterFilter).mockReturnValue({ chapterFilterEnabled: true, chapterFilterMode: 'contains', chapterFilterTerms: ['第1章'] })
+  vi.mocked(batch.canAppendAutomaticProcessing).mockReturnValue(true)
+  vi.mocked(batch.appendAutomaticProcessing).mockReturnValue(1)
+  await scheduleAutomaticProcessing('b1', 'v1', 'c1', 1, preferences)
+  expect(jobs.estimateRange).toHaveBeenCalledTimes(1)
+  expect(batch.appendAutomaticProcessing).toHaveBeenCalledWith('b1', 'v1', [expect.objectContaining({ chapter: chapters[2] })])
+  expect(batch.runBatchProcessing).not.toHaveBeenCalled()
 })
 
 it('selects the current and next N chapters, skips completed and attempted chapters, carries usage', async () => {
