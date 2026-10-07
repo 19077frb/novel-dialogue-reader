@@ -19,7 +19,7 @@ export function DialogueStrategySettings({ value, onChange, disabled = false, di
         <optgroup label="完整对话块：整章优先，长章自动分窗（试验）">
         <option value="complete-blocks">对话块：简短归属［较省用量］</option>
         <option value="complete-blocks-review">对话块：独立复核［全窗复核］</option>
-        <option value="complete-blocks-isolated">对话块：辅助信息隔离［不加复核］</option>
+        <option value="complete-blocks-isolated">对话块：辅助信息隔离［辅助容错］</option>
         <option value="complete-blocks-isolated-review">对话块：辅助隔离与独立复核{rounds > 0 ? '［推荐·质量优先］' : '［需开启复核］'}</option>
         <option value="complete-blocks-isolated-feedback-review">对话块：人物反馈与独立复核［额外人物检查］</option>
         </optgroup>
@@ -34,7 +34,7 @@ export function DialogueStrategySettings({ value, onChange, disabled = false, di
     <p className="hint">怎么选：质量优先，建议选择“对话块：辅助隔离与独立复核”，并将复核次数设为至少 1。
       想减少附加调用，可选择“对话块：简短归属”。已有选择不会自动更改。</p>
     <p className="hint">推荐基于目前有限样本和流程能力，不代表所有书籍、模型上都最准确；模型支持时可配合高思考，需在思考设置中另行选择。
-      “较省用量”仅指相同输入与模型下省去独立复核、人物反馈等附加调用，不保证总 Token 最少；重试、思考和章节长度仍会影响消耗。</p>
+      “较省用量”仅指相同输入与模型下省去独立复核、人物反馈等附加调用，不保证总 Token 最少；常规复核仍按复核次数执行，重试、思考和章节长度也会影响消耗。</p>
     <p className="hint" role="status">{value === 'legacy'
       ? '按较小窗口处理对白，使用预算内挑选的上下文。'
       : value.startsWith('complete-blocks')

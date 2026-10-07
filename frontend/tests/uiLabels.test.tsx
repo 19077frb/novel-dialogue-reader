@@ -43,6 +43,8 @@ describe('Chinese display labels and processing choices', () => {
     expect(screen.getByRole('option', { name: /较省用量/ })).toHaveValue('complete-blocks')
     expect(screen.getByText(/怎么选：质量优先/)).toBeVisible()
     expect(screen.getByText(/不保证总 Token 最少/)).toBeVisible()
+    expect(screen.getByText(/常规复核仍按复核次数执行/)).toBeVisible()
+    expect(screen.getByRole('option', { name: /辅助容错/ })).toHaveValue('complete-blocks-isolated')
     expect(screen.getByText(/目前有限样本/)).toBeVisible()
     expect(change).not.toHaveBeenCalled()
     expect([...select.querySelectorAll('option')].map(option => option.value)).toEqual([
