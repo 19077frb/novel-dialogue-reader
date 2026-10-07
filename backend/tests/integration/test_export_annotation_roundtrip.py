@@ -14,6 +14,7 @@ import io
 import json
 import zipfile
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -24,7 +25,7 @@ from fixtures.corrections import (
     run_deterministic_job,
     session_scope,
 )
-from ndr.storage.models import Annotation, BookCharacter, Chapter, Scene, SpeakerGroup
+from ndr.storage.models import Annotation, BookCharacter, Chapter, Quote, Scene, SpeakerGroup
 from ndr.storage.transactions import transaction
 
 
@@ -67,6 +68,60 @@ def _rewrite_manifest(epub_bytes: bytes, mutate) -> bytes:  # noqa: ANN001 - 测
                 payload = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
             target.writestr(info, payload)
     return output.getvalue()
+
+
+@pytest.mark.parametrize("depth_metadata", ["current", "legacy", "invalid"])
+def test_nested_thought_colors_and_owners_survive_epub_roundtrip(
+    fake_provider_client, depth_metadata,
+):
+    client = fake_provider_client
+    sample = "第一章\n「她想『明天见』，然后离开了。」\n『明天见』\n"
+    data = client.post("/api/books/import", files={
+        "file": ("nested-thought.txt", sample.encode(), "text/plain"),
+    }).json()["data"]
+    with transaction(client.app.state.session_factory) as session:
+        quotes = list(session.scalars(select(Quote).where(
+            Quote.book_version_id == data["book_version_id"],
+        ).order_by(Quote.start_cp)))
+        assert [quote.nesting_depth for quote in quotes] == [0, 1, 0]
+        scene = Scene(book_version_id=data["book_version_id"], start_cp=0, end_cp=len(sample))
+        session.add(scene)
+        session.flush()
+        for index, quote in enumerate(quotes):
+            group = SpeakerGroup(scene_id=scene.id, display_label=f"S{index + 1}",
+                                 canonical_name=f"人物{index + 1}", first_quote_id=quote.id)
+            session.add(group)
+            session.flush()
+            session.add(Annotation(quote_id=quote.id, scene_id=scene.id, kind="thought",
+                                   speaker_id=group.id, status="USER_CONFIRMED", source="USER",
+                                   assignment="EXISTING", basis="DIRECT", visible_from_cp=0))
+    original = annotations_of(client, data["book_id"], reading_mode="reread")["items"]
+    raw = _export(client, data["book_id"], _preview(client, data["book_id"])["snapshot_id"])
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        manifest = json.loads(archive.read("OEBPS/annotations.json"))
+        assert [entry["nesting_depth"] for entry in manifest["annotations"]] == [0, 1, 0]
+    if depth_metadata != "current":
+        def change_depth(manifest):  # noqa: ANN001 - 测试回调
+            if depth_metadata == "legacy":
+                manifest["annotations"] = [
+                    entry for entry in manifest["annotations"] if entry["nesting_depth"] == 0
+                ]
+                for entry in manifest["annotations"]:
+                    entry.pop("nesting_depth", None)
+            else:
+                manifest["annotations"][1]["nesting_depth"] = True
+        raw = _rewrite_manifest(raw, change_depth)
+    restored = client.post("/api/books/import", files={
+        "file": ("nested-restored.epub", raw, "application/epub+zip"),
+    })
+    assert restored.status_code == 202, restored.text
+    actual = annotations_of(client, restored.json()["data"]["book_id"], reading_mode="reread")["items"]
+    fields = ("label", "color_index", "kind")
+    if depth_metadata != "current":
+        original = [row for row in original if row["label"] != "人物2"]
+    assert sorted(tuple(row[key] for key in fields) for row in actual) == sorted(
+        tuple(row[key] for key in fields) for row in original
+    )
 
 
 def test_revealed_names_and_merge_visibility_survive_epub_roundtrip(

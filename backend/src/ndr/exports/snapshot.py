@@ -24,12 +24,13 @@ from ..storage.models import (
     Chapter,
     ExportSnapshot,
     IdentityRevision,
+    Quote,
     Scene,
     SpeakerGroup,
 )
 from .identities import IDENTITY_SNAPSHOT_VERSION, freeze_identity
 
-EXPORT_SNAPSHOT_VERSION = "export-snapshot-3"
+EXPORT_SNAPSHOT_VERSION = "export-snapshot-4"
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,11 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
         ).scalars()
     ]
     payload = projection.model_dump(mode="json", exclude={"pending_review_quotes"})
+    payload["quote_depths"] = dict(session.execute(
+        select(Quote.id, Quote.nesting_depth).where(
+            Quote.id.in_([item.quote_id for item in projection.items] or [""]),
+        ),
+    ).all())
     # Internal snapshot metadata is never sent by the reader API. Position-safe
     # exports must not bundle hidden future names even in the machine manifest.
     import json

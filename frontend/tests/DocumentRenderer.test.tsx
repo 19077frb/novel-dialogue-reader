@@ -250,6 +250,42 @@ describe('DocumentRenderer 标注投影', () => {
     expect(span).toHaveTextContent('「雨停了。」')
   })
 
+  it.each(['speech', 'thought', 'quotation'] as const)('%s按同一人物显示颜色、标签、说明和确认入口', kind => {
+    const onQuoteClick = vi.fn()
+    const view = render(<DocumentRenderer bookId="b1" nodes={[node]}
+      annotations={[annotation({ kind, label: '沙季' })]} onQuoteClick={onQuoteClick} />)
+    const span = screen.getByTestId('annotation-span')
+    expect(span).toHaveClass('ndr-annotation')
+    expect(span.style.color).toBeTruthy()
+    expect(span.title).toBe('沙季：戴着红围巾的女同学')
+    expect(within(span).getByTestId('annotation-label')).toHaveTextContent('〔沙季〕')
+    fireEvent.click(span)
+    expect(onQuoteClick).toHaveBeenCalledWith('q1')
+    view.rerender(<DocumentRenderer bookId="b1" nodes={[node]}
+      annotations={[annotation({ kind, withheld: true, label: null, color_index: null })]} />)
+    expect(screen.queryByTestId('annotation-span')).not.toBeInTheDocument()
+    view.rerender(<DocumentRenderer bookId="b1" nodes={[node]}
+      annotations={[annotation({ kind, status: 'UNKNOWN', speaker_group_id: null, label: null, color_index: null })]} />)
+    expect(screen.getByTestId('annotation-span').style.color).toBe('')
+    expect(screen.queryByTestId('annotation-label')).not.toBeInTheDocument()
+  })
+
+  it('内层心声使用自己的归属，外层颜色和原文不丢失', () => {
+    render(<DocumentRenderer bookId="b1" nodes={[node]} annotations={[
+      annotation({ end_cp: node.end_cp, label: '沙季' }),
+      annotation({ quote_id: 'inner', kind: 'thought', start_cp: 101, end_cp: 104,
+        label: '悠太', color_index: 1, speaker_description: '本章主人公' }),
+    ]} />)
+    const spans = screen.getAllByTestId('annotation-span')
+    const inner = spans.find(span => span.dataset.quoteId === 'inner')!
+    expect(inner.style.color).toBeTruthy()
+    expect(inner.style.color).not.toBe(spans[0].style.color)
+    expect(inner).toHaveTextContent('〔悠太〕雨停了')
+    expect(inner.title).toBe('悠太：本章主人公')
+    expect(screen.getAllByTestId('annotation-label')).toHaveLength(2)
+    expect(screen.getByTestId('document-renderer').textContent?.replace(/〔[^〕]+〕/g, '')).toBe(node.text)
+  })
+
   it('默认关闭，开启后按队列标记并保留说明，初读隐藏身份不隐藏待确认状态', () => {
     const pending = [{ quote_id: 'q1', start_cp: node.start_cp, end_cp: node.start_cp + 6 }]
     const view = render(<DocumentRenderer bookId="b1" nodes={[node]} pendingReviewQuotes={pending} annotations={[annotation({ status: 'PROVISIONAL' })]} />)

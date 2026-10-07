@@ -123,6 +123,9 @@ def build_annotations_manifest(
                 entry = {
                     "chapter_index": chapter_index,
                     "quote_text": normalize_for_match(quote_text),
+                    "nesting_depth": projection_payload.get("quote_depths", {}).get(
+                        run.quote_id, 0,
+                    ),
                     "speaker": key,
                     "kind": str(item.get("kind") or "other"),
                     "assignment": item.get("assignment"),
