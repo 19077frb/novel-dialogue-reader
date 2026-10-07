@@ -22,7 +22,7 @@ export const JOB_STATE_LABELS: Record<string, string> = {
   PARTIAL: '部分完成', COMPLETED: '已完成', FAILED: '失败',
   BUDGET_EXHAUSTED: '额度已用完', NEEDS_RECONCILIATION: '结果未知，需确认',
 }
-const JOB_KIND_LABELS: Record<string, string> = {
+export const JOB_KIND_LABELS: Record<string, string> = {
   IMPORT: '导入', INFERENCE: '对白归属', CHARACTER_ROSTER: '人物识别',
   CHARACTER_MERGE: '自动合并人物',
   RECHECK: '局部复核', RECOMPUTE: '重新计算', EXPORT: '导出',

@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../src/api/characters'
 import * as booksApi from '../src/api/books'
 import * as profilesApi from '../src/api/profiles'
+import * as jobsApi from '../src/api/jobs'
+import * as completion from '../src/processing/jobCompletion'
 import { updateProcessingPreferences } from '../src/processing/preferences'
 import type { CharacterDirectoryOut } from '../src/api/types'
 import CharactersPage from '../src/pages/CharactersPage'
@@ -17,8 +19,16 @@ vi.mock('../src/api/characters', () => ({
   startCharacterAutoMerge: vi.fn(), fetchLatestCharacterAutoMerge: vi.fn(),
 }))
 vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['profiles'] } }))
+vi.mock('../src/api/jobs', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/api/jobs')>(),
+  fetchTaskQueue: vi.fn().mockResolvedValue({ items: [], next_cursor: null }),
+}))
+vi.mock('../src/processing/jobCompletion', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/processing/jobCompletion')>(),
+  waitForJobCompletion: vi.fn(async job => ({ ...job, state: 'COMPLETED' })),
+}))
 vi.mock('../src/api/books', () => ({
-  fetchBook: vi.fn(), fetchChapters: vi.fn(), queryKeys: { book: (id: string) => ['book', id], chapters: (id: string) => ['chapters', id] },
+  fetchBook: vi.fn(), fetchJob: vi.fn(), fetchChapters: vi.fn(), queryKeys: { book: (id: string) => ['book', id], chapters: (id: string) => ['chapters', id] },
 }))
 
 const entries: CharacterDirectoryOut[] = [
@@ -36,6 +46,9 @@ const mergeResult = {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  localStorage.clear()
+  vi.mocked(jobsApi.fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  vi.mocked(completion.waitForJobCompletion).mockImplementation(async job => ({ ...job, state: 'COMPLETED' }))
   sessionStorage.clear()
   updateProcessingPreferences({ profileId: 'p1', tokenLimit: null, thinkingMode: 'default', thinkingEffort: 'default' })
   vi.mocked(booksApi.fetchBook).mockResolvedValue({ id: 'b1', title: '测试小说', active_version_id: 'v1' } as never)
@@ -296,7 +309,7 @@ describe('CharactersPage', () => {
     await screen.findByText('自动合并任务正在排队或运行，结束后才能重新配置。')
     expect(profile).toBeDisabled()
     expect(consent).toBeDisabled()
-    expect(api.startCharacterAutoMerge).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(api.startCharacterAutoMerge).toHaveBeenCalledTimes(1))
     expect(api.confirmCharacterAutoMerge).not.toHaveBeenCalled()
   })
 
@@ -343,9 +356,9 @@ describe('CharactersPage', () => {
     await userEvent.click(screen.getByLabelText('我同意调用模型生成合并建议（会消耗 Tokens）'))
     vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
     await userEvent.click(start)
-    expect(api.startCharacterAutoMerge).toHaveBeenCalledWith('b1', expect.objectContaining({
+    await waitFor(() => expect(api.startCharacterAutoMerge).toHaveBeenCalledWith('b1', expect.objectContaining({
       book_version_id: 'v1', profile_id: 'p1', max_total_tokens: null, run_now: true,
-    }))
+    })))
     await screen.findByText('合并了 1 个重复人物。')
     expect(screen.getByText(/悠太 → 浅村悠太/)).toHaveTextContent('别名和说明指向同一人')
     expect(screen.getByText('已知消耗 40 Tokens')).toBeInTheDocument()

@@ -80,6 +80,24 @@ class JobDetailOut(ApiModel):
     updated_at: str
 
 
+class TaskQueueItemOut(ApiModel):
+    id: str
+    kind: JobKind
+    state: JobState
+    book_id: str | None = None
+    book_title: str = ""
+    chapter_id: str | None = None
+    chapter_title: str = ""
+    selected_window_ids: list[str] | None = None
+    start_cp: int | None = None
+    end_cp: int | None = None
+    progress: dict[str, Any] = Field(default_factory=dict)
+    windows_total: int = 0
+    windows_done: int = 0
+    last_error: str | None = None
+    created_at: str
+
+
 class EstimateIn(ApiModel):
     book_version_id: str | None = None
     range: dict[str, Any] = Field(default_factory=dict)

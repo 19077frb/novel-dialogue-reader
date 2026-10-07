@@ -9,6 +9,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any, TypeVar
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 T = TypeVar("T")
@@ -47,6 +48,15 @@ def transaction(session_factory: sessionmaker[Session]) -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+@contextmanager
+def admission_transaction(session_factory: sessionmaker[Session]) -> Iterator[Session]:
+    """Serialize overlap checks and admission on SQLite, not model execution."""
+    with transaction(session_factory) as session:
+        if session.get_bind().dialect.name == "sqlite":
+            session.execute(text("BEGIN IMMEDIATE"))
+        yield session
 
 
 def check_version(instance: Any, expected_version: int | None) -> None:

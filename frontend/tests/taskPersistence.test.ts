@@ -38,6 +38,33 @@ function single(): SingleWorkflow {
       { windowId: 'w2', ordinal: '2', input: { ...input, selectedWindowIds: ['w2'], idempotencyKey: 'next-key' }, job: null, error: null },
     ] }
 }
+
+it('persists a stop received before POST acknowledgement and does not dispatch later windows', async () => {
+  const { runSingleWorkflow, stopSingleWorkflow } = await import('../src/processing/singleWorkflow')
+  const work = single()
+  work.tasks[0].job = null
+  let acknowledge!: (job: JobDetailOut) => void
+  api.createJob.mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve }))
+  api.pauseJob.mockResolvedValue({ ...completed('accepted'), state: 'PAUSED' })
+  const execution = runSingleWorkflow(work)
+  const ended = expect(execution).rejects.toThrow('安全停止')
+  await vi.waitUntil(() => api.createJob.mock.calls.length === 1)
+  await stopSingleWorkflow('b1')
+  expect(JSON.parse(localStorage.getItem('ndr:tasks:v1:single:b1')!).stopRequested).toBe(true)
+  acknowledge({ ...completed('accepted'), state: 'QUEUED' })
+  await ended
+  expect(api.pauseJob).toHaveBeenCalledWith('accepted')
+  expect(api.createJob).toHaveBeenCalledTimes(1)
+  expect(api.completeChapterProcessing).not.toHaveBeenCalled()
+})
+
+it('restores stopped single ranges by reads only without posting pending windows', async () => {
+  const { runSingleWorkflow } = await import('../src/processing/singleWorkflow')
+  const work = { ...single(), stopRequested: true }
+  await expect(runSingleWorkflow(work)).rejects.toThrow('安全停止')
+  expect(api.createJob).not.toHaveBeenCalled()
+  expect(api.fetchRecentJobs).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: 'next-key' }))
+})
 it('ignores missing-book records without reading details, creating jobs or removing old records', async () => {
   localStorage.setItem('ndr:tasks:v1:single:other-library', 'invalid legacy data')
   localStorage.setItem('ndr:tasks:v1:batch:deleted-book', 'invalid legacy data')

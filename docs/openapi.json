@@ -1775,6 +1775,93 @@
         }
       }
     },
+    "/api/jobs/queue": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "跨书籍任务队列（分页摘要，不读取调用归档）",
+        "operationId": "task_queue_route_api_jobs_queue_get",
+        "parameters": [
+          {
+            "name": "active_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Active Only"
+            }
+          },
+          {
+            "name": "book_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Book Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_CursorPage_TaskQueueItemOut__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/recent": {
       "get": {
         "tags": [
@@ -6318,6 +6405,34 @@
         ],
         "title": "CursorPage[QuoteOut]"
       },
+      "CursorPage_TaskQueueItemOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskQueueItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CursorPage[TaskQueueItemOut]"
+      },
       "DataEnvelope_AnnotationsResponse_": {
         "properties": {
           "data": {
@@ -6602,6 +6717,25 @@
           "request_id"
         ],
         "title": "DataEnvelope[CursorPage[QuoteOut]]"
+      },
+      "DataEnvelope_CursorPage_TaskQueueItemOut__": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CursorPage_TaskQueueItemOut_"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[CursorPage[TaskQueueItemOut]]"
       },
       "DataEnvelope_EstimateOut_": {
         "properties": {
@@ -10618,6 +10752,127 @@
         "additionalProperties": false,
         "type": "object",
         "title": "StaleReviewCleanupOut"
+      },
+      "TaskQueueItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/JobKind"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "book_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Id"
+          },
+          "book_title": {
+            "type": "string",
+            "title": "Book Title",
+            "default": ""
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "chapter_title": {
+            "type": "string",
+            "title": "Chapter Title",
+            "default": ""
+          },
+          "selected_window_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Window Ids"
+          },
+          "start_cp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Cp"
+          },
+          "end_cp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Cp"
+          },
+          "progress": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Progress"
+          },
+          "windows_total": {
+            "type": "integer",
+            "title": "Windows Total",
+            "default": 0
+          },
+          "windows_done": {
+            "type": "integer",
+            "title": "Windows Done",
+            "default": 0
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "created_at"
+        ],
+        "title": "TaskQueueItemOut"
       },
       "UndoOut": {
         "properties": {

@@ -602,7 +602,7 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('single-task-w2')).toHaveTextContent('等待派发')
     expect(await screen.findByTestId('job-panel')).toBeInTheDocument()
     expect(screen.getByTestId('preview-process')).toBeDisabled()
-    expect(screen.getByTestId('processing-mode-batch')).toBeDisabled()
+    expect(screen.getByTestId('processing-mode-batch')).toBeEnabled()
     expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
     expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
     const details = screen.getByTestId('single-task-details')
@@ -993,7 +993,7 @@ describe('PreviewPage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('batch-progress')).toHaveTextContent('成功 2 章，失败 1 章'),
     )
-    expect(screen.getByTestId('batch-error')).toHaveTextContent('2 章成功，1 章失败')
+    expect(screen.getByTestId('batch-error')).toHaveTextContent('成功 2 章，失败 1 章')
     const resultPanel = screen.getByTestId('batch-result-panel')
     expect(within(resultPanel).getByText('第一章人物识别失败')).toBeInTheDocument()
     expect(within(resultPanel).getByRole('columnheader', { name: '原因 / 错误详情' })).toBeInTheDocument()
@@ -1072,8 +1072,8 @@ describe('PreviewPage', () => {
     expect(within(panel).getAllByText('对白归属')).toHaveLength(2)
     expect(within(panel).getByText('窗口 1 · 1 句对白')).toBeInTheDocument()
     expect(within(panel).getByText('窗口 2 · 2 句对白')).toBeInTheDocument()
-    expect(screen.getByTestId('processing-mode-single')).toBeDisabled()
-    expect(screen.queryByTestId('batch-run')).not.toBeInTheDocument()
+    expect(screen.getByTestId('processing-mode-single')).toBeEnabled()
+    expect(screen.getByTestId('batch-run')).toBeInTheDocument()
 
     await userEvent.click(within(panel).getByTestId('batch-stop'))
     expect(within(panel).getByTestId('batch-progress-message')).toHaveTextContent('正在安全停止')
@@ -1085,7 +1085,7 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('batch-result-panel')).toBeInTheDocument()
     expect(screen.queryByTestId('batch-stop')).not.toBeInTheDocument()
     expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
-    expect(screen.getByTestId('batch-error')).toHaveTextContent('批量处理已停止')
+    expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理已停止')
   })
 
   it('批量处理会跳过回导后标记为已处理的章节', async () => {

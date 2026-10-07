@@ -694,6 +694,11 @@ def create_roster_job(
     if active_duplicate is not None:
         return active_duplicate, False
 
+    from ..jobs.occupancy import guard_active_target
+
+    guard_active_target(session, version.id, JobKind.CHARACTER_ROSTER,
+                        {"chapter_id": chapter.id})
+
     job = Job(
         kind=JobKind.CHARACTER_ROSTER,
         purpose=JobPurpose.NONE,

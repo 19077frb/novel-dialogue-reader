@@ -462,6 +462,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 跨书籍任务队列（分页摘要，不读取调用归档） */
+        get: operations["task_queue_route_api_jobs_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/recent": {
         parameters: {
             query?: never;
@@ -1991,6 +2008,13 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /** CursorPage[TaskQueueItemOut] */
+        CursorPage_TaskQueueItemOut_: {
+            /** Items */
+            items: components["schemas"]["TaskQueueItemOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
         /** DataEnvelope[AnnotationsResponse] */
         DataEnvelope_AnnotationsResponse_: {
             data: components["schemas"]["AnnotationsResponse"];
@@ -2120,6 +2144,15 @@ export interface components {
         /** DataEnvelope[CursorPage[QuoteOut]] */
         DataEnvelope_CursorPage_QuoteOut__: {
             data: components["schemas"]["CursorPage_QuoteOut_"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
+        /** DataEnvelope[CursorPage[TaskQueueItemOut]] */
+        DataEnvelope_CursorPage_TaskQueueItemOut__: {
+            data: components["schemas"]["CursorPage_TaskQueueItemOut_"];
             /**
              * Request Id
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
@@ -3800,6 +3833,51 @@ export interface components {
              */
             preserved_records: number;
         };
+        /** TaskQueueItemOut */
+        TaskQueueItemOut: {
+            /** Id */
+            id: string;
+            kind: components["schemas"]["JobKind"];
+            state: components["schemas"]["JobState"];
+            /** Book Id */
+            book_id?: string | null;
+            /**
+             * Book Title
+             * @default
+             */
+            book_title: string;
+            /** Chapter Id */
+            chapter_id?: string | null;
+            /**
+             * Chapter Title
+             * @default
+             */
+            chapter_title: string;
+            /** Selected Window Ids */
+            selected_window_ids?: string[] | null;
+            /** Start Cp */
+            start_cp?: number | null;
+            /** End Cp */
+            end_cp?: number | null;
+            /** Progress */
+            progress?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Windows Total
+             * @default 0
+             */
+            windows_total: number;
+            /**
+             * Windows Done
+             * @default 0
+             */
+            windows_done: number;
+            /** Last Error */
+            last_error?: string | null;
+            /** Created At */
+            created_at: string;
+        };
         /** UndoOut */
         UndoOut: {
             /**
@@ -4990,6 +5068,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_ChapterRosterOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    task_queue_route_api_jobs_queue_get: {
+        parameters: {
+            query?: {
+                active_only?: boolean;
+                book_id?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_CursorPage_TaskQueueItemOut__"];
                 };
             };
             /** @description Validation Error */

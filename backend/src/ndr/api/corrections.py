@@ -68,7 +68,7 @@ from ..ingest.query import active_version, get_book_or_404, load_canonical_text
 from ..jobs.scheduler import run_job
 from ..jobs.service import create_inference_job, job_detail
 from ..storage.models import Book, BookVersion, Gap, ModelProfile, Quote
-from ..storage.transactions import transaction
+from ..storage.transactions import admission_transaction, transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
 from .pagination import parse_limit
@@ -321,7 +321,7 @@ def recheck_quote_route(
     credentials = request.app.state.credentials
     factory = request.app.state.session_factory
 
-    with transaction(factory) as session:
+    with admission_transaction(factory) as session:
         quote = session.get(Quote, quote_id)
         if quote is None:
             raise ApiError.not_found("候选对白不存在", quote_id=quote_id)

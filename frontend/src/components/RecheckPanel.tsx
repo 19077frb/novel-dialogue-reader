@@ -122,7 +122,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
       >
         {busy ? '正在创建任务…' : '开始局部复核（调用模型）'}
       </button>
-      {currentJob && !TERMINAL_JOB_STATES.has(currentJob.state) && <p className="hint">复核任务正在运行，配置已固定；完成或停止后可调整并重新发起。</p>}
+      {currentJob && !TERMINAL_JOB_STATES.has(currentJob.state) && <p className="hint">该对白已有复核任务在任务队列中等待执行或正在执行，配置已固定；其他对白可另行添加。</p>}
       {error && (
         <p className="status-error" data-testid="recheck-error">
           {error}

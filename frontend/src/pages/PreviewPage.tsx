@@ -6,7 +6,6 @@ import { CollapsibleBlock } from '../components/CollapsibleBlock'
 import { annotationKeys, fetchAnnotations } from '../api/annotations'
 import {
   completeChapterProcessing,
-  setChapterProcessingStatus,
   fetchBook,
   fetchChapters,
   fetchContent,
@@ -23,7 +22,7 @@ import {
   type BudgetInput,
 } from '../api/jobs'
 import { fetchProfiles, profileKeys } from '../api/profiles'
-import type { AnnotationItemOut, ChapterOut, JobDetailOut } from '../api/types'
+import type { AnnotationItemOut, JobDetailOut } from '../api/types'
 import { BudgetForm } from '../components/BudgetForm'
 import { OperationTimer, useRequestClock } from '../components/OperationTimer'
 import { BatchProcessor, reconcileCompletedChapter, useBatchProgress } from '../components/BatchProcessor'
@@ -39,7 +38,8 @@ import { SpeakerLegend } from '../components/SpeakerLegend'
 import { UsageSummary } from '../components/UsageSummary'
 import { WindowPicker } from '../components/WindowPicker'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
-import { runSingleWorkflow, useSingleWorkflow } from '../processing/singleWorkflow'
+import { useSingleWorkflow } from '../processing/singleWorkflow'
+import { enqueueWork, useAdmissions, occupiedAdmissionKeys } from '../processing/workQueue'
 import type { SingleWorkflow } from '../processing/singleWorkflow'
 import { inferenceOptions, useProcessingPreferences } from '../processing/preferences'
 import { ThinkingSettings } from '../components/ThinkingSettings'
@@ -106,9 +106,6 @@ export default function PreviewPage() {
   const manuallySelectedJobRef = useRef<string | null>(null)
   const taskDetailRef = useRef<HTMLElement | null>(null)
   const [detailRequest, setDetailRequest] = useState(0)
-  const selectAutomaticJob = (id: string) => {
-    if (!manuallySelectedJobRef.current) setJobId(id)
-  }
   const showTaskDetails = (id: string) => {
     manuallySelectedJobRef.current = id
     setJobId(id)
@@ -127,6 +124,7 @@ export default function PreviewPage() {
   const [rosterConfirmed, setRosterConfirmed] = useState(false)
   const batchProgress = useBatchProgress(bookId)
   const singleProgress = useSingleWorkflow(bookId)
+  const admissions = useAdmissions()
   const restoredWindows = useRef(new Set<string>())
 
   const book = useQuery({
@@ -167,10 +165,6 @@ export default function PreviewPage() {
     const job = singleProgress.tasks.find(task => task.job && !TERMINAL_JOB_STATES.has(task.job.state))?.job
       ?? singleProgress.tasks.filter(task => task.job).at(-1)?.job
     if (job) { setCurrentJob(job); if (!manuallySelectedJobRef.current) setJobId(job.id) }
-    if (singleProgress.running) {
-      setProcessingMode('single')
-      setRange({ chapterId: singleProgress.chapterId, startCp: singleProgress.startCp, endCp: singleProgress.endCp })
-    }
     if (singleProgress.error) setError(singleProgress.error)
     const completed = singleProgress.tasks.filter(task => task.job?.state === 'COMPLETED' && !restoredWindows.current.has(task.job.id))
     if (completed.length) {
@@ -277,7 +271,7 @@ export default function PreviewPage() {
         budget,
       }, signal),
     enabled: Boolean(bookId) && rangeValid && range.chapterId !== null
-      && processingMode === 'single' && !batchProgress.running
+      && processingMode === 'single'
       && !dialogueStrategyDisabledReason(preferences.dialogueStrategy, budget.maxRecheckRounds),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
@@ -314,11 +308,6 @@ export default function PreviewPage() {
         throw new Error('没有选中当前章节的有效窗口，不能开始处理')
       }
       const selectedChapter = chapters.data?.find(chapter => chapter.id === range.chapterId)
-      if (mode === 'process' && selectedChapter?.processing_status_override != null && versionId && bookId) {
-        const saved = await setChapterProcessingStatus(bookId, selectedChapter.id, versionId, null)
-        queryClient.setQueryData<ChapterOut[]>(queryKeys.chapters(bookId), previous =>
-          previous?.map(chapter => chapter.id === saved.id ? saved : chapter))
-      }
       const totalEstimated = plannedWindows.reduce((total, window) => total + Math.max(1, Number(window.estimated_tokens) || 1), 0)
       const allocate = (limit: number | null, estimated: number) =>
         limit === null ? null : Math.max(1, Math.floor(limit * estimated / totalEstimated))
@@ -326,6 +315,7 @@ export default function PreviewPage() {
       const work: SingleWorkflow = {
         bookId: bookId!, versionId: versionId!, chapterId: range.chapterId,
         startCp: range.startCp, endCp: resolvedEnd, mode, concurrency, running: true, error: null,
+        clearManualStatus: mode === 'process' && selectedChapter?.processing_status_override != null,
         completeChapter: mode === 'process' && Boolean(range.chapterId) && (estimate?.windows ?? []).every(
           window => window.processing_status === 'completed' || selectedWindowIds.includes(String(window.window_id))),
         tasks: selected.map(window => ({
@@ -345,15 +335,15 @@ export default function PreviewPage() {
       }
       setError(null)
       setNotice(null)
-      return runSingleWorkflow(work)
+      await enqueueWork({ bookId: work.bookId, versionId: work.versionId,
+        bookTitle: book.data?.title,
+        title: `单章处理：${selectedChapter?.title ?? '自定义范围'}`,
+        keys: work.tasks.map(task => `dialogue:${work.chapterId}:${task.windowId}`),
+        payload: { type: 'single', work } })
     },
-    onSuccess: (job) => {
-      selectAutomaticJob(job.id)
-      setCurrentJob(job)
+    onSuccess: () => {
       setError(null)
-      setNotice(job.state === 'COMPLETED'
-        ? '任务完成：阅读标注已保存，返回阅读即可查看结果。'
-        : `任务结束于 ${SINGLE_TASK_LABELS[job.state] ?? job.state}，请在任务面板查看原因。`)
+      setNotice('已添加到任务队列，可继续选择其他章节或窗口。')
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : '创建任务失败'),
   })
@@ -403,14 +393,15 @@ export default function PreviewPage() {
   // 本章人物是逐句归属的前置：只有选中单一章节时才要求先确认名单与主人公；
   // 整本或自定义码点范围没有“本章”，后端也不会注入章节人物名单。
   const rosterRequired = range.chapterId !== null
-  const singleRunning = Boolean(singleProgress?.running) || jobMutation.isPending || singleTasks.some(
-    (task) => task.job && !TERMINAL_JOB_STATES.has(task.job.state),
-  ) || Boolean(currentJob && !TERMINAL_JOB_STATES.has(currentJob.state))
   const runBlockers: string[] = []
+  const selectedKeys = selectedWindowIds.map(id => `dialogue:${range.chapterId}:${id}`)
+  if (admissions.some(item => item.bookId === bookId && item.versionId === book.data?.active_version_id
+    && ['queued', 'running'].includes(item.phase) && occupiedAdmissionKeys(item).some(key => selectedKeys.includes(key)))) {
+    runBlockers.push('所选窗口已有任务在任务队列中等待执行或正在执行，请选择其他窗口或前往任务队列查看')
+  }
   if (filterReason) runBlockers.push(filterReason)
   const strategyReason = dialogueStrategyDisabledReason(preferences.dialogueStrategy, budget.maxRecheckRounds)
   if (strategyReason) runBlockers.push(strategyReason)
-  if (singleRunning) runBlockers.push('当前单章任务尚未结束，请等待或在任务面板停止')
   if (!singleProgress && recentJobs.isPending) runBlockers.push('正在读取已有任务')
   if (recentJobs.isError) runBlockers.push('已有任务读取失败，请重新读取后再处理')
   if (!rangeValid) runBlockers.push('处理范围无效')
@@ -484,7 +475,7 @@ export default function PreviewPage() {
               type="radio"
               name="processing-mode"
               checked={processingMode === 'single'}
-              disabled={batchProgress.running || singleRunning}
+              disabled={jobMutation.isPending}
               onChange={() => setProcessingMode('single')}
               data-testid="processing-mode-single"
             />
@@ -495,7 +486,7 @@ export default function PreviewPage() {
               type="radio"
               name="processing-mode"
               checked={processingMode === 'batch'}
-              disabled={batchProgress.running || singleRunning}
+              disabled={jobMutation.isPending}
               onChange={() => setProcessingMode('batch')}
               data-testid="processing-mode-batch"
             />
@@ -504,17 +495,17 @@ export default function PreviewPage() {
         </div>
       </section>
 
-      <ThinkingSettings disabled={batchProgress.running || singleRunning} profiles={profiles.data ?? []}
-        disabledReason="当前处理任务尚未结束；请等待完成或先停止任务，再切换处理方式及模型配置。"
+      <ThinkingSettings disabled={jobMutation.isPending} profiles={profiles.data ?? []}
+        disabledReason="正在保存本次任务，请稍后调整下一次处理的配置。"
         profileId={profileId} onProfileChange={setProfileId}
         profileTestId={processingMode === 'batch' ? 'batch-profile' : 'preview-profile'} />
       <DialogueStrategySettings value={preferences.dialogueStrategy} rounds={preferences.maxRecheckRounds}
-        disabled={batchProgress.running || singleRunning}
+        disabled={jobMutation.isPending}
         onChange={dialogueStrategy => setPreferences({ dialogueStrategy })} />
       <RosterRepairSettings preferences={preferences} onChange={setPreferences}
-        disabled={batchProgress.running || singleRunning} />
+        disabled={jobMutation.isPending} />
 
-      {processingMode === 'single' && !batchProgress.running && (
+      {processingMode === 'single' && (
         <>
 
       <section className="card ndr-preview-controls ndr-step-card">
@@ -656,7 +647,7 @@ export default function PreviewPage() {
       {singleTasks.length > 0 && (
         <section className="card" data-testid="single-task-progress">
           <h2>单章窗口任务进度</h2>
-          <p className="hint">提交后会先排队，再由后台执行。任务全部结束前不能新建任务；读取进度不会重新调用模型。</p>
+          <p className="hint">可继续添加其他章节或窗口；同一窗口已有任务时会提示。跨书籍进度可在上方“任务队列”查看。</p>
           <CollapsibleBlock title="单章任务明细" summary={`共 ${singleTasks.length} 个窗口；失败 ${singleTasks.filter(task => task.error || task.job?.state === 'FAILED').length} 个`}>
           <div className="ndr-table-wrap"><table>
             <thead><tr><th>窗口</th><th>状态</th><th>详情</th></tr></thead>

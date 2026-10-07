@@ -12,10 +12,18 @@ import type {
   JobRecoveryOut,
   ReadingMode,
   UsageOut,
+  TaskQueuePage,
 } from './types'
 
 export const jobKeys = {
   usage: (bookId: string) => ['usage', bookId] as const,
+}
+
+export function fetchTaskQueue(activeOnly = true, cursor?: string | null, signal?: AbortSignal, bookId?: string): Promise<TaskQueuePage> {
+  const params = new URLSearchParams({ active_only: String(activeOnly), limit: '50' })
+  if (cursor) params.set('cursor', cursor)
+  if (bookId) params.set('book_id', bookId)
+  return apiData<TaskQueuePage>(`/api/jobs/queue?${params}`, { signal })
 }
 
 export function fetchRecentJobs(input: { bookId?: string; versionId?: string; chapterId?: string; quoteId?: string; kind?: JobDetailOut['kind']; idempotencyKey?: string; limit?: number }, signal?: AbortSignal): Promise<JobDetailOut[]> {

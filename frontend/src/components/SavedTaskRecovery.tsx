@@ -5,14 +5,36 @@ import { fetchBooks, queryKeys } from '../api/books'
 import { restoreSavedSingles } from '../processing/singleWorkflow'
 import { restoreSavedBatches } from './BatchProcessor'
 import { ReadErrorNotice } from './ReadErrorNotice'
+import { pumpQueue } from '../processing/workQueue'
 
 /** Shared browser storage may belong to a different data directory on the same port. */
 export function SavedTaskRecovery() {
   const queryClient = useQueryClient()
   const [hasRecords] = useState(() => Object.keys(localStorage).some(key =>
-    key.startsWith('ndr:tasks:v1:batch:') || key.startsWith('ndr:tasks:v1:single:')))
+    key.startsWith('ndr:tasks:v1:batch:') || key.startsWith('ndr:tasks:v1:single:') || key === 'ndr:tasks:v1:admissions'))
   const restored = useRef(false)
   const [restoreError, setRestoreError] = useState<unknown>(null)
+  useEffect(() => {
+    const completed = (event: Event) => {
+      const id = (event as CustomEvent<{ bookId: string }>).detail.bookId
+      void queryClient.invalidateQueries({ queryKey: ['chapters', id] })
+      void queryClient.invalidateQueries({ queryKey: ['book-characters', id] })
+      void queryClient.invalidateQueries({ queryKey: ['character-directory', id] })
+      void queryClient.invalidateQueries({ queryKey: ['usage', id] })
+    }
+    window.addEventListener('ndr:queue-completed', completed)
+    const windowCompleted = (event: Event) => {
+      const { bookId, startCp, endCp } = (event as CustomEvent<{ bookId: string; startCp: number; endCp: number }>).detail
+      void queryClient.invalidateQueries({ predicate: query => query.queryKey[0] === 'annotations'
+        && query.queryKey[1] === bookId && Number(query.queryKey[2]) < endCp && Number(query.queryKey[3]) > startCp })
+      void queryClient.invalidateQueries({ queryKey: ['window-preview', bookId] })
+    }
+    window.addEventListener('ndr:window-completed', windowCompleted)
+    return () => {
+      window.removeEventListener('ndr:queue-completed', completed)
+      window.removeEventListener('ndr:window-completed', windowCompleted)
+    }
+  }, [queryClient])
   const books = useQuery({
     queryKey: ['task-recovery-books'],
     enabled: hasRecords,
@@ -38,6 +60,7 @@ export function SavedTaskRecovery() {
     try {
       restoreSavedBatches(books.data)
       restoreSavedSingles(books.data)
+      void pumpQueue(books.data)
       restored.current = true
       setRestoreError(null)
     } catch (error) { setRestoreError(error) }
