@@ -181,6 +181,46 @@ def test_nested_quotes_are_not_counted_as_unprocessed_targets(
     assert payload["counts"]["unprocessed_quotes"] == 1
 
 
+def test_owned_nested_thought_shares_color_and_respects_horizon(fake_provider_client):
+    client = fake_provider_client
+    sample = "第一章\n「她想『明天见』，然后离开了。」\n「明天见」\n"
+    data = client.post("/api/books/import", files={
+        "file": ("thought.txt", sample.encode(), "text/plain"),
+    }).json()["data"]
+    factory = client.app.state.session_factory
+    with transaction(factory) as session:
+        quotes = list(session.scalars(select(Quote).where(
+            Quote.book_version_id == data["book_version_id"],
+        ).order_by(Quote.start_cp)))
+        outer, inner, last = quotes
+        scene = Scene(book_version_id=data["book_version_id"], start_cp=0, end_cp=len(sample))
+        session.add(scene)
+        session.flush()
+        group = SpeakerGroup(scene_id=scene.id, display_label="S1", canonical_name="林雨",
+                             description="本章主人公", first_quote_id=outer.id)
+        session.add(group)
+        session.flush()
+        for quote, kind in [(outer, "speech"), (inner, "thought")]:
+            session.add(Annotation(quote_id=quote.id, scene_id=scene.id, kind=kind,
+                                   speaker_id=group.id, status="ACCEPTED", source="MODEL",
+                                   assignment="EXISTING", basis="DIRECT",
+                                   visible_from_cp=last.end_cp if quote is inner else 0))
+        inner_id, outer_id = inner.id, outer.id
+    url = f'/api/books/{data["book_id"]}/annotations'
+    initial = client.get(url, params={"reading_mode": "initial", "visible_horizon_cp": 0}).json()["data"]
+    by_id = {item["quote_id"]: item for item in initial["items"]}
+    assert by_id[inner_id]["withheld"] and by_id[inner_id]["label"] is None
+    assert by_id[inner_id]["color_index"] is None and not by_id[inner_id]["speaker_description"]
+    reread = client.get(url, params={"reading_mode": "reread"}).json()["data"]
+    by_id = {item["quote_id"]: item for item in reread["items"]}
+    assert by_id[inner_id]["kind"] == "thought"
+    assert by_id[inner_id]["label"] == by_id[outer_id]["label"] == "林雨"
+    assert by_id[inner_id]["color_index"] == by_id[outer_id]["color_index"]
+    assert by_id[inner_id]["speaker_description"] == "本章主人公"
+    assert reread["counts"]["unprocessed_quotes"] == 1
+    assert reread["counts"]["total"] == 2
+
+
 def test_projection_reports_unknown_without_colors(
     fake_provider_client: TestClient, migrated_settings: Settings
 ) -> None:

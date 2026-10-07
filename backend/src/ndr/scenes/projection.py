@@ -145,7 +145,9 @@ def build_projection(
         for row in session.execute(
             select(Quote).where(
                 Quote.book_version_id == book_version_id,
-                Quote.nesting_depth == 0,
+                or_(Quote.nesting_depth == 0, select(Annotation.id).where(
+                    Annotation.quote_id == Quote.id,
+                ).exists()),
                 Quote.start_cp < end_cp,
                 Quote.end_cp > start_cp,
             )
@@ -157,7 +159,6 @@ def build_projection(
             .join(Quote, Annotation.quote_id == Quote.id)
             .where(
                 Quote.book_version_id == book_version_id,
-                Quote.nesting_depth == 0,
                 Quote.start_cp < end_cp,
                 Quote.end_cp > start_cp,
             )
@@ -200,7 +201,9 @@ def build_projection(
         "unknown": 0,
         "stale": 0,
         "withheld": 0,
-        "unprocessed_quotes": max(0, len(quote_rows) - len(annotations)),
+        "unprocessed_quotes": len({
+            quote.id for quote in quote_rows.values() if quote.nesting_depth == 0
+        } - {annotation.quote_id for annotation in annotations}),
     }
     items: list[AnnotationItemOut] = []
     quote_count_by_identity: dict[str, int] = {}

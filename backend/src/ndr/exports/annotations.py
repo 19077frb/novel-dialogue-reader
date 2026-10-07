@@ -131,6 +131,9 @@ def build_annotations_manifest(
                     "source": str(item.get("source") or "MODEL"),
                     "stale": bool(item.get("stale")),
                 }
+                depth = projection_payload.get("quote_depths", {}).get(run.quote_id, 0)
+                if depth:
+                    entry["nesting_depth"] = depth
                 entries.append((start, entry))
     entries.sort(key=lambda pair: pair[0])
     manifest = {

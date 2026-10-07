@@ -3,7 +3,7 @@
 匹配规则：
 
 - 章节：优先「清单章节标题 + 最接近的下标」对齐，其次按下标；
-- 对白：在对应章节内，按清单顺序向前扫描**顶层候选引语**，找到第一条
+- 对白：在对应章节及嵌套层级内（旧清单默认顶层），按清单顺序扫描候选引语，找到第一条
   归一化后原文一致的对白；同一句重复出现时按出现次序一一对应；
 - 说话人：按色号键（``c0``、``c1``…）恢复分组；每章一个场景，同色号在场景内共享分组，
   分组带名字时跨场景共享颜色（与导出前的投影规则一致）。
@@ -105,17 +105,17 @@ def restore_annotations_from_manifest(
             **identity_stats,
         }
 
-    quotes_by_chapter: dict[str, list[tuple[Quote, str]]] = {}
-    top_level = list(
+    quotes_by_chapter: dict[tuple[str, int], list[tuple[Quote, str]]] = {}
+    quotes = list(
         session.execute(
             select(Quote)
-            .where(Quote.book_version_id == version.id, Quote.nesting_depth == 0)
+            .where(Quote.book_version_id == version.id)
             .order_by(Quote.start_cp)
         ).scalars()
     )
-    for quote in top_level:
+    for quote in quotes:
         if quote.chapter_id:
-            quotes_by_chapter.setdefault(quote.chapter_id, []).append(
+            quotes_by_chapter.setdefault((quote.chapter_id, quote.nesting_depth), []).append(
                 (quote, normalize_for_match(canonical_text[quote.start_cp : quote.end_cp]))
             )
 
@@ -123,7 +123,7 @@ def restore_annotations_from_manifest(
     scene_bounds: dict[str, list[int]] = {}
     groups: dict[tuple[str, str], SpeakerGroup] = {}
     used_labels: dict[str, set[str]] = {}
-    pointers: dict[str, int] = {}
+    pointers: dict[tuple[str, int], int] = {}
     restored = 0
     unmatched = 0
 
@@ -132,8 +132,13 @@ def restore_annotations_from_manifest(
         if chapter is None:
             unmatched += 1
             continue
-        quote_list = quotes_by_chapter.get(chapter.id, [])
-        pointer = pointers.get(chapter.id, 0)
+        depth = entry.get("nesting_depth", 0)
+        if not isinstance(depth, int) or isinstance(depth, bool) or depth < 0:
+            unmatched += 1
+            continue
+        key = (chapter.id, depth)
+        quote_list = quotes_by_chapter.get(key, [])
+        pointer = pointers.get(key, 0)
         quote = None
         expected = str(entry.get("quote_text") or "")
         match_pointer = pointer
@@ -146,7 +151,7 @@ def restore_annotations_from_manifest(
         if quote is None:
             unmatched += 1
             continue
-        pointers[chapter.id] = match_pointer
+        pointers[key] = match_pointer
 
         speaker = speakers.get(str(entry.get("speaker") or ""))
         group = None
