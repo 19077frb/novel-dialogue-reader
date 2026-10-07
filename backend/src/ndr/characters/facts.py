@@ -341,6 +341,8 @@ def _latest_field(facts, updates, kind, field):
 
 
 def _cohort_profile(rows):
+    from .names import prefer_complete_name
+
     facts = [(i, r) for i, r in rows if isinstance(r, CharacterIdentityFact)]
     updates = [(i, r) for i, r in rows if isinstance(r, IdentityProfileUpdate)]
     roles = [(i, r) for i, r in facts if r.kind == "designation"]
@@ -350,6 +352,13 @@ def _cohort_profile(rows):
         default=None,
     )
     name = chosen[1].value if chosen else None
+    # Explicit profile updates reset the candidate set. Do not pull a previous
+    # name back across a user's rename or across the visible evidence horizon.
+    cutoff = max((i for i, r in updates if r.field == "name"), default=-1)
+    for candidate in ((i, r) for i, r in facts if r.kind == "name" and i > cutoff):
+        if prefer_complete_name(name, candidate[1].value) != (name or ""):
+            chosen = candidate
+            name = candidate[1].value
     alias_update = max(
         ((i, r) for i, r in updates if r.field == "aliases"),
         key=lambda row: row[0],

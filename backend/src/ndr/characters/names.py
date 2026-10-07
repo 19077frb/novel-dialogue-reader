@@ -20,12 +20,25 @@ def is_role_name(value: str | None) -> bool:
 
 
 def revealed_name(current: str | None, proposed: str | None, *, locked: bool = False) -> str | None:
-    """Only upgrade a role to an explicitly proposed name, never infer one from alias order."""
+    """Upgrade a role or short name from a supported proposal, never from alias order."""
     proposed = (proposed or "").strip()
-    if (not locked and is_role_name(current) and valid_display_name(proposed)
-            and not is_role_name(proposed) and name_key(proposed) != name_key(current)):
+    if not locked and prefer_complete_name(current, proposed) != (current or "").strip():
         return proposed
     return None
+
+
+def prefer_complete_name(current: str | None, proposed: str | None) -> str:
+    """Choose a supported fuller name of one identity, not an arbitrary longer alias."""
+    current, proposed = (current or "").strip(), (proposed or "").strip()
+    if (not valid_display_name(proposed) or is_role_name(proposed)
+            or re.search(r"(?:同学|老师|先生|小姐|大人|前辈|哥哥|姐姐|师傅)$", proposed)):
+        return current
+    if not current or is_role_name(current):
+        return proposed
+    if (len(current) >= 2 and len(proposed) > len(current)
+            and (proposed.startswith(current) or proposed.endswith(current))):
+        return proposed
+    return current
 
 
 def name_key(value: str | None) -> str:

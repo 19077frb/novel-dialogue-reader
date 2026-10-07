@@ -66,6 +66,21 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('公共配色说明及全书锁定只出现一次，各人物保留禁用悬停', async () => {
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue({
+      job_id: 'merge-1', state: 'RUNNING', usage: {}, merged_count: 0, unknown_usage_runs: 0,
+      created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:01Z',
+    } as never)
+    renderPage()
+    await screen.findByText('自动合并：处理中')
+    expect(screen.getAllByText(/^颜色由程序生成，保存不调用模型/)).toHaveLength(1)
+    expect(screen.getAllByText('本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。')).toHaveLength(1)
+    for (const input of screen.getAllByLabelText('姓名')) {
+      expect(input).toBeDisabled()
+      expect(input).toHaveAttribute('title', '本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。')
+    }
+    expect(api.editBookCharacter).not.toHaveBeenCalled()
+  })
   it('可恢复自动配色，有未保存的人物资料时阻止改色并说明原因', async () => {
     vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(entries.map((row, index) => ({
       ...row, color_index: index === 0 ? 8 : index, preferred_color_index: index === 0 ? 8 : null,

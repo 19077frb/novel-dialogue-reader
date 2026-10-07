@@ -547,7 +547,7 @@ class FakeUnavailableSystem:
 
 def test_prompt_examples_use_original_names_without_rewriting_input_characters():
     assert LABELING_PROMPT_VERSION == "labeling-19"
-    assert ROSTER_PROMPT_VERSION == "roster-6"
+    assert ROSTER_PROMPT_VERSION == "roster-7"
     for prompt in (SYSTEM_PROMPT, ROSTER_SYSTEM_PROMPT):
         assert "林舟" in prompt and "周遥" in prompt
         assert all(

@@ -68,7 +68,7 @@ class IsolatedRepairPlan:
             "已修复的独立组也属于保留人物，不得再次改写。"
             "name/alias/designation不能填叙述者、本章第一人称或代词；"
             "视角身份只用pov_candidate及pov_evidence_refs表达，不必新增代称事实。"
-            "description可留空；填写时必须与description事实或其中文分号连接值一致。"
+            "有原文依据时给出一条简短description事实，description直接复用其value；无依据才留空。"
         )
         return task
 

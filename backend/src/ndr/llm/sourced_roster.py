@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import Field
 
 from ..characters.facts import CharacterIdentityFact, OriginalIdentitySnapshot
-from ..characters.names import valid_display_name
+from ..characters.names import prefer_complete_name, valid_display_name
 from ..domain.common import ApiModel
 from .schemas import RosterCharacter, RosterOutput
 
@@ -116,6 +116,21 @@ def _compile_output(output, original, lines, allowed_character_ids, source_ref):
                 source="model", source_ref=source_ref, accepted=False,
             ))
         compiled[person.temp_ref] = tuple(records)
+        # Only validated name facts can promote a short name. A description
+        # fallback reuses one supported fact, never a guessed or concatenated bio.
+        name = person.name
+        for fact in person.facts:
+            if fact.kind == "name":
+                name = prefer_complete_name(name, fact.value)
+        if name != person.name:
+            person.aliases = list(dict.fromkeys([
+                *person.aliases, person.name,
+            ]))
+            person.aliases = [value for value in person.aliases if value != name]
+            person.name = name
+            person.real_name = name
+        if not person.description and descriptions:
+            person.description = max(descriptions, key=len)
     return output, compiled
 
 
