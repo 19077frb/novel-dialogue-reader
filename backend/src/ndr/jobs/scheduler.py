@@ -1254,6 +1254,20 @@ def _dispatch_with_bounded_retry(
             save_run_archive(run, request_payload)
             run.state = InferenceRunState.DISPATCHED
             run_id = run.id
+            row = session.scalar(select(JobWindow).where(
+                JobWindow.job_id == job_id, JobWindow.window_id == window.window_id,
+            ))
+            if row is not None and row.state in {JobState.QUEUED, JobState.FAILED, JobState.PAUSED}:
+                row.state = JobState.RUNNING
+            job = session.get(Job, job_id)
+            if job is not None and job.state is JobState.RUNNING:
+                progress = _json_of(job.progress_json)
+                # Retain review details, and never undo an already saved window.
+                if (progress.get("stage") != "rechecking"
+                        or progress.get("window_id") != window.window_id):
+                    job.progress_json = json.dumps({
+                        **progress, "stage": "running", "window_id": window.window_id,
+                    })
             session.commit()
 
         started = time.perf_counter()

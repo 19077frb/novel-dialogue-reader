@@ -23,6 +23,7 @@ from ndr.storage.models import (
     BookVersion,
     InferenceRun,
     Job,
+    JobWindow,
     Quote,
     ResultCache,
     ReviewItem,
@@ -148,6 +149,39 @@ class StageAdapter(FakeProviderAdapter):
         if self.pause and len(self.calls) == self.pause[0]:
             self.pause[1]()
         return result
+
+
+@pytest.mark.parametrize("rounds", [0, 1])
+def test_window_is_running_during_initial_dispatch_and_review(fake_provider_client, rounds):
+    client = fake_provider_client
+    create, factory = prepare(client)
+    job = create(f"live-state-{rounds}")
+    with transaction(factory) as session:
+        row = session.get(Job, job["id"])
+        budget = json.loads(row.budget_json)
+        row.budget_json = json.dumps({**budget, "max_recheck_rounds": rounds})
+
+    class ObservingAdapter(StageAdapter):
+        async def generate_labels(self, payload):
+            with factory() as session:
+                current = session.get(Job, job["id"])
+                window = session.scalar(select(JobWindow).where(JobWindow.job_id == job["id"]))
+                assert current.state is JobState.RUNNING
+                assert window.state is JobState.RUNNING
+                progress = json.loads(current.progress_json)
+                assert progress["window_id"] == window.window_id
+                assert progress["stage"] == ("rechecking" if self.calls else "running")
+                if self.calls:
+                    assert progress["review_stage"] == "review:1"
+            return await super().generate_labels(payload)
+
+    adapter = ObservingAdapter(["林舟", "林舟"])
+    result = run_job(factory, client.app.state.settings, job_id=job["id"],
+                     adapter_factory=lambda *_: adapter)
+    assert result.state is JobState.COMPLETED, result.errors
+    assert len(adapter.calls) == 1 + rounds
+    with factory() as session:
+        assert session.scalar(select(JobWindow).where(JobWindow.job_id == job["id"])).state is JobState.COMPLETED
 
 
 @pytest.mark.parametrize("retries", [0, 1])
