@@ -25,7 +25,7 @@ it('keeps the dialogue strategy as a draft until save and restores it on reopeni
   page.unmount()
   renderWithProviders(<SettingsPage />)
   expect(screen.getByTestId('dialogue-strategy')).toHaveValue('complete-review')
-  expect(screen.getByText(/当前复核次数为 0/)).toBeInTheDocument()
+  expect(screen.getByText(/复核次数为 0，独立复核已关闭/)).toBeVisible()
 })
 it('keeps roster repair as a draft until save and restores the saved values', async () => {
   const page = renderWithProviders(<SettingsPage />)
