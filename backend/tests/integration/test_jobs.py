@@ -158,8 +158,9 @@ def test_short_protocol_rejects_unknown_version_before_creating_job(
         engine.dispose()
 
 
+@pytest.mark.parametrize("add_next_chapter_person", [False, True])
 def test_short_chapter_job_uses_confirmed_roster_without_eager_scene_slots(
-    fake_provider_client, migrated_settings,
+    fake_provider_client, migrated_settings, add_next_chapter_person,
 ):
     client = fake_provider_client
     data = _import(client)
@@ -180,7 +181,17 @@ def test_short_chapter_job_uses_confirmed_roster_without_eager_scene_slots(
         job = _create_job(client, data["book_id"], profile, key="short-confirmed-chapter",
             range={"chapter_id": chapter["id"], "start_cp": 0, "end_cp": cutoff,
                    "output_protocol": "expression-production-1"}, reading_mode="reread")
-        adapter = ShortJobAdapter()
+        class ChapterAdapter(ShortJobAdapter):
+            async def generate_labels(self, payload):
+                result = await super().generate_labels(payload)
+                if add_next_chapter_person and len(self.calls) == 1:
+                    with transaction(factory) as session:
+                        version = session.scalar(select(BookVersion))
+                        session.add(BookCharacter(book_version_id=version.id,
+                            canonical_name="后章新增人物", source="MODEL", user_confirmed=False))
+                return result
+
+        adapter = ChapterAdapter()
         outcome = _run_with_fake(migrated_settings, job["id"], adapter)
         assert outcome.state is JobState.COMPLETED, outcome.errors
         request = json.loads(adapter.calls[0]["payload"]["messages"][1]["content"])
@@ -189,6 +200,9 @@ def test_short_chapter_job_uses_confirmed_roster_without_eager_scene_slots(
         with factory() as session:
             groups = list(session.scalars(select(SpeakerGroup)))
             assert len(groups) == 1 and groups[0].character_id in people_ids
+            if add_next_chapter_person:
+                assert session.scalar(select(BookCharacter).where(
+                    BookCharacter.canonical_name == "后章新增人物"))
     finally:
         engine.dispose()
 
