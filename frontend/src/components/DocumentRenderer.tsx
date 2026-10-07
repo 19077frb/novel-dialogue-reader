@@ -162,14 +162,17 @@ function renderAnnotatedText(
           annotation.status === 'UNKNOWN'
             ? '证据不足：不指定说话人（无色无编号）'
             : annotation.speaker_description
-              ? `${label ?? '说话人'}：${annotation.speaker_description}`
-              : label ?? '说话人'
+              ? `${annotation.status === 'PROVISIONAL' ? '⚠ 候选人物，待确认。' : ''}${label ?? '说话人'}：${annotation.speaker_description}`
+              : `${annotation.status === 'PROVISIONAL' ? '⚠ 候选人物，待确认。' : ''}${label ?? '说话人'}`
         }
       >
         {showLabel ? (
           <span className="ndr-annotation-label" data-testid="annotation-label">
             {labelText(label)}
           </span>
+        ) : null}
+        {slice.start === annotation.start_cp && annotation.status === 'PROVISIONAL' ? (
+          <span className="status-warning" role="img" aria-label="候选人物，待确认" title="此人物尚未确认，请在待确认队列核对。">⚠</span>
         ) : null}
         {inner}
       </span>,

@@ -17,6 +17,7 @@ export const quoteKindLabel = (value: string): string => ({
 } as Record<string, string>)[value] ?? value
 
 export const reviewReasonLabel = (value: string): string => ({
+  MODEL_OUTPUT_WARNING: '模型结果校验警告',
   LOW_CONFIDENCE: '置信度低', AMBIGUOUS_SPEAKER: '说话人有歧义', UNKNOWN_SPEAKER: '无法确定说话人',
   POSSIBLE_NEW_SPEAKER: '可能是新说话人', SCENE_BOUNDARY: '场景边界待确认',
   STALE_DEPENDENCY: '人物或场景调整后需复核', USER_FLAGGED: '用户标记', OTHER: '其他',

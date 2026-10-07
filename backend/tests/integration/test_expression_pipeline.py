@@ -4,7 +4,7 @@ import json
 from copy import deepcopy
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from ndr.domain.enums import (
     AnnotationSource,
@@ -25,6 +25,7 @@ from ndr.storage.models import (
     Job,
     Quote,
     ResultCache,
+    ReviewItem,
     SpeakerGroup,
 )
 from ndr.storage.transactions import transaction
@@ -183,7 +184,7 @@ def test_primary_blank_evidence_retry_is_targeted_counted_and_strict(fake_provid
     result = run_job(
         factory, client.app.state.settings, job_id=job["id"], adapter_factory=lambda *_: adapter
     )
-    assert result.state is (JobState.COMPLETED if retries else JobState.FAILED), result.errors
+    assert result.state is JobState.COMPLETED, result.errors
     assert len(adapter.calls) == 1 + retries
     if retries:
         initial, corrected = (row["payload"]["messages"] for row in adapter.calls)
@@ -195,8 +196,98 @@ def test_primary_blank_evidence_retry_is_targeted_counted_and_strict(fake_provid
         runs = list(session.scalars(select(InferenceRun).where(InferenceRun.job_id == job["id"])))
         assert len(runs) == 1 + retries
         assert sum(json.loads(run.usage_json)["total_tokens"] for run in runs) == 30 * (1 + retries)
-        assert sum(run.state is InferenceRunState.FAILED for run in runs) == 1
-        assert bool(session.scalar(select(Annotation))) is bool(retries)
+        assert sum(run.state is InferenceRunState.FAILED for run in runs) == retries
+        assert len(list(session.scalars(select(Annotation)))) == 2
+        if not retries:
+            annotations = list(session.scalars(select(Annotation)))
+            assert sum(row.status is AnnotationStatus.PROVISIONAL for row in annotations) == 1
+            assert sum(row.status is AnnotationStatus.ACCEPTED for row in annotations) == 1
+            warning = session.scalar(select(ReviewItem))
+            assert warning.reason.value == "MODEL_OUTPUT_WARNING"
+            assert session.scalar(select(ResultCache)) is None
+
+
+def test_final_recovery_survives_refresh_and_valid_retry_resolves_warning(fake_provider_client):
+    client = fake_provider_client
+    create, factory = prepare(client, all_quotes=True, context_policy="context-chapter-2")
+    job = create("persist-local-warning")
+    with transaction(factory) as session:
+        stored = session.get(Job, job["id"])
+        stored.budget_json = json.dumps({"max_recheck_rounds": 1, "max_format_retries": 1})
+
+    class AlwaysBadOne(StageAdapter):
+        async def generate_labels(self, payload):
+            result = await super().generate_labels(payload)
+            result["labels"][0]["evidence"] = ["UNSENT"]
+            return result
+
+    adapter = AlwaysBadOne(["林舟"])
+    result = run_job(
+        factory, client.app.state.settings, job_id=job["id"], adapter_factory=lambda *_: adapter
+    )
+    assert result.state is JobState.COMPLETED
+    assert len(adapter.calls) == 2  # Format correction, no invalid-primary independent review.
+    with factory() as session:
+        warning = session.scalar(select(ReviewItem))
+        assert warning.reason.value == "MODEL_OUTPUT_WARNING"
+        warning_id = warning.id
+        assert session.scalar(select(ResultCache)) is None
+        runs = list(session.scalars(select(InferenceRun)))
+        assert sum(json.loads(run.usage_json)["total_tokens"] for run in runs) == 60
+        checkpoint = json.loads(session.get(Job, job["id"]).checkpoint_json)
+        assert "校验警告" in str(checkpoint["auxiliary_warnings"])
+    result = run_job(
+        factory, client.app.state.settings, job_id=job["id"], adapter_factory=lambda *_: adapter
+    )
+    assert result.state is JobState.COMPLETED
+    assert len(adapter.calls) == 2
+    valid = StageAdapter(["林舟"])
+    repair = create("replace-local-warning")
+    result = run_job(
+        factory, client.app.state.settings, job_id=repair["id"], adapter_factory=lambda *_: valid
+    )
+    assert result.state is JobState.COMPLETED, result.errors
+    with factory() as session:
+        assert session.get(ReviewItem, warning_id).queue_status.value == "RESOLVED"
+        assert all(row.status is AnnotationStatus.ACCEPTED for row in session.scalars(select(Annotation)))
+
+
+def test_recovered_candidate_does_not_replace_manually_locked_dialogue(fake_provider_client):
+    client = fake_provider_client
+    create, factory = prepare(client, all_quotes=True, context_policy="context-chapter-2")
+    seed = create("seed-locked-warning")
+    adapter = StageAdapter(["林舟"])
+    result = run_job(
+        factory, client.app.state.settings, job_id=seed["id"], adapter_factory=lambda *_: adapter
+    )
+    assert result.state is JobState.COMPLETED
+    with transaction(factory) as session:
+        first = session.scalar(select(Annotation).join(Quote).order_by(Quote.start_cp))
+        first.user_locked, first.status = True, AnnotationStatus.USER_CONFIRMED
+        quote_id, speaker_id = first.quote_id, first.speaker_id
+        session.execute(delete(ResultCache))
+    job = create("keep-locked-warning")
+    with transaction(factory) as session:
+        session.get(Job, job["id"]).budget_json = json.dumps(
+            {"max_recheck_rounds": 0, "max_format_retries": 0}
+        )
+
+    class BadLocked(StageAdapter):
+        async def generate_labels(self, payload):
+            raw = await super().generate_labels(payload)
+            raw["labels"][0]["evidence"] = ["UNSENT"]
+            return raw
+
+    bad = BadLocked(["许晴"])
+    result = run_job(
+        factory, client.app.state.settings, job_id=job["id"], adapter_factory=lambda *_: bad
+    )
+    assert result.state is JobState.COMPLETED
+    with factory() as session:
+        locked = session.scalar(select(Annotation).where(Annotation.quote_id == quote_id))
+        assert locked.user_locked and locked.status is AnnotationStatus.USER_CONFIRMED
+        assert locked.speaker_id == speaker_id
+        assert session.scalar(select(ReviewItem).where(ReviewItem.quote_id == quote_id)) is None
 
 
 @pytest.mark.parametrize(

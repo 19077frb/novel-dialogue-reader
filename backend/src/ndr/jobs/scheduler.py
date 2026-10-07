@@ -483,7 +483,7 @@ def _positions(inputs, window):  # noqa: ANN001, ANN202
 
 def _retain_auxiliary_warnings(job, warnings):
     """Keep bounded user-visible diagnostics across finalization and cache replay."""
-    if not _range_of(job).get("auxiliary_protocol"):
+    if not warnings:
         return
     checkpoint = _json_of(job.checkpoint_json)
     current = checkpoint.get("auxiliary_warnings", [])
@@ -503,6 +503,7 @@ def _apply_payload(
     cache_key: str,
     preserve_existing_candidates: bool = False,
     attribution_only: bool = False,
+    allow_partial: bool = False,
 ) -> tuple[bool, list[str], list[str], list[str]]:
     """校验并应用一次输出；成功时写缓存。
 
@@ -521,6 +522,7 @@ def _apply_payload(
         else raw
     )
     compilation = None
+    validation_warnings = {}
     cache_payload = payload
     expected_version = "1.0"
     if state.production_expression_task is not None:
@@ -551,7 +553,15 @@ def _apply_payload(
             if isinstance(raw, ReviewedExpression):
                 cache_payload = raw.cache_payload()
         except (ValueError, InvalidModelOutput, ValidationError) as exc:
-            return False, ["invalid_expression_output"], [str(exc)], []
+            if not allow_partial or isinstance(raw, ReviewedExpression):
+                return False, ["invalid_expression_output"], [str(exc)], []
+            from ..llm.expression_recovery import recover_expression_output
+
+            try:
+                recovery = recover_expression_output(payload, state.production_expression_task)
+            except (ValueError, InvalidModelOutput, ValidationError):
+                return False, ["invalid_expression_output"], [str(exc)], []
+            compilation, validation_warnings = recovery.compilation, recovery.warnings
         payload = compilation.output
         if (
             attribution_only
@@ -617,24 +627,29 @@ def _apply_payload(
         preserve_existing_candidates=preserve_existing_candidates,
         expected_schema_version=expected_version,
         acceptance_ceilings=compilation.acceptance_ceilings if compilation else None,
+        validation_warnings=validation_warnings,
     )
     if not result.validation_ok:
         return False, result.validation_codes, result.warnings, list(report.warnings)
-    ResultCacheStore(session).put(
-        cache_key=cache_key,
-        result_json=json.dumps(
-            cache_payload if compilation else report.output.model_dump(mode="json"),
-            ensure_ascii=False,
-        ),
-        schema_version=(
-            "expr-review-1" if isinstance(raw, ReviewedExpression) else PRODUCTION_CACHE_VERSION
+    if not validation_warnings:
+        ResultCacheStore(session).put(
+            cache_key=cache_key,
+            result_json=json.dumps(
+                cache_payload if compilation else report.output.model_dump(mode="json"),
+                ensure_ascii=False,
+            ),
+            schema_version=(
+                "expr-review-1" if isinstance(raw, ReviewedExpression) else PRODUCTION_CACHE_VERSION
+            ) if compilation else CACHE_SCHEMA_VERSION,
+            dependency_hash=window.dependency_hash,
+            created_run_id=run_id,
         )
-        if compilation
-        else CACHE_SCHEMA_VERSION,
-        dependency_hash=window.dependency_hash,
-        created_run_id=run_id,
-    )
     auxiliary_warnings = compilation.auxiliary_warnings if compilation else []
+    if validation_warnings:
+        auxiliary_warnings.append(
+            f"已保留有效对白归属；{len(validation_warnings)} 句存在校验警告，"
+            "可识别人物仅作为候选显示，请在待确认队列核对。"
+        )
     if isinstance(raw, ReviewedExpression):
         auxiliary_warnings.extend(raw.auxiliary_warnings)
     return True, [], [], [*reference_repairs, *auxiliary_warnings, *report.warnings]
@@ -1976,6 +1991,7 @@ def run_job(
                         raw=raw,
                         run_id=run_id,
                         cache_key=cache_key,
+                        allow_partial=attempt >= format_retry_limit,
                     )
                     if not ok:
                         run.state = InferenceRunState.FAILED

@@ -23,6 +23,7 @@ import { GapDecisionControls } from '../components/GapDecisionControls'
 import { QuoteDetailDrawer } from '../components/QuoteDetailDrawer'
 
 const REASONS: ReviewReason[] = [
+  'MODEL_OUTPUT_WARNING',
   'LOW_CONFIDENCE',
   'AMBIGUOUS_SPEAKER',
   'UNKNOWN_SPEAKER',
@@ -34,6 +35,7 @@ const REASONS: ReviewReason[] = [
 ]
 
 const REASON_LABELS: Record<ReviewReason, string> = {
+  MODEL_OUTPUT_WARNING: '模型结果校验警告',
   LOW_CONFIDENCE: '置信度低',
   AMBIGUOUS_SPEAKER: '说话人有歧义',
   UNKNOWN_SPEAKER: '无法确定说话人',
@@ -267,7 +269,7 @@ export default function ReviewPage() {
                 <div className="ndr-review-item-main">
                   <span className="ndr-badge">{quoteId ? '对白' : '场景边界'}</span>
                   {reasons.map((value) => (
-                    <span className="ndr-badge" key={value}>
+                    <span className={`ndr-badge${value === 'MODEL_OUTPUT_WARNING' ? ' status-warning' : ''}`} key={value}>
                       原因：{REASON_LABELS[value]}
                     </span>
                   ))}

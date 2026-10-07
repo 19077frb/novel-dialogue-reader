@@ -9899,6 +9899,7 @@
       "ReviewReason": {
         "type": "string",
         "enum": [
+          "MODEL_OUTPUT_WARNING",
           "LOW_CONFIDENCE",
           "AMBIGUOUS_SPEAKER",
           "UNKNOWN_SPEAKER",
