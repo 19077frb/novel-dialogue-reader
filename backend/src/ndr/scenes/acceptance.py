@@ -27,7 +27,7 @@ from ..domain.enums import (
 from ..llm.expression_contract import has_owner_contract
 from ..llm.schemas import QuoteLabel
 
-ACCEPTANCE_POLICY_VERSION = "acceptance-4"
+ACCEPTANCE_POLICY_VERSION = "acceptance-5"
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ def decide_acceptance(label: QuoteLabel, *, cold_start: bool = True) -> Acceptan
             status=UNKNOWN,
             reason="unknown_quote_kind",
             needs_review=True,
-            review_reason=ReviewReason.LOW_CONFIDENCE,
+            review_reason=ReviewReason.UNKNOWN_QUOTE_KIND,
         )
     if not has_owner_contract(label):
         # 旧非speech及新版集体/其他类型不携带单个人物归属。
@@ -63,7 +63,8 @@ def decide_acceptance(label: QuoteLabel, *, cold_start: bool = True) -> Acceptan
             status=UNKNOWN,
             reason="insufficient_evidence",
             needs_review=True,
-            review_reason=ReviewReason.UNKNOWN_SPEAKER,
+            review_reason=(ReviewReason.UNKNOWN_QUOTE_SOURCE
+                           if label.kind is QuoteKind.QUOTATION else ReviewReason.UNKNOWN_SPEAKER),
         )
     if basis is SpeakerBasis.STYLE_ONLY:
         return AcceptanceDecision(

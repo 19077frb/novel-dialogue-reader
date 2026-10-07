@@ -239,8 +239,8 @@ export function QuoteDetailDrawer({
             <dl className="ndr-drawer-annotation" data-testid="drawer-annotation">
               <dt>状态</dt>
               <dd title={data.annotation.status}>{annotationStatusLabel(data.annotation.status)}</dd>
-              <dt>编号</dt>
-              <dd>{data.annotation.label ?? '（没有编号）'}</dd>
+              <dt>{data.annotation.kind === 'other' ? '人物归属' : '编号'}</dt>
+              <dd>{data.annotation.kind === 'other' ? '无需归属' : data.annotation.label ?? '（没有编号）'}</dd>
               <dt>类型</dt>
               <dd title={data.annotation.kind}>{quoteKindLabel(data.annotation.kind)}</dd>
               <dt>锁定</dt>

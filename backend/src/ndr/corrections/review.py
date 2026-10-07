@@ -11,7 +11,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
@@ -23,7 +23,7 @@ from ..domain.corrections import (
     SceneGroupRefOut,
     SceneRefOut,
 )
-from ..domain.enums import ErrorCode, ReviewQueueStatus, ReviewReason
+from ..domain.enums import ErrorCode, QuoteKind, ReviewQueueStatus, ReviewReason
 from ..domain.quotes import QuoteDetailOut
 from ..storage.models import Annotation, Gap, Quote, ReviewItem, Scene, SpeakerGroup
 from .invalidator import upsert_review_item
@@ -84,14 +84,23 @@ def review_target_text(session: Session, item: ReviewItem, canonical_text: str) 
     return canonical_text[target.start_cp : target.end_cp]
 
 
-def review_item_out(item: ReviewItem, *, target_text: str = "") -> ReviewItemOut:
+def review_item_out(item: ReviewItem, *, target_text: str = "",
+                    kind: QuoteKind | None = None) -> ReviewItemOut:
+    reason = item.reason
+    data = load_json(item.candidates_json, {})
+    if item.queue_status is not ReviewQueueStatus.RESOLVED and isinstance(data, dict):
+        if reason is ReviewReason.LOW_CONFIDENCE and data.get("reason") == "unknown_quote_kind":
+            reason = ReviewReason.UNKNOWN_QUOTE_KIND
+        elif (reason is ReviewReason.UNKNOWN_SPEAKER and kind is QuoteKind.QUOTATION
+              and data.get("reason") == "insufficient_evidence"):
+            reason = ReviewReason.UNKNOWN_QUOTE_SOURCE
     return ReviewItemOut(
         id=item.id,
         target_type=item.target_type,
         quote_id=item.quote_id,
         gap_id=item.gap_id,
         target_text=target_text,
-        reason=item.reason,
+        reason=reason,
         queue_status=item.queue_status,
         candidates=load_json(item.candidates_json, {}),
         annotation_version=item.annotation_version,
@@ -106,6 +115,22 @@ def _version_scope(book_version_id: str):  # noqa: ANN202
     quote_ids = select(Quote.id).where(Quote.book_version_id == book_version_id)
     gap_ids = select(Gap.id).where(Gap.book_version_id == book_version_id)
     return or_(ReviewItem.quote_id.in_(quote_ids), ReviewItem.gap_id.in_(gap_ids))
+
+
+def _display_reason():
+    # Match the read-only compatibility mapping in review_item_out; no per-row reads.
+    data = case((func.json_valid(ReviewItem.candidates_json), ReviewItem.candidates_json),
+                else_="{}")
+    cause = func.json_extract(data, "$.reason")
+    active = ReviewItem.queue_status != ReviewQueueStatus.RESOLVED
+    return case(
+        (and_(active, ReviewItem.reason == ReviewReason.LOW_CONFIDENCE,
+              cause == "unknown_quote_kind"), ReviewReason.UNKNOWN_QUOTE_KIND.value),
+        (and_(active, ReviewItem.reason == ReviewReason.UNKNOWN_SPEAKER,
+              Annotation.kind == QuoteKind.QUOTATION, cause == "insufficient_evidence"),
+         ReviewReason.UNKNOWN_QUOTE_SOURCE.value),
+        else_=ReviewItem.reason,
+    )
 
 
 def review_counts(session: Session, book_version_id: str) -> ReviewItemCountsOut:
@@ -124,14 +149,17 @@ def review_counts(session: Session, book_version_id: str) -> ReviewItemCountsOut
         .where(scope)
         .group_by(ReviewItem.queue_status)
     ).all()
+    display_reason = _display_reason()
     reason_rows = session.execute(
-        select(ReviewItem.reason, func.count()).where(scope).group_by(ReviewItem.reason)
+        select(display_reason, func.count())
+        .outerjoin(Annotation, Annotation.quote_id == ReviewItem.quote_id)
+        .where(scope).group_by(display_reason)
     ).all()
     total_targets = session.scalar(select(func.count(func.distinct(target))).where(scope))
     return ReviewItemCountsOut(
         total=sum(count for _, count, _ in status_rows),
         by_status={status.value: count for status, count, _ in status_rows},
-        by_reason={reason.value: count for reason, count in reason_rows},
+        by_reason={str(reason): count for reason, count in reason_rows},
         targets_total=total_targets or 0,
         targets_by_status={status.value: targets for status, _, targets in status_rows},
     )
@@ -163,12 +191,14 @@ def list_review_items(
             ReviewItem,
             func.coalesce(Quote.start_cp, Gap.start_cp),
             func.coalesce(Quote.end_cp, Gap.end_cp),
+            Annotation.kind,
         )
         .outerjoin(
             Quote,
             ReviewItem.quote_id == Quote.id,
         )
         .outerjoin(Gap, ReviewItem.gap_id == Gap.id)
+        .outerjoin(Annotation, Annotation.quote_id == ReviewItem.quote_id)
         .where(_version_scope(book_version_id))
     )
     if chapter_id:
@@ -182,7 +212,7 @@ def list_review_items(
             )
         )
     if reason is not None:
-        stmt = stmt.where(ReviewItem.reason == reason)
+        stmt = stmt.where(_display_reason() == reason.value)
     if queue_status is not None:
         stmt = stmt.where(ReviewItem.queue_status == queue_status)
     if cursor:
@@ -192,8 +222,9 @@ def list_review_items(
     has_more = len(rows) > limit
     rows = rows[:limit]
     items = [
-        review_item_out(row, target_text=canonical_text[start:end] if start is not None else "")
-        for row, start, end in rows
+        review_item_out(row, target_text=canonical_text[start:end] if start is not None else "",
+                        kind=kind)
+        for row, start, end, kind in rows
     ]
     next_cursor = (
         encode_cursor([rows[-1][0].created_at.isoformat(), rows[-1][0].id])
@@ -226,7 +257,8 @@ def review_item_detail(
             context_after = canonical_text[gap.end_cp : gap.end_cp + 120]
     label_map = label_map_for_scene(session, scene.id) if scene is not None else {}
     return ReviewItemDetailOut(
-        item=review_item_out(item, target_text=review_target_text(session, item, canonical_text)),
+        item=review_item_out(item, target_text=review_target_text(session, item, canonical_text),
+                             kind=annotation.kind if annotation else None),
         annotation=annotation_out(annotation, label_map) if annotation is not None else None,
         scene=scene_ref_out(scene) if scene is not None else None,
         context_before=context_before,
@@ -286,7 +318,8 @@ def defer_review_item(session: Session, *, item: ReviewItem, note: str = "") -> 
         item.candidates_json = json.dumps(candidates, ensure_ascii=False)
     item.queue_status = ReviewQueueStatus.DEFERRED
     session.flush()
-    return review_item_out(item)
+    annotation = session.scalar(select(Annotation).where(Annotation.quote_id == item.quote_id))
+    return review_item_out(item, kind=annotation.kind if annotation else None)
 
 
 def build_quote_detail(
@@ -321,7 +354,8 @@ def build_quote_detail(
     )
     detail.annotation = annotation_out(annotation, label_map) if annotation is not None else None
     detail.scene = SceneRefOut(**scene_ref_out(scene)) if scene is not None else None
-    detail.review_items = [review_item_out(item) for item in items]
+    detail.review_items = [review_item_out(item, kind=annotation.kind if annotation else None)
+                           for item in items]
     detail.can_correct = True
     detail.scene_groups = (
         [

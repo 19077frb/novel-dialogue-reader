@@ -28,6 +28,15 @@ const GROUPS: SceneGroupRefOut[] = [
 ]
 
 describe('CorrectionForm', () => {
+  it('术语可改为非人物文本，不要求选择人物', async () => {
+    const onSubmit = vi.fn()
+    render(<CorrectionForm annotation={ANNOTATION} sceneGroups={GROUPS} sceneVersion={1} onSubmit={onSubmit} />)
+    await userEvent.selectOptions(screen.getByTestId('correction-action'), 'set_kind')
+    await userEvent.selectOptions(screen.getByTestId('correction-kind'), 'other')
+    expect(screen.getByRole('option', { name: '非人物文本（无需归属）' })).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('correction-submit'))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ action: 'set_kind', kind: 'other' }))
+  })
   it('显示当前版本，并把动作与期望版本一起提交（不调用模型）', async () => {
     const onSubmit = vi.fn()
     render(

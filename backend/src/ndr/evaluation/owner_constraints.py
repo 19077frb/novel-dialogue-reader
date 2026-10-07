@@ -52,7 +52,8 @@ class ConstrainedOwnerProtocol(ExplicitOwnerProtocol):
             self.system.rsplit("\n", 1)[0]
             + (
                 "人物evidence只表达人物归属依据，不是判定kind的依据。"
-                "无明确原表达者的引文仍可以判为quotation，但character=null时basis=insufficient、evidence=[]。\n"
+                "人物原话来源不明仍可判quotation，character=null时basis=insufficient、evidence=[]；"
+                "术语、标题和注释等非人物文本判other，不要求人物。\n"
             )
             + json.dumps(self.schema, ensure_ascii=False)
         )

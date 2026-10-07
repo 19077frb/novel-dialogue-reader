@@ -906,3 +906,56 @@ def test_recheck_creates_bounded_job_and_does_not_call_model_at_creation(
         json={"profile_id": "does-not-exist", "idempotency_key": "k-recheck-2"},
     )
     assert missing.status_code == 404
+
+
+def test_old_review_reasons_are_normalized_read_only_with_matching_filters(
+    fake_provider_client: TestClient, migrated_settings: Settings,
+) -> None:
+    from ndr.domain.enums import QuoteKind
+    from ndr.scenes.review_sync import sync_attribution_reviews
+
+    data = _prepare(fake_provider_client, migrated_settings)
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        annotations = list(session.scalars(select(Annotation)))[:3]
+        ids = []
+        for annotation, kind, reason, cause in zip(annotations,
+            (QuoteKind.QUOTATION, QuoteKind.UNKNOWN, QuoteKind.OTHER),
+            (ReviewReason.UNKNOWN_SPEAKER, ReviewReason.LOW_CONFIDENCE, ReviewReason.UNKNOWN_SPEAKER),
+            ("insufficient_evidence", "unknown_quote_kind", "insufficient_evidence"), strict=True):
+            for old in list(session.scalars(select(ReviewItem).where(ReviewItem.quote_id == annotation.quote_id))):
+                session.delete(old)
+            session.flush()
+            annotation.kind = kind
+            item = ReviewItem(target_type="quote", quote_id=annotation.quote_id, reason=reason,
+                              queue_status=ReviewQueueStatus.PENDING,
+                              candidates_json=json.dumps({"reason": cause}))
+            session.add(item)
+            session.flush()
+            ids.append(item.id)
+        session.add(ReviewItem(target_type="quote", quote_id=annotations[0].quote_id,
+                    reason=ReviewReason.USER_FLAGGED, queue_status=ReviewQueueStatus.PENDING,
+                    candidates_json='{"note":"保留"}'))
+        # New automatic acceptance closes superseded engine causes, not user flags.
+        sync_attribution_reviews(session, annotations[2], current_reason=None)
+        session.commit()
+    response = fake_provider_client.get(f"/api/books/{data['book_id']}/review-items").json()['data']
+    items = {item['id']: item for item in response['items']}
+    assert items[ids[0]]['reason'] == 'UNKNOWN_QUOTE_SOURCE'
+    assert items[ids[1]]['reason'] == 'UNKNOWN_QUOTE_KIND'
+    assert items[ids[2]]['queue_status'] == 'RESOLVED'
+    assert response['counts']['by_reason']['UNKNOWN_QUOTE_SOURCE'] == 1
+    for item_id, reason in zip(ids[:2], ('UNKNOWN_QUOTE_SOURCE', 'UNKNOWN_QUOTE_KIND'), strict=True):
+        filtered = fake_provider_client.get(f"/api/books/{data['book_id']}/review-items", params={'reason': reason}).json()['data']
+        assert [item['id'] for item in filtered['items']] == [item_id]
+        detail = fake_provider_client.get(f'/api/review-items/{item_id}').json()['data']
+        assert detail['item']['reason'] == reason
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        assert session.get(ReviewItem, ids[0]).reason is ReviewReason.UNKNOWN_SPEAKER
+        assert session.get(ReviewItem, ids[1]).reason is ReviewReason.LOW_CONFIDENCE
+        # The migrated database must also accept newly stored reason values.
+        for old_id, reason in zip(ids[:2], (ReviewReason.UNKNOWN_QUOTE_SOURCE,
+                                           ReviewReason.UNKNOWN_QUOTE_KIND), strict=True):
+            session.add(ReviewItem(target_type="quote",
+                        quote_id=session.get(ReviewItem, old_id).quote_id, reason=reason,
+                        queue_status=ReviewQueueStatus.PENDING, candidates_json='{}'))
+        session.flush()

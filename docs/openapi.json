@@ -10071,6 +10071,8 @@
           "LOW_CONFIDENCE",
           "AMBIGUOUS_SPEAKER",
           "UNKNOWN_SPEAKER",
+          "UNKNOWN_QUOTE_KIND",
+          "UNKNOWN_QUOTE_SOURCE",
           "POSSIBLE_NEW_SPEAKER",
           "SCENE_BOUNDARY",
           "STALE_DEPENDENCY",
