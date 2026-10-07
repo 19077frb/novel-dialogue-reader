@@ -615,17 +615,53 @@ export function requestBatchStop(bookId: string) {
 export function useBatchProgress(bookId: string | undefined): BatchProgressSnapshot {
   useEffect(() => { if (bookId && !batchSnapshots.has(bookId)) void restoreBatchProcessing(bookId) }, [bookId])
   return useSyncExternalStore(
-    (listener) => {
-      batchListeners.add(listener)
-      return () => batchListeners.delete(listener)
-    },
+    subscribeBatch,
     () => (bookId ? batchSnapshots.get(bookId) ?? EMPTY_BATCH : EMPTY_BATCH),
   )
 }
 
+const BATCH_JOURNAL_PREFIX = 'ndr:tasks:v1:batch:'
+
+/** Observe another tab; never copy its execution state or acquire its lock. */
+function receiveBatchSnapshot(key: string, raw: string | null) {
+  const bookId = key.slice(BATCH_JOURNAL_PREFIX.length)
+  if (!bookId) return
+  if (raw === null) {
+    batchSnapshots.delete(bookId)
+  } else {
+    try {
+      const saved = JSON.parse(raw) as SavedBatch
+      const next = saved.snapshot
+      if (saved.schema !== 1 || saved.execution?.bookId !== bookId || !next
+        || !Number.isFinite(next.startedAt) || !Number.isFinite(next.revision)
+        || !next.chapterStates || !next.annotationRevisions || !Array.isArray(next.tasks)) return
+      const current = batchSnapshots.get(bookId)
+      if (current && (next.startedAt < current.startedAt
+        || next.startedAt === current.startedAt && next.revision <= current.revision)) return
+      batchSnapshots.set(bookId, next)
+    } catch { return } // Do not dispatch work from damaged foreign records.
+  }
+  batchListeners.forEach(listener => listener())
+}
+
+function receiveBatchStorage(event: StorageEvent) {
+  if (event.storageArea && event.storageArea !== localStorage) return
+  if (event.key?.startsWith(BATCH_JOURNAL_PREFIX)) receiveBatchSnapshot(event.key, event.newValue)
+}
+
 function subscribeBatch(listener: () => void) {
+  if (batchListeners.size === 0) {
+    window.addEventListener('storage', receiveBatchStorage)
+    // Catch up after a period with no mounted progress consumers.
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(BATCH_JOURNAL_PREFIX)) receiveBatchSnapshot(key, localStorage.getItem(key))
+    }
+  }
   batchListeners.add(listener)
-  return () => batchListeners.delete(listener)
+  return () => {
+    batchListeners.delete(listener)
+    if (batchListeners.size === 0) window.removeEventListener('storage', receiveBatchStorage)
+  }
 }
 
 export function useBatchChapterProgress(bookId: string | undefined) {

@@ -70,6 +70,7 @@ export default function ReaderPage() {
   const batchChapterProgress = useBatchChapterProgress(bookId)
   const annotationRevisions = useBatchAnnotationRevisions(bookId)
   const catalogRevision = useBatchCatalogRevision(bookId)
+  const catalogRefreshTimer = useRef<number | null>(null)
   const documentRef = useRef<HTMLDivElement>(null)
   const [chapterId, setChapterId] = useState<string | null>(null)
   const [cursor, setCursor] = useState<string | null>(null)
@@ -94,12 +95,17 @@ export default function ReaderPage() {
     enabled: Boolean(bookId) && book.isSuccess,
   })
 
+  useEffect(() => () => {
+    if (catalogRefreshTimer.current !== null) window.clearTimeout(catalogRefreshTimer.current)
+    catalogRefreshTimer.current = null
+  }, [bookId])
+
   useEffect(() => {
-    if (!bookId || catalogRevision === 0) return
-    const timer = window.setTimeout(() => {
+    if (!bookId || catalogRevision === 0 || catalogRefreshTimer.current !== null) return
+    catalogRefreshTimer.current = window.setTimeout(() => {
+      catalogRefreshTimer.current = null
       void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId), exact: true })
     }, 400)
-    return () => window.clearTimeout(timer)
   }, [catalogRevision, bookId, queryClient])
 
   const content = useQuery({

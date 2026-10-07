@@ -119,6 +119,44 @@ function quotesFor(chapterId: string) {
 }
 
 describe('ReaderPage', () => {
+  it('同步异页完成状态且连续章节完成不会推迟目录刷新，普通进度不刷新正文目录', async () => {
+    batch.clearBatchProgress('b1')
+    const view = renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')
+    await screen.findByText(/第二章的正文/)
+    const initialCatalogCalls = vi.mocked(booksApi.fetchChapters).mock.calls.length
+    const initialContentCalls = vi.mocked(booksApi.fetchContent).mock.calls.length
+    const initialAnnotationCalls = vi.mocked(annotationsApi.fetchAnnotations).mock.calls.length
+    vi.useFakeTimers()
+    const startedAt = Date.now()
+    const send = (revision: number, catalogRevision: number) => {
+      const raw = JSON.stringify({ schema: 1, execution: { bookId: 'b1' }, snapshot: {
+        startedAt, revision, catalogRevision, tasks: [],
+        chapterStates: { c1: { state: 'processed', pendingTasks: 0, completedWindows: 1, totalWindows: 1, error: null } },
+        annotationRevisions: {},
+      } })
+      act(() => window.dispatchEvent(new StorageEvent('storage', { key: 'ndr:tasks:v1:batch:b1', newValue: raw })))
+    }
+    try {
+      send(1, 1)
+      expect(document.querySelector('[data-processing-state="processed"]')).not.toBeNull()
+      for (let i = 2; i <= 4; i++) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+        send(i, i)
+      }
+      expect(booksApi.fetchChapters).toHaveBeenCalledTimes(initialCatalogCalls)
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(booksApi.fetchChapters).toHaveBeenCalledTimes(initialCatalogCalls + 1)
+      send(5, 4) // Only task progress changed.
+      await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+      expect(booksApi.fetchChapters).toHaveBeenCalledTimes(initialCatalogCalls + 1)
+      expect(booksApi.fetchContent).toHaveBeenCalledTimes(initialContentCalls)
+      expect(annotationsApi.fetchAnnotations).toHaveBeenCalledTimes(initialAnnotationCalls)
+    } finally {
+      view.unmount()
+      batch.clearBatchProgress('b1')
+      vi.useRealTimers()
+    }
+  })
   it.each(['initial', 'reread'] as const)('右下角上一章/下一章沿目录切换并保存阅读位置（%s）', async mode => {
     vi.mocked(booksApi.fetchBook).mockResolvedValue({ ...BOOK, reading_mode: mode })
     vi.mocked(booksApi.fetchChapters).mockResolvedValue(CHAPTERS.map((chapter, index) => ({ ...chapter, ordinal: index * 10 })))
