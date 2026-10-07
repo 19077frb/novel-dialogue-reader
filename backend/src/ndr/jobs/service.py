@@ -404,6 +404,10 @@ def create_inference_job(
     if active_duplicate is not None:
         return active_duplicate, False
 
+    from .occupancy import guard_active_target
+
+    guard_active_target(session, version.id, kind, range_payload)
+
     job = Job(
         kind=kind,
         purpose=purpose,

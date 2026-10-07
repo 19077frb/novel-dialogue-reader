@@ -46,6 +46,21 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); clearBatchProgress('b1') })
 
+it('allows a retry while a different book is running and uses free shared slots', async () => {
+  const preferences = { ...getProcessingPreferences(), profileId: 'p1', concurrency: 2, tokenLimit: 1000 }
+  await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }], preferences })
+  let finish!: (job: JobDetailOut) => void
+  vi.mocked(jobs.createJob).mockImplementation(async input => input.bookId === 'b2'
+    ? new Promise(resolve => { finish = resolve }) : job('COMPLETED'))
+  const other = runBatchProcessing({ bookId: 'b2', bookVersionId: 'v1', requested: [chapter],
+    plans: [{ chapter, estimate: { ...estimate, windows: estimate.windows!.slice(0, 1) } }], preferences })
+  await vi.waitUntil(() => Boolean(finish))
+  await expect(retryBatchTask('b1', 'dialogue:c1:w1')).resolves.toBeUndefined()
+  finish(job('COMPLETED'))
+  await other
+  clearBatchProgress('b2')
+})
+
 it.each([1, 2])('admits different windows from the retry buttons into one pool with concurrency %s', async concurrency => {
   vi.mocked(jobs.createJob).mockResolvedValue(job('FAILED'))
   await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],

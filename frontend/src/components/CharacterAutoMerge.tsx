@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { fetchLatestCharacterAutoMerge, startCharacterAutoMerge, confirmCharacterAutoMerge } from '../api/characters'
+import { fetchLatestCharacterAutoMerge, confirmCharacterAutoMerge } from '../api/characters'
+import { enqueueWork, useAdmissions, stopAdmission } from '../processing/workQueue'
+import { Link } from 'react-router-dom'
 import { freshIdempotencyKey, pauseJob } from '../api/jobs'
 import { fetchProfiles, profileKeys } from '../api/profiles'
 import { useProcessingPreferences, inferenceOptions } from '../processing/preferences'
@@ -20,17 +22,20 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
   const [selected, setSelected] = useState<string[]>([])
   const [preferences, update] = useProcessingPreferences()
   const refreshed = useRef('')
+  const admissions = useAdmissions()
+  const queued = admissions.find(item => item.bookId === bookId && item.versionId === versionId && item.payload.type === 'merge' && ['queued', 'running'].includes(item.phase))
+  const queueError = [...admissions].reverse().find(item => item.bookId === bookId && item.versionId === versionId && item.payload.type === 'merge')?.error
   const profiles = useQuery({ queryKey: profileKeys.profiles(), queryFn: ({ signal }) => fetchProfiles(signal), enabled: open })
   const result = useQuery({ queryKey: ['character-auto-merge', bookId, versionId],
     queryFn: ({ signal }) => fetchLatestCharacterAutoMerge(bookId, versionId!, signal), enabled: Boolean(versionId),
-    refetchInterval: query => query.state.data && !query.state.error && !TERMINAL_JOB_STATES.has(query.state.data.state) ? 2000 : false })
+    refetchInterval: query => queued || query.state.data && !query.state.error && !TERMINAL_JOB_STATES.has(query.state.data.state) ? 2000 : false })
   const jobId = result.data?.job_id
   useEffect(() => { if (jobId) setOpen(true); setSelected([]); setConfirmed(false) }, [jobId])
-  const start = useMutation({ mutationFn: () => startCharacterAutoMerge(bookId, {
+  const start = useMutation({ mutationFn: () => enqueueWork({ bookId, versionId: versionId!, title: '全书人物自动合并', keys: ['merge'], payload: { type: 'merge', input: {
     book_version_id: versionId!, profile_id: preferences.profileId,
     inference_options: inferenceOptions(preferences), max_total_tokens: preferences.tokenLimit,
     idempotency_key: freshIdempotencyKey('character-auto-merge', `${bookId}:${versionId}`), run_now: true,
-  }), onSuccess: () => { setConfirmed(false) }, onSettled: async () => { await result.refetch() } })
+  } } }), onSuccess: () => { setConfirmed(false) }, onSettled: async () => { await result.refetch() } })
   const stop = useMutation({ mutationFn: () => pauseJob(jobId!), onSuccess: () => { void result.refetch() } })
   const accept = useMutation({ mutationFn: (ids: string[]) => visibleFromCp == null
     ? confirmCharacterAutoMerge(bookId, jobId!, ids)
@@ -41,7 +46,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
       && Array.isArray(result.data.proposals) && result.data.proposals.length === 0
   )
   const awaiting = result.data?.phase === 'awaiting_confirmation' && !noSuggestions
-  const busy = start.isPending || accept.isPending || Boolean(versionId && result.isPending) || Boolean(result.data && !TERMINAL_JOB_STATES.has(result.data.state))
+  const busy = Boolean(queued) || start.isPending || accept.isPending || Boolean(versionId && result.isPending) || Boolean(result.data && !TERMINAL_JOB_STATES.has(result.data.state))
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false) }, [busy, onBusyChange])
   useEffect(() => {
     if (result.data?.state === 'COMPLETED' && !noSuggestions && result.data.phase !== 'awaiting_confirmation' && result.data.phase !== 'discarded' && refreshed.current !== result.data.job_id) {
@@ -50,9 +55,9 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     }
   }, [result.data, onSaved, noSuggestions])
   const profileReady = profiles.data?.some(profile => profile.id === preferences.profileId)
-  const blocked = disabled || busy || result.isError || awaiting
+  const blocked = busy || result.isError || awaiting
   const blockedReason = result.isError ? '任务状态读取失败，重新读取成功后才能开始新的分析。'
-    : disabled ? '本书处理任务正在运行，请先停止处理再自动合并。'
+    : queued ? '本书自动合并任务已在任务队列中，请等待完成或前往队列停止。'
     : start.isPending ? '正在提交自动合并任务，请勿重复启动。'
     : accept.isPending ? '正在保存本次合并决定，请稍候。'
     : versionId && result.isPending ? '正在读取已有任务，确认状态后才能开始新的分析。'
@@ -84,7 +89,9 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
       <button disabled={blocked || !versionId || count < 1 || !profileReady || !confirmed}
         title={blockedReason ?? (!versionId ? '请先重新读取书籍版本。' : count < 1 ? '请先识别或添加人物。' : !profileReady ? '请先选择可用的模型配置。' : !confirmed ? '请先勾选同意调用模型。' : undefined)}
         onClick={() => start.mutate()}>分析合并建议</button>
-      {disabled && <p className="hint">请先停止本书处理任务再自动合并。</p>}
+      {disabled && <p className="hint">本书处理尚未结束，合并分析会加入队列，等待前序处理完成后执行。</p>}
+      {queued && <p role="status">已添加自动合并任务。<Link to="/tasks">查看任务队列</Link> <button className="ndr-danger" disabled={queued.stopRequested} title={queued.stopRequested ? '停止请求已提交，请等待安全收尾。' : undefined} onClick={() => { void stopAdmission(queued.id).catch(() => result.refetch()) }}>停止本次分析</button></p>}
+      {queueError && <p role="alert" className="status-error">{queueError}</p>}
       {count < 1 && <p className="hint">至少有一个人物才能分析合并或更名建议。</p>}
       {!profileReady && <p className="hint">请选择可用的模型配置。</p>}
       {!confirmed && !awaiting && <p className="hint">开始前请勾选同意调用模型。</p>}
@@ -145,7 +152,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
             </li>)}</ul>
             </CollapsibleBlock>
           </>}
-          {busy && <button title={stop.isPending || result.data.state === 'PAUSING' ? '停止请求已提交，请等待模型调用安全收尾。' : undefined} className="ndr-danger" disabled={stop.isPending || result.data.state === 'PAUSING'} onClick={() => stop.mutate()}>停止自动合并</button>}
+          {busy && !queued && <button title={stop.isPending || result.data.state === 'PAUSING' ? '停止请求已提交，请等待模型调用安全收尾。' : undefined} className="ndr-danger" disabled={stop.isPending || result.data.state === 'PAUSING'} onClick={() => stop.mutate()}>停止自动合并</button>}
         </>}
       </div>}
     </>}

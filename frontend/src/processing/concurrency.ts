@@ -62,3 +62,27 @@ export function createTaskLimiter(concurrency: number): TaskLimiter {
     },
   }
 }
+
+const sharedActive: number[] = []
+const sharedWaiting: { limit: number; enter: () => void }[] = []
+function drainSharedPool() {
+  while (sharedWaiting.length) {
+    const next = sharedWaiting[0]
+    if (sharedActive.length >= Math.min(next.limit, ...sharedActive)) return
+    sharedWaiting.shift()
+    next.enter()
+  }
+}
+
+/** Single/batch admissions from different books share the page's model slots. */
+export async function inSharedTaskPool<T>(concurrency: number, task: () => Promise<T>): Promise<T> {
+  const limit = Math.max(1, Math.min(16, Math.trunc(concurrency) || 1))
+  await new Promise<void>(resolve => {
+    sharedWaiting.push({ limit, enter: () => { sharedActive.push(limit); resolve() } })
+    drainSharedPool()
+  })
+  try { return await task() } finally {
+    sharedActive.splice(sharedActive.indexOf(limit), 1)
+    drainSharedPool()
+  }
+}

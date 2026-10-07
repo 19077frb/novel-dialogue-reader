@@ -9,17 +9,21 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import Integer, func, select, tuple_
 from sqlalchemy.orm import Session
 
-from ..domain.common import DataEnvelope
+from ..domain.common import CursorPage, DataEnvelope
 from ..domain.enums import CredentialMode, JobKind, JobState
 from ..domain.jobs import (
     JobCreate,
     JobDetailOut,
     JobRunOut,
     ReconcileIn,
+    TaskQueueItemOut,
 )
 from ..domain.recovery import JobRecoveryOut
 from ..jobs.scheduler import reconcile_job, run_job
@@ -30,12 +34,68 @@ from ..jobs.service import (
     job_windows,
 )
 from ..recovery.service import job_recovery, profile_snapshot_of
-from ..storage.models import Book, BookVersion, Job, ModelProfile, Quote
-from ..storage.transactions import transaction
+from ..storage.models import Book, BookVersion, Chapter, Job, JobWindow, ModelProfile, Quote
+from ..storage.transactions import admission_transaction, transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
+from .pagination import decode_cursor, encode_cursor
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+@router.get("/queue", response_model=DataEnvelope[CursorPage[TaskQueueItemOut]],
+            summary="跨书籍任务队列（分页摘要，不读取调用归档）")
+def task_queue_route(request: Request, active_only: bool = True, book_id: str | None = None,
+                     limit: int = Query(default=50, ge=1, le=100), cursor: str | None = None,
+                     session: Session = Depends(get_session)):
+    statement = select(Job.id, Job.kind, Job.state, Job.book_id, Book.title,
+                       func.json_extract(Job.range_json, "$.chapter_id").label("chapter_id"),
+                       func.json_extract(Job.range_json, "$.start_cp").label("start_cp"),
+                       func.json_extract(Job.range_json, "$.end_cp").label("end_cp"),
+                       func.json_extract(Job.range_json, "$.selected_window_ids")
+                       .label("selected_window_ids"),
+                       Job.progress_json, Job.last_error, Job.created_at).outerjoin(
+                           Book, Book.id == Job.book_id)
+    if active_only:
+        statement = statement.where(Job.state.in_(
+            (JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)))
+    if book_id:
+        statement = statement.where(Job.book_id == book_id)
+    if cursor:
+        parts = decode_cursor(cursor)
+        try:
+            created = datetime.fromisoformat(str(parts[0]))
+            if len(parts) != 2 or created.tzinfo is None:
+                raise ValueError("invalid cursor")
+        except (ValueError, IndexError) as exc:
+            raise ApiError.validation("任务列表游标无效，请重新读取") from exc
+        statement = statement.where(tuple_(Job.created_at, Job.id) < (created, str(parts[1])))
+    rows = list(session.execute(statement.order_by(Job.created_at.desc(), Job.id.desc())
+                                .limit(limit + 1)))
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    chapter_ids = {row.chapter_id for row in rows if row.chapter_id}
+    titles = dict(session.execute(select(Chapter.id, Chapter.title).where(
+        Chapter.id.in_(chapter_ids))).all()) if chapter_ids else {}
+    window_counts = {row.job_id: (row.total, row.done) for row in session.execute(
+        select(JobWindow.job_id, func.count().label("total"),
+               func.sum((JobWindow.state == JobState.COMPLETED).cast(Integer))
+               .label("done")).where(JobWindow.job_id.in_([row.id for row in rows]))
+        .group_by(JobWindow.job_id))} if rows else {}
+    items = [TaskQueueItemOut(id=row.id, kind=row.kind, state=row.state, book_id=row.book_id,
+                             book_title=row.title or "", chapter_id=row.chapter_id,
+                             chapter_title=titles.get(row.chapter_id, ""),
+                             start_cp=row.start_cp, end_cp=row.end_cp,
+                             selected_window_ids=(json.loads(row.selected_window_ids)
+                                                  if row.selected_window_ids else None),
+                             progress=json.loads(row.progress_json or "{}"),
+                             windows_total=window_counts.get(row.id, (0, 0))[0],
+                             windows_done=window_counts.get(row.id, (0, 0))[1] or 0,
+                             last_error=row.last_error, created_at=row.created_at.isoformat())
+             for row in rows]
+    return DataEnvelope(data=CursorPage(items=items, next_cursor=encode_cursor(
+        [rows[-1].created_at.isoformat(), rows[-1].id]) if has_more else None),
+        request_id=current_request_id(request))
 
 
 @router.get(
@@ -97,7 +157,7 @@ def create_job_route(
     credentials = request.app.state.credentials
     factory = request.app.state.session_factory
 
-    with transaction(factory) as session:
+    with admission_transaction(factory) as session:
         book = session.get(Book, payload.book_id)
         if book is None:
             raise ApiError.not_found("书籍不存在", book_id=payload.book_id)

@@ -1518,3 +1518,9 @@ textarea:focus-visible {
 .ndr-collapse-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 36px; height: 36px; padding: 6px; border: 0; background: transparent; }
 .ndr-collapsible-summary { color: var(--ndr-muted); overflow-wrap: anywhere; }
 .ndr-collapsible-block > [hidden] { display: none; }
+
+.ndr-task-queue-list { list-style: none; padding: 0; }
+.ndr-task-queue-range { min-width: 0; overflow-wrap: anywhere; }
+.ndr-task-queue-list > li { padding: 12px 0; border-bottom: 1px solid var(--ndr-border); overflow-wrap: anywhere; }
+.ndr-task-queue-list > li > span { margin-right: 12px; color: var(--ndr-muted); }
+.ndr-task-queue-list > li > button { margin: 8px 8px 0 0; }

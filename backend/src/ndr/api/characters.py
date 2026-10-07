@@ -36,7 +36,7 @@ from ..domain.jobs import JobDetailOut
 from ..jobs.scheduler import run_job
 from ..jobs.service import job_detail
 from ..storage.models import Book, BookVersion, Chapter, Job, ModelProfile
-from ..storage.transactions import transaction
+from ..storage.transactions import admission_transaction, transaction
 from .deps import get_session
 from .errors import ApiError, current_request_id
 
@@ -97,7 +97,7 @@ def auto_merge_characters_route(
     background: BackgroundTasks,
 ) -> DataEnvelope[JobDetailOut]:
     factory = request.app.state.session_factory
-    with transaction(factory) as session:
+    with admission_transaction(factory) as session:
         book = _book_or_404(session, book_id)
         version = _version_or_400(session, book, payload.book_version_id)
         if book.active_version_id != version.id:
@@ -271,7 +271,7 @@ def analyze_character_roster_route(
     credentials = request.app.state.credentials
     factory = request.app.state.session_factory
 
-    with transaction(factory) as session:
+    with admission_transaction(factory) as session:
         book = _book_or_404(session, book_id)
         version = _version_or_400(session, book, payload.book_version_id)
         chapter = _chapter_or_400(session, version, chapter_id)

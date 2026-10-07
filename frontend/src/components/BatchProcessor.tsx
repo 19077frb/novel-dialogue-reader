@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 import { completeChapterProcessing, fetchBook, fetchChapters, fetchProcessingStatus, setChapterProcessingStatus } from '../api/books'
 import { ApiError } from '../api/client'
@@ -12,7 +12,7 @@ import { createJob, estimateRange, freshIdempotencyKey, pauseJob, fetchRecentJob
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 import { hasSingleWork } from '../processing/singleWorkflow'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
-import { createTaskLimiter, mapWithConcurrency } from '../processing/concurrency'
+import { createTaskLimiter, mapWithConcurrency, inSharedTaskPool } from '../processing/concurrency'
 import { waitForJobCompletion } from '../processing/jobCompletion'
 import { getProcessingPreferences, inferenceOptions, useProcessingPreferences, rosterRepairOptions, estimateRosterTokens } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
@@ -25,6 +25,7 @@ import { CollapsibleBlock } from './CollapsibleBlock'
 import { getGeneralSettings, useGeneralSettings } from '../settings/preferences'
 import { chapterFilterReason, defaultChapterFilter, normalizeChapterFilter } from '../processing/chapterFilter'
 import type { ChapterFilter } from '../processing/chapterFilter'
+import { enqueueWork, getAdmissions } from '../processing/workQueue'
 
 class BatchAbortError extends Error {}
 
@@ -404,9 +405,6 @@ export async function retryBatchTask(bookId: string, taskId: string, wholeChapte
 async function prepareBatchRetry(bookId: string, taskId: string, wholeChapter: boolean, stopGeneration: number, chapterStopGeneration: number): Promise<{ completion?: Promise<void> }> {
   let controller = expandableBatches.get(bookId)
   if (batchSnapshots.get(bookId)?.stopRequested) throw new Error('队列正在停止，请等待请求收尾后再重试。')
-  if (!controller && (hasSingleWork() || [...batchSnapshots.values()].some(batch => batch.running))) {
-    throw new Error('请等待当前任务结束或恢复队列后再重试。')
-  }
   const saved = batchExecutions.get(bookId)
   const task = batchSnapshots.get(bookId)?.tasks.find(item => item.id === taskId)
   if (!saved || !task || (!wholeChapter && (task.state !== 'failed' || !task.retryable))) throw new Error('此任务不能直接重试，请先查看任务详情并确认后台请求已结束。')
@@ -582,7 +580,7 @@ export function isBatchRunning(bookId: string): boolean {
 }
 
 export function hasBatchWork(): boolean {
-  return hasSingleWork() || retryPlanning.size > 0 || [...batchSnapshots.values()].some(batch => batch.running)
+  return getAdmissions().some(item => ['queued', 'running'].includes(item.phase)) || hasSingleWork() || retryPlanning.size > 0 || [...batchSnapshots.values()].some(batch => batch.running)
 }
 
 export function clearBatchProgress(bookId: string) {
@@ -714,6 +712,7 @@ interface BatchProcessorProps {
 }
 
 export interface BatchExecution {
+  queueId?: string
   chapterFilter?: ChapterFilter
   restoring?: boolean
   bookId: string
@@ -740,7 +739,11 @@ export async function runBatchProcessing(execution: BatchExecution) {
   const reason = dialogueStrategyDisabledReason(execution.preferences.dialogueStrategy, execution.preferences.maxRecheckRounds)
   if (reason) throw new Error(reason)
   const chapterFilter = normalizeChapterFilter(execution.chapterFilter ?? getGeneralSettings())
-  return withWorkflowLock(`processing:${execution.bookId}`, () => runBatchInternal({ ...execution, chapterFilter }))
+  return withWorkflowLock(`processing:${execution.bookId}`, async () => {
+    if (execution.queueId && getAdmissions().find(item => item.id === execution.queueId)?.stopRequested) return
+    if (execution.queueId && (await fetchBook(execution.bookId)).active_version_id !== execution.bookVersionId) throw new Error('书籍版本已改变，未派发旧范围。')
+    return runBatchInternal({ ...execution, chapterFilter })
+  })
 }
 
 export function automaticAllowance(bookId: string) {
@@ -754,6 +757,7 @@ export function refreshAutomaticAllowance(bookId: string) {
 }
 
 async function runBatchInternal({ bookId, bookVersionId, requested, plans, preferences,
+  queueId,
   forceReprocess = false, initialSpent = 0, initialTotalSpent = initialSpent, initialUnknownRuns = 0,
   onUsage, onProgress = () => undefined,
   onError = () => undefined, onTokenLimit = () => undefined, onFinished = () => undefined, retryTaskId,
@@ -766,7 +770,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
   const options = inferenceOptions(preferences)
   requested = [...requested]
   plans = [...plans]
-  const execution: BatchExecution = { bookId, bookVersionId, requested, plans, preferences: { ...preferences },
+  const execution: BatchExecution = { queueId, bookId, bookVersionId, requested, plans, preferences: { ...preferences },
     forceReprocess, onUsage, onProgress, onError, onTokenLimit, onFinished, expandable, chapterFilter }
   const savedExecution = { execution, spent: initialSpent, totalSpent: initialTotalSpent, unknownRuns: initialUnknownRuns }
   batchExecutions.set(bookId, savedExecution)
@@ -977,7 +981,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
     }
 
     const runMetered = <T,>(reserveEstimate: number, task: (available: number | null) => Promise<T>, shouldSkip: () => boolean = () => false, taskId?: string) =>
-      limiter.run(async () => {
+      limiter.run(() => inSharedTaskPool(preferences.concurrency, async () => {
         if (shouldSkip()) return
         if (batchShouldStop(bookId, stopRef.current)) throw new Error('批量处理已停止')
         const existing = Boolean(restoring && taskId && batchRequests.get(bookId)?.[taskId]?.jobId)
@@ -997,7 +1001,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         } finally {
           reserved = Math.max(0, reserved - reservation)
         }
-      })
+      }))
 
     const recordUsage = (job: JobDetailOut, stage: string) => {
       const accounted = accountedJobs.get(bookId) ?? new Set<string>()
@@ -1364,6 +1368,14 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
 
 export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished, showConfiguration = true, initialChapterId }: BatchProcessorProps) {
   const batchProgress = useBatchProgress(bookId)
+  const notifiedFinish = useRef<number | null>(batchProgress.finishedAt)
+  useEffect(() => {
+    if (batchProgress.finishedAt && !batchProgress.running && notifiedFinish.current !== batchProgress.finishedAt) {
+      notifiedFinish.current = batchProgress.finishedAt
+      if (batchProgress.tasks.some(task => task.state === 'failed')) setError(batchProgress.message)
+      onFinished()
+    }
+  }, [batchProgress.finishedAt, batchProgress.running, onFinished])
   const [startId, setStartId] = useState('')
   const [endId, setEndId] = useState('')
   const [preferences, setPreferences] = useProcessingPreferences()
@@ -1458,10 +1470,17 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     if (!validRange || !profileId || !bookVersionId) return
     setRunning(true)
     try {
-      await runBatchProcessing({ bookId, bookVersionId,
+      const work: BatchExecution = { bookId, bookVersionId,
         requested: chapters.slice(startIndex, endIndex + 1), plans, preferences, forceReprocess,
         chapterFilter: normalizeChapterFilter(filterSettings),
-        onProgress: setProgress, onError: setError, onTokenLimit: setTokenLimitText, onFinished })
+      }
+      await enqueueWork({ bookId, versionId: bookVersionId,
+        title: `批量处理：${chapters[startIndex]?.title} → ${chapters[endIndex]?.title}`,
+        keys: plans.flatMap(plan => [`roster:${plan.chapter.id}`, ...(plan.estimate.windows ?? [])
+          .map(window => `dialogue:${plan.chapter.id}:${String(window.window_id)}`)]),
+        payload: { type: 'batch', work } })
+      setProgress('已添加到任务队列，可继续选择其他范围。')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '添加任务失败')
     } finally { setRunning(false) }
   }
   const taskList = (() => {
@@ -1541,12 +1560,12 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         </CollapsibleBlock>
         <p className="hint">{batchProgress.running
           ? '停止后不会再派发排队任务；已经发给模型的请求会安全收尾。'
-          : '任务列表保留到下一批启动，可在应用内切换页面后返回查看；刷新或关闭页面会清除本列表。'}</p>
+          : '最近一次任务明细会保存；跨书籍任务与已添加范围可从顶部“任务队列”查看。'}</p>
       </section>
     )
   })()
 
-  if (batchProgress.running || !showConfiguration) return taskList
+  if (!showConfiguration) return taskList
 
   return (
     <>
@@ -1620,7 +1639,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       {strategyReason && <p className="hint">{strategyReason}</p>}
       {!profileId && <p className="hint">请选择批量处理使用的模型配置。</p>}
       {!validRange && <p className="status-error">结束章节不能早于开始章节。</p>}
-      {progress && <p className="hint" data-testid="batch-progress">{progress}</p>}
+      {(progress || batchProgress.message) && <p className="hint" data-testid="batch-progress">{batchProgress.message || progress}</p>}
       {error && <p className="status-error" data-testid="batch-error">
         {error} {taskList && <a href="#batch-task-list" onClick={() => setTaskListOpen(true)}>查看任务列表</a>}
       </p>}

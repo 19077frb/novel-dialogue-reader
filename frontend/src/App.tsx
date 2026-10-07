@@ -13,6 +13,7 @@ import CharactersPage from './pages/CharactersPage'
 import BookmarksPage from './pages/BookmarksPage'
 import PreprocessingPage from './pages/PreprocessingPage'
 import SettingsPage from './pages/SettingsPage'
+import TaskQueuePage from './pages/TaskQueuePage'
 import { useGeneralSettings } from './settings/preferences'
 import { stopAutomaticProcessing } from './processing/autoProcessing'
 import { SavedTaskRecovery } from './components/SavedTaskRecovery'
@@ -72,6 +73,7 @@ export default function App() {
         <nav className="ndr-app-nav" aria-label="主导航">
           {/* NavLink 会在当前页给出 aria-current="page"，键盘/读屏用户能知道自己在哪一页 */}
           <NavLink to="/library">书架</NavLink>
+          <NavLink to="/tasks">任务队列</NavLink>
           <NavLink to="/settings/models">模型配置</NavLink>
           <NavLink to="/settings/general">通用设置</NavLink>
         </nav>
@@ -83,6 +85,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/library" element={<LibraryPage />} />
+          <Route path="/tasks" element={<TaskQueuePage />} />
           <Route path="/books/:bookId/read" element={<ReaderPage />} />
           <Route path="/books/:bookId/bookmarks" element={<BookmarksPage />} />
           <Route path="/books/:bookId/preprocessing" element={<PreprocessingPage />} />

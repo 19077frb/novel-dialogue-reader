@@ -237,7 +237,7 @@ export function CharacterRosterPanel({
     : textlessCompleted ? '本章没有正文文字，已完成，无需再分析人物。'
     : recent.isPending ? '正在读取已有的人物任务，读取完成后再分析。'
     : recent.isError ? '已有任务读取失败，请先点击“重新读取任务”。'
-    : job.data && !TERMINAL_JOB_STATES.has(job.data.state) ? '人物分析尚未结束，请等待完成或先停止任务。'
+    : job.data && !TERMINAL_JOB_STATES.has(job.data.state) ? '本章人物分析已有任务在任务队列中等待执行或正在执行，请等待完成或先停止任务。'
     : !profileId ? '请先在上方选择模型配置，再分析本章人物。' : null
   const confirmBlocker = confirm.isPending ? '正在保存人物名单，请等待保存完成。'
     : !draftCurrent ? '人物名单正在更新，请等待读取完成后再确认。'
