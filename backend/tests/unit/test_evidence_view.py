@@ -84,8 +84,17 @@ def test_every_hidden_citation_position_is_rejected(field):
         raw["new_characters"] = [
             {"ref": "N1", "name": "门卫", "description": "门口工作人员", "evidence": ["G1"]}
         ]
-    with pytest.raises(InvalidModelOutput, match="did not provide.*G1"):
+    with pytest.raises(InvalidModelOutput, match="did not provide.*G1") as error:
         NonblankEvidenceViewAdapter(None, task()).compile_payload(raw)
+    location = {
+        "speaker": "Q1.evidence=G1",
+        "recipient": "Q1.addressee_evidence=G1",
+        "break": "breaks=G1",
+        "anonymous": "N1.evidence=G1",
+    }[field]
+    assert location in str(error.value)
+    assert "不可按Q编号计算G编号" in str(error.value)
+    assert "保留kind" in str(error.value)
 
 
 def test_nonblank_reference_and_original_compile_stay_strict():
@@ -160,6 +169,7 @@ def test_actual_view_and_diagnostic_cached_retry_preserves_usage_and_restores(tm
     assert request == frozen
     assert EVIDENCE_VIEW_POLICY in backend.seen[0]["messages"][0]["content"]
     assert "did not provide" in backend.seen[1]["messages"][-1]["content"]
+    assert "Q1.evidence=G1" in backend.seen[1]["messages"][-1]["content"]
     stats = journal.stats()
     restored = asyncio.run(
         run_trial(
@@ -199,6 +209,18 @@ def test_blank_gap_boundary_is_preserved_by_mapping_not_scene_inference():
     frozen = deepcopy(raw)
     stripped, _ = NonblankEvidenceViewAdapter(None, task()).compile_payload(raw)
     assert stripped["breaks"] == ["G1"] and raw == frozen
+
+
+def test_diagnostic_is_bounded_and_does_not_mutate_or_accept_invalid_output():
+    raw = payload()
+    raw["labels"][0]["evidence"] = ["G1"] * 1000
+    frozen = deepcopy(raw)
+    with pytest.raises(InvalidModelOutput) as error:
+        NonblankEvidenceViewAdapter(None, task()).compile_payload(raw)
+    assert len(str(error.value)) < 800
+    assert "Q1.evidence=G1" in str(error.value)
+    assert "共1000处" in str(error.value)
+    assert raw == frozen
 
 
 @pytest.mark.parametrize("field", ["speaker", "recipient", "anonymous"])
