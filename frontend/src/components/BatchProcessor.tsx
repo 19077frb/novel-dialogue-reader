@@ -103,6 +103,9 @@ const batchSnapshots = new Map<string, BatchProgressSnapshot>()
 const batchListeners = new Set<() => void>()
 const batchStopRequests = new Set<string>()
 const retryPlanning = new Set<string>()
+const retryAdmissions = new Map<string, Promise<unknown>>()
+const retryStopGenerations = new Map<string, number>()
+const chapterRetryStops = new Map<string, number>()
 const batchExecutions = new Map<string, { execution: BatchExecution; spent: number; totalSpent: number; unknownRuns: number }>()
 const chapterStopRequests = new Map<string, Set<string>>()
 const expandableBatches = new Map<string, {
@@ -298,6 +301,8 @@ function finishChapterCancellation(bookId: string, chapterId: string) {
 }
 
 export async function cancelChapterProcessing(bookId: string, chapterId: string) {
+  const retryKey = `${bookId}:${chapterId}`
+  chapterRetryStops.set(retryKey, (chapterRetryStops.get(retryKey) ?? 0) + 1)
   const controller = expandableBatches.get(bookId)
   if (!controller && restoringBatches.has(bookId)) {
     const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
@@ -369,12 +374,45 @@ export function reconcileCompletedChapter(bookId: string, chapterId: string) {
 }
 
 export async function retryBatchTask(bookId: string, taskId: string, wholeChapter = false) {
-  const controller = wholeChapter ? expandableBatches.get(bookId) : undefined
-  if (retryPlanning.has(bookId) || (hasBatchWork() && !controller)) throw new Error('请等待当前任务结束后再重试。')
+  const task = batchSnapshots.get(bookId)?.tasks.find(item => item.id === taskId)
+  if (!task) throw new Error('任务记录已清除，请重新读取。')
+  const prefix = `${bookId}:${task.chapterId}:`
+  const key = `${prefix}${wholeChapter ? '*' : taskId}`
+  if (retryPlanning.has(key) || retryPlanning.has(`${prefix}*`)
+    || wholeChapter && [...retryPlanning].some(item => item.startsWith(prefix))) {
+    throw new Error('本任务正在准备重试，请等待加入队列。')
+  }
+  retryPlanning.add(key)
+  const stopGeneration = retryStopGenerations.get(bookId) ?? 0
+  const chapterStopGeneration = chapterRetryStops.get(`${bookId}:${task.chapterId}`) ?? 0
+  // Serialize only admission, never the model execution. The first admission
+  // installs the pool synchronously; subsequent clicks reuse it and its budget.
+  const admission = (retryAdmissions.get(bookId) ?? Promise.resolve()).catch(() => undefined)
+    .then(() => {
+      if ((retryStopGenerations.get(bookId) ?? 0) !== stopGeneration) throw new Error('已停止准备重试，未调用模型。')
+      return prepareBatchRetry(bookId, taskId, wholeChapter, stopGeneration, chapterStopGeneration)
+    })
+  retryAdmissions.set(bookId, admission)
+  let admitted: { completion?: Promise<void> }
+  try { admitted = await admission } finally {
+    retryPlanning.delete(key)
+    if (retryAdmissions.get(bookId) === admission) retryAdmissions.delete(bookId)
+  }
+  await admitted.completion
+}
+
+async function prepareBatchRetry(bookId: string, taskId: string, wholeChapter: boolean, stopGeneration: number, chapterStopGeneration: number): Promise<{ completion?: Promise<void> }> {
+  let controller = expandableBatches.get(bookId)
+  if (batchSnapshots.get(bookId)?.stopRequested) throw new Error('队列正在停止，请等待请求收尾后再重试。')
+  if (!controller && (hasSingleWork() || [...batchSnapshots.values()].some(batch => batch.running))) {
+    throw new Error('请等待当前任务结束或恢复队列后再重试。')
+  }
   const saved = batchExecutions.get(bookId)
   const task = batchSnapshots.get(bookId)?.tasks.find(item => item.id === taskId)
   if (!saved || !task || (!wholeChapter && (task.state !== 'failed' || !task.retryable))) throw new Error('此任务不能直接重试，请先查看任务详情并确认后台请求已结束。')
-  retryPlanning.add(bookId)
+  if ((chapterRetryStops.get(`${bookId}:${task.chapterId}`) ?? 0) !== chapterStopGeneration) throw new Error('已取消本章重试，未调用模型。')
+  if (!wholeChapter && (batchSnapshots.get(bookId)?.tasks ?? []).some(item => item.chapterId === task.chapterId
+    && item.type === 'roster' && ['queued', 'running'].includes(item.state))) throw new Error('请等待本章人物识别完成后再重试窗口。')
   if (!controller) publishBatch(bookId, { running: true, startedAt: Date.now(), finishedAt: null, stopRequested: false,
     message: '正在检查失败任务与已保存的窗口（不调用模型）…' })
   try {
@@ -393,7 +431,11 @@ export async function retryBatchTask(bookId: string, taskId: string, wholeChapte
     const windows = estimate.windows ?? []
     if (batchStopRequests.has(bookId)) throw new Error('已停止准备重试，未调用模型。')
     const forceReprocess = saved.execution.forceReprocess ?? false
-    if (chapter.dialogue_processed && !forceReprocess) { reconcileCompletedChapter(bookId, chapter.id); saved.execution.onFinished?.(); return }
+    if (chapter.dialogue_processed && !forceReprocess) {
+      reconcileCompletedChapter(bookId, chapter.id)
+      if (!controller) publishBatch(bookId, { running: false, finishedAt: Date.now() })
+      saved.execution.onFinished?.(); return {}
+    }
     const chapterTasks = batchSnapshots.get(bookId)?.tasks.filter(item => item.chapterId === chapter.id) ?? []
     // Chapter retry repairs the previous task set, not every newly estimated window.
     const repairWindowIds = new Set(chapterTasks.filter(item => item.type === 'dialogue'
@@ -410,39 +452,58 @@ export async function retryBatchTask(bookId: string, taskId: string, wholeChapte
       completedWindows: windows.filter(window => forceReprocess
         ? batchSnapshots.get(bookId)?.tasks.find(item => item.chapterId === chapter.id && item.windowId === String(window.window_id))?.state === 'completed'
         : window.processing_status === 'completed').length,
-      reuseRoster: wholeChapter && (await fetchCharacterRoster(bookId, chapter.id, saved.execution.bookVersionId)).status === 'CONFIRMED' }
+      reuseRoster: (wholeChapter || task.type === 'dialogue') && (await fetchCharacterRoster(bookId, chapter.id, saved.execution.bookVersionId)).status === 'CONFIRMED' }
+    if (!wholeChapter && task.type === 'dialogue' && !plan.reuseRoster) throw new Error('请先确认本章人物，再重试对白窗口。')
+    // The old pool may have drained during the read-only checks.
+    controller = expandableBatches.get(bookId)
+    if ((retryStopGenerations.get(bookId) ?? 0) !== stopGeneration) throw new Error('已停止准备重试，未调用模型。')
+    if ((chapterRetryStops.get(`${bookId}:${task.chapterId}`) ?? 0) !== chapterStopGeneration) throw new Error('已取消本章重试，未调用模型。')
     if (controller) {
-      if (expandableBatches.get(bookId) !== controller || batchStopRequests.has(bookId)) throw new Error('队列已结束或正在停止，请再次点击重试。')
+      if (batchStopRequests.has(bookId)) throw new Error('队列正在停止，请等待收尾。')
       controller.retry(plan)
+      return {}
     } else {
       chapterStopRequests.get(bookId)?.delete(chapter.id)
       publishBatch(bookId, { running: false })
-      await runBatchProcessing({ ...saved.execution, requested: [chapter], plans: [plan],
-        forceReprocess, initialSpent: saved.spent, initialTotalSpent: saved.totalSpent,
-        initialUnknownRuns: saved.unknownRuns, retryTaskId: wholeChapter ? `roster:${chapter.id}` : taskId })
+      const latest = batchExecutions.get(bookId) ?? saved
+      let ready!: () => void
+      const poolReady = new Promise<void>(resolve => { ready = resolve })
+      const completion = withWorkflowLock(`processing:${bookId}`, () => {
+        if ((retryStopGenerations.get(bookId) ?? 0) !== stopGeneration) throw new Error('已停止准备重试，未调用模型。')
+        if ((chapterRetryStops.get(`${bookId}:${task.chapterId}`) ?? 0) !== chapterStopGeneration) throw new Error('已取消本章重试，未调用模型。')
+        const reason = dialogueStrategyDisabledReason(latest.execution.preferences.dialogueStrategy, latest.execution.preferences.maxRecheckRounds)
+        if (reason) throw new Error(reason)
+        return runBatchInternal({ ...latest.execution, requested: [chapter], plans: [plan],
+          chapterFilter: normalizeChapterFilter(latest.execution.chapterFilter ?? getGeneralSettings()),
+          forceReprocess, initialSpent: latest.spent, initialTotalSpent: latest.totalSpent,
+          initialUnknownRuns: latest.unknownRuns, retryTaskId: wholeChapter ? `roster:${chapter.id}` : taskId, onPoolReady: ready })
+      })
+      // Wait for cross-tab ownership and pool installation, not model completion.
+      await Promise.race([poolReady, completion])
+      return { completion }
     }
-  } finally {
-    retryPlanning.delete(bookId)
+  } catch (reason) {
     if (!controller) {
       batchStopRequests.delete(bookId)
       publishBatch(bookId, { running: false, stopRequested: false, finishedAt: Date.now() })
     }
+    throw reason
   }
 }
 
 export function BatchRetryControls({ bookId, taskId }: { bookId: string; taskId?: string }) {
   const progress = useBatchProgress(bookId)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
   const tasks = progress.tasks.filter(task => task.state === 'failed' && task.retryable && (!taskId || task.id === taskId))
   if (!tasks.length) return null
   return <div className="ndr-form-actions">
-    {tasks.map(task => <button key={task.id} type="button" disabled={busy || progress.running}
-      title={busy ? '正在准备重试，请等待完成。' : progress.running ? '本书已有任务正在运行，请等待结束或先停止，再重试失败任务。' : undefined}
-      onClick={() => { setBusy(true); setError(null); void retryBatchTask(bookId, task.id)
+    {tasks.map(task => <button key={task.id} type="button" disabled={busy[task.id] || progress.stopRequested}
+      title={busy[task.id] ? '本窗口正在准备重试，请等待加入队列。' : progress.stopRequested ? '队列正在停止，请等待请求收尾后再重试。' : '加入重试队列，有空闲并发位置时立即处理。'}
+      onClick={() => { setBusy(current => ({ ...current, [task.id]: true })); setError(null); void retryBatchTask(bookId, task.id)
         .catch(reason => setError(reason instanceof Error ? reason.message : '重试失败'))
-        .finally(() => setBusy(false)) }}>
-      {busy ? '准备重试…' : `重试${task.type === 'roster' ? '人物识别' : task.windowLabel}`}{!taskId && `（${task.chapterTitle}）`}
+        .finally(() => setBusy(current => ({ ...current, [task.id]: false }))) }}>
+      {busy[task.id] ? '准备重试…' : `重试${task.type === 'roster' ? '人物识别' : task.windowLabel}`}{!taskId && `（${task.chapterTitle}）`}
     </button>)}
     {error && <p className="status-error" role="alert">{error}</p>}
     {!taskId && <p className="hint">重试会使用原模型配置和剩余额度，不刷新已用额度。人物识别重试成功后继续本章未完成窗口；成功窗口不会重复处理。</p>}
@@ -536,6 +597,7 @@ export function clearBatchProgress(bookId: string) {
 }
 
 export function requestBatchStop(bookId: string) {
+  retryStopGenerations.set(bookId, (retryStopGenerations.get(bookId) ?? 0) + 1)
   batchStopRequests.add(bookId)
   const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
   publishBatch(bookId, {
@@ -670,6 +732,7 @@ export interface BatchExecution {
   onFinished?: () => void
   retryTaskId?: string
   expandable?: boolean
+  onPoolReady?: () => void
 }
 
 /** Shared sequenced roster/window pipeline for manual batches and reader look-ahead. */
@@ -694,7 +757,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
   forceReprocess = false, initialSpent = 0, initialTotalSpent = initialSpent, initialUnknownRuns = 0,
   onUsage, onProgress = () => undefined,
   onError = () => undefined, onTokenLimit = () => undefined, onFinished = () => undefined, retryTaskId,
-  expandable = false, restoring = false, chapterFilter = defaultChapterFilter() }: BatchExecution) {
+  expandable = false, restoring = false, chapterFilter = defaultChapterFilter(), onPoolReady = () => undefined }: BatchExecution) {
   if (isBatchRunning(bookId) && !restoring) throw new Error('本书已有批量任务运行，请先等待或停止。')
   const restoredSnapshot = restoring ? batchSnapshots.get(bookId) : undefined
   if (!restoring) { batchRequests.set(bookId, {}); accountedJobs.set(bookId, new Set()) }
@@ -728,11 +791,25 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
     let warningOpen = false
     const limiter = createTaskLimiter(concurrency)
     const pendingWork: Promise<void>[] = []
+    const directRetryPlans: ChapterPlan[] = []
     const inFlight = new Set<Promise<void>>()
     let wakeQueue: (() => void) | null = null
     let abortReason: BatchAbortError | null = null
     let nextRosterIndex = 0
+    const trackWork = (promise: Promise<void>) => {
+      pendingWork.push(promise)
+      inFlight.add(promise)
+      void promise.then(() => {
+        inFlight.delete(promise); wakeQueue?.()
+      }, reason => {
+        inFlight.delete(promise)
+        if (isBatchAbortError(reason)) { stopRef.current = true; abortReason = reason }
+        wakeQueue?.()
+      })
+      return promise
+    }
     const failedChapterIds = new Set<string>()
+    const completingChapters = new Set<string>()
     const skippedEmptyChapterIds = new Set<string>()
     const cancelledChapterIds = new Set<string>(selectedPlans.filter(plan => plan.cancelled).map(plan => plan.chapter.id))
     stopRef.current = false
@@ -771,7 +848,8 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
       finishedAt: null,
       stopRequested: restoredSnapshot?.stopRequested ?? false,
       message: '准备批量处理…',
-      tasks: restoredSnapshot ? tasks.map(task => restoredSnapshot.tasks.find(old => old.id === task.id) ?? task) : retryTaskId ? [...(batchSnapshots.get(bookId)?.tasks ?? []).filter(old => !tasks.some(task => task.id === old.id)), ...tasks] : tasks,
+      tasks: restoredSnapshot ? [...restoredSnapshot.tasks.filter(old => !tasks.some(task => task.id === old.id)),
+        ...tasks.map(task => restoredSnapshot.tasks.find(old => old.id === task.id) ?? task)] : retryTaskId ? [...(batchSnapshots.get(bookId)?.tasks ?? []).filter(old => !tasks.some(task => task.id === old.id)), ...tasks] : tasks,
       chapterStates: { ...(retryTaskId ? batchSnapshots.get(bookId)?.chapterStates : {}), ...Object.fromEntries(requested.map((chapter) => {
         const plan = selectedPlans.find((item) => item.chapter.id === chapter.id)
         return [chapter.id, {
@@ -788,7 +866,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
 
     expandableBatches.set(bookId, { versionId: bookVersionId, automatic: expandable && !retryTaskId,
       cancel: chapterId => {
-        selectedPlans.filter(plan => plan.chapter.id === chapterId).forEach(plan => { plan.cancelled = true })
+        [...selectedPlans, ...directRetryPlans].filter(plan => plan.chapter.id === chapterId).forEach(plan => { plan.cancelled = true })
         cancelledChapterIds.add(chapterId)
         failedChapterIds.delete(chapterId)
         wakeQueue?.()
@@ -801,21 +879,30 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         failedChapterIds.delete(plan.chapter.id)
         cancelledChapterIds.delete(plan.chapter.id)
         skippedEmptyChapterIds.delete(plan.chapter.id)
-        selectedPlans.push({ ...plan, cancelled: false })
+        plan.cancelled = false
+        if (plan.reuseRoster) directRetryPlans.push(plan)
+        else selectedPlans.push(plan)
         const oldPlan = plans.findIndex(old => old.chapter.id === plan.chapter.id)
-        if (oldPlan >= 0) plans[oldPlan] = plan
+        if (oldPlan >= 0) {
+          const windows = [...(plans[oldPlan].estimate.windows ?? []).filter(old =>
+            !(plan.estimate.windows ?? []).some(window => String(window.window_id) === String(old.window_id))), ...(plan.estimate.windows ?? [])]
+          plans[oldPlan] = { ...plan, estimate: { ...plan.estimate, windows } }
+        }
         else plans.push(plan)
+        if (!requested.some(chapter => chapter.id === plan.chapter.id)) requested.push(plan.chapter)
         const tail = selectedPlans.splice(nextRosterIndex).sort((a, b) => a.chapter.ordinal - b.chapter.ordinal)
         selectedPlans.push(...tail)
         const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
         const tasks = planTasks(plan)
+        const mergedTasks = [...current.tasks.filter(task => !tasks.some(replacement => replacement.id === task.id)), ...tasks]
         publishBatch(bookId, {
-          tasks: [...current.tasks.filter(task => task.chapterId !== plan.chapter.id || task.state === 'completed'
-            && !tasks.some(replacement => replacement.id === task.id)), ...tasks],
-          chapterStates: { ...current.chapterStates, [plan.chapter.id]: { state: 'queued',
-            completedWindows: plan.completedWindows ?? 0, totalWindows: plan.totalWindows ?? plan.estimate.windows?.length ?? 0,
-            error: null, cancelRequested: false, manualStatusCleared: true, pendingTasks: tasks.filter(task => task.state === 'queued').length } }, message: '已将本章未完成任务加入重试队列，其他章节继续处理。',
+          tasks: mergedTasks,
+          chapterStates: { ...current.chapterStates, [plan.chapter.id]: { state: mergedTasks.some(task => task.chapterId === plan.chapter.id && task.state === 'running')
+            ? current.chapterStates[plan.chapter.id]?.state === 'roster' ? 'roster' : 'dialogue' : 'queued',
+            completedWindows: Math.max(current.chapterStates[plan.chapter.id]?.completedWindows ?? 0, plan.completedWindows ?? 0), totalWindows: plan.totalWindows ?? plan.estimate.windows?.length ?? 0,
+            error: null, cancelRequested: false, manualStatusCleared: true, pendingTasks: mergedTasks.filter(task => task.chapterId === plan.chapter.id && ['queued', 'running'].includes(task.state)).length } }, message: '已将未完成任务加入重试队列，其他任务继续处理。',
         })
+        if (plan.reuseRoster) trackWork(scheduleDialogue(plan, requested.findIndex(chapter => chapter.id === plan.chapter.id)))
         wakeQueue?.()
       }, append: additions => {
       if (batchShouldStop(bookId, stopRef.current)) return 0
@@ -857,6 +944,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
       wakeQueue?.()
       return fresh.length
     } })
+    onPoolReady()
 
     const checkBudgetReminder = () => {
       if (tokenLimit === null || warnedAtEightyPercent || warningOpen || spent < Math.ceil(tokenLimit * 0.8)) return
@@ -1074,6 +1162,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         return runMetered(Number(window.estimated_tokens) || 1, async (available) => {
           if (plan.cancelled) return
           updateBatchTask(bookId, taskId, 'running')
+          updateChapterProgress(bookId, chapter.id, { state: 'dialogue', error: null })
           let retryable = false
           try {
             const dialogueJob = await waitForChapterJob(bookId, plan, taskId,
@@ -1125,7 +1214,18 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         }, () => Boolean(plan.cancelled), taskId)
       })
       return Promise.all(jobs).then(async () => {
-        if (plan.cancelled || chapterFailed || failedChapterIds.has(chapter.id)) return
+        if (plan.cancelled || chapterFailed) return
+        const remaining = (batchSnapshots.get(bookId)?.tasks ?? []).filter(task => task.chapterId === chapter.id && task.state !== 'completed')
+        if (remaining.length) {
+          if (remaining.some(task => task.state === 'failed')) failedChapterIds.add(chapter.id)
+          const pending = remaining.some(task => ['queued', 'running'].includes(task.state))
+          updateChapterProgress(bookId, chapter.id, { state: pending ? 'dialogue' : remaining.some(task => task.state === 'failed') ? 'failed' : 'stopped',
+            error: pending ? null : '本窗口已保存，其他窗口尚未完成。' })
+          return
+        }
+        failedChapterIds.delete(chapter.id)
+        if (completingChapters.has(chapter.id)) return
+        completingChapters.add(chapter.id)
         try {
           await completeChapterProcessing(bookId, chapter.id, bookVersionId)
         } catch (reason) {
@@ -1138,6 +1238,8 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
           failedChapterIds.add(chapter.id)
           updateChapterProgress(bookId, chapter.id, { state: 'failed', error: message })
           return
+        } finally {
+          completingChapters.delete(chapter.id)
         }
         const message = `${prefix}：已完成；${usageLabel()}`
         reconcileCompletedChapter(bookId, chapter.id)
@@ -1173,19 +1275,6 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         return
       }
 
-      const trackWork = (promise: Promise<void>) => {
-        pendingWork.push(promise)
-        inFlight.add(promise)
-        // 后台对白与下一章人物同时运行，提前注册拒绝处理，最终统一收集结果。
-        void promise.then(() => {
-          inFlight.delete(promise); wakeQueue?.()
-        }, reason => {
-          inFlight.delete(promise)
-          if (isBatchAbortError(reason)) { stopRef.current = true; abortReason = reason }
-          wakeQueue?.()
-        })
-        return promise
-      }
       nextRosterIndex = 1
       let rosterPromise: Promise<void> | null = trackWork(scheduleRoster(selectedPlans[0], 0))
       let index = 0
@@ -1226,7 +1315,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         outcome.status === 'rejected' && isBatchAbortError(outcome.reason)
       )
       if (abortOutcome?.status === 'rejected') throw abortOutcome.reason
-      const selectedCount = new Set(selectedPlans.map(plan => plan.chapter.id)).size
+      const selectedCount = new Set([...selectedPlans, ...directRetryPlans].map(plan => plan.chapter.id)).size
       const filteredCount = requested.filter(chapter => chapterFilterReason(chapter.title, chapterFilter)).length
       const skipped = requested.length - selectedCount - filteredCount
       const succeededCount = selectedCount - failedChapterIds.size - skippedEmptyChapterIds.size - cancelledChapterIds.size
@@ -1241,7 +1330,9 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         setError(`批量处理结束：${succeededCount} 章成功，${failedChapterIds.size} 章失败；具体原因见任务列表。`)
       }
       publishBatch(bookId, { running: false, stopRequested: false, message: retryTaskId &&
-        batchSnapshots.get(bookId)?.chapterStates[requested[0]?.id]?.state !== 'processed' && !failedChapterIds.size
+        batchSnapshots.get(bookId)?.chapterStates[requested[0]?.id]?.state !== 'processed'
+        && selectedPlans.every(plan => (plan.estimate.windows ?? []).every(window => (batchSnapshots.get(bookId)?.tasks ?? [])
+          .some(task => task.id === `dialogue:${plan.chapter.id}:${String(window.window_id)}` && task.state === 'completed')))
         ? '所选失败窗口已恢复并保存；本章还有未完成窗口，请继续选择重试。' : summary })
       onFinished()
     } catch (reason) {
