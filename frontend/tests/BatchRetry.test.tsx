@@ -1,4 +1,4 @@
-import { render, screen, cleanup, act } from '@testing-library/react'
+import { render, screen, cleanup, act, fireEvent, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as books from '../src/api/books'
 import * as characters from '../src/api/characters'
@@ -45,6 +45,128 @@ beforeEach(() => {
   vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: estimate.windows!.map(window => ({ ...window, processing_status: window.window_id === 'w2' ? 'completed' : 'failed' })) })
 })
 afterEach(() => { cleanup(); clearBatchProgress('b1') })
+
+it.each([1, 2])('admits different windows from the retry buttons into one pool with concurrency %s', async concurrency => {
+  vi.mocked(jobs.createJob).mockResolvedValue(job('FAILED'))
+  await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency, tokenLimit: 1000 }, onUsage: usage })
+  vi.mocked(jobs.estimateRange).mockResolvedValue(estimate)
+  const finishers: Array<(value: JobDetailOut) => void> = []
+  vi.mocked(jobs.createJob).mockImplementation(() => new Promise(resolve => { finishers.push(resolve) }))
+  render(<><Snapshot /><BatchRetryControls bookId="b1" /></>)
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /重试窗口 1/ })) })
+  await waitFor(() => expect(finishers).toHaveLength(1))
+  expect(screen.getByRole('button', { name: /重试窗口 2/ })).toBeEnabled()
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /重试窗口 2/ })) })
+  await waitFor(() => expect(readSnapshot().tasks.find((task: { id: string }) => task.id === 'dialogue:c1:w2').state)
+    .toBe(concurrency === 1 ? 'queued' : 'running'))
+  expect(finishers).toHaveLength(concurrency)
+  expect(readJournal<{ execution: { plans: Array<{ estimate: EstimateOut }> } }>('batch:b1')?.execution.plans[0].estimate.windows).toHaveLength(2)
+  expect(books.completeChapterProcessing).not.toHaveBeenCalled()
+  await act(async () => { await expect(retryBatchTask('b1', 'dialogue:c1:w1')).rejects.toThrow(/不能直接重试|正在准备/) })
+  await act(async () => { finishers[0](job('COMPLETED')) })
+  await waitFor(() => expect(finishers).toHaveLength(2))
+  expect(books.completeChapterProcessing).not.toHaveBeenCalled()
+  expect(readSnapshot().chapterStates.c1.state).toBe('dialogue')
+  await act(async () => { finishers[1](job('COMPLETED')) })
+  await waitFor(() => expect(hasBatchWork()).toBe(false))
+  expect(books.completeChapterProcessing).toHaveBeenCalledTimes(1)
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
+  expect(jobs.createJob).toHaveBeenCalledTimes(4)
+  expect(usage).toHaveBeenLastCalledWith(50)
+  expect(readSnapshot().tasks.every((task: { state: string }) => task.state === 'completed')).toBe(true)
+})
+
+it('dispatches a retry into a free slot while the next chapter roster is still running', async () => {
+  const second = { ...chapter, id: 'c2', ordinal: 1 }
+  let finishRoster!: (value: JobDetailOut) => void
+  vi.mocked(characters.analyzeCharacterRoster).mockResolvedValueOnce(job('COMPLETED'))
+    .mockImplementationOnce(() => new Promise(resolve => { finishRoster = resolve }))
+  const run = runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter, second],
+    plans: [{ chapter, estimate }, { chapter: second, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 3, tokenLimit: null } })
+  await vi.waitFor(() => expect(jobs.createJob).toHaveBeenCalledTimes(2))
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  await retryBatchTask('b1', 'dialogue:c1:w1')
+  await vi.waitFor(() => expect(jobs.createJob).toHaveBeenCalledTimes(3))
+  expect(hasBatchWork()).toBe(true)
+  finishRoster(job('COMPLETED')); await run
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(2)
+})
+
+it('accepts simultaneous retry clicks before the first pool has acquired its workflow lock', async () => {
+  vi.mocked(jobs.createJob).mockResolvedValue(job('FAILED'))
+  await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 2, tokenLimit: null } })
+  vi.mocked(jobs.estimateRange).mockResolvedValue(estimate)
+  const finishers: Array<(value: JobDetailOut) => void> = []
+  vi.mocked(jobs.createJob).mockImplementation(() => new Promise(resolve => { finishers.push(resolve) }))
+  const first = retryBatchTask('b1', 'dialogue:c1:w1')
+  const second = retryBatchTask('b1', 'dialogue:c1:w2')
+  await expect(retryBatchTask('b1', 'dialogue:c1:w1')).rejects.toThrow('正在准备')
+  await vi.waitFor(() => expect(finishers).toHaveLength(2))
+  finishers.forEach(finish => finish(job('COMPLETED')))
+  await Promise.all([first, second])
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
+  expect(jobs.createJob).toHaveBeenCalledTimes(4)
+  expect(books.completeChapterProcessing).toHaveBeenCalledTimes(1)
+})
+
+it('stopping during admission cancels queued retry preparations without issuing model requests', async () => {
+  vi.mocked(jobs.createJob).mockResolvedValue(job('FAILED'))
+  await start()
+  vi.mocked(jobs.estimateRange).mockResolvedValue(estimate)
+  let finishRead!: (value: never) => void
+  vi.mocked(books.fetchBook).mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve }))
+  const first = retryBatchTask('b1', 'dialogue:c1:w1').catch(error => error)
+  const second = retryBatchTask('b1', 'dialogue:c1:w2').catch(error => error)
+  await vi.waitFor(() => expect(books.fetchBook).toHaveBeenCalled())
+  requestBatchStop('b1')
+  finishRead({ active_version_id: 'v1' } as never)
+  expect((await first).message).toContain('停止')
+  expect((await second).message).toContain('停止')
+  expect(jobs.createJob).toHaveBeenCalledTimes(2)
+  expect(hasBatchWork()).toBe(false)
+})
+
+it('cancels both a running retry and another retry waiting for a slot in the same chapter', async () => {
+  vi.mocked(jobs.createJob).mockResolvedValue(job('FAILED'))
+  await start()
+  vi.mocked(jobs.estimateRange).mockResolvedValue(estimate)
+  let finish!: (value: JobDetailOut) => void
+  vi.mocked(jobs.createJob).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const run = retryBatchTask('b1', 'dialogue:c1:w1')
+  await vi.waitFor(() => expect(jobs.createJob).toHaveBeenCalledTimes(3))
+  await retryBatchTask('b1', 'dialogue:c1:w2')
+  await cancelChapterProcessing('b1', 'c1')
+  finish(job('COMPLETED')); await run
+  expect(jobs.createJob).toHaveBeenCalledTimes(3)
+  expect(books.completeChapterProcessing).not.toHaveBeenCalled()
+  render(<Snapshot />)
+  expect(readSnapshot().chapterStates.c1.state).toBe('stopped')
+  expect(readSnapshot().tasks.filter((task: { type: string }) => task.type === 'dialogue')
+    .every((task: { state: string }) => task.state === 'cancelled')).toBe(true)
+})
+
+it('restores the combined retry plan without dropping unrelated failed windows', async () => {
+  const tasks = [{ id: 'roster:c1', type: 'roster', chapterId: 'c1', state: 'completed' },
+    ...['w1', 'w2', 'w3'].map(windowId => ({ id: `dialogue:c1:${windowId}`, chapterId: 'c1', windowId,
+      type: 'dialogue', state: windowId === 'w3' ? 'failed' : 'queued', retryable: true }))]
+  writeJournal('batch:b1', { schema: 1, requests: {}, accounted: [], spent: 30, totalSpent: 30, unknownRuns: 0,
+    snapshot: { running: true, startedAt: 1, finishedAt: null, stopRequested: false, message: '', tasks,
+      chapterStates: { c1: { state: 'dialogue', totalWindows: 3, completedWindows: 0 } }, annotationRevisions: {}, catalogRevision: 0, revision: 0 },
+    execution: { bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate, reuseRoster: true, totalWindows: 3 }],
+      preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 2, tokenLimit: 1000 } } })
+  vi.mocked(jobs.createJob).mockImplementation(async () => job('COMPLETED'))
+  await restoreBatchProcessing('b1')
+  expect(characters.analyzeCharacterRoster).not.toHaveBeenCalled()
+  expect(jobs.createJob).toHaveBeenCalledTimes(2)
+  expect(books.completeChapterProcessing).not.toHaveBeenCalled()
+  render(<Snapshot />)
+  expect(readSnapshot().tasks.find((task: { id: string }) => task.id === 'dialogue:c1:w3').state).toBe('failed')
+  expect(readSnapshot().chapterStates.c1.state).toBe('failed')
+  expect(readJournal<{ totalSpent: number }>('batch:b1')?.totalSpent).toBe(50)
+})
 
 it('skips filtered chapters even on forced redo, without model calls or completion writes', async () => {
   updateGeneralSettings({ chapterFilterEnabled: true, chapterFilterTerms: ['第一章'] })
