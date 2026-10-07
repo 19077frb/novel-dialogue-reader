@@ -7,7 +7,11 @@ venv/
 .pytest_cache/
 .pytest-full/
 .pytest-run/
+/.pytest-mb-settings/
+/.tmp/
 backend/.pytest_tmp/
+/backend/pytest-cache-files-*/
+/backend/docs/internal/pytest-cache-batch-snapshot-*/
 .ruff_cache/
 .mypy_cache/
 htmlcov/
