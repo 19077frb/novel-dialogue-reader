@@ -12,7 +12,7 @@ from ndr.characters.visibility import identity_presentation_history
 from ndr.domain.enums import ReadingMode
 from ndr.evaluation.owner_constraints import ConstrainedOwnerProtocol
 from ndr.llm.expression_compiler import compile_expression_output
-from ndr.llm.expression_task import build_production_expression_task
+from ndr.llm.expression_task import bind_sent_identity_profiles, build_production_expression_task
 from ndr.llm.validation import LabelingTargets, parse_and_validate
 from ndr.scenes.runner import _validate_expression_task, run_window
 from ndr.scenes.state import SceneState
@@ -57,6 +57,42 @@ def test_effective_manual_fields_are_not_fabricated_literal_facts():
         "character": "C1", "basis": "direct", "evidence": ["E1"]}]}, task)
     assert result.output.new_speakers[0].character_id == "c"
     assert result.output.new_speakers[0].description == "新说明"
+
+
+def test_sent_profiles_restore_only_transient_identity_data_not_live_records():
+    person, version, window, state = fixture()
+    task = build_production_expression_task(window, state)
+    person.identity_facts_json = '[]'
+    person.presentation_history_json = '[]'
+    person.canonical_name = "新姓名"
+    extra = BookCharacter(id="new", book_version_id="v", canonical_name="新人物",
+                          identity_facts_json="[]", presentation_history_json="[]", source="USER")
+    project_identity_state(state, [person, extra], version, reading_mode=ReadingMode.INITIAL, horizon=8)
+    with pytest.raises(ValueError, match="profiles differ"):
+        _validate_expression_task(task, window, state, None)
+    bind_sent_identity_profiles(task, state)
+    _validate_expression_task(task, window, state, None)
+    assert state.identity_characters[0].canonical_name == "林舟"
+    assert "新人物" not in state.known_characters
+    assert person.canonical_name == "新姓名"
+    window.fragments[0].text = "被修改的原文"
+    with pytest.raises(ValueError, match="context differs"):
+        _validate_expression_task(task, window, state, None)
+
+
+@pytest.mark.parametrize("change", ["missing", "horizon", "mode"])
+def test_sent_profiles_cannot_restore_deleted_identities_or_change_visibility(change):
+    _, _, window, state = fixture()
+    task = build_production_expression_task(window, state)
+    if change == "missing":
+        state.book_characters = []
+        state.confirmed_characters = []
+    elif change == "horizon":
+        state.identity_input_horizon += 1
+    else:
+        state.identity_input_mode = "reread"
+    with pytest.raises(ValueError):
+        bind_sent_identity_profiles(task, state)
 
 
 def test_effective_field_sources_reach_actual_owner_request_without_inventing_quotes():

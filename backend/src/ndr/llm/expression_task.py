@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 
 from ..evaluation.compact import Candidate, CompactTask
-from ..scenes.state import SceneState
+from ..scenes.state import ConfirmedCharacter, SceneState
 
 PRODUCTION_EXPRESSION_VERSION = "expression-production-1"
 PRODUCTION_CACHE_VERSION = "expression-1"
@@ -68,6 +69,41 @@ def known_declaration_ids(task):
         return ()
     task.validate_effective_profiles()
     return tuple(c.character_id for c in task.candidates if c.character_id)
+
+
+def bind_sent_identity_profiles(task, state: SceneState):
+    """Apply a server-built request using what it sent, not later chapter updates.
+
+    The freshly loaded state still establishes identity existence and visibility.
+    Only its transient identity view is restored; scene bindings and database
+    records remain authoritative and are checked by the ordinary validator.
+    """
+    if not isinstance(task, ProjectedCompactTask):
+        return
+    task.validate_effective_profiles()
+    if (not state.projected_identity_input
+            or task.reading_mode != state.identity_input_mode
+            or task.visible_horizon_cp != state.identity_input_horizon):
+        raise ValueError("Production expression differs from its server visibility view")
+    available = {person.character_id for person in state.identity_characters}
+    profiles = {p["character_id"]: ConfirmedCharacter.from_dict(p) for p in task.effective_profiles}
+    if not profiles.keys() <= available:
+        raise ValueError("请求中的人物身份已删除或合并，请重新确认人物后重试")
+    state.book_characters = list(profiles.values())
+    state.confirmed_characters = [profiles[p.character_id] for p in state.confirmed_characters
+                                  if p.character_id in profiles]
+    state.pov_character_id = next((c.character_id for c in task.candidates
+                                   if c.ref == task.pov_ref), None)
+    for slot in state.participants:
+        person = profiles.get(slot.character_id)
+        slot.canonical_name = person.canonical_name if person else ""
+        slot.description = person.description if person else ""
+    counts = Counter(p.canonical_name for p in profiles.values() if p.canonical_name)
+    state.known_characters = {p.canonical_name: p.description for p in profiles.values()
+                              if p.canonical_name and counts[p.canonical_name] == 1}
+    slots = {slot.display_label: slot for slot in state.participants}
+    state.recent_turns = [{**turn, "speaker_name": slots[turn["speaker_ref"]].canonical_name}
+                          for turn in state.recent_turns if turn.get("speaker_ref") in slots]
 
 
 def build_production_expression_task(window, state: SceneState, *, auxiliary_protocol=None):

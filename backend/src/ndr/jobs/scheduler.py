@@ -48,6 +48,7 @@ from ..llm.errors import ProviderError, ProviderErrorKind
 from ..llm.expression_task import (
     PRODUCTION_CACHE_VERSION,
     PRODUCTION_EXPRESSION_VERSION,
+    bind_sent_identity_profiles,
     build_production_expression_task,
 )
 from ..llm.prompts import LABELING_PROMPT_VERSION
@@ -530,6 +531,7 @@ def _apply_payload(
         from ..scenes.runner import _validate_expression_task
 
         try:
+            bind_sent_identity_profiles(state.production_expression_task, state)
             _validate_expression_task(state.production_expression_task, window, state, None)
         except ValueError as exc:
             return False, ["invalid_expression_input"], [str(exc)], []
