@@ -90,6 +90,7 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
         end_cp=max(resolved.end_cp, resolved.start_cp + 1),
         reading_mode=reading_mode,
         visible_horizon_cp=horizon,
+        include_pending_reviews=False,
     )
     counts = projection.counts
     warnings = build_warnings(counts)
@@ -115,7 +116,7 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
             .order_by(IdentityRevision.created_at)
         ).scalars()
     ]
-    payload = projection.model_dump(mode="json")
+    payload = projection.model_dump(mode="json", exclude={"pending_review_quotes"})
     # Internal snapshot metadata is never sent by the reader API. Position-safe
     # exports must not bundle hidden future names even in the machine manifest.
     import json

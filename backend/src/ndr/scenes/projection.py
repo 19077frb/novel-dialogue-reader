@@ -117,13 +117,14 @@ def build_projection(
     end_cp: int,
     reading_mode: ReadingMode = ReadingMode.INITIAL,
     visible_horizon_cp: int | None = None,
+    include_pending_reviews: bool = True,
 ) -> AnnotationsResponse:
     """按范围返回有效投影（颜色/编号/图例/统计）。"""
 
     horizon = visible_horizon_cp if reading_mode is ReadingMode.INITIAL else None
     pending_review_quotes = [
         PendingReviewQuoteOut(quote_id=row.id, start_cp=row.start_cp, end_cp=row.end_cp)
-        for row in session.execute(
+        for row in (session.execute(
             select(Quote.id, Quote.start_cp, Quote.end_cp).where(
                 Quote.book_version_id == book_version_id,
                 Quote.start_cp < end_cp,
@@ -133,7 +134,7 @@ def build_projection(
                     ReviewItem.queue_status == ReviewQueueStatus.PENDING,
                 ).exists(),
             ).order_by(Quote.start_cp, Quote.id)
-        )
+        ) if include_pending_reviews else [])
     ]
     revert_quotes, revert_groups, reverted_revisions = horizon_identity_reverts(
         session, book_version_id=book_version_id, horizon=horizon

@@ -198,6 +198,7 @@ def run_live_predictions(
                 end_cp=version.canonical_length_cp,
                 reading_mode=reading_mode,
                 visible_horizon_cp=None,
+                include_pending_reviews=False,
             )
         quotes = [
             {
