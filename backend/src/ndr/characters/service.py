@@ -654,12 +654,17 @@ def create_roster_job(
     repair_range = {}
     repair_budget = {}
     if roster_repair_enabled:
-        repair_range = {"roster_repair_protocol": "roster-repair-1"}
+        from ..llm.isolated_roster_repair import ISOLATED_REPAIR_POLICY
+
+        repair_range = {"roster_repair_protocol": "roster-repair-1",
+                        "roster_repair_policy": ISOLATED_REPAIR_POLICY}
         repair_budget = {
             "max_roster_repairs": max_roster_repairs,
             "max_format_retries": max_format_retries,
         }
-        request_payload.update(repair_range)
+        # Same user request/key must still return its original frozen legacy job.
+        # Only a newly created job receives the new internal compilation policy.
+        request_payload["roster_repair_protocol"] = repair_range["roster_repair_protocol"]
         request_payload.update(repair_budget)
     digest = digest_request(request_payload)
     existing = session.execute(

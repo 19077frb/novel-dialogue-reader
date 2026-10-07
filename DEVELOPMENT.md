@@ -87,6 +87,8 @@ pwsh -File scripts/verify.ps1
 
 `ndr.llm.roster_repair`提供人物提案的定向修复计划和全名单编译，使用`prepare_roster_repair()`冻结有效人物及失败依赖组，`compile_roster_repair()`仅替换失败组并保留分别的调用来源。内部生成的人物任务可显式指定range.roster_repair_protocol=roster-repair-1，由ndr.jobs.roster_pipeline实现有界调用、计量、停止及恢复；须同时使用sourced-roster-2。页面默认尚未启用，模块编译器本身不调用模型。离线验证：`uv run --project backend python -m pytest backend/tests/unit/test_roster_repair.py backend/tests/unit/test_sourced_roster.py backend/tests/integration/test_sourced_roster_jobs.py backend/tests/integration/test_roster_pipeline.py`。
 
+`ndr.llm.isolated_roster_repair`是新任务冻结的identity-blocks-2编译策略；旧严格编译器保留。它在完整组覆盖及全名单校验下隔离辅助信息、保留独立成功组，再生成仅含剩余组的计划。保留块含原索引及实际来源，不能把多次修复来源统一重标；策略/计划绑定进入阶段指纹。同一幂等请求复用旧任务而非升级。离线边界用例为`backend/tests/unit/test_isolated_roster_repair.py`，正式暂停/恢复与来源用例仍在`test_roster_pipeline.py`；契约细节见[人物身份与颜色](docs/CONTRACTS.md#人物身份与颜色)。
+
 - `backend/src/ndr/api/`：HTTP 路由和请求/响应转换。
 - `backend/src/ndr/domain/`：Pydantic schema 与枚举，是 API 类型的权威来源。
 - `backend/src/ndr/ingest/`：TXT/EPUB 导入。

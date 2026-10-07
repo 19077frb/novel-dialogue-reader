@@ -160,6 +160,7 @@ def test_public_api_freezes_repair_limits_and_runs_real_pipeline(migrated_client
         "roster_repair_enabled": True, "max_roster_repairs": 1, "max_format_retries": 0,
     })
     assert job["range"]["roster_repair_protocol"] == "roster-repair-1"
+    assert job["range"]["roster_repair_policy"] == "identity-blocks-2"
     with client.app.state.session_factory() as session:
         budget = json.loads(session.get(Job, job["id"]).budget_json)
         assert budget["max_roster_repairs"] == 1
@@ -202,6 +203,103 @@ def test_public_api_zero_repairs_keeps_valid_people_without_second_call(migrated
     assert result.state is JobState.COMPLETED and result.calls == 1
     assert len(adapter.calls) == 1
     assert saved(client, job)[1]["proposal_diagnostics"]["unresolved_groups"]
+
+
+def test_isolated_policy_keeps_valid_repair_and_only_retries_remaining_group(migrated_client):
+    client = migrated_client
+    data, job = prepare(client, api_options={
+        "roster_repair_enabled": True, "max_roster_repairs": 2, "max_format_retries": 0,
+    })
+    partial = fixed()
+    partial["repairs"].insert(0, {"indices": [1], "characters": [person("c1", "林舟", "L999")]})
+    partial["repairs"][1]["characters"][0]["description"] = "没有对应逐事实依据的显示说明"
+    last = {"schema_version": "roster-repair-1", "repairs": [
+        {"indices": [1], "characters": [person("c1", "林舟", "L2")]},
+    ], "_usage": {"total_tokens": 11}}
+    adapter = FakeProviderAdapter(script=[primary(all_bad=True), partial, last])
+    result = run(client, job, adapter)
+    assert result.state is JobState.COMPLETED and result.calls == 3
+    _, progress, runs = saved(client, job)
+    diagnostics = progress["proposal_diagnostics"]
+    assert diagnostics["repair_policy"] == "identity-blocks-2"
+    assert diagnostics["repair_succeeded"] and diagnostics["unresolved_groups"] == []
+    assert diagnostics["repair_steps"][0]["successful_groups"] == [[2]]
+    assert diagnostics["repair_steps"][0]["unresolved_groups"] == [[1]]
+    assert diagnostics["repair_steps"][0]["discarded_descriptions"] == 1
+    request = runs[2]["archive"]["request"]
+    task = json.loads(request["messages"][1]["content"].split("\n", 1)[1].split("\n\n", 1)[0])
+    assert [g["indices"] for g in task["groups"]] == [[1]]
+    assert [p["name"] for p in task["retained_characters"]] == ["陆欣"]
+    assert request["roster_repair_policy"] == "identity-blocks-2"
+    assert request["roster_repair_binding"] != runs[1]["archive"]["request"]["roster_repair_binding"]
+    assert [r["usage"]["total_tokens"] for r in runs] == [5, 7, 11]
+    with client.app.state.session_factory() as session:
+        version = session.get(BookVersion, data["book_version_id"])
+        people = list(session.scalars(select(BookCharacter).where(BookCharacter.book_version_id == version.id)))
+        sources = {p.canonical_name: read_identity_records(p, version)[0].source_ref for p in people}
+        assert sources == {"陆欣": runs[1]["id"], "林舟": runs[2]["id"]}
+    assert run(client, job, adapter).calls == 0 and len(adapter.calls) == 3
+
+
+def test_isolated_policy_exhausted_partial_repair_is_not_reported_as_whole_success(migrated_client):
+    client = migrated_client
+    data, job = prepare(client, api_options={"roster_repair_enabled": True, "max_roster_repairs": 1})
+    partial = fixed()
+    partial["repairs"].insert(0, {"indices": [1], "characters": [person("c1", "林舟", "L999")]})
+    result = run(client, job, FakeProviderAdapter(script=[primary(all_bad=True), partial]))
+    assert result.state is JobState.COMPLETED and result.calls == 2
+    diagnostics = saved(client, job)[1]["proposal_diagnostics"]
+    assert not diagnostics["repair_succeeded"] and diagnostics["unresolved_groups"] == [[1]]
+    with client.app.state.session_factory() as session:
+        people = list(session.scalars(select(BookCharacter).where(
+            BookCharacter.book_version_id == data["book_version_id"])))
+        assert [p.canonical_name for p in people] == ["陆欣"]
+
+
+def test_isolated_policy_pause_restores_partial_receipt_without_resending_valid_group(migrated_client):
+    client = migrated_client
+    data, job = prepare(client, api_options={"roster_repair_enabled": True, "max_roster_repairs": 2})
+    partial = fixed()
+    partial["repairs"].insert(0, {"indices": [1], "characters": [person("c1", "林舟", "L999")]})
+    adapter = CallbackAdapter([primary(all_bad=True), partial],
+                              lambda: update(client, job, state=JobState.PAUSING), at=2)
+    assert run(client, job, adapter).state is JobState.PAUSED
+    with client.app.state.session_factory() as session:
+        assert not list(session.scalars(select(BookCharacter).where(
+            BookCharacter.book_version_id == data["book_version_id"])))
+    original_runs = saved(client, job)[2]
+    update(client, job, state=JobState.QUEUED)
+    last = fixed(indices=[1])
+    last["repairs"][0]["characters"] = [person("c1", "林舟", "L2")]
+    resumed_adapter = FakeProviderAdapter(script=[last])
+    result = run(client, job, resumed_adapter)
+    assert result.state is JobState.COMPLETED and result.calls == 1
+    runs = saved(client, job)[2]
+    assert [r["id"] for r in runs[:2]] == [r["id"] for r in original_runs]
+    assert [r["archive"] for r in runs[:2]] == [r["archive"] for r in original_runs]
+    with client.app.state.session_factory() as session:
+        version = session.get(BookVersion, data["book_version_id"])
+        people = list(session.scalars(select(BookCharacter).where(BookCharacter.book_version_id == version.id)))
+        sources = {p.canonical_name: read_identity_records(p, version)[0].source_ref for p in people}
+        assert sources == {"陆欣": runs[1]["id"], "林舟": runs[2]["id"]}
+
+
+def test_enabled_idempotency_key_returns_frozen_legacy_policy_job(migrated_client):
+    client = migrated_client
+    data, job = prepare(client, api_options={"roster_repair_enabled": True})
+    with client.app.state.session_factory() as session:
+        stored = session.get(Job, job["id"])
+        scope = json.loads(stored.range_json)
+        del scope["roster_repair_policy"]
+        stored.range_json = json.dumps(scope)
+        profile_id = json.loads(stored.profile_snapshot_json)["profile_id"]
+        session.commit()
+    endpoint = f"/api/books/{data['book_id']}/chapters/{scope['chapter_id']}/character-roster/analyze"
+    result = client.post(endpoint, json={"profile_id": profile_id,
+                                       "idempotency_key": "repair", "run_now": False,
+                                       "roster_repair_enabled": True})
+    assert result.status_code == 202 and result.json()["data"]["id"] == job["id"]
+    assert "roster_repair_policy" not in result.json()["data"]["range"]
 
 
 def test_actual_partial_repair_keeps_separate_receipts_and_identity_sources(migrated_client):

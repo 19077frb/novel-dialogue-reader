@@ -13,6 +13,11 @@ from ..characters.service import complete_textless_chapter, store_roster_candida
 from ..context.budget import estimate_tokens
 from ..domain.enums import InferenceRunState, JobKind, JobState
 from ..llm.errors import ProviderError, ProviderErrorKind
+from ..llm.isolated_roster_repair import (
+    ISOLATED_REPAIR_POLICY,
+    compile_isolated_roster_repair,
+    prepare_isolated_roster_repair,
+)
 from ..llm.prompts.roster_repair import build_roster_repair_messages
 from ..llm.roster_repair import REPAIR_VERSION, compile_roster_repair, prepare_roster_repair
 from ..llm.sourced_roster import (
@@ -265,6 +270,8 @@ class _Pipeline:
             "json_object": True,
             "target_quote_ids": [],
             "reserve_tokens": sum(estimate_tokens(m["content"]) for m in messages) + output_limit,
+            **({"roster_repair_policy": self.repair_policy}
+               if self.repair_policy is not None else {}),
             **extra,
         }
 
@@ -277,6 +284,9 @@ class _Pipeline:
             job = session.get(Job, self.job_id)
             version = session.get(BookVersion, job.book_version_id)
             scope = _job_range(job)
+            self.repair_policy = scope.get("roster_repair_policy")
+            if self.repair_policy not in (None, ISOLATED_REPAIR_POLICY):
+                raise ValueError("人物修复策略不受支持")
             chapter = session.get(Chapter, str(scope.get("chapter_id", "")))
             if (
                 job.kind is not JobKind.CHARACTER_ROSTER
@@ -347,7 +357,9 @@ class _Pipeline:
                 )
             except IsolatedRosterFailure as exc:
                 output, facts, diagnostic = SourcedRosterOutput(characters=[]), {}, exc.diagnostics
-            plan = prepare_roster_repair(payload, source_ref=run_id, **compile_args)
+            prepare = (prepare_isolated_roster_repair
+                       if self.repair_policy else prepare_roster_repair)
+            plan = prepare(payload, source_ref=run_id, **compile_args)
             return output, facts, diagnostic, plan
 
         feedback = None
@@ -375,6 +387,7 @@ class _Pipeline:
 
         repair_error = None
         repaired = False
+        repair_steps = []
         if plan.groups:
             for index in range(repair_limit):
                 task = plan.task_payload()
@@ -382,27 +395,43 @@ class _Pipeline:
                     task["previous_error"] = repair_error[:1000]
                 repair_messages = build_roster_repair_messages(messages, task)
                 try:
-                    (output, facts), _ = self.attempt(
+                    value, _ = self.attempt(
                         f"repair:{index}",
                         self.request(
                             repair_messages,
                             roster_repair_protocol=REPAIR_VERSION,
                             roster_primary_run_id=primary_id,
+                            **({"roster_repair_binding": plan.fingerprint()}
+                               if self.repair_policy else {}),
                         ),
-                        lambda raw, run_id: compile_roster_repair(
+                        lambda raw, run_id, plan=plan: (
+                            compile_isolated_roster_repair if self.repair_policy
+                            else compile_roster_repair
+                        )(
                             plan, raw, original=original, source_ref=run_id
                         ),
                     )
                 except _Invalid as exc:
                     repair_error = str(exc)
                 else:
-                    repaired = True
-                    break
+                    if self.repair_policy:
+                        output, facts, plan, partial = value
+                        repair_steps.append(partial)
+                        repaired = not plan.groups
+                        repair_error = None if repaired else "部分身份仍未通过校验"
+                    else:
+                        output, facts = value
+                        repaired = True
+                        repair_error = None
+                    if repaired:
+                        break
         diagnostic = {
             **diagnostic,
             "repair_succeeded": repaired,
             "unresolved_groups": [] if repaired else [list(group) for group in plan.groups],
             "repair_error": repair_error,
+            **({"repair_policy": self.repair_policy, "repair_steps": repair_steps}
+               if self.repair_policy else {}),
         }
         if not output.characters and plan.groups:
             self.halt(
