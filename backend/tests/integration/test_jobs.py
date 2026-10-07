@@ -193,9 +193,9 @@ def test_short_chapter_job_uses_confirmed_roster_without_eager_scene_slots(
         engine.dispose()
 
 
-@pytest.mark.parametrize("stale", [True, False])
-def test_short_jobs_reject_stale_identity_bindings_and_review_without_old_answers(
-    fake_provider_client, migrated_settings, stale,
+@pytest.mark.parametrize("change", ["rename", "delete", "locked_review"])
+def test_short_jobs_bind_sent_identities_and_review_without_old_answers(
+    fake_provider_client, migrated_settings, change,
 ):
     data = _import(fake_provider_client)
     profile = _fake_profile(fake_provider_client)
@@ -211,15 +211,19 @@ def test_short_jobs_reject_stale_identity_bindings_and_review_without_old_answer
             person_id = person.id
         job = _create_job(fake_provider_client, data["book_id"], profile, key="short-review",
             range={"start_cp": 0, "end_cp": cutoff, "output_protocol": "expression-production-1"},
-            budget={"max_recheck_rounds": 0 if stale else 1, "max_format_retries": 2},
+            budget={"max_recheck_rounds": 1 if change == "locked_review" else 0, "max_format_retries": 2},
             reading_mode="reread")
 
         class CallbackAdapter(ShortJobAdapter):
             async def generate_labels(self, payload):
                 result = await super().generate_labels(payload)
-                if stale:
+                if change in {"rename", "delete"}:
                     with transaction(factory) as session:
-                        session.get(BookCharacter, person_id).canonical_name = "在途改名"
+                        person = session.get(BookCharacter, person_id)
+                        if change == "delete":
+                            session.delete(person)
+                        else:
+                            person.canonical_name = "在途改名"
                 elif len(self.calls) == 2:
                     sent = json.dumps(payload["messages"], ensure_ascii=False)
                     assert "candidate_hints" not in sent and "旧候选" not in sent
@@ -234,16 +238,21 @@ def test_short_jobs_reject_stale_identity_bindings_and_review_without_old_answer
 
         adapter = CallbackAdapter(kind="thought")
         result = _run_with_fake(migrated_settings, job["id"], adapter)
-        assert result.state is (JobState.FAILED if stale else JobState.COMPLETED), result.errors
-        assert len(adapter.calls) == (1 if stale else 2)
+        assert result.state is (JobState.FAILED if change == "delete" else JobState.COMPLETED), result.errors
+        assert len(adapter.calls) == (2 if change == "locked_review" else 1)
         with factory() as session:
             annotations = list(session.scalars(select(Annotation)))
             runs = list(session.scalars(select(InferenceRun).where(InferenceRun.job_id == job["id"])))
             assert len(runs) == len(adapter.calls)
-            if stale:
+            if change == "delete":
                 assert not annotations
                 assert runs[0].state is InferenceRunState.FAILED
                 assert json.loads(runs[0].usage_json)["total_tokens"] == 30
+            elif change == "rename":
+                assert session.get(BookCharacter, person_id).canonical_name == "在途改名"
+                assert session.get(SpeakerGroup, annotations[0].speaker_id).character_id == person_id
+                assert annotations[0].kind is QuoteKind.THOUGHT
+                assert runs[0].state is InferenceRunState.SUCCEEDED
             else:
                 assert annotations[0].kind is QuoteKind.THOUGHT
                 assert annotations[0].source is AnnotationSource.USER
