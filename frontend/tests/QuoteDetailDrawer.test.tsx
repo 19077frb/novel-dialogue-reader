@@ -137,6 +137,9 @@ describe('QuoteDetailDrawer', () => {
     expect(screen.getByTestId('quote-context')).toHaveTextContent('少女合上伞。')
     expect(screen.getByTestId('quote-context')).toHaveTextContent('少年点头。')
     expect(screen.getByTestId('drawer-annotation')).toHaveTextContent('暂定，待确认')
+    expect(screen.getByTestId('drawer-annotation')).toHaveTextContent('人物归属绫濑沙季')
+    expect(screen.getByTestId('drawer-annotation')).not.toHaveTextContent('S1')
+    expect(screen.getByTestId('correction-version')).toHaveTextContent('绫濑沙季')
     expect(screen.getByTestId('drawer-annotation')).toHaveTextContent('对白（发声）')
     expect(vi.mocked(booksApi.fetchQuoteDetail)).toHaveBeenCalledWith('q1', {
       contextWindowCp: 120,
