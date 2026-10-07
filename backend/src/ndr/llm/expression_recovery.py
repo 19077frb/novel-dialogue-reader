@@ -121,7 +121,9 @@ def recover_expression_output(payload, task):
         kind = row.get("kind")
         if isinstance(kind, str) and kind in OWNER_KINDS:
             candidate = row.get("character")
-            character = candidate if isinstance(candidate, str) and candidate in known else None
+            character = (
+                candidate if isinstance(candidate, str) and candidate in identities else None
+            )
             normalized[q] = {
                 "q": q, "kind": kind, "character": character,
                 "basis": "style_only" if character else "insufficient",

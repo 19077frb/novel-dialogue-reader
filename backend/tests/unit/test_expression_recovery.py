@@ -96,6 +96,19 @@ def test_bad_new_identity_is_unknown_and_dependent_rows_are_not_accepted():
     assert all(person.character_id == "person" for person in result.compilation.output.new_speakers)
 
 
+def test_valid_new_identity_declaration_can_be_kept_as_a_warning_candidate():
+    raw = payload()
+    raw["new_characters"] = [
+        {"ref": "N1", "name": "门卫", "description": "门口工作人员", "evidence": ["E1"]}
+    ]
+    raw["labels"][0].update(character="N1", evidence=["G1"])
+    result = recover_expression_output(raw, task())
+    assert result.compilation.output.labels[0].speaker_ref
+    assert result.compilation.acceptance_ceilings == {"quote1": AnnotationStatus.PROVISIONAL}
+    declaration = result.compilation.output.new_speakers[0]
+    assert declaration.name == "门卫" and declaration.evidence_refs == ["proof"]
+
+
 @pytest.mark.parametrize("change", [
     {"breaks": ["UNSENT"]}, {"breaks": ["B1", "B1"]}, {"labels": []},
     {"unexpected": "value"}, {"needs_context": ["Q99"]},
