@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { QuoteCorrectionInput } from '../api/review'
 import type { AnnotationStateOut, QuoteKind, SceneGroupRefOut } from '../api/types'
 import { labelText } from '../styles/palette'
+import { annotationStatusLabel } from '../ui/labels'
 
 const KINDS: { value: QuoteKind; label: string }[] = [
   { value: 'speech', label: '对白（发声）' },
@@ -109,7 +110,7 @@ export function CorrectionForm({
       <p className="hint" data-testid="correction-version">
         当前标注：
         {annotation
-          ? `${annotation.status} · ${labelText(annotation.label) || '（无色/无编号）'} · 版本 ${annotation.version}`
+          ? `${annotationStatusLabel(annotation.status)} · ${labelText(annotation.label) || '（无色/无编号）'} · 版本 ${annotation.version}`
           : '还没有标注（更正会建立一条人工标注）'}
       </p>
       <label className="ndr-field">

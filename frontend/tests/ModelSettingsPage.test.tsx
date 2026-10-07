@@ -90,6 +90,19 @@ describe('ModelSettingsPage', () => {
     expect(await screen.findByTestId('protocol-capabilities')).toHaveTextContent('json_schema：未声明')
   })
 
+  it('shows Chinese protocol and credential labels without changing saved identifiers', async () => {
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile()])
+    renderWithProviders(<ModelSettingsPage />)
+    const card = await screen.findByTestId('profile-card')
+    expect(card).toHaveTextContent('兼容聊天接口')
+    expect(card).toHaveTextContent('仅本次会话')
+    expect(card).not.toHaveTextContent('chat-completions-compatible')
+    expect(card).toHaveTextContent('https://api.example.com/v1')
+    expect(screen.getByTestId('profile-protocol')).toHaveValue('chat-completions-compatible')
+    expect(profilesApi.createProfile).not.toHaveBeenCalled()
+    expect(profilesApi.testConnection).not.toHaveBeenCalled()
+  })
+
   it('新建配置时提交密钥，但界面上不回显密钥', async () => {
     vi.mocked(profilesApi.createProfile).mockResolvedValue(profile())
     // 创建成功后列表刷新会拿到新配置
@@ -315,7 +328,7 @@ describe('ModelSettingsPage / 连接测试', () => {
     const result = await screen.findByTestId('connection-result')
     expect(result).toHaveTextContent('连接失败')
     expect(result).toHaveTextContent('PROVIDER_AUTH_FAILED')
-    expect(result).toHaveTextContent('未知（提供方未返回 usage，不按 0 计）')
+    expect(result).toHaveTextContent('未知（模型服务未返回用量，不按 0 计）')
   })
 
   it('FakeProvider 结果会被明确标注为测试适配器', async () => {

@@ -6,6 +6,12 @@ import { describe, expect, it } from 'vitest'
 const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/styles/global.css'), 'utf8')
 
 describe('shared UI design rules', () => {
+  it('lets model cards and form groups shrink on narrow screens without clipping long addresses', () => {
+    expect(css).toContain('minmax(min(100%, 320px), 1fr)')
+    expect(css).toMatch(/\.ndr-profile-card dl\s*\{[^}]*minmax\(0, 1fr\)/)
+    expect(css).toMatch(/\.ndr-profile-card dd\s*\{[^}]*overflow-wrap:\s*anywhere/)
+    expect(css).toMatch(/\.ndr-profile-form fieldset\s*\{[^}]*min-width:\s*0/)
+  })
   it('keeps collapsed content hidden and adapts block summaries with theme tokens', () => {
     expect(css).toMatch(/\.ndr-collapsible-block > \[hidden\]\s*\{[^}]*display:\s*none/)
     expect(css).toMatch(/\.ndr-collapsible-summary\s*\{[^}]*color:\s*var\(--ndr-muted\)/)

@@ -11,9 +11,9 @@ test('首页显示后端 /api/health 返回的真实状态', async ({ page }) =>
 
   const status = page.getByTestId('health-ok')
   await expect(status).toBeVisible()
-  await expect(status).toContainText('ok')
+  await expect(status).toContainText('服务已连接')
   // E2E 后端使用隔离数据目录并自动迁移，因此页面必须如实显示 READY。
-  await expect(status).toContainText('READY')
+  await expect(status).toContainText('数据库 就绪')
 })
 
 test('经 Vite 代理的 /api/health 可用且不调用模型', async ({ request }) => {

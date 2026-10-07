@@ -804,6 +804,7 @@ textarea:focus-visible {
   padding: 12px;
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .ndr-radio-row {
@@ -827,7 +828,7 @@ textarea:focus-visible {
 
 .ndr-profile-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   gap: 12px;
 }
 
@@ -837,6 +838,17 @@ textarea:focus-visible {
   padding: 12px;
   display: grid;
   gap: 8px;
+  min-width: 0;
+}
+
+.ndr-profile-card dl { grid-template-columns: max-content minmax(0, 1fr); }
+.ndr-profile-card dd { margin-left: 0; overflow-wrap: anywhere; }
+.ndr-profile-card h3 { min-width: 0; overflow-wrap: anywhere; }
+.ndr-profile-card header { flex-wrap: wrap; }
+.ndr-profile-form > *, .ndr-field { min-width: 0; }
+.ndr-profile-form .ndr-range-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 600px) {
+  .ndr-profile-form .ndr-range-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 .ndr-profile-card header {
