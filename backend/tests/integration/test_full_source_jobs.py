@@ -7,10 +7,10 @@ from sqlalchemy import select
 
 from ndr.context.budget import CHAPTER_POLICY
 from ndr.context.service import load_window_inputs, plan_range
-from ndr.domain.enums import JobState, ReadingMode
+from ndr.domain.enums import AnnotationStatus, JobState, ReadingMode, ReviewReason
 from ndr.jobs.scheduler import run_job
 from ndr.llm.adapters.fake import FakeProviderAdapter
-from ndr.storage.models import BookVersion, InferenceRun, Job
+from ndr.storage.models import Annotation, BookVersion, InferenceRun, Job, Quote, ReviewItem
 
 TEXT = "第一章\n章首身份证据。\n林舟说：「你好。」\n陆欣答：「再见。」\n章末身份证据。\n第二章\n未来秘密。\n「下一章对白。」\n"
 
@@ -161,7 +161,7 @@ def test_actual_auxiliary_isolation_preserves_main_or_holds_shared_identity(
 @pytest.mark.parametrize(
     "version,bad_main", [(None, False), ("expression-auxiliary-isolation-1", True)]
 )
-def test_auxiliary_flag_never_bypasses_old_strict_mode_or_main_validation(
+def test_final_recovery_never_accepts_bad_main_or_undeclared_auxiliary_fields(
     migrated_client, version, bad_main
 ):
     client = migrated_client
@@ -177,7 +177,16 @@ def test_auxiliary_flag_never_bypasses_old_strict_mode_or_main_validation(
         job_id=job["id"],
         adapter_factory=lambda *_: adapter,
     )
-    assert result.state is JobState.FAILED and len(adapter.calls) == 1
+    assert result.state is JobState.COMPLETED and len(adapter.calls) == 1
+    with client.app.state.session_factory() as session:
+        annotations = list(session.scalars(select(Annotation).join(Quote).order_by(Quote.start_cp)))
+        assert len(annotations) == 2
+        assert annotations[0].status is AnnotationStatus.PROVISIONAL
+        assert annotations[0].speaker_id
+        assert annotations[1].status is AnnotationStatus.ACCEPTED
+        warning = session.scalar(select(ReviewItem))
+        assert warning.reason is ReviewReason.MODEL_OUTPUT_WARNING
+        assert warning.quote_id == annotations[0].quote_id
 
 
 def test_actual_job_request_sends_whole_chapter_not_next_chapter(migrated_client):

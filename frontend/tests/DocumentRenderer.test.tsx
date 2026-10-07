@@ -247,6 +247,15 @@ describe('DocumentRenderer 标注投影', () => {
     expect(span).toHaveTextContent('「雨停了。」')
   })
 
+  it('候选人物显示警告并保留说明，初读未揭示时不显示', () => {
+    const view = render(<DocumentRenderer bookId="b1" nodes={[node]} annotations={[annotation({ status: 'PROVISIONAL' })]} />)
+    expect(screen.getByRole('img', { name: '候选人物，待确认' })).toHaveClass('status-warning')
+    expect(screen.getByTestId('annotation-span').title).toContain('戴着红围巾的女同学')
+    expect(screen.getByTestId('annotation-span').title).toContain('待确认')
+    view.rerender(<DocumentRenderer bookId="b1" nodes={[node]} annotations={[annotation({ status: 'PROVISIONAL', withheld: true })]} />)
+    expect(screen.queryByRole('img', { name: '候选人物，待确认' })).not.toBeInTheDocument()
+  })
+
   it('withheld 的标注既不着色也不下发编号', () => {
     render(
       <DocumentRenderer

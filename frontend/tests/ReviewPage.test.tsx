@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as booksApi from '../src/api/books'
 import * as profilesApi from '../src/api/profiles'
 import * as reviewApi from '../src/api/review'
+import type { ReviewQueueResponse } from '../src/api/types'
 import ReviewPage from '../src/pages/ReviewPage'
 import { renderRoute } from './helpers'
 
@@ -224,6 +225,17 @@ describe('ReviewPage', () => {
 
     renderRoute('/books/:bookId/review', <ReviewPage />, '/books/b1/review')
     expect(await screen.findByTestId('review-empty')).toHaveTextContent('不等于')
+  })
+
+  it('校验警告有中文原因和警告样式，并可按原因筛选', async () => {
+    const source = QUEUE as ReviewQueueResponse
+    vi.mocked(reviewApi.fetchReviewQueue).mockResolvedValue({
+      ...source,
+      items: [{ ...source.items![0], reason: 'MODEL_OUTPUT_WARNING' }],
+    } as never)
+    renderRoute('/books/:bookId/review', <ReviewPage />, '/books/b1/review')
+    expect(await screen.findByText('原因：模型结果校验警告')).toHaveClass('status-warning')
+    expect(screen.getByRole('option', { name: '模型结果校验警告' })).toBeInTheDocument()
   })
 
   it('清理误触发记录后重新读取队列，保留真实问题并显示统计', async () => {

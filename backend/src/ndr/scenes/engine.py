@@ -484,6 +484,7 @@ def apply_window(
     preserve_existing_candidates: bool = False,
     expected_schema_version: str = "1.0",
     acceptance_ceilings: Mapping[str, AnnotationStatus] | None = None,
+    validation_warnings: Mapping[str, str] | None = None,
 ) -> WindowApplication:
     """应用一次模型输出：校验 → 锁定检查 → 可见时点 → 接受策略 → 落库。"""
 
@@ -529,6 +530,12 @@ def apply_window(
 
     parsed = report.output
     accepted = report.accepted_labels
+    validation_warnings = dict(validation_warnings or {})
+    if (set(validation_warnings) - {label.quote_id for label in accepted}
+            or any(not isinstance(message, str) for message in validation_warnings.values())):
+        application.validation_ok = False
+        application.validation_codes.append("invalid_validation_warnings")
+        return application
     ceilings = dict(acceptance_ceilings or {})
     owner_ids = {row.quote_id for row in accepted if has_owner_contract(row)}
     if acceptance_ceilings is not None and (
@@ -717,6 +724,12 @@ def apply_window(
                 }
             )
         decision_out = decide_acceptance(stored_label, cold_start=cold_start)
+        if label.quote_id in validation_warnings:
+            decision_out = AcceptanceDecision(
+                status=AnnotationStatus.PROVISIONAL if speaker_id else AnnotationStatus.UNKNOWN,
+                reason="model_output_validation_warning", needs_review=True,
+                review_reason=ReviewReason.MODEL_OUTPUT_WARNING,
+            )
         if label.quote_id in ceilings and decision_out.status is AnnotationStatus.ACCEPTED:
             decision_out = AcceptanceDecision(
                 status=AnnotationStatus.PROVISIONAL, reason="unapproved_expression_owner",
@@ -769,6 +782,8 @@ def apply_window(
                         stored_label.assignment.value if stored_label.assignment else None
                     ),
                     "reason": decision_out.reason,
+                    **({"warning": validation_warnings[label.quote_id]}
+                       if label.quote_id in validation_warnings else {}),
                 },
                 annotation_version=annotation.version,
             )

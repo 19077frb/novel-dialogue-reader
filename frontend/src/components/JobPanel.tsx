@@ -113,7 +113,7 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
       )}
       <IdentityFeedbackSummary checkpoint={job.data.checkpoint} />
       {Array.isArray(job.data.checkpoint?.auxiliary_warnings) && (
-        <div className="hint" aria-label="辅助信息校验提示">{job.data.checkpoint.auxiliary_warnings
+        <div className="hint" aria-label="处理结果提示">{job.data.checkpoint.auxiliary_warnings
           .filter((notice): notice is string => typeof notice === 'string').slice(0, 5)
           .map((notice, index) => <p key={index}>{notice}</p>)}</div>
       )}

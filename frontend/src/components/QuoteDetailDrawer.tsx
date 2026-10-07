@@ -217,6 +217,12 @@ export function QuoteDetailDrawer({
               {notice}
             </p>
           )}
+          {itemDetail.data?.item.reason === 'MODEL_OUTPUT_WARNING' && (
+            <p className="status-warning" role="status">⚠ 模型结果未通过逐句校验，显示的人物仅是候选，请核对后确认。</p>
+          )}
+          {typeof itemDetail.data?.item.candidates?.warning === 'string' && (
+            <p className="hint">{itemDetail.data.item.candidates.warning}</p>
+          )}
 
           <QuoteContext
             before={data.context_before}
