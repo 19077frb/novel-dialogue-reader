@@ -369,7 +369,7 @@ export default function PreviewPage() {
       setNotice(
         job.state === 'COMPLETED'
           ? '任务完成：阅读标注已保存，返回阅读即可查看结果。'
-          : `任务结束于 ${job.state}，请在任务面板查看原因。`,
+          : `任务结束于 ${SINGLE_TASK_LABELS[job.state] ?? job.state}，请在任务面板查看原因。`,
       )
       // 失效**整族**投影查询：阅读页用的是「初读 horizon = 本章末端」的另一个键，
       // 只失效 horizon=null 那一个会让阅读页继续用旧（可能是空）的结果。

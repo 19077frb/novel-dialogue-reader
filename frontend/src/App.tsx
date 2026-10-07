@@ -31,7 +31,7 @@ export function HealthBadge() {
     return (
       <div data-testid="health-error" className="ndr-health-error">
         <p className="status status-error">无法连接后端</p>
-        <p className="hint">请确认后端已在 127.0.0.1:8765 运行（scripts/dev.ps1）。</p>
+        <p className="hint">请确认应用启动窗口仍然打开，再重试连接。如果修改过服务地址，请使用启动时显示的地址。</p>
         <button type="button" onClick={() => void health.refetch()}>
           重试连接
         </button>
@@ -42,8 +42,8 @@ export function HealthBadge() {
   return (
     <div className="ndr-health-pill" data-testid="health-ok">
       <span className="ndr-health-dot" aria-hidden="true" />
-      <span>
-        后端 {health.data.status} · v{health.data.version} · 数据库 {health.data.database.state}
+      <span title={`服务：${health.data.status}；数据库：${health.data.database.state}`}>
+        {health.data.status === 'ok' ? '服务已连接' : health.data.status === 'degraded' ? '服务异常' : health.data.status} · v{health.data.version} · 数据库 {({ READY: '就绪', ERROR: '异常', OUTDATED: '需要升级', NOT_INITIALIZED: '尚未初始化' } as Record<string, string>)[health.data.database.state] ?? health.data.database.state}
         {health.data.database.detail ? ` — ${health.data.database.detail}` : ''}
       </span>
     </div>

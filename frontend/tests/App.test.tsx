@@ -60,7 +60,7 @@ describe('App', () => {
 
     renderWithProviders(<App />, '/')
 
-    expect(await screen.findByTestId('health-ok')).toHaveTextContent('READY')
+    expect(await screen.findByTestId('health-ok')).toHaveTextContent('数据库 就绪')
     expect(screen.getByTestId('health-ok')).toHaveTextContent('9.9.9-test')
     expect(await screen.findByTestId('library-empty')).toBeInTheDocument()
   })

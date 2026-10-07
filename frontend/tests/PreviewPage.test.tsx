@@ -431,7 +431,7 @@ describe('PreviewPage', () => {
     const profiles = await profilesApi.fetchProfiles()
     vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([...profiles, { ...profiles[0], id: 'p2', name: '第二模型' }])
     const mounted = renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await screen.findByText('第二模型 · fake-provider · fake-model')
+    await screen.findByText('第二模型 · fake-model')
     const modelSettings = screen.getByTestId('model-thinking-settings')
     expect(within(modelSettings).getByTestId('preview-profile')).toBeInTheDocument()
     expect(within(modelSettings).getByTestId('processing-thinking-mode')).toBeInTheDocument()

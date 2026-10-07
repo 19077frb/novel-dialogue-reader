@@ -23,6 +23,7 @@ import type { GapDecision } from '../api/types'
 import { CorrectionForm } from './CorrectionForm'
 import { GapDecisionControls } from './GapDecisionControls'
 import { QuoteContext } from './QuoteContext'
+import { annotationStatusLabel, quoteKindLabel, reviewReasonLabel, queueStatusLabel, correctionActionLabel } from '../ui/labels'
 import { RecheckPanel } from './RecheckPanel'
 
 const CONTEXT_STEPS = [120, 600, 2000]
@@ -207,8 +208,8 @@ export function QuoteDetailDrawer({
           </p>
           {itemDetail.data && (
             <p className="hint" data-testid="drawer-queue-item">
-              队列：{itemDetail.data.item.reason} · {itemDetail.data.item.queue_status}
-              （{(itemDetail.data.allowed_actions ?? []).join(' / ')}）
+              队列：{reviewReasonLabel(itemDetail.data.item.reason)} · {queueStatusLabel(itemDetail.data.item.queue_status)}
+              （{(itemDetail.data.allowed_actions ?? []).map(correctionActionLabel).join(' / ')}）
             </p>
           )}
           {notice && (
@@ -231,11 +232,11 @@ export function QuoteDetailDrawer({
           {data.annotation && (
             <dl className="ndr-drawer-annotation" data-testid="drawer-annotation">
               <dt>状态</dt>
-              <dd>{data.annotation.status}</dd>
+              <dd title={data.annotation.status}>{annotationStatusLabel(data.annotation.status)}</dd>
               <dt>编号</dt>
               <dd>{data.annotation.label ?? '（没有编号）'}</dd>
               <dt>类型</dt>
-              <dd>{data.annotation.kind}</dd>
+              <dd title={data.annotation.kind}>{quoteKindLabel(data.annotation.kind)}</dd>
               <dt>锁定</dt>
               <dd>{data.annotation.user_locked ? '已人工锁定' : '未锁定'}</dd>
               <dt>版本</dt>

@@ -136,7 +136,8 @@ describe('QuoteDetailDrawer', () => {
     expect(await screen.findByTestId('drawer-quote')).toHaveTextContent('「雨停了。」')
     expect(screen.getByTestId('quote-context')).toHaveTextContent('少女合上伞。')
     expect(screen.getByTestId('quote-context')).toHaveTextContent('少年点头。')
-    expect(screen.getByTestId('drawer-annotation')).toHaveTextContent('PROVISIONAL')
+    expect(screen.getByTestId('drawer-annotation')).toHaveTextContent('暂定，待确认')
+    expect(screen.getByTestId('drawer-annotation')).toHaveTextContent('对白（发声）')
     expect(vi.mocked(booksApi.fetchQuoteDetail)).toHaveBeenCalledWith('q1', {
       contextWindowCp: 120,
       signal: expect.anything(),
@@ -231,6 +232,8 @@ describe('QuoteDetailDrawer', () => {
       <QuoteDetailDrawer quoteId="q1" reviewItemId="r1" onClose={vi.fn()} />,
     )
     await screen.findByTestId('drawer-queue-item')
+    expect(screen.getByTestId('drawer-queue-item')).toHaveTextContent('置信度低 · 待确认')
+    expect(screen.getByTestId('drawer-queue-item')).toHaveTextContent('指定已有说话人')
 
     await userEvent.click(screen.getByTestId('drawer-defer'))
     await waitFor(() => expect(reviewApi.deferReviewItem).toHaveBeenCalledWith('r1', '稍后处理'))

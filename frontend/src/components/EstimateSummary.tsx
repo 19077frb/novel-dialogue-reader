@@ -16,7 +16,7 @@ export function EstimateSummary({ estimate }: { estimate: EstimateOut }) {
         <dt>合计</dt>
         <dd data-testid="estimate-total">{estimate.total_tokens} token</dd>
       </dl>
-      <p className="hint">估算来自本地启发式 token 口径，不是真实计费依据；实际用量以提供方 usage 为准。</p>
+      <p className="hint">Token 是模型用量单位，不等于字数。这里是本地估算，不是真实计费依据；实际消耗以模型服务返回的用量为准。</p>
       {(estimate.notes ?? []).length > 0 && (
         <ul className="hint">
           {(estimate.notes ?? []).map((note) => (

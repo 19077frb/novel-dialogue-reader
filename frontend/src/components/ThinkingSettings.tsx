@@ -2,6 +2,7 @@ import { useProcessingPreferences } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
 import type { ModelProfileOut } from '../api/types'
 import { DisabledHint, disabledHint } from './DisabledHint'
+import { protocolLabel } from '../ui/labels'
 
 export function ThinkingSettings({ disabled, disabledReason, profiles, profileId, onProfileChange, profileTestId, draftPreferences, onPreferencesChange }: {
   disabled: boolean
@@ -28,11 +29,12 @@ export function ThinkingSettings({ disabled, disabledReason, profiles, profileId
     <label className="ndr-field">模型配置
       <select value={profileId} disabled={disabled} {...disabledHint(disabled && lockReason)} onChange={event => onProfileChange(event.target.value)} data-testid={profileTestId}>
         <option value="">（请选择模型配置）</option>
-        {profiles.map(item => <option key={item.id} value={item.id}>{item.name} · {item.protocol} · {item.model}</option>)}
+        {profiles.map(item => <option key={item.id} value={item.id} title={`${item.name} · ${protocolLabel(item.protocol)} · ${item.model}`}>{item.name} · {item.model}</option>)}
       </select>
     </label>
+    {profile?.protocol === 'fake-provider' && <p className="hint">当前选择的是模拟服务，仅用于测试，不会调用真实模型。</p>}
     {profiles.length === 0 && <p className="hint" data-testid="preview-no-profile">还没有模型配置：请先到“模型配置”添加提供方（真实提供方需要密钥）。</p>}
-    <div className="ndr-form-actions">
+    <div className="ndr-range-grid">
       <label className="ndr-field">思考模式
         <select data-testid="processing-thinking-mode" disabled={disabled} {...disabledHint(disabled && lockReason)} value={preferences.thinkingMode}
           onChange={event => update({ thinkingMode: event.target.value as ProcessingPreferences['thinkingMode'] })}>

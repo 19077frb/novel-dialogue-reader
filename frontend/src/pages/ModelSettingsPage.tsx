@@ -13,6 +13,9 @@ import {
   updateProfile,
 } from '../api/profiles'
 import type { ConnectionTestOut, CredentialMode, ModelProfileOut } from '../api/types'
+import { credentialLabel, protocolLabel } from '../ui/labels'
+import { CollapsibleBlock } from '../components/CollapsibleBlock'
+import { ReadErrorNotice } from '../components/ReadErrorNotice'
 
 type KeyAction = 'keep' | 'replace' | 'remove'
 
@@ -232,7 +235,7 @@ export default function ModelSettingsPage() {
         <h2>新增或更新配置</h2>
         <p className="hint">
           在这里填写 API 根地址、模型名与密钥；不需要改源码。密钥只在提交时出现，
-          保存后接口只返回 <code>has_key</code>，不会回传密钥本身。保存前可以用
+          保存后只显示密钥是否已保存，不会显示密钥本身。保存前可以用
           「测试当前填写内容」验证连通性，保存后也可以随时「测试连接」；除连接测试外，本页不会发起调用。
         </p>
 
@@ -267,23 +270,23 @@ export default function ModelSettingsPage() {
             >
               {(protocols.data ?? []).map((item) => (
                 <option key={item.protocol} value={item.protocol}>
-                  {item.protocol}
+                  {protocolLabel(item.protocol)}
                 </option>
               ))}
-              {!protocols.data && <option value={form.protocol}>{form.protocol}</option>}
+              {!protocols.data && <option value={form.protocol}>{protocolLabel(form.protocol)}</option>}
             </select>
           </label>
 
           {selectedProtocol && (
-            <p className="hint" data-testid="protocol-capabilities">
+            <details className="hint" data-testid="protocol-capabilities"><summary>接口支持与技术说明</summary><p>
               {selectedProtocol.notes} · json_object：{selectedProtocol.supports_json_object ? '支持' : '不支持'} ·
               json_schema：{selectedProtocol.supports_json_schema ? '支持' : '未声明'} · 需要 Key：
               {selectedProtocol.requires_api_key ? '是' : '否'}
-            </p>
+            </p></details>
           )}
 
           <label>
-            Base URL（API 根路径）
+            服务地址（Base URL）
             <input
               type="text"
               value={form.baseUrl}
@@ -310,7 +313,7 @@ export default function ModelSettingsPage() {
             <legend>常用生成参数</legend>
             <p className="hint">留空表示沿用提供方或任务默认值。输出上限是每次调用的上限，不是本次任务的总额度。
               下方思考设置作为模型配置默认值，也可在「预览与处理」中按任务覆盖。</p>
-            {([
+            <div className="ndr-range-grid">{([
               ['max_tokens', '每次调用最大输出 Token', 1, undefined, 1],
               ['temperature', '随机性（越低越稳定）', 0, 2, 0.1],
               ['top_p', '采样范围', 0, 1, 0.05],
@@ -320,7 +323,7 @@ export default function ModelSettingsPage() {
               <input type="number" data-testid={`profile-${key}`} min={min} max={max} step={step}
                 value={(JSON.parse(form.paramsText)[key] as number | undefined) ?? ''}
                 onChange={event => changeParameter(key, event.target.value)} />
-            </label>)}
+            </label>)}</div>
           </fieldset>
           <fieldset>
             <legend>默认思考设置</legend>
@@ -399,7 +402,7 @@ export default function ModelSettingsPage() {
                   ))}
                 </div>
                 <label>
-                  API Key（留空表示不保存密钥）
+                  接口密钥（API Key，留空不保存）
                   <input
                     type="password"
                     value={form.apiKey}
@@ -461,7 +464,7 @@ export default function ModelSettingsPage() {
               <li>
                 用量：
                 {testResult.data.usage_unknown
-                  ? '未知（提供方未返回 usage，不按 0 计）'
+                  ? '未知（模型服务未返回用量，不按 0 计）'
                   : `输入 ${testResult.data.usage?.input_tokens ?? '?'} · 输出 ${
                       testResult.data.usage?.output_tokens ?? '?'
                     } · 合计 ${testResult.data.usage?.total_tokens ?? '?'}`}
@@ -495,12 +498,13 @@ export default function ModelSettingsPage() {
       <section className="card">
         <h2>已保存的配置</h2>
         {profiles.isPending && <p className="hint">正在读取配置…</p>}
-        {profiles.isError && <p className="status-error">配置读取失败，请确认后端已启动。</p>}
+        {profiles.isError && <ReadErrorNotice label="模型配置读取失败" error={profiles.error} retrying={profiles.isFetching} onRetry={() => void profiles.refetch()} />}
         {profiles.isSuccess && profiles.data.length === 0 && (
           <p className="hint" data-testid="profiles-empty">
             还没有模型配置。填写上方表单即可保存，不需要修改源码。
           </p>
         )}
+        <CollapsibleBlock title="模型配置列表" summary={`共 ${profiles.data?.length ?? 0} 个配置`}>
         <div className="ndr-profile-list">
           {(profiles.data ?? []).map((profile) => (
             <article className="ndr-profile-card" key={profile.id} data-testid="profile-card">
@@ -512,13 +516,13 @@ export default function ModelSettingsPage() {
               </header>
               <dl>
                 <dt>协议</dt>
-                <dd>{profile.protocol}</dd>
-                <dt>Base URL</dt>
+                <dd title={profile.protocol}>{protocolLabel(profile.protocol)}</dd>
+                <dt>服务地址</dt>
                 <dd>{profile.base_url}</dd>
                 <dt>模型</dt>
                 <dd>{profile.model}</dd>
                 <dt>凭据</dt>
-                <dd>{profile.credential_mode}</dd>
+                <dd>{credentialLabel(profile.credential_mode)}</dd>
                 <dt>版本</dt>
                 <dd>{profile.version}</dd>
               </dl>
@@ -557,6 +561,7 @@ export default function ModelSettingsPage() {
             </article>
           ))}
         </div>
+        </CollapsibleBlock>
       </section>
     </div>
   )
