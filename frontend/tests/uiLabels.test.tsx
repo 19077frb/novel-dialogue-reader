@@ -32,4 +32,28 @@ describe('Chinese display labels and processing choices', () => {
     expect(screen.getByText('等待当前任务结束')).toBeVisible()
     expect(screen.getByText(/人物名单反馈需要独立复核/)).toBeVisible()
   })
+  it('explains a bounded recommendation and savings without changing existing choices', () => {
+    const change = vi.fn()
+    const { rerender } = render(<DialogueStrategySettings value="legacy" onChange={change} rounds={1} />)
+    const select = screen.getByTestId('dialogue-strategy')
+    expect(select).toHaveValue('legacy')
+    expect(screen.queryByText('原有窗口流程')).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /默认·小窗口/ })).toHaveValue('legacy')
+    expect(screen.getByRole('option', { name: /推荐·质量优先/ })).toHaveValue('complete-blocks-isolated-review')
+    expect(screen.getByRole('option', { name: /较省用量/ })).toHaveValue('complete-blocks')
+    expect(screen.getByText(/怎么选：质量优先/)).toBeVisible()
+    expect(screen.getByText(/不保证总 Token 最少/)).toBeVisible()
+    expect(screen.getByText(/目前有限样本/)).toBeVisible()
+    expect(change).not.toHaveBeenCalled()
+    expect([...select.querySelectorAll('option')].map(option => option.value)).toEqual([
+      'legacy', 'complete-blocks', 'complete-blocks-review', 'complete-blocks-isolated',
+      'complete-blocks-isolated-review', 'complete-blocks-isolated-feedback-review', 'complete', 'complete-review',
+    ])
+    rerender(<DialogueStrategySettings value="complete-blocks-isolated-review" onChange={change} rounds={0} />)
+    expect(select).toHaveValue('complete-blocks-isolated-review')
+    expect(screen.queryByRole('option', { name: /推荐·质量优先/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /需开启复核/ })).toHaveValue('complete-blocks-isolated-review')
+    expect(screen.getByRole('status')).toHaveTextContent('独立复核已关闭')
+    expect(change).not.toHaveBeenCalled()
+  })
 })
