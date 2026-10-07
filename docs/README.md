@@ -16,7 +16,7 @@
 | [评测配置](../evaluation/configs/README.md) | 评测执行者：配置字段和实际接入边界 | 把记录字段当作已实现开关 |
 | [评测清单](../evaluation/manifests/README.md) | 评测数据维护者：作品划分、路径及清单校验 | 私有小说和个人凭据 |
 | [对照方法](../evaluation/ablations.md) | 评测维护者：B0～B4差异、复现和证据门槛 | 把未运行实验写成效果结论 |
-| [短协议实验](../evaluation/compact-protocol.md) | 评测维护者：隔离编译、身份评分及有界对照调用 | 声称已接入正式任务或已证明收益 |
+| [短协议与评测](../evaluation/compact-protocol.md) | 评测维护者：隔离编译、身份评分、有界对照调用及显式正式入口边界 | 将隔离实验误称为正式功能，或将接入/校验通过当作质量收益 |
 | [原创样例](../evaluation/examples/README.md) | 样例使用者：来源、文件与用途 | 宣称最小样例代表真实作品质量 |
 | [导出夹具](../evaluation/examples/exports/README.md) | 导出测试维护者：固定产物、校验与标准检查边界 | 将历史产物当作当前构建结果 |
 | [评测报告](../evaluation/reports/README.md) | 报告使用者：历史证据、指标、复现和限制 | 改写历史结果、维护者个人状态 |
