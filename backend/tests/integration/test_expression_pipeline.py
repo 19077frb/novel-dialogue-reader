@@ -177,6 +177,64 @@ def test_actual_job_independent_review_and_evidence_based_third_identity(
         assert sum(json.loads(r.usage_json)["total_tokens"] for r in runs) == 30 * calls
 
 
+@pytest.mark.parametrize("changed_after_call", [0, 1, 2])
+def test_concurrent_character_updates_do_not_invalidate_sent_identity_profiles(
+    fake_provider_client, changed_after_call
+):
+    client = fake_provider_client
+    create, factory = prepare(client, auxiliary=True)
+    job = create(f"concurrent-profiles-{changed_after_call}")
+    if changed_after_call == 0:
+        with transaction(factory) as session:
+            row = session.get(Job, job["id"])
+            settings = json.loads(row.range_json)
+            settings.pop("review_protocol")
+            row.range_json = json.dumps(settings)
+            row.budget_json = json.dumps({"max_recheck_rounds": 0})
+
+    def change_people():
+        with transaction(factory) as session:
+            person = session.scalar(select(BookCharacter).where(BookCharacter.canonical_name == "林舟"))
+            person.canonical_name = "林舟新名"
+            person.aliases_json = '["新增称呼"]'
+            person.description = "下一章更新的说明"
+            session.add(BookCharacter(book_version_id=person.book_version_id,
+                                      canonical_name="新人物", source="USER", user_confirmed=True))
+
+    adapter = StageAdapter(["林舟", "林舟"], pause=(changed_after_call or 1, change_people))
+    result = run_job(factory, client.app.state.settings, job_id=job["id"],
+                     adapter_factory=lambda *_: adapter)
+    assert result.state is JobState.COMPLETED, result.errors
+    assert len(adapter.calls) == (1 if changed_after_call == 0 else 2)
+    with factory() as session:
+        current = session.scalar(select(BookCharacter).where(BookCharacter.canonical_name == "林舟新名"))
+        assert current.description == "下一章更新的说明"
+        assert json.loads(current.aliases_json) == ["新增称呼"]
+        annotation = session.scalar(select(Annotation))
+        assert session.get(SpeakerGroup, annotation.speaker_id).character_id == current.id
+        assert session.scalar(select(BookCharacter).where(BookCharacter.canonical_name == "新人物"))
+
+
+def test_deleted_identity_is_rejected_without_retrying_paid_calls(fake_provider_client):
+    client = fake_provider_client
+    create, factory = prepare(client)
+    job = create("deleted-sent-identity")
+
+    def remove_person():
+        with transaction(factory) as session:
+            person = session.scalar(select(BookCharacter).where(BookCharacter.canonical_name == "林舟"))
+            session.delete(person)
+
+    adapter = StageAdapter(["林舟", "林舟"], pause=(2, remove_person))
+    result = run_job(factory, client.app.state.settings, job_id=job["id"],
+                     adapter_factory=lambda *_: adapter)
+    assert result.state is JobState.FAILED
+    assert len(adapter.calls) == 2
+    with factory() as session:
+        assert "身份已删除或合并" in session.get(Job, job["id"]).last_error
+        assert session.scalar(select(Annotation)) is None
+
+
 def test_review_and_cached_replay_keep_independent_owner_and_auxiliary_notice(fake_provider_client):
     client = fake_provider_client
     create, factory = prepare(client, auxiliary=True)
