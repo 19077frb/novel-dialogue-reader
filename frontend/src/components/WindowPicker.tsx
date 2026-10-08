@@ -1,5 +1,6 @@
 import type { EstimateOut } from '../api/types'
 import { CollapsibleBlock } from './CollapsibleBlock'
+import { PaginatedItems } from './ListPagination'
 
 export function WindowPicker({ windows, selectedIds, onChange, disabled = false }: {
   windows: NonNullable<EstimateOut['windows']>
@@ -24,6 +25,7 @@ export function WindowPicker({ windows, selectedIds, onChange, disabled = false 
       <p className="hint" data-testid="windows-selection-summary">
         已选 {selected.length}/{windows.length} 个窗口 · 约 {tokens.toLocaleString()} tokens（仅对白归属估算）
       </p>
+      <PaginatedItems label="处理窗口" scope={String(windows[0]?.window_id ?? '')}>
       {windows.map((window) => {
         const id = String(window.window_id)
         return (
@@ -43,6 +45,7 @@ export function WindowPicker({ windows, selectedIds, onChange, disabled = false 
           </label>
         )
       })}
+      </PaginatedItems>
     </fieldset>
     </CollapsibleBlock>
   )

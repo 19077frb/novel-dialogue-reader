@@ -11,6 +11,7 @@ import { ThinkingSettings } from './ThinkingSettings'
 import { JOB_STATE_LABELS } from './JobPanel'
 import { OperationTimer } from './OperationTimer'
 import { CollapsibleBlock } from './CollapsibleBlock'
+import { PaginatedItems } from './ListPagination'
 
 export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyChange, onSaved, visibleFromCp }: {
   bookId: string; versionId?: string | null; count: number; disabled: boolean
@@ -122,6 +123,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
             </div>
             {!result.data.proposals?.length && <p>没有可接受的合并建议。</p>}
             <CollapsibleBlock title="合并建议明细" summary={`共 ${proposals.length} 组建议；已选 ${selected.length} 组`}>
+            <PaginatedItems label="合并建议" pageSize={5} scope={bookId}>
             {proposals.map(group => <article className="card ndr-merge-card" key={group.target.character_id}>
               <label className="ndr-field"><span><input type="checkbox" disabled={disabled || busy} checked={selected.includes(group.target.character_id)}
                 onChange={event => setSelected(ids => event.target.checked ? [...ids, group.target.character_id] : ids.filter(id => id !== group.target.character_id))} />
@@ -137,6 +139,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
                 <dd>说明：{person.description || '暂无说明'}</dd>
               </div>)}</dl>
             </article>)}
+            </PaginatedItems>
             </CollapsibleBlock>
             {result.data.skipped_groups > 0 && <p>另有 {result.data.skipped_groups} 组未纳入建议，原人物保持不变。</p>}
             <div className="ndr-form-actions">
@@ -148,9 +151,9 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
           {result.data.state === 'COMPLETED' && !noSuggestions && !awaiting && result.data.phase !== 'discarded' && <>
             <p role="status">合并了 {result.data.merged_count} 个重复人物{result.data.merges?.some(group => group.previous_name) ? `；更新了 ${result.data.merges.filter(group => group.previous_name).length} 个正式名称` : ''}{result.data.skipped_groups ? `；保留 ${result.data.skipped_groups} 组未合并` : ''}。</p>
             <CollapsibleBlock title="合并结果明细" summary={`共 ${result.data.merges?.length ?? 0} 项`}>
-            <ul className="ndr-merge-text">{(result.data.merges ?? []).map(group => <li key={group.target_character_id}>
+            <PaginatedItems label="合并结果" listTag="ul" className="ndr-merge-text">{(result.data.merges ?? []).map(group => <li key={group.target_character_id}>
               {group.source_names.join('、') || group.previous_name} → {group.target_name}：{group.reason}
-            </li>)}</ul>
+            </li>)}</PaginatedItems>
             </CollapsibleBlock>
           </>}
           {busy && !queued && <button title={stop.isPending || result.data.state === 'PAUSING' ? '停止请求已提交，请等待模型调用安全收尾。' : undefined} className="ndr-danger" disabled={stop.isPending || result.data.state === 'PAUSING'} onClick={() => stop.mutate()}>停止自动合并</button>}

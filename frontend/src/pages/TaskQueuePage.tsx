@@ -5,6 +5,7 @@ import { fetchTaskQueue, fetchRecentJobs } from '../api/jobs'
 import { readBatchHistory } from '../processing/batchHistory'
 import { JobPanel, JOB_KIND_LABELS, JOB_STATE_LABELS } from '../components/JobPanel'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
+import { PaginatedItems } from '../components/ListPagination'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
 import { useAdmissions, stopAdmission, useQueueError } from '../processing/workQueue'
 import type { QueueAdmission } from '../processing/workQueue'
@@ -63,8 +64,10 @@ function ChapterTaskHistory({ item, chapterId, kind, windowId, onSelect }: {
       <p className="hint">旧范围没有保存完整任务明细。以下是本章最近的后台任务，不代表它们全部属于此批次。</p>
       {jobs.isPending && <p role="status">正在读取任务…</p>}
       {jobs.isError && <ReadErrorNotice label="本章任务读取失败" error={jobs.error} retrying={jobs.isFetching} onRetry={() => void jobs.refetch()} />}
+      <PaginatedItems label="本章后台任务" scope={`${item.id}:${chapterId}:${kind}`}>
       {matching?.map(job => <div key={job.id}>{JOB_STATE_LABELS[job.state]} · {new Date(job.created_at).toLocaleString()}
         <button onClick={() => onSelect(job.id)}>查看任务</button>{job.last_error && <p className="status-error">{job.last_error}</p>}</div>)}
+      </PaginatedItems>
       {matching?.length === 0 && <p className="hint">未找到匹配的后台任务。</p>}
   </CollapsibleBlock>
 }
@@ -87,12 +90,12 @@ function AdmissionDetails({ item, onSelect }: { item: QueueAdmission; onSelect: 
       : item.payload.work.plans.flatMap(plan => [{ id: `roster:${plan.chapter.id}`, chapterId: plan.chapter.id, kind: 'CHARACTER_ROSTER' as const, windowId: null, label: `${plan.chapter.title} · 人物识别`, state: '状态待核实', error: null, jobId: null }, ...(plan.estimate.windows ?? []).map(window => ({ id: `${plan.chapter.id}:${window.window_id}`, chapterId: plan.chapter.id, kind: 'INFERENCE' as const, windowId: window.window_id, label: `${plan.chapter.title} · 对白窗口 ${window.ordinal}`, state: '状态待核实', error: null, jobId: null }))])
     : (single && (single.queueId === item.id || item.id.startsWith('legacy:')) ? single : item.payload.work).tasks.map(task => ({ id: task.windowId, label: `对白窗口 ${task.ordinal}`, state: task.job ? JOB_STATE_LABELS[task.job.state] : task.error ? '未执行' : LABELS[item.phase], error: task.error, jobId: task.job?.id }))
   return <CollapsibleBlock title="范围内任务" defaultOpen={false} summary={`共 ${tasks.length} 项`}>
-    <ul className="ndr-task-queue-list">{tasks.map(task => <li key={task.id}>
+    <PaginatedItems label="范围内任务" scope={item.id} listTag="ul" className="ndr-task-queue-list">{tasks.map(task => <li key={task.id}>
       <span>{task.label} · {task.state}</span>
       {task.jobId && <button onClick={() => onSelect(task.jobId!)}>查看任务</button>}
       {!task.jobId && 'chapterId' in task && <ChapterTaskHistory item={item} chapterId={task.chapterId} kind={task.kind} windowId={typeof task.windowId === 'string' ? task.windowId : null} onSelect={onSelect} />}
       {task.error && <p className="status-error">{task.error}</p>}
-    </li>)}</ul>
+    </li>)}</PaginatedItems>
   </CollapsibleBlock>
 }
 
@@ -152,6 +155,7 @@ export default function TaskQueuePage() {
       {legacy.errors.length > 0 && <p role="alert" className="status-error">有 {legacy.errors.length} 份旧范围记录无法读取，原记录保留，未从这些记录派发新任务。请先检查保存的任务，不要重复提交。</p>}
       <CollapsibleBlock title="已添加的处理范围" summary={`${ranges.filter(item => ['queued', 'running'].includes(item.phase)).length} 个范围等待或执行中；${ranges.filter(item => item.phase === 'failed').length} 个范围失败（勾选“显示已结束任务”查看）`}>
         {!visible.length && <p>没有{history ? '保存的' : '等待或执行中的'}处理范围。</p>}
+        <PaginatedItems label="处理范围" pageSize={5} scope={String(history)}>
         {visible.map(item => <article className="card ndr-task-queue-range" key={item.id}>
           <div className="ndr-form-actions"><strong>{item.bookTitle ? `${item.bookTitle} · ` : ''}{item.title}</strong><span>{item.stopRequested && item.phase === 'running' ? '正在安全停止' : LABELS[item.phase]}</span>
             <Link className="ndr-button" to={`/books/${item.bookId}/preview`}>打开本书</Link>
@@ -160,19 +164,23 @@ export default function TaskQueuePage() {
           {item.error && <p className="status-error">{item.error}</p>}
           <AdmissionDetails item={item} onSelect={select} />
         </article>)}
+        </PaginatedItems>
       </CollapsibleBlock>
       <CollapsibleBlock title="后台任务" summary="包含各书籍的人物识别、对白归属、局部复核及自动合并；详情按需读取。">
         {jobs.isPending && <p role="status">正在读取任务…</p>}
         {jobs.isError && <ReadErrorNotice label="任务队列读取失败" error={jobs.error} retrying={jobs.isFetching} onRetry={() => { void jobs.refetch() }} />}
         {jobs.data?.pages.every(page => !page.items.length) && <p>没有{history ? '' : '排队或运行的'}后台任务。</p>}
-        <ul className="ndr-task-queue-list">{jobs.data?.pages.flatMap(page => page.items).map(job => <li key={job.id}>
+        <PaginatedItems label="后台任务" scope={String(history)} listTag="ul" className="ndr-task-queue-list"
+          hasMore={jobs.hasNextPage} loading={jobs.isFetchingNextPage} loadMore={async () => {
+            const result = await jobs.fetchNextPage()
+            if (result.isError) throw result.error
+          }}>{jobs.data?.pages.flatMap(page => page.items).map(job => <li key={job.id}>
           <div><strong>{job.book_title || '书籍已删除'}</strong> · {job.chapter_title || '全书'} · {JOB_KIND_LABELS[job.kind]} · {JOB_STATE_LABELS[job.state]}</div>
           {Boolean(job.windows_total) && <span>窗口 {job.windows_done}/{job.windows_total}</span>}
           {job.selected_window_ids?.length ? <span>窗口：{job.selected_window_ids.join('、')}</span> : null}
           {job.last_error && <p className="status-error">{job.last_error}</p>}
           <button onClick={() => select(job.id)}>查看任务</button>
-        </li>)}</ul>
-        {jobs.hasNextPage && <button disabled={jobs.isFetchingNextPage} title={jobs.isFetchingNextPage ? '正在读取下一页，请稍候。' : undefined} onClick={() => { void jobs.fetchNextPage() }}>加载更多</button>}
+        </li>)}</PaginatedItems>
       </CollapsibleBlock>
     </section>
     {selected && <section className="card" key={selected} ref={detailRef} tabIndex={-1}><h2>任务详情</h2><button onClick={() => setSelected(null)}>关闭详情</button><JobPanel jobId={selected} /></section>}

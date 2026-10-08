@@ -4,10 +4,12 @@
  * 门槛：用户不写代码就能完成全部人工确认；**队列清空不等于全部识别正确**
  * （这里只显示「已知待确认项」，未知/暂定/过期数量在统计里单独列出）。
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
+import { PaginatedItems } from '../components/ListPagination'
+import { ReadErrorNotice } from '../components/ReadErrorNotice'
 
 import { fetchBook, fetchChapters, fetchGaps, queryKeys } from '../api/books'
 import { cleanupDependencyReviews, fetchReviewQueue, submitGapCorrection, type ReviewFilters } from '../api/review'
@@ -17,7 +19,6 @@ import type {
   ReviewItemOut,
   ReviewQueueStatus,
   ReviewReason,
-  ReviewQueueResponse,
 } from '../api/types'
 import { GapDecisionControls } from '../components/GapDecisionControls'
 import { QuoteDetailDrawer } from '../components/QuoteDetailDrawer'
@@ -86,8 +87,6 @@ export default function ReviewPage() {
   const [chapterId, setChapterId] = useState('')
   const [reason, setReason] = useState<'' | ReviewReason>('')
   const [queueStatus, setQueueStatus] = useState<'' | ReviewQueueStatus>('PENDING')
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [pages, setPages] = useState<ReviewQueueResponse[]>([])
   const [selected, setSelected] = useState<{ quoteId: string; reviewItemId: string } | null>(null)
   const [openGapId, setOpenGapId] = useState<string | null>(null)
 
@@ -116,22 +115,15 @@ export default function ReviewPage() {
     queryFn: ({ signal }) => fetchGaps(bookId as string, { limit: 200 }, signal),
     enabled: Boolean(bookId),
   })
-  const queue = useQuery({
-    queryKey: ['review-items', bookId ?? '', filters, cursor],
-    queryFn: ({ signal }) =>
-      fetchReviewQueue(bookId as string, { ...filters, cursor }, signal),
+  const queue = useInfiniteQuery({
+    queryKey: ['review-items', bookId ?? '', filters],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) =>
+      fetchReviewQueue(bookId as string, { ...filters, cursor: pageParam }, signal),
+    getNextPageParam: page => page.next_cursor ?? undefined,
     enabled: Boolean(bookId),
   })
-
-  useEffect(() => {
-    setPages([])
-    setCursor(null)
-  }, [filters])
-
-  useEffect(() => {
-    if (!queue.data) return
-    setPages((previous) => (cursor ? [...previous, queue.data] : [queue.data]))
-  }, [queue.data, cursor])
+  const pages = queue.data?.pages ?? []
 
   const gapById = useMemo(() => {
     const map = new Map<string, GapOut>()
@@ -156,8 +148,6 @@ export default function ReviewPage() {
   const cleanup = useMutation({
     mutationFn: () => cleanupDependencyReviews(bookId!),
     onSuccess: () => {
-      setCursor(null)
-      setPages(previous => previous.slice(0, 1))
       void queryClient.invalidateQueries({ queryKey: ['review-items', bookId] })
       void queryClient.invalidateQueries({ queryKey: ['annotations', bookId] })
       void queryClient.invalidateQueries({ queryKey: ['review-item'] })
@@ -256,7 +246,7 @@ export default function ReviewPage() {
 
       <section className="card">
         {queue.isPending && <p className="hint">正在读取队列…</p>}
-        {queue.isError && <p className="status-error">队列读取失败。</p>}
+        {queue.isError && <ReadErrorNotice label="队列读取失败" error={queue.error} retrying={queue.isFetching} onRetry={() => void queue.refetch()} />}
         {queue.isSuccess && items.length === 0 && (
           <p className="hint" data-testid="review-empty">
             当前筛选条件下没有待确认项。注意：这**不等于**整本书已完全确认——请同时查看
@@ -264,7 +254,11 @@ export default function ReviewPage() {
           </p>
         )}
         <CollapsibleBlock title="待确认列表" summary={`当前已加载 ${groupedItems.length} 项`}>
-        <ul className="ndr-review-list" data-testid="review-list">
+        <div data-testid="review-list"><PaginatedItems label="待确认" scope={`${bookId}:${chapterId}:${reason}:${queueStatus}`} listTag="ul" className="ndr-review-list"
+          hasMore={queue.hasNextPage} loading={queue.isFetching} loadMore={async () => {
+            const result = await queue.fetchNextPage()
+            if (result.isError) throw result.error
+          }}>
           {groupedItems.map(({ item, reasons, statuses }) => {
             const quoteId = item.quote_id
             const gap = item.gap_id ? gapById.get(item.gap_id) : undefined
@@ -318,16 +312,7 @@ export default function ReviewPage() {
               </li>
             )
           })}
-        </ul>
-        {pages[pages.length - 1]?.next_cursor && (
-          <button
-            type="button"
-            onClick={() => setCursor(pages[pages.length - 1]?.next_cursor ?? null)}
-            data-testid="review-load-more"
-          >
-            加载更多
-          </button>
-        )}
+        </PaginatedItems></div>
         </CollapsibleBlock>
       </section>
 

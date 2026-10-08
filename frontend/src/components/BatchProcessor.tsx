@@ -24,6 +24,7 @@ import type { AnalyzeRosterInput } from '../api/characters'
 import type { CreateJobInput } from '../api/jobs'
 import { FormatRetrySetting } from './FormatRetrySetting'
 import { CollapsibleBlock } from './CollapsibleBlock'
+import { ListPagination, useListPagination } from './ListPagination'
 import { getGeneralSettings, useGeneralSettings } from '../settings/preferences'
 import { chapterFilterReason, defaultChapterFilter, normalizeChapterFilter } from '../processing/chapterFilter'
 import type { ChapterFilter } from '../processing/chapterFilter'
@@ -1430,6 +1431,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const [running, setRunning] = useState(false)
   const [estimating, setEstimating] = useState(false)
   const [taskListOpen, setTaskListOpen] = useState(true)
+  const taskPagination = useListPagination(batchProgress.tasks.length, 20, `${bookId}:${batchProgress.startedAt}`)
   const [estimatedTokens, setEstimatedTokens] = useState<number | null>(null)
   const [plans, setPlans] = useState<ChapterPlan[]>([])
   const [progress, setProgress] = useState('')
@@ -1575,8 +1577,8 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
               </tr>
             </thead>
             <tbody>
-              {batchProgress.tasks.map((task) => (
-                <tr key={task.id} data-task-state={task.state} data-testid="batch-task-row">
+              {batchProgress.tasks.map((task, index) => (
+                <tr key={task.id} hidden={!taskPagination.isVisible(index)} data-task-state={task.state} data-testid="batch-task-row">
                   <td><span className={`ndr-task-state ndr-task-${task.state}`}>{TASK_STATE_LABELS[task.state]}</span></td>
                   <td>{task.type === 'roster' ? '人物识别' : '对白归属'}</td>
                   <td>{task.chapterTitle}</td>
@@ -1597,6 +1599,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
             </tbody>
           </table>
         </div>
+        <ListPagination pagination={taskPagination} label="批量任务" />
         </CollapsibleBlock>
         <p className="hint">{batchProgress.running
           ? '停止后不会再派发排队任务；已经发给模型的请求会安全收尾。'

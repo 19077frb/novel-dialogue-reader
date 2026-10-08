@@ -6,6 +6,7 @@ import { bookmarkKey, deleteBookmark, editBookmark, fetchBookmarks } from '../ap
 import type { BookmarkOut } from '../api/types'
 import { ReadErrorNotice } from './ReadErrorNotice'
 import { CollapsibleBlock } from './CollapsibleBlock'
+import { PaginatedItems } from './ListPagination'
 import { DisabledHint } from './DisabledHint'
 
 function BookmarkCard({ item, activeVersionId, saved }: { item: BookmarkOut; activeVersionId?: string | null; saved: () => Promise<void> }) {
@@ -46,8 +47,11 @@ export function BookmarkList({ bookId, activeVersionId }: { bookId: string; acti
     {list.isError && <ReadErrorNotice label="书签读取失败" error={list.error} retrying={list.isFetching} onRetry={() => void list.refetch()} />}
     {!list.isPending && !list.isError && !items.length && <p className="hint">还没有书签。阅读时点击段落旁的 ☆，收藏想再看的段落。</p>}
     <CollapsibleBlock title="书签列表" summary={`已加载 ${items.length} 个书签`}>
-    <div className="ndr-bookmark-list">{items.map(item => <BookmarkCard key={`${item.id}:${item.version}`} item={item} activeVersionId={activeVersionId} saved={() => client.invalidateQueries({ queryKey: bookmarkKey(bookId) })} />)}</div>
-    {list.hasNextPage && <button title={list.isFetching ? '正在读取书签，请等待本次读取完成。' : undefined} disabled={list.isFetching} onClick={() => void list.fetchNextPage()}>加载更多书签</button>}
+    <PaginatedItems label="书签" pageSize={5} scope={bookId} className="ndr-bookmark-list"
+      hasMore={list.hasNextPage} loading={list.isFetching} loadMore={async () => {
+        const result = await list.fetchNextPage()
+        if (result.isError) throw result.error
+      }}>{items.map(item => <BookmarkCard key={`${item.id}:${item.version}`} item={item} activeVersionId={activeVersionId} saved={() => client.invalidateQueries({ queryKey: bookmarkKey(bookId) })} />)}</PaginatedItems>
     </CollapsibleBlock>
   </div>
 }

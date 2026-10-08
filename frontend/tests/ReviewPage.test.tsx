@@ -138,6 +138,24 @@ const QUEUE = {
 } as never
 
 describe('ReviewPage', () => {
+  it('待确认跨页去重并按需读取后续批次', async () => {
+    const source = QUEUE as ReviewQueueResponse
+    const rows = Array.from({ length: 21 }, (_, i) => ({ ...source.items![0], id: `r${i}`, quote_id: `q${i}`, target_text: `「测试对白 ${i}」` }))
+    vi.mocked(reviewApi.fetchReviewQueue).mockImplementation(async (_book, filters) => ({
+      ...source, items: filters?.cursor ? [rows[20], { ...rows[20], id: 'other-reason', reason: 'UNKNOWN_SPEAKER' }] : rows,
+      next_cursor: filters?.cursor ? null : 'next',
+    }) as never)
+    renderRoute('/books/:bookId/review', <ReviewPage />, '/books/b1/review')
+    await screen.findByText('「测试对白 0」')
+    const nav = screen.getByRole('navigation', { name: '待确认分页' })
+    expect(screen.getByText('「测试对白 20」')).not.toBeVisible()
+    await userEvent.click(within(nav).getByRole('button', { name: '下一页' }))
+    expect(reviewApi.fetchReviewQueue).toHaveBeenCalledTimes(1)
+    await userEvent.click(within(nav).getByRole('button', { name: '下一页' }))
+    await waitFor(() => expect(screen.getByText('原因：无法确定说话人')).toBeVisible())
+    expect(screen.getAllByText('「测试对白 20」')).toHaveLength(1)
+    expect(reviewApi.fetchReviewQueue).toHaveBeenCalledWith('b1', expect.objectContaining({ cursor: 'next' }), expect.anything())
+  })
   beforeEach(() => {
     vi.mocked(booksApi.fetchBook).mockReset()
     vi.mocked(booksApi.fetchChapters).mockReset()

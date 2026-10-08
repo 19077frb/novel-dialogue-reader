@@ -15,6 +15,7 @@ import {
 import type { ConnectionTestOut, CredentialMode, ModelProfileOut } from '../api/types'
 import { credentialLabel, protocolLabel } from '../ui/labels'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
+import { PaginatedItems } from '../components/ListPagination'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
 
 type KeyAction = 'keep' | 'replace' | 'remove'
@@ -505,7 +506,7 @@ export default function ModelSettingsPage() {
           </p>
         )}
         <CollapsibleBlock title="模型配置列表" summary={`共 ${profiles.data?.length ?? 0} 个配置`}>
-        <div className="ndr-profile-list">
+          <PaginatedItems label="模型配置" pageSize={5} className="ndr-profile-list">
           {(profiles.data ?? []).map((profile) => (
             <article className="ndr-profile-card" key={profile.id} data-testid="profile-card">
               <header>
@@ -560,7 +561,7 @@ export default function ModelSettingsPage() {
               </div>
             </article>
           ))}
-        </div>
+          </PaginatedItems>
         </CollapsibleBlock>
       </section>
     </div>
