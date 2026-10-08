@@ -52,13 +52,16 @@ class IsolatedRepairPlan:
 
     def fingerprint(self):
         plan = self.original_plan
-        return hashlib.sha256(_json({
+        binding = {
             "policy": ISOLATED_REPAIR_POLICY,
             "original": [plan.original_version, plan.original_sha256,
                          plan.chapter_start, plan.chapter_end],
             "allowed_ids": sorted(plan.allowed_ids), "targets": plan.targets_json,
             "retained": self.retained_blocks_json, "sources": self.seen_sources,
-        }).encode()).hexdigest()
+        }
+        if json.loads(plan.known_names_json):
+            binding["known_names"] = plan.known_names_json
+        return hashlib.sha256(_json(binding).encode()).hexdigest()
 
     def task_payload(self):
         task = self.original_plan.task_payload()
@@ -108,7 +111,8 @@ def compile_isolated_roster_repair(plan, payload, *, original, source_ref):
         raise ValueError("修复后人物提案超过数量上限")
     arguments = {"original": original, "chapter_start": original_plan.chapter_start,
                  "chapter_end": original_plan.chapter_end,
-                 "allowed_character_ids": original_plan.allowed_ids}
+                 "allowed_character_ids": original_plan.allowed_ids,
+                 "known_character_names": json.loads(original_plan.known_names_json)}
     remaining, successful, details = [], [], []
     discarded_facts = discarded_descriptions = 0
     for group, indices in zip(envelope.repairs, supplied, strict=True):

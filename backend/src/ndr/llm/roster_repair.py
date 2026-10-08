@@ -42,6 +42,7 @@ class RosterRepairPlan:
     targets_json: str
     diagnostics_json: str
     groups: tuple[tuple[int, ...], ...]
+    known_names_json: str = "{}"
 
     def task_payload(self):
         return {
@@ -58,7 +59,7 @@ def _json(value):
 
 
 def prepare_roster_repair(payload, *, original, chapter_start, chapter_end,
-                          allowed_character_ids, source_ref):
+                          allowed_character_ids, source_ref, known_character_names=None):
     """Freeze all failed blocks, including transitive duplicate dependencies."""
     if not isinstance(source_ref, str) or not source_ref.strip() or len(source_ref) > 160:
         raise ValueError("人物初次调用来源不能为空")
@@ -67,6 +68,7 @@ def prepare_roster_repair(payload, *, original, chapter_start, chapter_end,
         output, _, diagnostic = compile_isolated_sourced_roster(
             payload, original=original, chapter_start=chapter_start, chapter_end=chapter_end,
             allowed_character_ids=allowed_character_ids, source_ref=source_ref,
+            known_character_names=known_character_names,
         )
     except IsolatedRosterFailure as exc:
         output = SourcedRosterOutput(characters=[])
@@ -109,7 +111,7 @@ def prepare_roster_repair(payload, *, original, chapter_start, chapter_end,
         original.book_version_id, original.canonical_sha256, chapter_start, chapter_end,
         frozenset(allowed_character_ids), source_ref,
         _json([p.model_dump(mode="json") for p in output.characters]),
-        _json(targets), _json(diagnostic), groups,
+        _json(targets), _json(diagnostic), groups, _json(known_character_names or {}),
     )
 
 
@@ -146,12 +148,14 @@ def compile_roster_repair(plan, payload, *, original, source_ref):
         {"schema_version": "1.1", "characters": people}, original=original,
         chapter_start=plan.chapter_start, chapter_end=plan.chapter_end,
         allowed_character_ids=plan.allowed_ids, source_ref=source_ref,
+        known_character_names=json.loads(plan.known_names_json),
     )
     # Compile retained blocks with their initial source, not the repair's receipt.
     _, retained_facts = compile_sourced_roster(
         {"schema_version": "1.1", "characters": retained}, original=original,
         chapter_start=plan.chapter_start, chapter_end=plan.chapter_end,
         allowed_character_ids=plan.allowed_ids, source_ref=plan.initial_source_ref,
+        known_character_names=json.loads(plan.known_names_json),
     )
     facts.update(retained_facts)
     return output, facts

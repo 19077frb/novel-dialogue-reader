@@ -16,6 +16,13 @@ class RosterReceiptError(ValueError):
     pass
 
 
+def _has_local_result(archive):
+    error = archive.get("error")
+    return (archive.get("phase") == "returned"
+            and isinstance(archive.get("adapter_result"), dict)
+            and (error is None or (isinstance(error, dict) and error.get("kind") is None)))
+
+
 def has_returned_result(session, job):
     run = session.scalar(select(InferenceRun).where(
         InferenceRun.job_id == job.id,
@@ -24,8 +31,7 @@ def has_returned_result(session, job):
         return False
     try:
         archive = decode_archive(run.call_archive)
-        return (archive.get("phase") == "returned" and archive.get("error") is None
-                and isinstance(archive.get("adapter_result"), dict))
+        return _has_local_result(archive)
     except ValueError:
         return False
 
@@ -40,7 +46,7 @@ def returned_attempt(session, job, chapter_id, messages, protocol):
         archive = decode_archive(run.call_archive)
         if archive.get("phase") != "returned":
             raise ValueError("尚无完整返回")
-        if archive.get("error") is not None:
+        if archive.get("error") is not None and not _has_local_result(archive):
             if run.state in {InferenceRunState.DISPATCHED, InferenceRunState.UNKNOWN_OUTCOME}:
                 raise ValueError("调用结果尚未核对")
             return None  # A recorded failed call retains the explicit retry behavior.

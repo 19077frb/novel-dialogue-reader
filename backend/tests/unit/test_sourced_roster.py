@@ -71,6 +71,47 @@ def compile_proposal(payload=None, **changes):
     return compile_sourced_roster(proposal() if payload is None else payload, **{**args, **changes})
 
 
+@pytest.mark.parametrize("kind", ["alias", "designation"])
+def test_existing_catalog_name_keeps_chapter_callname_facts_without_inventing_fullname(kind):
+    payload = proposal()
+    person = payload["characters"][0]
+    person.update(name="陈小舟", character_id="old-person", pov_candidate=False,
+                  pov_evidence_refs=[], evidence_refs=["L4"],
+                  facts=[{"kind": kind, "value": "小舟", "evidence_refs": ["L4"]}])
+    output, facts = compile_proposal(payload, known_character_names={"old-person": "陈小舟"})
+    assert output.characters[0].name == "陈小舟"
+    assert output.characters[0].real_name is None
+    assert [(f.kind, f.value) for f in facts["c1"]] == [(kind, "小舟")]
+    assert facts["c1"][0].visible_from_cp == original_lines(TEXT, START, len(TEXT))["L4"][1]
+
+
+@pytest.mark.parametrize("damage", ["catalog", "missing_catalog", "unknown_id", "new_person",
+                                    "no_identity_fact", "real_name", "invalid_proof"])
+def test_inherited_name_requires_exact_catalog_and_valid_chapter_identity(damage):
+    payload = proposal()
+    person = payload["characters"][0]
+    person.update(name="陈小舟", character_id="old-person", aliases=["小舟"],
+                  facts=[{"kind": "alias", "value": "小舟", "evidence_refs": ["L4"]}])
+    names = {"old-person": "陈小舟"}
+    if damage == "catalog":
+        names["old-person"] = "另一个姓名"
+    elif damage == "missing_catalog":
+        names = {}
+    elif damage == "unknown_id":
+        person["character_id"] = "not-provided"
+        names["not-provided"] = "陈小舟"
+    elif damage == "new_person":
+        person["character_id"] = None
+    elif damage == "no_identity_fact":
+        person["facts"] = [{"kind": "description", "value": "学生", "evidence_refs": ["L5"]}]
+    elif damage == "real_name":
+        person["real_name"] = "陈小舟"
+    else:
+        person["facts"][0]["evidence_refs"] = ["L999"]
+    with pytest.raises(ValueError):
+        compile_proposal(payload, known_character_names=names)
+
+
 def test_actual_chapter_lines_map_to_whole_original_not_zero_or_chapter_end():
     output, facts = compile_proposal()
     assert output.characters[0].name == "林舟"
@@ -199,7 +240,7 @@ def test_no_valid_identity_is_failure_but_genuine_empty_list_is_preserved():
     payload["characters"][0]["facts"].extend([
         {"kind": "description", "value": "坏说明", "evidence_refs": ["L999"]},
     ] * 101)
-    with pytest.raises(ValueError, match="姓名或代称缺少自己的事实依据"):
+    with pytest.raises(ValueError, match="姓名或代称缺少本章称呼事实"):
         compile_isolated(payload)
     output, facts, diagnostic = compile_isolated({"schema_version": "1.1", "characters": []})
     assert not output.characters and not facts and diagnostic["isolated_characters"] == 0

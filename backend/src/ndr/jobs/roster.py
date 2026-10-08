@@ -125,6 +125,13 @@ def _prepare_input(session, settings, job, version, chapter):
     return messages, original, protocol if sourced else "legacy-roster-1", allowed_ids
 
 
+def _catalog_names(messages):
+    data = json.loads(messages[1]["content"].split("任务参数（JSON）：\n", 1)[1]
+                      .split("\n\n", 1)[0])
+    return {item["character_id"]: item["name"] for item in data["existing_characters"]
+            if isinstance(item.get("name"), str) and item["name"].strip()}
+
+
 def run_character_roster_job(
     session_factory, settings, *, job_id, credentials=None, adapter_factory=None,
 ) -> RosterJobOutcome:
@@ -329,6 +336,7 @@ def _run_character_roster_job(
         with session_factory() as session:
             save_run_archive(session.get(InferenceRun, run_id), request_payload)
             session.commit()
+    known_character_names = _catalog_names(request_payload["messages"])
     raw = None
     outcome.calls = 0 if restored else 1
     try:
@@ -354,11 +362,13 @@ def _run_character_roster_job(
             output, identity_facts, diagnostics = compile_isolated_sourced_roster(
                 payload, original=original, chapter_start=chapter_start, chapter_end=chapter_end,
                 allowed_character_ids=allowed_character_ids, source_ref=run_id,
+                known_character_names=known_character_names,
             )
         elif protocol in SOURCED_ROSTER_VERSIONS:
             output, identity_facts = compile_sourced_roster(
                 payload, original=original, chapter_start=chapter_start, chapter_end=chapter_end,
                 allowed_character_ids=allowed_character_ids, source_ref=run_id,
+                known_character_names=known_character_names,
             )
         else:
             output = RosterOutput.model_validate(payload)

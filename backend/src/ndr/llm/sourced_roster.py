@@ -53,13 +53,16 @@ def original_lines(text, start, end):
 
 
 def compile_sourced_roster(payload, *, original: OriginalIdentitySnapshot, chapter_start,
-                          chapter_end, allowed_character_ids, source_ref):
+                          chapter_end, allowed_character_ids, source_ref,
+                          known_character_names=None):
     output = SourcedRosterOutput.model_validate(payload)
     lines = original_lines(original.text, chapter_start, chapter_end)
-    return _compile_output(output, original, lines, allowed_character_ids, source_ref)
+    return _compile_output(output, original, lines, allowed_character_ids, source_ref,
+                           known_character_names)
 
 
-def _compile_output(output, original, lines, allowed_character_ids, source_ref):
+def _compile_output(output, original, lines, allowed_character_ids, source_ref,
+                    known_character_names=None):
     refs = [person.temp_ref for person in output.characters]
     ids = [person.character_id for person in output.characters if person.character_id]
     if len(set(refs)) != len(refs) or len(set(ids)) != len(ids):
@@ -84,8 +87,11 @@ def _compile_output(output, original, lines, allowed_character_ids, source_ref):
         names = {f.value for f in person.facts if f.kind in {"name", "designation"}}
         aliases = {f.value for f in person.facts if f.kind in {"name", "alias", "designation"}}
         descriptions = [f.value for f in person.facts if f.kind == "description"]
-        if not valid_display_name(person.name) or person.name not in names:
-            raise ValueError("人物姓名或代称缺少自己的事实依据")
+        inherited_name = (person.character_id and known_character_names
+                          and known_character_names.get(person.character_id) == person.name
+                          and any(f.kind in {"name", "alias", "designation"} for f in person.facts))
+        if not valid_display_name(person.name) or (person.name not in names and not inherited_name):
+            raise ValueError("人物姓名或代称缺少本章称呼事实，且不匹配已提供的正式姓名")
         if person.real_name and person.real_name not in {
             f.value for f in person.facts if f.kind == "name"
         }:
@@ -135,7 +141,7 @@ def _compile_output(output, original, lines, allowed_character_ids, source_ref):
 
 
 def compile_isolated_sourced_roster(payload, *, original, chapter_start, chapter_end,
-                                   allowed_character_ids, source_ref):
+                                   allowed_character_ids, source_ref, known_character_names=None):
     """Keep independent identities, never salvage a damaged identity dependency."""
     if not isinstance(payload, dict) or not isinstance(payload.get("characters"), list):
         raise ValueError("人物提案顶层必须包含人物数组")
@@ -202,7 +208,7 @@ def compile_isolated_sourced_roster(payload, *, original, chapter_start, chapter
                 {**payload, "characters": [person]},
             )
             validated, identity = _compile_output(
-                single, original, lines, allowed_character_ids, source_ref,
+                single, original, lines, allowed_character_ids, source_ref, known_character_names,
             )
             people.extend(validated.characters)
             compiled.update(identity)
