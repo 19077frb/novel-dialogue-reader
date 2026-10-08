@@ -17,11 +17,12 @@ from ..domain.common import ApiModel
 from ..domain.enums import Assignment, GapDecision, QuoteKind, SpeakerBasis
 from ..llm.errors import InvalidModelOutput
 from ..llm.nonperson_policy import NONPERSON_POLICY
+from ..llm.prompts.labeling import IDENTITY_LINKING_POLICY
 from ..llm.schemas import GapDecisionOut, LlmOutput, NewSpeaker, QuoteLabel, SceneUpdate
 from ..llm.validation import LabelingTargets, load_json_object, validate_output
 
 PROTOCOL_VERSION = "compact-attribution-2"
-PROMPT_VERSION = "compact-prompt-3"
+PROMPT_VERSION = "compact-prompt-4"
 COMPILER_VERSION = "scene-local-compiler-2"
 
 
@@ -168,8 +169,11 @@ class CompactTask:
             "coreference引用指代依据。形式合法的引用不代表证据充分，不得自引冒充直接证据。"
             "证据只能来自context.ref。证据不足用null，不靠风格猜身份。"
             "有名单外人物时声明N编号及简短称呼、description、原文evidence；"
-            "不得仅凭同姓/泛称/关系合并，不知道真名可用‘门卫’等称呼。"
-            "时间、地点或交谈群体明显改变时在breaks给对应G编号；"
+            "不得仅凭同姓、泛称或笼统关系合并，不知道真名可用‘门卫’等称呼。"
+            "身份对应已有candidates时，labels.character直接复用其C编号，"
+            "不另在new_characters声明N；仅真正名单外人物使用新N。"
+            + "\n" + IDENTITY_LINKING_POLICY + "\n"
+            + "时间、地点或交谈群体明显改变时在breaks给对应G编号；"
             "gap_next_quote为null时不能切场景。needs_context只填目标Q编号。"
             "示例只表示格式，与输入人物无关："
             '{"labels":[{"q":"Q1","kind":"speech","character":"C1",'

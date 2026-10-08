@@ -9,9 +9,9 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 
-from .labeling import DATA_DELIMITER, escape_data_markers
+from .labeling import DATA_DELIMITER, IDENTITY_LINKING_POLICY, escape_data_markers
 
-ROSTER_PROMPT_VERSION = "roster-9"
+ROSTER_PROMPT_VERSION = "roster-10"
 
 ROSTER_SYSTEM_PROMPT = """你是中文轻小说的人物名单分析助手。
 你只做一件事：从给定章节里找出会说话、被称呼、被叙述为说话对象的人物，并判断谁可能是本章视角人物。
@@ -49,7 +49,11 @@ description应是一条简短、适合读者查看的中文人物说明，尽量
 10. 顶层只允许 schema_version 和 characters；人物对象只允许
 temp_ref、character_id、name、real_name、aliases、description、evidence_refs、pov_candidate 字段。
 11. 必须使用 evidence_refs，不得写成 refs；不得输出 type、output_schema 等包装字段。
-""".strip()
+""".strip() + "\n" + IDENTITY_LINKING_POLICY + (
+    "\n已确认对应已有身份时，character_id必须复用existing_characters提供的ID；"
+    "name可沿用其正式姓名，facts与real_name仍按本章证据填写。"
+    "同一已有ID本次只输出一个人物，合并本章有依据的称呼和事实。"
+)
 
 
 def _data_block(lines: Sequence[str]) -> str:
