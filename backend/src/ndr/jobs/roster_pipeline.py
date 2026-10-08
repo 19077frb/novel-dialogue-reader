@@ -279,6 +279,7 @@ class _Pipeline:
         from .roster import (
             _build_adapter,
             _catalog_names,
+            _catalog_records,
             _job_range,
             _prepare_input,
             chapter_has_body_text,
@@ -464,6 +465,7 @@ class _Pipeline:
                     ),
                     identity_facts=facts,
                     original=original,
+                    identity_catalog=_catalog_records(messages),
                 )
             checkpoint = json.loads(job.checkpoint_json or "{}")
             checkpoint.update(

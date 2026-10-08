@@ -12,6 +12,7 @@ from ndr.speakers.groups import SpeakerRegistry
 @pytest.mark.parametrize("role,name", [
     ("女神", "阿库娅"), ("女骑士", "达克妮丝"), ("无头骑士", "贝尔迪亚"),
     ("魔王军干部", "贝尔迪亚"), ("自称无头骑士", "贝尔迪亚"),
+    ("店长", "刘禾"), ("副店长", "陆欣"),
 ])
 def test_role_name_can_upgrade_only_with_explicit_unlocked_name(role, name):
     assert revealed_name(role, name) == name

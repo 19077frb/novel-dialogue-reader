@@ -125,10 +125,14 @@ def _prepare_input(session, settings, job, version, chapter):
     return messages, original, protocol if sourced else "legacy-roster-1", allowed_ids
 
 
-def _catalog_names(messages):
+def _catalog_records(messages):
     data = json.loads(messages[1]["content"].split("任务参数（JSON）：\n", 1)[1]
                       .split("\n\n", 1)[0])
-    return {item["character_id"]: item["name"] for item in data["existing_characters"]
+    return data["existing_characters"]
+
+
+def _catalog_names(messages):
+    return {item["character_id"]: item["name"] for item in _catalog_records(messages)
             if isinstance(item.get("name"), str) and item["name"].strip()}
 
 
@@ -432,6 +436,7 @@ def _run_character_roster_job(
                     allow_overwrite_manual=bool(
                         _job_range(job).get("allow_overwrite_manual", False)),
                     identity_facts=identity_facts, original=original,
+                    identity_catalog=_catalog_records(request_payload["messages"]),
                 )
         except Exception as exc:  # noqa: BLE001 - persist charged storage failures
             run = session.get(InferenceRun, run_id)

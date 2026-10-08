@@ -275,6 +275,7 @@ def store_roster_candidates(
     allow_overwrite_manual: bool = False,
     identity_facts=None,  # noqa: ANN001 - validated per-temp-ref identity blocks
     original=None,  # noqa: ANN001 - immutable OriginalIdentitySnapshot
+    identity_catalog=None,  # noqa: ANN001 - frozen visible catalog from the original request
 ) -> ChapterCharacterRoster:
     sourced = isinstance(output, SourcedRosterOutput)
     if sourced and (original is None or identity_facts is None
@@ -302,8 +303,15 @@ def store_roster_candidates(
         if not candidate.temp_ref or candidate.temp_ref in seen_refs:
             continue
         seen_refs.add(candidate.temp_ref)
+        inferred_id = None
+        if sourced and not candidate.character_id:
+            from .identity import match_contextual_identity
+
+            inferred_id = match_contextual_identity(
+                candidate, identity_facts[candidate.temp_ref], identity_catalog, original=original,
+            )
         matched = by_id.get(candidate.character_id) if candidate.character_id else (
-            None if sourced else _match_existing(
+            by_id.get(inferred_id) if sourced else _match_existing(
                 session,
                 version.id,
                 name=candidate.name,

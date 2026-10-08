@@ -105,6 +105,88 @@ def test_equal_anonymous_designations_are_not_implicitly_one_identity(migrated_c
         assert all(p.canonical_name == "女同学" for p in people)
 
 
+@pytest.mark.parametrize("protected", [False, True])
+@pytest.mark.parametrize("named", [False, True])
+def test_missing_role_id_reuses_original_request_context_without_duplicate_or_manual_overwrite(
+    migrated_client, protected, named,
+):
+    client = migrated_client
+    data, first = prepare(client, "第一章\n林舟打工的书店店长刘禾说：「你好。」")
+    manager = {"temp_ref": "manager", "name": "店长", "evidence_refs": ["L2"],
+               "description": "林舟打工的书店店长", "facts": [
+                   {"kind": "designation", "value": "店长", "evidence_refs": ["L2"]},
+                   {"kind": "description", "value": "林舟打工的书店店长",
+                    "evidence_refs": ["L2"]},
+               ]}
+    initial = response()
+    initial_manager = deepcopy(manager)
+    if named:
+        initial_manager.update(name="刘禾", real_name="刘禾")
+        initial_manager["facts"].append({"kind": "name", "value": "刘禾",
+                                         "evidence_refs": ["L2"]})
+    initial["characters"].append(initial_manager)
+    assert run(client, first, initial)[0].state == JobState.COMPLETED
+    with transaction(client.app.state.session_factory) as session:
+        profile_id = json.loads(session.get(Job, first["id"]).profile_snapshot_json)["profile_id"]
+        people = list(session.scalars(select(BookCharacter).where(
+            BookCharacter.book_version_id == data["book_version_id"],
+        )))
+        expected_name = "刘禾" if named else "店长"
+        person = next(p for p in people if p.canonical_name == expected_name)
+        manager_id = person.id
+        if protected:
+            person.user_confirmed = True
+            person.name_locked = True
+            person.description = "人工说明，不能被分析覆盖"
+    chapter = client.get(f"/api/books/{data['book_id']}/chapters").json()["data"][0]
+    second = client.post(
+        f"/api/books/{data['book_id']}/chapters/{chapter['id']}/character-roster/analyze",
+        json={"profile_id": profile_id,
+              "idempotency_key": "second-role", "run_now": False,
+              "allow_overwrite_manual": named},
+    )
+    assert second.status_code == 202, second.text
+    result, adapter = run(client, second.json()["data"], {
+        "schema_version": "1.1", "characters": [deepcopy(manager)], "_usage": {"total_tokens": 7},
+    })
+    assert result.state == JobState.COMPLETED and len(adapter.calls) == 1
+    with client.app.state.session_factory() as session:
+        people = list(session.scalars(select(BookCharacter).where(
+            BookCharacter.book_version_id == data["book_version_id"],
+        )))
+        assert len(people) == 2
+        person = next(p for p in people if p.id == manager_id)
+        assert person.canonical_name == expected_name and person.user_confirmed is protected
+        if protected:
+            assert person.description == "人工说明，不能被分析覆盖"
+        roster = client.get(
+            f"/api/books/{data['book_id']}/chapters/{chapter['id']}/character-roster",
+        ).json()["data"]
+        assert roster["candidates"][0]["character_id"] == manager_id
+    if not protected:
+        # Replaying the original receipt must not substitute today's changed directory.
+        with transaction(client.app.state.session_factory) as session:
+            session.get(Job, second.json()["data"]["id"]).state = JobState.FAILED
+            person = session.get(BookCharacter, manager_id)
+            person.identity_facts_json = "[]"
+            person.presentation_history_json = json.dumps([
+                {"cp": 0, "name": "店长", "description": "林舟打工的餐厅店长"},
+            ])
+
+        def forbid_provider(*args):
+            pytest.fail("Saved-result revalidation must not issue another model request")
+
+        restored = run_character_roster_job(
+            client.app.state.session_factory, client.app.state.settings,
+            job_id=second.json()["data"]["id"], adapter_factory=forbid_provider,
+        )
+        assert restored.state == JobState.COMPLETED and restored.calls == 0
+        with client.app.state.session_factory() as session:
+            assert len(list(session.scalars(select(BookCharacter).where(
+                BookCharacter.book_version_id == data["book_version_id"],
+            )))) == 2
+
+
 def test_invalid_original_preparation_does_not_dispatch_or_leave_running(migrated_client):
     client = migrated_client
     data, job = prepare(client)
