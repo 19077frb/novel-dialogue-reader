@@ -161,7 +161,7 @@ it('stopping during admission cancels queued retry preparations without issuing 
   expect(hasBatchWork()).toBe(false)
 })
 
-it('cancels both a running retry and another retry waiting for a slot in the same chapter', async () => {
+it('keeps a running retry that completed after cancellation and cancels the unsent retry', async () => {
   vi.mocked(jobs.createJob).mockResolvedValue(job('FAILED'))
   await start()
   vi.mocked(jobs.estimateRange).mockResolvedValue(estimate)
@@ -176,8 +176,8 @@ it('cancels both a running retry and another retry waiting for a slot in the sam
   expect(books.completeChapterProcessing).not.toHaveBeenCalled()
   render(<Snapshot />)
   expect(readSnapshot().chapterStates.c1.state).toBe('stopped')
-  expect(readSnapshot().tasks.filter((task: { type: string }) => task.type === 'dialogue')
-    .every((task: { state: string }) => task.state === 'cancelled')).toBe(true)
+  expect(readSnapshot().tasks.find((task: { id: string }) => task.id === 'dialogue:c1:w1').state).toBe('completed')
+  expect(readSnapshot().tasks.find((task: { id: string }) => task.id === 'dialogue:c1:w2').state).toBe('cancelled')
 })
 
 it('restores the combined retry plan without dropping unrelated failed windows', async () => {

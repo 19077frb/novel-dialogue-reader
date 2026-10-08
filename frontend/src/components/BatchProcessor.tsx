@@ -1133,7 +1133,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
           recordUsage(rosterJob, '人物识别')
           if (plan.cancelled) {
             if (rosterJob.state === 'NEEDS_RECONCILIATION') throw new Error(rosterJob.last_error || '请求结果不明确，请先查看任务详情。')
-            updateBatchTask(bookId, taskId, 'cancelled')
+            updateBatchTask(bookId, taskId, rosterJob.state === 'COMPLETED' ? 'completed' : 'cancelled')
             finishChapterCancellation(bookId, chapter.id)
             return
           }
@@ -1232,7 +1232,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
             recordUsage(dialogueJob, '对白处理')
             if (plan.cancelled) {
               if (dialogueJob.state === 'NEEDS_RECONCILIATION') throw new Error(dialogueJob.last_error || '请求结果不明确，请先查看任务详情。')
-              updateBatchTask(bookId, taskId, 'cancelled')
+              updateBatchTask(bookId, taskId, dialogueJob.state === 'COMPLETED' ? 'completed' : 'cancelled')
               if (dialogueJob.state === 'COMPLETED') recordCompletedWindow(bookId, chapter.id)
               finishChapterCancellation(bookId, chapter.id)
               return
