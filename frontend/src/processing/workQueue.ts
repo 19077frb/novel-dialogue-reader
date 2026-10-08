@@ -4,6 +4,7 @@ import type { SingleWorkflow } from './singleWorkflow'
 import type { BatchExecution } from '../components/BatchProcessor'
 import type { CharacterAutoMergeIn } from '../api/types'
 import { readJournal, writeJournal, withWorkflowLock } from './journal'
+import { pruneBatchHistory } from './batchHistory'
 import { fetchBook } from '../api/books'
 import { waitForJobCompletion } from './jobCompletion'
 import { inSharedTaskPool } from './concurrency'
@@ -95,6 +96,7 @@ export async function enqueueWork(input: Omit<QueueAdmission, 'id' | 'phase' | '
     const active = items.filter(item => ['queued', 'running'].includes(item.phase))
     const history = items.filter(item => !['queued', 'running'].includes(item.phase)).slice(-200)
     writeJournal(KEY, [...active, ...history, item].sort((a, b) => a.createdAt - b.createdAt))
+    pruneBatchHistory(new Set([...active, ...history, item].map(row => row.id)))
     notify()
     return id
   })
