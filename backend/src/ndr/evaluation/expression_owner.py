@@ -10,13 +10,14 @@ from pydantic import Field
 from ndr.domain.common import ApiModel
 from ndr.evaluation.compact import DiscoveredCharacter
 from ndr.llm.nonperson_policy import NONPERSON_POLICY
+from ndr.llm.prompts.labeling import IDENTITY_LINKING_POLICY
 from ndr.scenes.acceptance import decide_acceptance
 
 from .enumerated_view import ENUMERATED_VIEW_POLICY
 from .evidence_view import EVIDENCE_VIEW_POLICY
 from .simple_grounded_compact import SimpleGroundedCompactAdapter
 
-VERSION = "explicit-expression-owner-1"
+VERSION = "explicit-expression-owner-2"
 
 
 class OwnerLabel(ApiModel):
@@ -70,7 +71,9 @@ class ExplicitOwnerProtocol:
             "所有证据只能来自context实际ref，空白和boundary_ref不能作身份证据。"
             "仅自引不能冒充direct；证据不足保留未知，不以style_only自动确定人物。"
             "group/other/unknown只写q/kind。"
-            "新N需简短name/description和原文evidence；同姓、泛称、关系不足以合并。"
+            "新N需简短name/description和原文evidence；同姓、泛称或笼统关系不足以合并。"
+            "身份对应已有candidates时，labels.character必须复用其C编号，"
+            "不得在new_characters另建N；即使该人物尚未在本场景发声也复用C。"
             "breaks仅使用gap_next_quote中有后继的编号，不改变原文位置和人物可见范围。"
             "needs_context只填目标Q编号。无需受话对象或其他辅助字段。\n"
             + EVIDENCE_VIEW_POLICY
@@ -78,6 +81,8 @@ class ExplicitOwnerProtocol:
             + ENUMERATED_VIEW_POLICY
             + "\n"
             + NONPERSON_POLICY
+            + "\n"
+            + IDENTITY_LINKING_POLICY
             + "\n"
             + json.dumps(schema, ensure_ascii=False)
         )

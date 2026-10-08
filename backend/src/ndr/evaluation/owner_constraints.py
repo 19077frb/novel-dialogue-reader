@@ -5,7 +5,7 @@ import json
 
 from .expression_owner import ExplicitOwnerProtocol
 
-VERSION = "explicit-owner-null-field-constraints-2"
+VERSION = "explicit-owner-null-field-constraints-3"
 
 
 class ConstrainedOwnerProtocol(ExplicitOwnerProtocol):
@@ -62,7 +62,8 @@ class ConstrainedOwnerProtocol(ExplicitOwnerProtocol):
                 "\n人物资料identity_records说明当前可见字段的来源；source=model仍是模型候选，"
                 "profile_update是资料修订，不是原文引文或说话人证据。"
                 "历史evidence_spans仅说明来源位置，未在context发送的原文不得引用。"
-                "资料或POV候选不能压倒当前原文；遇到遗漏可声明有证据的新N，"
+                "资料或POV候选不能压倒当前原文；先核对已有C的称呼与具体关系，"
+                "确有名单外人物才声明有证据的新N，"
                 "不得仅凭同名或泛称合并人物。"
             )
 

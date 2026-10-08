@@ -146,7 +146,7 @@ def test_constrained_schema_and_compiler_preserve_unknown_and_known_owners(kind)
         before = deepcopy(data)
         validator.validate(data)
         result = protocol.compile(data)
-        assert result["protocol_version"] == "explicit-owner-null-field-constraints-2"
+        assert result["protocol_version"] == "explicit-owner-null-field-constraints-3"
         assert result["production_submission_allowed"] is False
         assert all(
             row["character_id"] == ("person" if character else None) for row in result["rows"]
