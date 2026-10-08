@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
+import { ListPagination, useListPagination } from '../components/ListPagination'
 
 import { annotationKeys, fetchAnnotations } from '../api/annotations'
 import {
@@ -118,6 +119,7 @@ export default function PreviewPage() {
   }, [detailRequest, jobId])
   const [currentJob, setCurrentJob] = useState<JobDetailOut | null>(null)
   const [singleTasks, setSingleTasks] = useState<SingleWindowTask[]>([])
+  const singlePagination = useListPagination(singleTasks.length, 20, `${bookId}:${singleTasks[0]?.windowId ?? ''}`)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
@@ -651,8 +653,8 @@ export default function PreviewPage() {
           <CollapsibleBlock title="单章任务明细" summary={`共 ${singleTasks.length} 个窗口；失败 ${singleTasks.filter(task => task.error || task.job?.state === 'FAILED').length} 个`}>
           <div className="ndr-table-wrap"><table>
             <thead><tr><th>窗口</th><th>状态</th><th>详情</th></tr></thead>
-            <tbody>{singleTasks.map((task) => (
-              <tr key={task.windowId} data-testid={`single-task-${task.windowId}`}>
+            <tbody>{singleTasks.map((task, index) => (
+              <tr key={task.windowId} hidden={!singlePagination.isVisible(index)} data-testid={`single-task-${task.windowId}`}>
                 <td>窗口 {task.ordinal}</td>
                 <td>{task.job ? SINGLE_TASK_LABELS[task.job.state] ?? task.job.state : task.error ? '未派发' : '等待派发'}</td>
                 <td>
@@ -664,6 +666,7 @@ export default function PreviewPage() {
               </tr>
             ))}</tbody>
           </table></div>
+          <ListPagination pagination={singlePagination} label="单章任务" />
           </CollapsibleBlock>
         </section>
       )}

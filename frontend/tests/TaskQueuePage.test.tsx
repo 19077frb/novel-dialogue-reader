@@ -20,6 +20,27 @@ function oldAdmission() {
     createdAt: 1, payload: { type: 'batch', work: { plans: [{ chapter: { id: 'c1', title: '第一章' }, estimate: { windows: [] } }] } } }
 }
 
+it('pages background tasks and loads the next cursor only after all loaded pages', async () => {
+  const rows = Array.from({ length: 21 }, (_, i) => ({ id: `j${i}`, book_title: `作品 ${i}`, chapter_title: '第一章', kind: 'INFERENCE', state: 'COMPLETED' }))
+  vi.mocked(fetchTaskQueue).mockImplementation(async (_active, cursor) => ({
+    items: cursor ? [{ ...rows[0], id: 'remote', book_title: '下一批作品' }] : rows,
+    next_cursor: cursor ? null : 'cursor-2',
+  }) as never)
+  renderWithProviders(<TaskQueuePage />)
+  await screen.findByText('作品 0')
+  const nav = screen.getByRole('navigation', { name: '后台任务分页' })
+  expect(screen.getAllByRole('button', { name: '查看任务' })).toHaveLength(20)
+  await userEvent.click(within(nav).getByRole('button', { name: '下一页' }))
+  expect(screen.getByText('作品 20')).toBeVisible()
+  expect(fetchTaskQueue).toHaveBeenCalledTimes(1)
+  await userEvent.click(screen.getAllByRole('button', { name: '查看任务' })[0])
+  expect(screen.getByText('详情 j20')).toBeVisible()
+  await userEvent.click(within(nav).getByRole('button', { name: '下一页' }))
+  await waitFor(() => expect(screen.getByText('下一批作品')).toBeVisible())
+  expect(fetchTaskQueue).toHaveBeenCalledWith(true, 'cursor-2', expect.anything())
+  expect(screen.getByText('详情 j20')).toBeVisible()
+})
+
 it('opens a task directly even when it is absent from the current queue page', async () => {
   vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
   renderWithProviders(<TaskQueuePage />, '/tasks?jobId=old-job')

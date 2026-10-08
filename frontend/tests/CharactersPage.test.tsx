@@ -66,6 +66,27 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('翻页保留人物草稿，搜索更换后回到第一页，不调用模型', async () => {
+    vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(Array.from({ length: 6 }, (_, i) => ({
+      ...entries[0], character_id: `person-${i}`, name: `人物 ${i}`,
+    })))
+    renderPage()
+    const card = await screen.findByRole('article', { name: '人物 人物 0' })
+    await waitFor(() => expect(within(card).getByLabelText('姓名')).toBeEnabled())
+    await userEvent.type(within(card).getByLabelText('姓名'), '草稿')
+    expect(within(card).getByLabelText('姓名')).toHaveValue('人物 0草稿')
+    const nav = screen.getByRole('navigation', { name: '人物资料分页' })
+    await userEvent.click(within(nav).getByRole('button', { name: '下一页' }))
+    expect(card).not.toBeVisible()
+    expect(screen.getByRole('article', { name: '人物 人物 5' })).toBeVisible()
+    await userEvent.click(within(nav).getByRole('button', { name: '上一页' }))
+    expect(within(card).getByLabelText('姓名')).toHaveValue('人物 0草稿')
+    await userEvent.click(within(nav).getByRole('button', { name: '下一页' }))
+    await userEvent.type(screen.getByLabelText('搜索人物'), '人物 0')
+    expect(screen.getByRole('article', { name: '人物 人物 0' })).toBeVisible()
+    expect(api.editBookCharacter).not.toHaveBeenCalled()
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+  })
   it('公共配色说明及全书锁定只出现一次，各人物保留禁用悬停', async () => {
     vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue({
       job_id: 'merge-1', state: 'RUNNING', usage: {}, merged_count: 0, unknown_usage_runs: 0,

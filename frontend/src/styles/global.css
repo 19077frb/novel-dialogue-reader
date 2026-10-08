@@ -1518,6 +1518,9 @@ textarea:focus-visible {
 .ndr-collapse-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 36px; height: 36px; padding: 6px; border: 0; background: transparent; }
 .ndr-collapsible-summary { color: var(--ndr-muted); overflow-wrap: anywhere; }
 .ndr-collapsible-block > [hidden] { display: none; }
+[hidden] { display: none !important; }
+.ndr-list-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.ndr-list-pagination .status-error { flex-basis: 100%; }
 
 .ndr-task-queue-list { list-style: none; padding: 0; }
 .ndr-task-queue-range { min-width: 0; overflow-wrap: anywhere; }

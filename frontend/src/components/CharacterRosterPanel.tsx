@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CollapsibleBlock } from './CollapsibleBlock'
+import { PaginatedItems } from './ListPagination'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
@@ -379,7 +380,7 @@ export function CharacterRosterPanel({
 
       {drafts.length > 0 ? (
         <CollapsibleBlock title="本章人物名单" summary={`共 ${drafts.length} 个人物；已选 ${drafts.filter(item => item.accepted).length} 个`}>
-        <div className="ndr-character-list" data-testid="roster-candidates">
+        <div data-testid="roster-candidates"><PaginatedItems label="本章人物" pageSize={5} scope={chapterId} className="ndr-character-list">
           {drafts.map((item) => (
             <article key={item.temp_ref} className="ndr-character-card">
               <label className="ndr-radio-row">
@@ -460,7 +461,7 @@ export function CharacterRosterPanel({
               )}
             </article>
           ))}
-        </div>
+        </PaginatedItems></div>
         </CollapsibleBlock>
       ) : (
         !textlessCompleted && <p className="hint">还没有人物候选。可以先分析，也可以直接手动添加。</p>

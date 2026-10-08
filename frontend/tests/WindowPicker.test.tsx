@@ -1,6 +1,26 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
+import { useState } from 'react'
 import { WindowPicker } from '../src/components/WindowPicker'
+
+it('keeps window selections across pages and selects all windows, not just the visible page', () => {
+  const windows = Array.from({ length: 23 }, (_, i) => ({ window_id: `w${i + 1}`, ordinal: i + 1, target_count: 2 }))
+  function Example() {
+    const [selected, setSelected] = useState<string[]>([])
+    return <WindowPicker windows={windows} selectedIds={selected} onChange={setSelected} />
+  }
+  render(<Example />)
+  expect(screen.getByTestId('window-w21')).not.toBeVisible()
+  fireEvent.click(screen.getByTestId('window-w1'))
+  fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+  fireEvent.click(screen.getByTestId('window-w21'))
+  expect(screen.getByTestId('windows-selection-summary')).toHaveTextContent('已选 2/23')
+  fireEvent.click(screen.getByRole('button', { name: '上一页' }))
+  expect(screen.getByTestId('window-w1')).toBeChecked()
+  fireEvent.click(screen.getByTestId('windows-select-all'))
+  expect(screen.getByTestId('windows-selection-summary')).toHaveTextContent('已选 23/23')
+  expect(screen.getByTestId('window-w23')).toBeChecked()
+})
 
 it('shows saved statuses and selects only failed or incomplete windows', () => {
   const onChange = vi.fn()
