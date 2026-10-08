@@ -9,6 +9,7 @@ from ndr.characters.auto_merge import (
     _name_candidates,
     _restore_plan_references,
     _validate_plan,
+    _validated_groups,
 )
 from ndr.characters.merge_diagnostics import MergePlanError, saved_model_groups
 
@@ -107,3 +108,63 @@ def test_saved_plan_is_bounded_and_does_not_retain_provider_metadata():
     assert saved["model_groups_truncated"]
     assert len(saved["model_groups"][0]["merged_description"]) == 4096
     assert saved["model_groups"][0]["extra_fields"] == ["[已脱敏]"]
+
+
+def _entries(count=8):
+    return [{"character_id": f"uuid-{i}", "name": f"人物{i}", "kind": "book"}
+            for i in range(1, count + 1)]
+
+
+@pytest.mark.parametrize("same_name", ["人物1", " 人物1 "])
+def test_same_name_is_no_rename_but_keeps_merge(same_name):
+    group = {**_group(), "preferred_name": same_name}
+    output, skipped, issues = _validated_groups({"groups": [group]}, _entries())
+    assert output.groups[0].preferred_name is None
+    assert output.groups[0].source_ids == ["uuid-2"]
+    assert skipped == 0 and issues == []
+
+
+@pytest.mark.parametrize("bad", [
+    {**_group("C3", ["C4"]), "preferred_name": "未提供姓名"},
+    {**_group("C3", ["C4"]), "merged_description": " "},
+    {**_group("C3", ["C4"]), "confidence": 2},
+    {**_group("C3", ["C4"]), "extra": "secret"},
+    _group("C999", ["C4"]),
+    {**_group("C3", ["C4"]), "source_ids": [], "preferred_name": "人物3"},
+    "invalid",
+])
+def test_invalid_independent_group_does_not_hide_valid_groups(bad):
+    output, skipped, issues = _validated_groups(
+        {"groups": [_group(), bad, _group("C5", ["C6"])]}, _entries(),
+    )
+    assert [group.target_id for group in output.groups] == ["uuid-1", "uuid-5"]
+    assert skipped == 1
+    assert all(issue["group_index"] == 2 for issue in issues)
+    assert "secret" not in json.dumps(issues)
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_every_conflicting_group_is_excluded_including_malformed(malformed):
+    dependent = _group("C2", ["C3"])
+    if malformed:
+        dependent["merged_description"] = ""
+    output, skipped, issues = _validated_groups({"groups": [
+        _group(), dependent, _group("C3", ["C4"]), _group("C5", ["C6"]),
+    ]}, _entries())
+    assert [group.target_id for group in output.groups] == ["uuid-5"]
+    assert skipped == 3
+    assert {issue["group_index"] for issue in issues} == {1, 2, 3}
+
+
+def test_diagnostic_limit_does_not_limit_conflict_exclusion():
+    groups = [_group()] * 60 + [_group("C5", ["C6"])]
+    output, skipped, issues = _validated_groups({"groups": groups}, _entries())
+    assert [group.target_id for group in output.groups] == ["uuid-5"]
+    assert skipped == 60 and len(issues) == 50
+
+
+def test_all_invalid_groups_fail_and_empty_plan_is_valid():
+    with pytest.raises(MergePlanError):
+        _validated_groups({"groups": [_group(), _group("C2", ["C3"])]}, _entries())
+    output, skipped, issues = _validated_groups({"groups": []}, _entries())
+    assert output.groups == [] and skipped == 0 and issues == []

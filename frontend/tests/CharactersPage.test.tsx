@@ -211,6 +211,33 @@ describe('CharactersPage', () => {
     expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
     expect(api.confirmCharacterAutoMerge).not.toHaveBeenCalled()
   })
+  it('部分组无效仍展示有效建议，可选择确认且保留排除原因', async () => {
+    const issue = { code: 'invalid_preferred_name', group_index: 2,
+      related_group_index: null, field: 'preferred_name', character_ref: 'C3',
+      message: '第2组的建议姓名没有资料依据' }
+    const preview = { ...mergeResult, phase: 'awaiting_confirmation' as const,
+      merged_count: 0, merges: [], last_error: null, skipped_groups: 1,
+      validation_issues: [issue], proposals: [{ target: entries[1], sources: [entries[0]],
+        preferred_name: null, confidence: 0.99, reason: '姓名一致', merged_description: '人物说明' }] }
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(preview)
+    vi.mocked(api.confirmCharacterAutoMerge).mockImplementation(async () => {
+      const applied = { ...mergeResult, phase: 'applied' as const, validation_issues: [issue], skipped_groups: 1 }
+      vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(applied)
+      return applied
+    })
+    renderPage()
+    const panel = within(await screen.findByRole('region', { name: '合并建议预览' }))
+    expect(screen.getByText('部分建议未通过检查，已排除；其余建议仍可查看并选择确认。')).toBeVisible()
+    await userEvent.click(screen.getByText('查看校验详情（1 处）'))
+    expect(screen.getByText(/第2组的建议姓名没有资料依据/)).toBeVisible()
+    expect(panel.queryByText(/正式名称：/)).not.toBeInTheDocument()
+    await userEvent.click(panel.getByRole('button', { name: '全选合并建议' }))
+    await userEvent.click(panel.getByRole('button', { name: '确认合并所选 1 组' }))
+    await screen.findByText(/未通过检查的组没有执行，仅合并了你选择的有效建议/)
+    expect(api.confirmCharacterAutoMerge).toHaveBeenCalledWith('b1', 'merge-1', ['u2'])
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+  })
+
   it('全选多组建议只提交一次，计数包含同组多个重复人物', async () => {
     const proposals = [
       { target: entries[1], sources: [entries[0], { ...entries[0], character_id: 'u3' }], confidence: 0.99, reason: '第一行\n第二行', merged_description: '主人公浅村悠太，在书店打工。' },
