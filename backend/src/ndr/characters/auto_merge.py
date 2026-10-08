@@ -269,15 +269,15 @@ def _validate_plan(output: MergeOutput, entries):
             add("missing_reason", f"第{index}组缺少明确的中文合并依据", index, "reason")
         if group.preferred_name:
             target = by_id.get(group.target_id, {})
+            if name_key(group.preferred_name) == name_key(target.get("name")):
+                group.preferred_name = None
+        if group.preferred_name:
             names = [value for key in ids if key in by_id
                      for value in [by_id[key]["name"], *by_id[key].get("aliases", [])]]
-            current_name = sanitize(target.get("name", ""), limit=80)
             proposed_name = sanitize(group.preferred_name, limit=80)
             problem = None
             if group.preferred_name not in names:
                 problem = f"建议姓名“{proposed_name}”不在本组已提供的姓名或别名中"
-            elif name_key(group.preferred_name) == name_key(target.get("name")):
-                problem = f"建议姓名“{proposed_name}”与当前名称“{current_name}”相同，无需更名"
             elif not valid_display_name(group.preferred_name) or is_role_name(group.preferred_name):
                 problem = f"建议姓名“{proposed_name}”仍是身份代称或不符合简短姓名要求"
             if problem:
@@ -296,6 +296,72 @@ def _validate_plan(output: MergeOutput, entries):
     if issues:
         raise MergePlanError(issues)
     return by_id
+
+
+def _validated_groups(payload, entries):
+    """Isolate invalid groups, reserving references even from malformed groups."""
+    if (not isinstance(payload, dict) or set(payload) != {"groups"}
+            or not isinstance(payload["groups"], list) or len(payload["groups"]) > 500):
+        # An invalid envelope cannot define a complete, bounded plan safely.
+        MergeOutput.model_validate(payload)
+    refs = character_refs(entries)
+    known = {row["character_id"] for row in entries}
+    short_ids = {value: key for key, value in refs.items()}
+    memberships = {}
+    parsed = {}
+    rejected = set()
+    issues = []
+
+    def add(issue):
+        if len(issues) < 50:
+            issues.append(issue)
+
+    for index, raw in enumerate(payload["groups"], 1):
+        # Reserve all identifiable references BEFORE schema validation. Otherwise
+        # an invalid group could hide a dependency on an apparently valid group.
+        if isinstance(raw, dict):
+            sources = raw.get("source_ids", [])
+            if not isinstance(sources, list):
+                sources = [sources]
+            for key in [raw.get("target_id"), *sources]:
+                if isinstance(key, str):
+                    key = refs.get(key, key)
+                    if key in known:
+                        memberships.setdefault(key, set()).add(index)
+        try:
+            group = MergeGroup.model_validate(raw)
+            output = _restore_plan_references(MergeOutput(groups=[group]), entries)
+            _validate_plan(output, entries)
+            parsed[index] = output.groups[0]
+        except MergePlanError as exc:
+            rejected.add(index)
+            for issue in exc.issues:
+                add({**issue, "group_index": index,
+                     "message": issue["message"].replace("第1组", f"第{index}组", 1)})
+        except ValidationError as exc:
+            rejected.add(index)
+            for item in exc.errors()[:50]:
+                field = sanitize(".".join(str(part) for part in item["loc"]), limit=160)
+                label = "整理后人物说明（需为1–512字）" if field == "merged_description" else field
+                add({"code": "invalid_group_schema", "group_index": index, "field": field,
+                     "character_ref": None, "related_group_index": None,
+                     "message": f"第{index}组的 {label or '内容'} 字段缺失或格式不符合要求"})
+    for key, indices in memberships.items():
+        if len(indices) < 2:
+            continue
+        rejected.update(indices)
+        ordered = sorted(indices)
+        for index in ordered:
+            related = ordered[0] if index != ordered[0] else ordered[1]
+            add({"code": "conflicting_groups", "group_index": index,
+                 "field": "character_ids", "character_ref": short_ids[key],
+                 "related_group_index": related,
+                 "message": f"第{index}组与第{related}组引用了同一人物"
+                            f"（{short_ids[key]}），冲突组均未纳入建议"})
+    accepted = [group for index, group in parsed.items() if index not in rejected]
+    if payload["groups"] and not accepted:
+        raise MergePlanError(issues)
+    return MergeOutput(groups=accepted), len(rejected), issues
 
 
 def _restore_plan_references(output: MergeOutput, entries) -> MergeOutput:
@@ -601,8 +667,7 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
                 checkpoint.update(saved_model_groups(payload),
                                   character_refs=character_refs(entries))
                 job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
-        output = _restore_plan_references(MergeOutput.model_validate(payload), entries)
-        _validate_plan(output, entries)
+        output, invalid_groups, validation_issues = _validated_groups(payload, entries)
         with transaction(factory) as session:
             job = session.get(Job, job_id)
             if job is None:
@@ -625,13 +690,14 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
             analysis_groups = output.model_dump()["groups"]
             output, unnamed_groups = _named_targets(output, entries)
             accepted = [group.model_dump() for group in output.groups if group.confidence >= 0.95]
-            skipped = unnamed_groups + len(output.groups) - len(accepted)
+            skipped = invalid_groups + unnamed_groups + len(output.groups) - len(accepted)
             checkpoint = json.loads(job.checkpoint_json or "{}")
             phase = "awaiting_confirmation" if accepted else "no_suggestions"
             checkpoint.update(
                 phase=phase,
                 merge_proposal={"groups": accepted, "skipped_groups": skipped},
                 analysis_groups=analysis_groups,
+                validation_issues=validation_issues,
             )
             job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
             job.progress_json = json.dumps(

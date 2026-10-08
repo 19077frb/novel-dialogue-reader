@@ -104,12 +104,13 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
           <p>已知消耗 {result.data.usage?.total_tokens ?? 0} Tokens{result.data.unknown_usage_runs > 0 ? `；另有 ${result.data.unknown_usage_runs} 次调用用量未知` : ''}</p>
           {noSuggestions && <p className="hint">本次未修改人物，无需确认或放弃。{result.data.skipped_groups > 0 ? `有 ${result.data.skipped_groups} 组建议未达到接受条件，未纳入结果。` : '模型未提供合并或更名建议。'}你可以调整配置，重新勾选同意后再次分析；不会自动调用模型。</p>}
           {result.data.last_error && <p className="status-error" role="alert">{result.data.last_error}</p>}
+          {awaiting && Boolean(result.data.validation_issues?.length) && <p role="status">部分建议未通过检查，已排除；其余建议仍可查看并选择确认。</p>}
           {Boolean(result.data.validation_issues?.length) && <details>
             <summary>查看校验详情（{result.data.validation_issues?.length} 处）</summary>
             <ul className="ndr-merge-text">{result.data.validation_issues?.map((issue, index) => <li key={index}>
               {issue.message}{issue.field ? `；字段：${issue.field}` : ''}
             </li>)}</ul>
-            <p className="hint">本次没有执行合并，不会自动再次调用模型。请核对问题后决定是否重新分析。</p>
+            <p className="hint">{awaiting ? '未通过检查的组不能确认；请核对下方有效建议后选择接受或放弃。' : result.data.phase === 'applied' ? '未通过检查的组没有执行，仅合并了你选择的有效建议。' : '本次没有执行合并，不会自动再次调用模型。请核对问题后决定是否重新分析。'}</p>
           </details>}
           {awaiting && <section className="ndr-merge-preview" aria-label="合并建议预览">
             <h3 className="ndr-step-heading"><span className="ndr-step-badge">2</span>预览并选择合并建议</h3>

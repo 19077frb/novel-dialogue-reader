@@ -947,6 +947,52 @@ def test_auto_merge_applies_and_preserves_names_descriptions_references_usage(
     assert adapter.calls[0]["payload"]["max_tokens_override"] == 4096
 
 
+@pytest.mark.parametrize("bad", ["name", "schema", "unknown", "conflict"])
+def test_auto_merge_keeps_independent_groups_for_preview_and_selection(
+    migrated_client, populated, bad,
+):
+    client, ids = migrated_client, populated
+    with transaction(client.app.state.session_factory) as session:
+        target = BookCharacter(book_version_id=ids["version"], canonical_name="角色甲")
+        source = BookCharacter(book_version_id=ids["version"], canonical_name="甲")
+        session.add_all([target, source])
+        session.flush()
+        other_target, other_source = target.id, source.id
+    job, _ = _auto_job(client, ids)
+    second = _merge_group(ids, target_id=other_target, source_ids=[other_source])
+    if bad == "name":
+        second["preferred_name"] = "不存在的姓名"
+    elif bad == "schema":
+        second["merged_description"] = ""
+    elif bad == "unknown":
+        second["source_ids"] = ["not-a-character"]
+    groups = [_merge_group(ids, preferred_name="悠太"), second]
+    if bad == "conflict":
+        groups.append(_merge_group(ids, target_id=other_source, source_ids=[]))
+    outcome, adapter = _run_merge(client, job, groups, accept=False)
+    assert outcome.state is JobState.COMPLETED
+    base = f"/api/books/{ids['book']}/character-directory/auto-merge/{job['id']}"
+    preview = client.get(base).json()["data"]
+    assert preview["phase"] == "awaiting_confirmation"
+    assert len(preview["proposals"]) == 1
+    assert preview["proposals"][0]["preferred_name"] is None
+    assert preview["last_error"] is None and preview["validation_issues"]
+    assert preview["skipped_groups"] == (2 if bad == "conflict" else 1)
+    assert preview["usage"]["total_tokens"] == 40
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["source"]) is not None
+    assert client.post(f"{base}/confirm", json={
+        "selected_target_ids": [other_target],
+    }).status_code == 422
+    response = client.post(f"{base}/confirm", json={"selected_target_ids": [ids["target"]]})
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["merges"][0]["previous_name"] is None
+    with transaction(client.app.state.session_factory) as session:
+        assert session.get(BookCharacter, ids["source"]) is None
+        assert session.get(BookCharacter, other_source) is not None
+    assert len(adapter.calls) == 1
+
+
 @pytest.mark.parametrize("case", ["unknown", "overlap", "self", "extra"])
 def test_auto_merge_rejects_invalid_plan_atomically_and_keeps_usage(
     migrated_client, populated, case
@@ -1075,7 +1121,6 @@ def test_auto_merge_previews_all_three_revealed_names_without_paid_retry(migrate
 
 @pytest.mark.parametrize("locked,role,name,problem", [
     (False, "女神", "虚构姓名", "不在本组已提供"),
-    (True, "阿库娅", "阿库娅", "无需更名"),
     (False, "女神", "无头骑士", "仍是身份代称"),
 ])
 def test_auto_merge_rejects_invalid_rename_with_specific_reason(
