@@ -135,9 +135,13 @@ def run_character_roster_job(
                 job = session.get(Job, job_id)
                 return RosterJobOutcome(job_id, job.state if job else JobState.FAILED)
         _ACTIVE.add(job_id)
+    previous_runs = set()
     try:
         with session_factory() as session:
             job = session.get(Job, job_id)
+            previous_runs = set(session.scalars(select(InferenceRun.id).where(
+                InferenceRun.job_id == job_id,
+            )))
             if job is not None and job.state is JobState.PAUSING:
                 job.state = JobState.PAUSED
                 session.commit()
@@ -153,6 +157,7 @@ def run_character_roster_job(
         logger.exception("人物任务收尾异常 job_id=%s", job_id)
         state = (JobState.NEEDS_RECONCILIATION if isinstance(exc, RosterReceiptError)
                  else JobState.FAILED)
+        new_calls = 0
         with session_factory() as session:
             job = session.get(Job, job_id)
             if job is not None:
@@ -183,15 +188,16 @@ def run_character_roster_job(
                 job.state = state
                 job.last_error = (str(exc) if isinstance(exc, RosterReceiptError) else
                                   f"人物任务收尾失败（{type(exc).__name__}）；重试将优先恢复已保存的返回")
-                calls = len(list(session.scalars(select(InferenceRun.id).where(
+                runs = set(session.scalars(select(InferenceRun.id).where(
                     InferenceRun.job_id == job_id,
-                ))))
+                )))
+                new_calls = len(runs - previous_runs)
                 job.progress_json = json.dumps({
-                    "stage": state.value.lower(), "calls": calls,
+                    "stage": state.value.lower(), "calls": len(runs),
                     "receipt_recovery_blocked": isinstance(exc, RosterReceiptError),
                 })
                 session.commit()
-        return RosterJobOutcome(job_id, state, errors=[type(exc).__name__])
+        return RosterJobOutcome(job_id, state, calls=new_calls, errors=[type(exc).__name__])
     finally:
         with _GUARD:
             _ACTIVE.discard(job_id)

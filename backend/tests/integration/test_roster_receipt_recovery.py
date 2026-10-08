@@ -34,7 +34,7 @@ def test_returned_roster_recovers_final_commit_failure_without_recharging(migrat
     adapter = FakeProviderAdapter(script=[response()])
     outcome = run_character_roster_job(factory, settings, job_id=job["id"],
                                       adapter_factory=lambda *_: adapter)
-    assert failed and outcome.state == JobState.FAILED
+    assert failed and outcome.state == JobState.FAILED and outcome.calls == 1
     with factory() as session:
         stored = session.get(Job, job["id"])
         assert stored.state == JobState.FAILED and "RuntimeError" in stored.last_error
