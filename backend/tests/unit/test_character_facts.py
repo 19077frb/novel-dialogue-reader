@@ -61,6 +61,42 @@ def test_legacy_current_metadata_is_not_a_guessed_visible_fact():
     assert character.identity_facts_json == "[]" and character.version == 1
 
 
+def test_complete_name_survives_later_short_name_without_future_leak_or_user_override():
+    from ndr.characters.facts import IdentityProfileUpdate, append_identity_records
+
+    text = "小舟走来。后来得知他叫陈小舟。小舟挥手。"
+    sha = hashlib.sha256(text.encode()).hexdigest()
+    character, version, _ = objects()
+    version.canonical_sha256, version.canonical_length_cp = sha, len(text)
+    original = OriginalIdentitySnapshot(version.id, sha, text)
+    records = []
+    for name, start in [("小舟", 0), ("陈小舟", text.index("陈小舟")),
+                        ("小舟", text.rindex("小舟"))]:
+        records.append(CharacterIdentityFact(kind="name", value=name,
+            canonical_sha256=sha, visible_from_cp=start + len(name),
+            evidence_spans=((start, start + len(name)),), source="model",
+            source_ref="roster:test", accepted=True))
+    append_identity_facts(character, version, tuple(records), original=original)
+    assert visible_identity_profile(character, version, horizon=2)["name"] == "小舟"
+    assert visible_identity_profile(character, version, horizon=len(text))["name"] == "陈小舟"
+    append_identity_records(character, version, (IdentityProfileUpdate(field="name", value="小舟",
+        canonical_sha256=sha, visible_from_cp=len(text), source="user",
+        source_ref="manual:test", accepted=True),))
+    assert visible_identity_profile(character, version, horizon=len(text))["name"] == "小舟"
+
+
+@pytest.mark.parametrize("current,proposed,expected", [
+    ("小舟", "陈小舟", "陈小舟"), ("陈小舟", "小舟", "陈小舟"),
+    ("林舟", "林舟同学", "林舟"), ("女神", "阿库娅", "阿库娅"),
+    ("林舟", "陈小舟", "林舟"), ("林舟", "学生会长", "林舟"),
+])
+def test_full_name_preference_is_not_longest_alias_guess(current, proposed, expected):
+    from ndr.characters.names import prefer_complete_name, revealed_name
+
+    assert prefer_complete_name(current, proposed) == expected
+    assert revealed_name(current, proposed, locked=True) is None
+
+
 def test_each_name_alias_description_relation_has_its_own_reveal_and_origin():
     character, version, original = objects()
     role = fact("designation", "路人")

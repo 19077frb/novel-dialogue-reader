@@ -64,7 +64,7 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
   if (item.color_index != null && item.color_index >= 32 && !colorChoices.includes(item.color_index)) colorChoices.push(item.color_index)
   return <article className="ndr-character-card" aria-label={`人物 ${item.name}`}>
     <h3 style={{ color: colorForIndex(item.color_index) }}>{item.name}</h3>
-    <DisabledHint reason={lockReason} />
+    {!disabled && <DisabledHint reason={lockReason} />}
     {item.chapter_count != null && item.dialogue_count != null && <p className="hint">
       出现 {item.chapter_count} 章 · {item.dialogue_count} 句对白
     </p>}
@@ -84,14 +84,13 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
     <p style={{ color: colorForIndex(color ?? item.color_index) }}>颜色预览：〔{item.name}〕「你好。」</p>
     {color == null && item.preferred_color_index != null && <p className="hint">恢复自动分配后的颜色以保存结果为准。</p>}
     <button type="button" title={colorReason} disabled={Boolean(colorReason)} onClick={() => saveColor.mutate()}>保存颜色</button>
-    <DisabledHint reason={colorReason} />
-    <p className="hint">颜色由程序生成，保存不调用模型、不更改人工确认状态。选择“自动分配”可恢复；自动占用的色号会为手动选择让位。改色在初读和重读中均生效。</p>
-    <label>姓名<input value={name} maxLength={128} onChange={(e) => setName(e.target.value)} disabled={busy} /></label>
-    <label>别名（用、分隔）<input value={aliases} onChange={(e) => setAliases(e.target.value)} disabled={busy} /></label>
-    <label>说明<textarea value={description} maxLength={512} rows={3} onChange={(e) => setDescription(e.target.value)} disabled={busy} /></label>
+    {!disabled && colorReason !== lockReason && <DisabledHint reason={colorReason} />}
+    <label className="ndr-field">姓名<input title={lockReason} value={name} maxLength={128} onChange={(e) => setName(e.target.value)} disabled={busy} /></label>
+    <label className="ndr-field">别名（用、分隔）<input title={lockReason} value={aliases} onChange={(e) => setAliases(e.target.value)} disabled={busy} /></label>
+    <label className="ndr-field">说明<textarea title={lockReason} value={description} maxLength={512} rows={3} onChange={(e) => setDescription(e.target.value)} disabled={busy} /></label>
     <button title={lockReason ?? (!name.trim() ? '请先填写人物姓名。' : undefined)} type="button" className="ndr-primary" disabled={busy || !name.trim()} onClick={() => { setMessage(''); save.mutate() }}>保存人物资料</button>
     {!name.trim() && <p className="hint">请填写人物姓名后再保存。</p>}
-    <label>合并到全书人物<select value={targetId} disabled={busy} onChange={(e) => { setTargetId(e.target.value); setConfirmMerge(false) }}>
+    <label className="ndr-field">合并到全书人物<select title={lockReason} value={targetId} disabled={busy} onChange={(e) => { setTargetId(e.target.value); setConfirmMerge(false) }}>
       <option value="">请选择合并目标</option>
       {targets.map((row) => <option key={row.character_id} value={row.character_id} title={row.description}>{row.name}</option>)}
     </select></label>
@@ -178,7 +177,8 @@ export default function CharactersPage() {
       disabled={batchProgress.running} onBusyChange={setAutoMergeBusy} onSaved={saved} />
     <section className="card">
       <p className="hint">汇总当前书籍版本已识别的人物（包括未发言人物），可能包含后文剧透。人工确认只是来源记录，并不表示永远正确；仍可手动修改，或让模型提出更名、合并与说明修正建议，预览接受后才生效。后台是否更新人工姓名与说明由通用设置决定，默认关闭。修改会影响已有对白、后续人物识别和导出，不改原文或章节完成状态。请先停止本书处理任务再编辑。</p>
-      {batchProgress.running && <p role="status">批量处理正在运行，停止后可修改人物。</p>}
+      {(batchProgress.running || autoMergeBusy) && <p role="status">本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。</p>}
+      <p className="hint">颜色由程序生成，保存不调用模型、不更改人工确认状态。选择“自动分配”可恢复；自动占用的色号会为手动选择让位。改色在初读和重读中均生效。</p>
       {message && <p role="status">{message}</p>}
       <div className="ndr-toolbar">
         <label className="ndr-field">搜索人物<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="姓名、别名或说明" /></label>

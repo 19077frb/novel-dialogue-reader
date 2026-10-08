@@ -26,6 +26,47 @@ from ndr.storage.models import (
 from ndr.storage.transactions import transaction
 
 
+@pytest.mark.parametrize("allow", [False, True])
+@pytest.mark.parametrize("description", ["", "本章有依据的新说明"])
+def test_automatic_profile_keeps_full_name_and_missing_description(
+    fake_provider_client, allow, description,
+):
+    client = fake_provider_client
+    data = client.post("/api/books/import", files={
+        "file": ("short-name.txt", "第一章\n陈小舟说：「小舟是我。」".encode(), "text/plain"),
+    }).json()["data"]
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, data["book_version_id"])
+        chapter = session.scalar(select(Chapter).where(Chapter.book_version_id == version.id))
+        character = BookCharacter(book_version_id=version.id, canonical_name="陈小舟",
+            description="已有说明", source=CharacterSource.MODEL, confirmation_source="automatic",
+            user_confirmed=False, name_locked=False)
+        session.add(character)
+        session.flush()
+        character_id, chapter_id = character.id, chapter.id
+        output = RosterOutput.model_validate({"characters": [{"temp_ref": "c1",
+            "character_id": character_id, "name": "小舟", "description": description,
+            "evidence_refs": ["L2"], "pov_candidate": True}]})
+        store_roster_candidates(session, version=version, chapter=chapter, output=output,
+                                job_id=None, allow_overwrite_manual=allow)
+    path = f'/api/books/{data["book_id"]}/chapters/{chapter_id}/character-roster'
+    roster = client.get(path).json()["data"]
+    candidate = roster["candidates"][0]
+    assert candidate["canonical_name"] == "陈小舟"
+    assert candidate["description"] == (description or "已有说明")
+    confirmation = {key: candidate[key] for key in (
+        "temp_ref", "character_id", "canonical_name", "aliases", "description",
+    )}
+    response = client.put(path, json={"candidates": [{**confirmation, "accepted": True}],
+        "pov_temp_ref": "c1", "expected_version": roster["version"],
+        "confirmation_mode": "automatic"})
+    assert response.status_code == 200, response.text
+    with client.app.state.session_factory() as session:
+        character = session.get(BookCharacter, character_id)
+        assert character.canonical_name == "陈小舟"
+        assert character.description == (description or "已有说明")
+
+
 def test_successful_roster_analysis_advances_placeholder_and_existing_revision(migrated_client):
     client = migrated_client
     imported = client.post("/api/books/import", files={

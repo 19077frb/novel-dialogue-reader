@@ -24,6 +24,46 @@ def proposal():
     }]}
 
 
+@pytest.mark.parametrize("description", ["", "改述但与事实文字不同"])
+def test_description_falls_back_to_one_valid_fact_not_concatenation(description):
+    payload = proposal()
+    person = payload["characters"][0]
+    person["description"] = description
+    person["facts"].extend([
+        {"kind": "description", "value": "学生会长", "evidence_refs": ["L5"]},
+        {"kind": "description", "value": "被陆欣称为小舟的学生会长", "evidence_refs": ["L4", "L5"]},
+    ])
+    output, _, _ = compile_isolated(payload)
+    assert output.characters[0].description == "被陆欣称为小舟的学生会长"
+
+
+def test_verified_full_name_promoted_but_bad_name_evidence_not_salvaged():
+    payload = proposal()
+    person = payload["characters"][0]
+    person["name"] = "林"
+    person["facts"].append({"kind": "name", "value": "林", "evidence_refs": ["L3"]})
+    # A one-letter fragment is not automatically treated as a full-name link.
+    output, _, _ = compile_isolated(payload)
+    assert output.characters[0].name == "林"
+    person["facts"][0]["evidence_refs"] = ["L999"]
+    with pytest.raises(ValueError):
+        compile_isolated(payload)
+
+
+def test_full_name_comes_from_same_identity_valid_name_fact_not_alias_order():
+    text = "陈小舟走来，小舟挥手。"
+    payload = {"schema_version": "1.1", "characters": [{
+        "temp_ref": "c1", "name": "小舟", "description": "", "evidence_refs": ["L1"],
+        "facts": [{"kind": "name", "value": "陈小舟", "evidence_refs": ["L1"]},
+                  {"kind": "name", "value": "小舟", "evidence_refs": ["L1"]}],
+    }]}
+    output, _, _ = compile_isolated_sourced_roster(payload,
+        original=OriginalIdentitySnapshot("v", hashlib.sha256(text.encode()).hexdigest(), text),
+        chapter_start=0, chapter_end=len(text), allowed_character_ids=set(), source_ref="run1")
+    person = output.characters[0]
+    assert person.name == person.real_name == "陈小舟" and person.aliases == ["小舟"]
+
+
 def compile_proposal(payload=None, **changes):
     args = {"original": OriginalIdentitySnapshot("v", hashlib.sha256(TEXT.encode()).hexdigest(), TEXT),
             "chapter_start": START, "chapter_end": len(TEXT),

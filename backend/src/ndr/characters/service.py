@@ -379,7 +379,12 @@ def store_roster_candidates(
             suggested = candidate.real_name or candidate.name
             from .names import is_role_name, valid_display_name
             if valid_display_name(suggested) and not is_role_name(suggested):
-                proposed_name = suggested if suggested != character.canonical_name else None
+                from .names import prefer_complete_name
+
+                current = character.canonical_name or ""
+                shortened = (suggested != current
+                             and prefer_complete_name(suggested, current) == current)
+                proposed_name = suggested if suggested != current and not shortened else None
         if proposed_name and any(row.id != character.id and matches_name(
             proposed_name, [row.canonical_name or "", *_json_list(row.aliases_json)],
         ) for row in existing):
@@ -413,8 +418,12 @@ def store_roster_candidates(
                     *_json_list(character.aliases_json),
                     *([character.canonical_name] if proposed_name else []),
                 ])),
-                "description": (candidate.description if allow_overwrite_manual
-                                and candidate.evidence_refs else character.description) or "",
+                "description": (candidate.description if candidate.evidence_refs and (
+                                    allow_overwrite_manual or not (
+                                        character.user_confirmed or character.name_locked
+                                    )
+                                ) else character.description)
+                                or character.description or "",
                 "evidence_refs": candidate.evidence_refs,
                 "pov_candidate": candidate.pov_candidate,
             }
@@ -490,7 +499,8 @@ def _upsert_confirmed_character(
                           old_name if old_name != name else None] if value and value != name)),
         ensure_ascii=False,
     )
-    character.description = item.description or (source or {}).get("description") or ""
+    character.description = (item.description or (source or {}).get("description")
+                             or (character.description if automatic else "") or "")
     if not automatic:
         character.source = CharacterSource.USER
         character.user_confirmed = True
