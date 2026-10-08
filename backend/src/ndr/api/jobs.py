@@ -242,6 +242,18 @@ def resume_job_route(
         job = session.get(Job, job_id)
         if job is None:
             raise ApiError.not_found("任务不存在", job_id=job_id)
+        if job.kind is JobKind.CHARACTER_ROSTER and job.state in {
+            JobState.FAILED, JobState.NEEDS_RECONCILIATION, JobState.PAUSED,
+            JobState.PARTIAL, JobState.BUDGET_EXHAUSTED,
+        }:
+            from ..jobs.roster_receipts import has_returned_result
+
+            if (not json.loads(job.range_json or "{}").get("roster_repair_protocol")
+                    and has_returned_result(session, job)):
+                checkpoint = json.loads(job.checkpoint_json or "{}")
+                checkpoint.pop("roster_retry_after_run_id", None)
+                job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+                job.state = JobState.QUEUED
         if job.state in {JobState.PAUSED, JobState.PARTIAL, JobState.BUDGET_EXHAUSTED}:
             job.state = JobState.QUEUED
     # 后台继续跑；这里只返回当前快照，真实进度由 GET /api/jobs/{id} 轮询

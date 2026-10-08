@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
+import threading
 import time
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..characters.facts import OriginalIdentitySnapshot
@@ -25,7 +28,7 @@ from ..context.budget import estimate_tokens
 from ..domain.enums import CredentialMode, InferenceRunState, JobKind, JobState
 from ..ingest.query import load_canonical_text
 from ..llm.adapters import AdapterSpec, build_adapter
-from ..llm.errors import ProviderError
+from ..llm.errors import ProviderError, ProviderErrorKind
 from ..llm.schemas import RosterOutput
 from ..llm.sourced_roster import (
     SOURCED_ROSTER_VERSION,
@@ -36,6 +39,9 @@ from ..llm.sourced_roster import (
 from ..storage.models import BookVersion, Chapter, InferenceRun, Job
 
 ROSTER_MAX_TOKENS = 2000
+_ACTIVE = set()
+_GUARD = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -120,6 +126,78 @@ def _prepare_input(session, settings, job, version, chapter):
 
 
 def run_character_roster_job(
+    session_factory, settings, *, job_id, credentials=None, adapter_factory=None,
+) -> RosterJobOutcome:
+    """Always settle unexpected worker failures; serialize re-entry for one job."""
+    with _GUARD:
+        if job_id in _ACTIVE:
+            with session_factory() as session:
+                job = session.get(Job, job_id)
+                return RosterJobOutcome(job_id, job.state if job else JobState.FAILED)
+        _ACTIVE.add(job_id)
+    try:
+        with session_factory() as session:
+            job = session.get(Job, job_id)
+            if job is not None and job.state is JobState.PAUSING:
+                job.state = JobState.PAUSED
+                session.commit()
+            if job is not None and job.state in {JobState.COMPLETED, JobState.PAUSED}:
+                return RosterJobOutcome(job_id, job.state)
+        return _run_character_roster_job(
+            session_factory, settings, job_id=job_id, credentials=credentials,
+            adapter_factory=adapter_factory,
+        )
+    except Exception as exc:  # noqa: BLE001 - background exceptions must not leave RUNNING
+        from .roster_receipts import RosterReceiptError
+
+        logger.exception("人物任务收尾异常 job_id=%s", job_id)
+        state = (JobState.NEEDS_RECONCILIATION if isinstance(exc, RosterReceiptError)
+                 else JobState.FAILED)
+        with session_factory() as session:
+            job = session.get(Job, job_id)
+            if job is not None:
+                if job.state == JobState.COMPLETED:
+                    return RosterJobOutcome(job_id, job.state)
+                if not isinstance(exc, RosterReceiptError):
+                    from ..storage.run_archive import decode_archive
+
+                    attempt = session.scalar(select(InferenceRun).where(
+                        InferenceRun.job_id == job_id,
+                    ).order_by(InferenceRun.created_at.desc(), InferenceRun.id.desc()).limit(1))
+                    if attempt is not None and attempt.state is InferenceRunState.DISPATCHED:
+                        try:
+                            receipt = decode_archive(attempt.call_archive)
+                            returned = (receipt.get("phase") == "returned"
+                                        and isinstance(receipt.get("adapter_result"), dict))
+                        except ValueError:
+                            returned = False
+                        if returned:
+                            attempt.state = InferenceRunState.FAILED
+                            attempt.error_code = "ROSTER_FINALIZATION_FAILED"
+                            attempt.usage_json = _attempt_usage_json(receipt["adapter_result"])
+                            attempt.elapsed_ms = receipt.get("elapsed_ms")
+                        else:
+                            state = JobState.NEEDS_RECONCILIATION
+                            attempt.state = InferenceRunState.UNKNOWN_OUTCOME
+                            attempt.error_code = "UNKNOWN_OUTCOME"
+                job.state = state
+                job.last_error = (str(exc) if isinstance(exc, RosterReceiptError) else
+                                  f"人物任务收尾失败（{type(exc).__name__}）；重试将优先恢复已保存的返回")
+                calls = len(list(session.scalars(select(InferenceRun.id).where(
+                    InferenceRun.job_id == job_id,
+                ))))
+                job.progress_json = json.dumps({
+                    "stage": state.value.lower(), "calls": calls,
+                    "receipt_recovery_blocked": isinstance(exc, RosterReceiptError),
+                })
+                session.commit()
+        return RosterJobOutcome(job_id, state, errors=[type(exc).__name__])
+    finally:
+        with _GUARD:
+            _ACTIVE.discard(job_id)
+
+
+def _run_character_roster_job(
     session_factory: sessionmaker[Session],
     settings: Settings,
     *,
@@ -173,20 +251,6 @@ def run_character_roster_job(
             outcome.state = JobState.COMPLETED
             return outcome
 
-        snapshot = json.loads(job.profile_snapshot_json or "{}")
-        if adapter_factory is not None:
-            adapter = adapter_factory(job, snapshot)
-        else:
-            try:
-                adapter = _build_adapter(settings, credentials, snapshot)
-            except ProviderError as exc:
-                job.state = JobState.FAILED
-                job.last_error = f"{exc.code.value}: {exc.message}"
-                session.commit()
-                outcome.state = JobState.FAILED
-                outcome.errors.append(exc.code.value)
-                return outcome
-
         chapter_start, chapter_end = chapter.start_cp, chapter.end_cp
         try:
             messages, original, protocol, allowed_character_ids = _prepare_input(
@@ -200,12 +264,28 @@ def run_character_roster_job(
             outcome.state = JobState.FAILED
             outcome.errors.append("invalid_roster_input")
             return outcome
+        from .roster_receipts import returned_attempt
+
+        restored = returned_attempt(session, job, chapter.id, messages, protocol)
+        snapshot = json.loads(job.profile_snapshot_json or "{}")
+        if not restored:
+            if adapter_factory is not None:
+                adapter = adapter_factory(job, snapshot)
+            else:
+                try:
+                    adapter = _build_adapter(settings, credentials, snapshot)
+                except ProviderError as exc:
+                    job.state = JobState.FAILED
+                    job.last_error = f"{exc.code.value}: {exc.message}"
+                    session.commit()
+                    outcome.state = JobState.FAILED
+                    outcome.errors.append(exc.code.value)
+                    return outcome
         budget = json.loads(job.budget_json or "{}")
         max_input_tokens = budget.get("max_input_tokens")
         estimated_tokens = sum(estimate_tokens(message["content"]) for message in messages)
-        if max_input_tokens is not None and estimated_tokens + ROSTER_MAX_TOKENS > int(
-            max_input_tokens
-        ):
+        if (not restored and max_input_tokens is not None
+                and estimated_tokens + ROSTER_MAX_TOKENS > int(max_input_tokens)):
             job.state = JobState.BUDGET_EXHAUSTED
             job.last_error = "剩余 Token 额度不足以分析本章人物"
             job.progress_json = json.dumps({"stage": "budget_exhausted"}, ensure_ascii=False)
@@ -217,7 +297,7 @@ def run_character_roster_job(
         ).hexdigest()
         job.state = JobState.RUNNING
         job.progress_json = json.dumps({"stage": "running", "calls": 0}, ensure_ascii=False)
-        run = InferenceRun(
+        run = restored[0] if restored else InferenceRun(
             job_id=job.id,
             window_id=f"roster:{chapter.id}",
             profile_snapshot_json=job.profile_snapshot_json or "{}",
@@ -235,16 +315,27 @@ def run_character_roster_job(
         "max_tokens": ROSTER_MAX_TOKENS, "json_object": True, "target_quote_ids": [],
     }
     from ..storage.run_archive import save_run_archive
-    with session_factory() as session:
-        save_run_archive(session.get(InferenceRun, run_id), request_payload)
-        session.commit()
-    raw = None
-    outcome.calls = 1
-    try:
-        raw = asyncio.run(adapter.generate_labels(deepcopy(request_payload)))
+    if restored:
+        _, archive, allowed_character_ids = restored
+        request_payload = archive["request"]
+        elapsed_ms = archive.get("elapsed_ms")
+    else:
         with session_factory() as session:
-            save_run_archive(session.get(InferenceRun, run_id), request_payload, raw=raw,
-                             elapsed_ms=int((time.monotonic() - started) * 1000), phase="returned")
+            save_run_archive(session.get(InferenceRun, run_id), request_payload)
+            session.commit()
+    raw = None
+    outcome.calls = 0 if restored else 1
+    try:
+        raw = (archive["adapter_result"] if restored else
+               asyncio.run(adapter.generate_labels(deepcopy(request_payload))))
+        elapsed_ms = elapsed_ms if restored else int((time.monotonic() - started) * 1000)
+        with session_factory() as session:
+            run = session.get(InferenceRun, run_id)
+            if not restored:
+                save_run_archive(run, request_payload, raw=raw,
+                                 elapsed_ms=elapsed_ms, phase="returned")
+            run.elapsed_ms = elapsed_ms
+            run.usage_json = _attempt_usage_json(raw)
             session.commit()
         payload = {
             key: value
@@ -277,23 +368,30 @@ def run_character_roster_job(
                for person in output.characters):
             raise ValueError("真实姓名必须有原文证据且为简短姓名")
     except Exception as exc:  # noqa: BLE001
+        unknown = isinstance(exc, ProviderError) and exc.kind in {
+            ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME,
+        }
         with session_factory() as session:
             job = session.get(Job, job_id)
             run = session.get(InferenceRun, run_id)
             if run is not None:
-                save_run_archive(run, request_payload, raw=raw, error=exc,
-                                 elapsed_ms=int((time.monotonic() - started) * 1000),
-                                 phase="returned")
-                run.state = InferenceRunState.FAILED
-                run.error_code = "INVALID_MODEL_OUTPUT"
-                run.elapsed_ms = int((time.monotonic() - started) * 1000)
+                if not restored:
+                    save_run_archive(run, request_payload, raw=raw, error=exc,
+                                     elapsed_ms=int((time.monotonic() - started) * 1000),
+                                     phase="returned")
+                run.state = (InferenceRunState.UNKNOWN_OUTCOME if unknown
+                             else InferenceRunState.FAILED)
+                run.error_code = (exc.code.value if isinstance(exc, ProviderError)
+                                  else "INVALID_MODEL_OUTPUT")
+                if not restored:
+                    run.elapsed_ms = int((time.monotonic() - started) * 1000)
                 run.usage_json = _attempt_usage_json(raw, exc)
             if job is not None:
-                job.state = JobState.FAILED
+                job.state = JobState.NEEDS_RECONCILIATION if unknown else JobState.FAILED
                 job.last_error = f"人物分析失败：{exc}"
-                job.progress_json = json.dumps({"stage": "failed", "calls": 1}, ensure_ascii=False)
+                job.progress_json = json.dumps({"stage": job.state.value.lower(), "calls": 1})
                 session.commit()
-            outcome.state = JobState.FAILED
+            outcome.state = JobState.NEEDS_RECONCILIATION if unknown else JobState.FAILED
             outcome.errors.append("invalid_model_output")
             return outcome
 
@@ -304,6 +402,12 @@ def run_character_roster_job(
         if job is None or version is None or chapter is None:
             outcome.state = JobState.FAILED
             outcome.errors.append("job_not_found")
+            return outcome
+        if job.state in {JobState.PAUSING, JobState.PAUSED, JobState.PARTIAL}:
+            job.state = JobState.PAUSED
+            job.progress_json = json.dumps({"stage": "paused", "calls": 1})
+            session.commit()
+            outcome.state = JobState.PAUSED
             return outcome
         try:
             with session.begin_nested():
@@ -318,7 +422,7 @@ def run_character_roster_job(
             if run is not None:
                 run.state = InferenceRunState.FAILED
                 run.error_code = "ROSTER_STORAGE_FAILED"
-                run.elapsed_ms = int((time.monotonic() - started) * 1000)
+                run.elapsed_ms = elapsed_ms
                 run.usage_json = _attempt_usage_json(raw)
             job.state = JobState.FAILED
             job.last_error = f"人物保存失败：{exc}"
@@ -330,9 +434,11 @@ def run_character_roster_job(
         run = session.get(InferenceRun, run_id)
         if run is not None:
             run.state = InferenceRunState.SUCCEEDED
-            run.elapsed_ms = int((time.monotonic() - started) * 1000)
+            run.error_code = None
+            run.elapsed_ms = elapsed_ms
             run.usage_json = _attempt_usage_json(raw)
         job.state = JobState.COMPLETED
+        job.last_error = None
         job.checkpoint_json = json.dumps(
             {
                 "roster_version": roster.version,
@@ -353,5 +459,4 @@ def run_character_roster_job(
         )
         session.commit()
         outcome.state = JobState.COMPLETED
-        outcome.calls = 1
     return outcome

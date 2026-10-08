@@ -2296,6 +2296,12 @@ def reconcile_job(session: Session, job: Job, *, action: str) -> dict[str, Any]:
     pending = [row for row in rows if row.state is JobState.NEEDS_RECONCILIATION]
     if action == "retry":
         checkpoint = _json_of(job.checkpoint_json)
+        if job.kind is JobKind.CHARACTER_ROSTER:
+            latest = session.scalar(select(InferenceRun).where(
+                InferenceRun.job_id == job.id,
+            ).order_by(InferenceRun.created_at.desc(), InferenceRun.id.desc()).limit(1))
+            if latest is not None:
+                checkpoint["roster_retry_after_run_id"] = latest.id
         roster_entry = checkpoint.get("roster_pipeline")
         if (
             job.kind is JobKind.CHARACTER_ROSTER

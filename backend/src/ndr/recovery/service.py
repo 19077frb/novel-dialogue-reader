@@ -232,6 +232,18 @@ def job_recovery(
     }:
         result.actions = []
         result.summary = "请在全书人物页查看合并结果；再次分析需新建一次自动合并，可能再次计费。"
+    if job.kind is JobKind.CHARACTER_ROSTER and job.state in {
+        JobState.FAILED, JobState.NEEDS_RECONCILIATION, JobState.PAUSED, JobState.PARTIAL,
+    } and not json.loads(job.range_json or "{}").get("roster_repair_protocol"):
+        from ..jobs.roster_receipts import has_returned_result
+
+        if not progress.get("receipt_recovery_blocked") and has_returned_result(session, job):
+            result.actions = [RecoveryActionOut(
+                action="resume", label="恢复已返回的人物结果",
+                detail="校验并保存已有返回，不重新调用模型；凭据不完整时会提示先核对。",
+                paid=False, endpoint="POST /api/jobs/{id}/resume",
+            )]
+            result.summary = "模型已返回，人物结果尚未保存完成，可以直接恢复。"
     return result
 
 
