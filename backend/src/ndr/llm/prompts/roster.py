@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 
 from .labeling import DATA_DELIMITER, escape_data_markers
 
-ROSTER_PROMPT_VERSION = "roster-8"
+ROSTER_PROMPT_VERSION = "roster-9"
 
 ROSTER_SYSTEM_PROMPT = """你是中文轻小说的人物名单分析助手。
 你只做一件事：从给定章节里找出会说话、被称呼、被叙述为说话对象的人物，并判断谁可能是本章视角人物。
@@ -22,6 +22,10 @@ ROSTER_SYSTEM_PROMPT = """你是中文轻小说的人物名单分析助手。
 3. 每个人物使用一个 temp_ref（例如 c1、c2），本次输出内不得重复。
 4. 先对照 existing_characters 的 name、aliases 和 description，证据能唯一确认同一人时
 必须填写其 character_id，并提供同一身份的关联证据；同一人物仅输出一次，合并别名与证据。
+写character_id=null前再次核对已有候选。店长、老师、店员等没有真名的人物也有稳定身份，
+应比较所属地点、与具名人物的关系及职务，而不是因本章发生了不同事情就新建一个同名人物。
+说明里的新动作不代表换了一个人。仅同职务仍不足以关联；不同地点、新任或证据不明时不要强行关联。
+已有多个同名候选时逐个对照具体身份依据，不能随便挑选，也不要为了绕开选择而声称确定是新人。
 后来揭示真实姓名时，name 必须优先写真实姓名，real_name 同时填写该姓名，aliases 包含旧称呼；
 不要把云岚、沈宁等明确姓名只放在别名中而继续以女法师、女骑士为name，不要因姓名变化另建人物。
 同一身份已有原文依据的完整姓名优先于姓氏、简称或昵称，不因本章只使用简称就缩短正式姓名。
