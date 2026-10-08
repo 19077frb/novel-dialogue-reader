@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { Link } from 'react-router-dom'
+import { saveBatchHistory } from '../processing/batchHistory'
 
 import { completeChapterProcessing, fetchBook, fetchChapters, fetchProcessingStatus, setChapterProcessingStatus } from '../api/books'
 import { ApiError } from '../api/client'
@@ -136,6 +138,7 @@ function persistBatch(bookId: string) {
   writeJournal(`batch:${bookId}`, { schema: 1, snapshot, execution,
     requests: batchRequests.get(bookId) ?? {}, accounted: [...(accountedJobs.get(bookId) ?? [])],
     spent: saved.spent, totalSpent: saved.totalSpent, unknownRuns: saved.unknownRuns } satisfies SavedBatch)
+  if (execution.queueId) saveBatchHistory(execution.queueId, snapshot.tasks)
 }
 
 /** Resume the original requests, never replace their idempotency keys. */
@@ -1586,6 +1589,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
                       : null) || '—'}
                   </td>
                   <td><BatchRetryControls bookId={bookId} taskId={task.id} />
+                    {task.jobId && <Link className="ndr-button" to={`/tasks?jobId=${encodeURIComponent(task.jobId)}`}>查看任务</Link>}
                     {task.state === 'failed' && !task.retryable && <span className="hint">请先查看任务详情，确认请求已结束后再处理。</span>}
                   </td>
                 </tr>

@@ -1,7 +1,8 @@
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Link } from 'react-router-dom'
-import { fetchTaskQueue } from '../api/jobs'
+import { Link, useSearchParams } from 'react-router-dom'
+import { fetchTaskQueue, fetchRecentJobs } from '../api/jobs'
+import { readBatchHistory } from '../processing/batchHistory'
 import { JobPanel, JOB_KIND_LABELS, JOB_STATE_LABELS } from '../components/JobPanel'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
@@ -48,6 +49,26 @@ function legacyAdmissions(current: QueueAdmission[]): { items: QueueAdmission[];
   return { items, errors }
 }
 
+function ChapterTaskHistory({ item, chapterId, kind, windowId, onSelect }: {
+  item: QueueAdmission; chapterId: string; kind: 'CHARACTER_ROSTER' | 'INFERENCE';
+  windowId?: string | null; onSelect: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false)
+  const jobs = useQuery({ queryKey: ['range-chapter-history', item.versionId, chapterId, kind],
+    enabled: open, queryFn: ({ signal }) => fetchRecentJobs({ bookId: item.bookId,
+      versionId: item.versionId, chapterId, kind, limit: 200 }, signal) })
+  const matching = jobs.data?.filter(job => !windowId || !Array.isArray(job.range?.selected_window_ids)
+    || job.range.selected_window_ids.includes(windowId))
+  return <CollapsibleBlock title="本章后台任务" summary="查询此章节实际保存的任务与恢复入口" open={open} onOpenChange={setOpen}>
+      <p className="hint">旧范围没有保存完整任务明细。以下是本章最近的后台任务，不代表它们全部属于此批次。</p>
+      {jobs.isPending && <p role="status">正在读取任务…</p>}
+      {jobs.isError && <ReadErrorNotice label="本章任务读取失败" error={jobs.error} retrying={jobs.isFetching} onRetry={() => void jobs.refetch()} />}
+      {matching?.map(job => <div key={job.id}>{JOB_STATE_LABELS[job.state]} · {new Date(job.created_at).toLocaleString()}
+        <button onClick={() => onSelect(job.id)}>查看任务</button>{job.last_error && <p className="status-error">{job.last_error}</p>}</div>)}
+      {matching?.length === 0 && <p className="hint">未找到匹配的后台任务。</p>}
+  </CollapsibleBlock>
+}
+
 function AdmissionDetails({ item, onSelect }: { item: QueueAdmission; onSelect: (id: string) => void }) {
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -59,20 +80,24 @@ function AdmissionDetails({ item, onSelect }: { item: QueueAdmission; onSelect: 
   if (item.payload.type === 'merge') return item.jobId ? <button onClick={() => onSelect(item.jobId!)}>查看任务</button> : <p className="hint">等待本书前序处理结束后分析人物，生成建议后仍需确认。</p>
   const batch = readJournal<{ execution: { queueId?: string }; snapshot: BatchProgressSnapshot }>(`batch:${item.bookId}`)
   const single = readJournal<SingleWorkflow>(`single:${item.bookId}`)
+  const batchTasks = batch && (batch.execution.queueId === item.id || item.id.startsWith('legacy:'))
+    ? batch.snapshot.tasks : readBatchHistory(item.id)
   const tasks = item.payload.type === 'batch'
-    ? batch && (batch.execution.queueId === item.id || item.id.startsWith('legacy:')) ? batch.snapshot.tasks.map(task => ({ id: task.id, label: `${task.chapterTitle} · ${task.type === 'roster' ? '人物识别' : `对白 ${task.windowLabel}`}`, state: LABELS[task.state], error: task.error, jobId: task.jobId }))
-      : item.payload.work.plans.flatMap(plan => [{ id: `roster:${plan.chapter.id}`, label: `${plan.chapter.title} · 人物识别`, state: LABELS[item.phase], error: null, jobId: null }, ...(plan.estimate.windows ?? []).map(window => ({ id: `${plan.chapter.id}:${window.window_id}`, label: `${plan.chapter.title} · 对白窗口 ${window.ordinal}`, state: LABELS[item.phase], error: null, jobId: null }))])
+    ? batchTasks ? batchTasks.map(task => ({ id: task.id, chapterId: task.chapterId, kind: task.type === 'roster' ? 'CHARACTER_ROSTER' as const : 'INFERENCE' as const, windowId: task.windowId, label: `${task.chapterTitle} · ${task.type === 'roster' ? '人物识别' : `对白 ${task.windowLabel}`}`, state: LABELS[task.state], error: task.error, jobId: task.jobId }))
+      : item.payload.work.plans.flatMap(plan => [{ id: `roster:${plan.chapter.id}`, chapterId: plan.chapter.id, kind: 'CHARACTER_ROSTER' as const, windowId: null, label: `${plan.chapter.title} · 人物识别`, state: '状态待核实', error: null, jobId: null }, ...(plan.estimate.windows ?? []).map(window => ({ id: `${plan.chapter.id}:${window.window_id}`, chapterId: plan.chapter.id, kind: 'INFERENCE' as const, windowId: window.window_id, label: `${plan.chapter.title} · 对白窗口 ${window.ordinal}`, state: '状态待核实', error: null, jobId: null }))])
     : (single && (single.queueId === item.id || item.id.startsWith('legacy:')) ? single : item.payload.work).tasks.map(task => ({ id: task.windowId, label: `对白窗口 ${task.ordinal}`, state: task.job ? JOB_STATE_LABELS[task.job.state] : task.error ? '未执行' : LABELS[item.phase], error: task.error, jobId: task.job?.id }))
   return <CollapsibleBlock title="范围内任务" defaultOpen={false} summary={`共 ${tasks.length} 项`}>
     <ul className="ndr-task-queue-list">{tasks.map(task => <li key={task.id}>
       <span>{task.label} · {task.state}</span>
       {task.jobId && <button onClick={() => onSelect(task.jobId!)}>查看任务</button>}
+      {!task.jobId && 'chapterId' in task && <ChapterTaskHistory item={item} chapterId={task.chapterId} kind={task.kind} windowId={typeof task.windowId === 'string' ? task.windowId : null} onSelect={onSelect} />}
       {task.error && <p className="status-error">{task.error}</p>}
     </li>)}</ul>
   </CollapsibleBlock>
 }
 
 export default function TaskQueuePage() {
+  const [searchParams] = useSearchParams()
   const admissions = useAdmissions()
   const runtimeError = useQueueError()
   // Observe the startup inventory without re-requesting it on progress ticks.
@@ -88,7 +113,8 @@ export default function TaskQueuePage() {
     return () => clearInterval(timer)
   }, [admissions])
   const [history, setHistory] = useState(false)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(searchParams.get('jobId'))
+  useEffect(() => { if (searchParams.get('jobId')) setSelected(searchParams.get('jobId')) }, [searchParams])
   const [detailRequest, setDetailRequest] = useState(0)
   const detailRef = useRef<HTMLElement | null>(null)
   useEffect(() => {

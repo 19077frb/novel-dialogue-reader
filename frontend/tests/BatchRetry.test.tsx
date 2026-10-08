@@ -4,6 +4,7 @@ import * as books from '../src/api/books'
 import * as characters from '../src/api/characters'
 import * as jobs from '../src/api/jobs'
 import { ApiError } from '../src/api/client'
+import { readBatchHistory } from '../src/processing/batchHistory'
 import { appendAutomaticProcessing, BatchRetryControls, canAppendAutomaticProcessing, cancelChapterProcessing, clearBatchProgress, hasBatchWork, requestBatchStop, retryBatchTask, retryChapterProcessing, runBatchProcessing, synchronizeManualChapterStatus, useBatchProgress } from '../src/components/BatchProcessor'
 import { getProcessingPreferences, updateProcessingPreferences } from '../src/processing/preferences'
 import { updateGeneralSettings } from '../src/settings/preferences'
@@ -45,6 +46,21 @@ beforeEach(() => {
   vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: estimate.windows!.map(window => ({ ...window, processing_status: window.window_id === 'w2' ? 'completed' : 'failed' })) })
 })
 afterEach(() => { cleanup(); clearBatchProgress('b1') })
+
+it('persists completed task receipts for the original range when stopped and replaced', async () => {
+  const preferences = { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1 }
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', queueId: 'old-range', requested: [chapter], plans: [{ chapter, estimate }], preferences })
+  const original = readBatchHistory('old-range')!
+  expect(original.length).toBeGreaterThan(0)
+  expect(original.every(task => task.state === 'completed' && task.jobId)).toBe(true)
+  requestBatchStop('b1')
+  expect(readBatchHistory('old-range')).toEqual(original)
+  vi.mocked(jobs.createJob).mockResolvedValue(job('FAILED'))
+  await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', queueId: 'new-range', requested: [chapter], plans: [{ chapter, estimate }], preferences })
+  expect(readBatchHistory('old-range')).toEqual(original)
+  expect(readBatchHistory('new-range')?.some(task => task.state === 'failed')).toBe(true)
+})
 
 it('allows a retry while a different book is running and uses free shared slots', async () => {
   const preferences = { ...getProcessingPreferences(), profileId: 'p1', concurrency: 2, tokenLimit: 1000 }
