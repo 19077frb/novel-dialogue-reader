@@ -276,7 +276,13 @@ class _Pipeline:
         }
 
     def execute(self, credentials, adapter_factory):
-        from .roster import _build_adapter, _job_range, _prepare_input, chapter_has_body_text
+        from .roster import (
+            _build_adapter,
+            _catalog_names,
+            _job_range,
+            _prepare_input,
+            chapter_has_body_text,
+        )
         from .scheduler import _request_fingerprint
 
         self.check_stop()
@@ -348,6 +354,7 @@ class _Pipeline:
                 "chapter_start": chapter.start_cp,
                 "chapter_end": chapter.end_cp,
                 "allowed_character_ids": allowed,
+                "known_character_names": _catalog_names(messages),
             }
 
         def initial(payload, run_id):

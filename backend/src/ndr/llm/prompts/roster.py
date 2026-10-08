@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 
 from .labeling import DATA_DELIMITER, escape_data_markers
 
-ROSTER_PROMPT_VERSION = "roster-7"
+ROSTER_PROMPT_VERSION = "roster-8"
 
 ROSTER_SYSTEM_PROMPT = """你是中文轻小说的人物名单分析助手。
 你只做一件事：从给定章节里找出会说话、被称呼、被叙述为说话对象的人物，并判断谁可能是本章视角人物。
@@ -25,8 +25,9 @@ ROSTER_SYSTEM_PROMPT = """你是中文轻小说的人物名单分析助手。
 后来揭示真实姓名时，name 必须优先写真实姓名，real_name 同时填写该姓名，aliases 包含旧称呼；
 不要把云岚、沈宁等明确姓名只放在别名中而继续以女法师、女骑士为name，不要因姓名变化另建人物。
 同一身份已有原文依据的完整姓名优先于姓氏、简称或昵称，不因本章只使用简称就缩短正式姓名。
-若本章只有简称，name和facts只写本章可证明的称呼，并关联已有character_id；
-程序会保留已有人物的完整正式姓名，不要把目录中的全名虚构成本章姓名事实。
+若本章只有简称，facts只写本章可证明的称呼，并关联已有character_id；
+name可以沿用该ID在existing_characters中已提供的正式name，也可以写本章称呼。
+不要把目录中的全名虚构成本章姓名事实，real_name仍需本章姓名证据。
 real_name 仅限本章原文明示姓名，必须有对应 evidence_refs，不能猜测；只有代称时为null。
 没有可靠对应关系的新人物 character_id=null；不得编造 ID，也不得仅凭姓氏或相似称呼关联。
 5. 每个人物必须有简短非空 name（不超过32字）。原文明确写出姓名或称呼唯一确认时，只写姓名；
@@ -96,7 +97,9 @@ def build_roster_messages(
             "\n本次必须输出schema_version=1.1，不得退回1.0。每个人物facts逐条记录"
             "kind(name/alias/designation/description/relation)、value、evidence_refs。"
             "每个姓名/别名必须出现在它自己引用的原文中，代称须有原文身份依据；"
-            "name对应name或designation事实，real_name对应name事实，aliases每项有自己的称呼事实，"
+            "新人物name对应name或designation事实；已有关联ID的name可沿用该ID提供的正式name，"
+            "但必须有本章name/alias/designation事实和关联依据。real_name对应本章name事实，"
+            "aliases每项有自己的称呼事实，"
             "关系不能放aliases。description优先直接复用一条description事实的value，字符完全一致；"
             "不要另写改述摘要。有原文依据时至少提供一条简短description事实及其必要引用。"
             "每条事实只引用支持该项的必要行；晚揭示的姓名、别名和关系保留自己的较晚依据。"

@@ -9,6 +9,28 @@ from ndr.llm.isolated_roster_repair import (
     compile_isolated_roster_repair,
     prepare_isolated_roster_repair,
 )
+from ndr.llm.roster_repair import compile_roster_repair, prepare_roster_repair
+
+
+@pytest.mark.parametrize("isolated", [False, True])
+def test_repair_freezes_catalog_name_for_retained_and_repaired_people(isolated):
+    retained = person("retained")
+    retained.update(name="陈林舟", character_id="old")
+    names = {"old": "陈林舟"}
+    prepare_fn = prepare_isolated_roster_repair if isolated else prepare_roster_repair
+    compile_fn = compile_isolated_roster_repair if isolated else compile_roster_repair
+    plan = prepare_fn({"schema_version": "1.1", "characters": [
+        retained, person("repair", "陆欣", "L999"),
+    ]}, original=original(), chapter_start=0, chapter_end=len(TEXT),
+        allowed_character_ids={"old"}, source_ref="primary-run", known_character_names=names)
+    names["old"] = "后来更改的名字"
+    result = compile_fn(plan, {"schema_version": "roster-repair-1", "repairs": [
+        {"indices": [2], "characters": [person("repair", "陆欣", "L3")]},
+    ]}, original=original(), source_ref="repair-run")
+    output, facts = result[:2]
+    assert [p.name for p in output.characters] == ["陈林舟", "陆欣"]
+    assert facts["retained"][0].source_ref == "primary-run"
+    assert facts["retained"][0].value == "林舟"
 
 
 def prepare(people):

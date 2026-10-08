@@ -146,3 +146,38 @@ def test_returned_roster_rejects_damaged_binding_without_new_call(migrated_clien
     assert outcome.state == JobState.NEEDS_RECONCILIATION and outcome.calls == 0
     actions = client.get(f"/api/jobs/{job['id']}/recovery").json()["data"]["actions"]
     assert {item["action"] for item in actions} == {"reconcile_keep", "reconcile_retry"}
+
+
+@pytest.mark.parametrize("error_kind", [None, "INVALID_OUTPUT"])
+def test_only_local_validation_failure_offers_saved_result_revalidation(migrated_client, monkeypatch,
+                                                                       error_kind):
+    from ndr.storage.run_archive import encode_archive
+
+    client = migrated_client
+    _, job = prepare(client)
+    factory, settings = client.app.state.session_factory, client.app.state.settings
+    adapter = FakeProviderAdapter(script=[response()])
+    assert run_character_roster_job(factory, settings, job_id=job["id"],
+                                   adapter_factory=lambda *_: adapter).state == JobState.COMPLETED
+    with factory() as session:
+        stored = session.get(Job, job["id"])
+        stored.state = JobState.FAILED
+        attempt = session.scalar(select(InferenceRun).where(InferenceRun.job_id == job["id"]))
+        attempt.state = InferenceRunState.FAILED
+        archive = decode_archive(attempt.call_archive)
+        archive["error"] = {"kind": error_kind, "message": "previous validation failure"}
+        attempt.call_archive = encode_archive(archive)
+        saved_archive = attempt.call_archive
+        session.commit()
+    action = client.get(f"/api/jobs/{job['id']}/recovery").json()["data"]["actions"][0]
+    assert action["action"] == ("resume" if error_kind is None else "run")
+    if error_kind is not None:
+        return
+    assert action["paid"] is False
+    monkeypatch.setattr("ndr.jobs.roster._build_adapter",
+                        lambda *_: pytest.fail("Local revalidation must not call provider"))
+    assert client.post(f"/api/jobs/{job['id']}/resume").status_code == 202
+    assert client.get(f"/api/jobs/{job['id']}").json()["data"]["state"] == "COMPLETED"
+    with factory() as session:
+        attempts = list(session.scalars(select(InferenceRun).where(InferenceRun.job_id == job["id"])))
+        assert len(attempts) == 1 and attempts[0].call_archive == saved_archive
