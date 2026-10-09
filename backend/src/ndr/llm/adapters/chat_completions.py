@@ -154,12 +154,21 @@ class ChatCompletionsAdapter:
         owns_client = self._client is None
         started = time.perf_counter()
         try:
-            response = await client.post(self.endpoint, json=payload, headers=self._headers())
+            response = await client.post(
+                self.endpoint, json=payload, headers=self._headers(), timeout=self._timeout,
+            )
         except httpx.TimeoutException as exc:
+            stage = ("等待模型返回" if isinstance(exc, httpx.ReadTimeout) else
+                     "连接模型服务" if isinstance(exc, httpx.ConnectTimeout) else
+                     "发送请求" if isinstance(exc, httpx.WriteTimeout) else
+                     "等待连接" if isinstance(exc, httpx.PoolTimeout) else "请求")
             raise ProviderError(
                 ProviderErrorKind.TIMEOUT,
-                f"请求超时（{self._timeout} 秒）",
-                details={"endpoint": self.endpoint},
+                f"{stage}超时（{self._timeout} 秒）；结果未知，请先核对原任务。"
+                "若模型思考耗时较长，可在模型配置中增加请求超时，用于后续新任务",
+                details={"endpoint": self.endpoint, "timeout_type": type(exc).__name__,
+                         "timeout_seconds": self._timeout,
+                         "elapsed_ms": int((time.perf_counter() - started) * 1000)},
             ) from exc
         except httpx.TransportError as exc:
             raise ProviderError(

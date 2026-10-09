@@ -90,6 +90,29 @@ def test_timeout_receipt_has_actual_request_but_no_invented_response_or_usage():
     assert "usage" not in caught.value.details
 
 
+@pytest.mark.parametrize("timeout_class, stage", [
+    (httpx.ReadTimeout, "等待模型返回"), (httpx.ConnectTimeout, "连接模型服务"),
+    (httpx.WriteTimeout, "发送请求"), (httpx.PoolTimeout, "等待连接"),
+])
+def test_request_timeout_overrides_shared_client_and_reports_stage(timeout_class, stage):
+    seen = []
+
+    def handler(request):
+        seen.append(request.extensions["timeout"])
+        raise timeout_class("private transport detail", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=5)
+    adapter = ChatCompletionsAdapter(base_url="https://example.com", model="test", client=client,
+                                     timeout_seconds=30, params={"timeout_seconds": 600})
+    with pytest.raises(ProviderError) as caught:
+        _run(adapter.generate_labels({"messages": [{"role": "user", "content": "fixture"}]}))
+    assert seen == [{"connect": 600, "read": 600, "write": 600, "pool": 600}]
+    assert stage in str(caught.value) and "结果未知" in str(caught.value)
+    assert caught.value.details["timeout_type"] == timeout_class.__name__
+    assert caught.value.details["elapsed_ms"] >= 0
+    assert "private" not in str(caught.value)
+
+
 def test_successful_connection_test_returns_usage_and_latency() -> None:
     seen: dict[str, str | None] = {}
 

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..characters.facts import OriginalIdentitySnapshot
@@ -37,6 +38,7 @@ from ..llm.sourced_roster import (
     compile_sourced_roster,
 )
 from ..storage.models import BookVersion, Chapter, InferenceRun, Job
+from ..storage.transactions import database_error_detail, finish_local_write, sqlite_lock_error
 
 ROSTER_MAX_TOKENS = 2000
 _ACTIVE = set()
@@ -198,7 +200,8 @@ def run_character_roster_job(
                             attempt.error_code = "UNKNOWN_OUTCOME"
                 job.state = state
                 job.last_error = (str(exc) if isinstance(exc, RosterReceiptError) else
-                                  f"人物任务收尾失败（{type(exc).__name__}）；重试将优先恢复已保存的返回")
+                                  f"人物任务收尾失败（{database_error_detail(exc)}）；"
+                                  "重试将优先恢复已保存的返回")
                 runs = set(session.scalars(select(InferenceRun.id).where(
                     InferenceRun.job_id == job_id,
                 )))
@@ -416,7 +419,7 @@ def _run_character_roster_job(
             outcome.errors.append("invalid_model_output")
             return outcome
 
-    with session_factory() as session:
+    def finalize(session):  # noqa: ANN001 - local transaction callback
         job = session.get(Job, job_id)
         version = session.get(BookVersion, job.book_version_id) if job is not None else None
         chapter = session.get(Chapter, chapter_id_value) if version is not None else None
@@ -427,7 +430,6 @@ def _run_character_roster_job(
         if job.state in {JobState.PAUSING, JobState.PAUSED, JobState.PARTIAL}:
             job.state = JobState.PAUSED
             job.progress_json = json.dumps({"stage": "paused", "calls": 1})
-            session.commit()
             outcome.state = JobState.PAUSED
             return outcome
         try:
@@ -440,6 +442,8 @@ def _run_character_roster_job(
                     identity_catalog=_catalog_records(request_payload["messages"]),
                 )
         except Exception as exc:  # noqa: BLE001 - persist charged storage failures
+            if sqlite_lock_error(exc):
+                raise
             run = session.get(InferenceRun, run_id)
             if run is not None:
                 run.state = InferenceRunState.FAILED
@@ -447,9 +451,9 @@ def _run_character_roster_job(
                 run.elapsed_ms = elapsed_ms
                 run.usage_json = _attempt_usage_json(raw)
             job.state = JobState.FAILED
-            job.last_error = f"人物保存失败：{exc}"
+            detail = database_error_detail(exc) if isinstance(exc, OperationalError) else str(exc)
+            job.last_error = f"人物保存失败：{detail}"
             job.progress_json = json.dumps({"stage": "failed", "calls": 1}, ensure_ascii=False)
-            session.commit()
             outcome.state = JobState.FAILED
             outcome.errors.append("roster_storage_failed")
             return outcome
@@ -479,6 +483,6 @@ def _run_character_roster_job(
             },
             ensure_ascii=False,
         )
-        session.commit()
         outcome.state = JobState.COMPLETED
+    finish_local_write(session_factory, finalize)
     return outcome

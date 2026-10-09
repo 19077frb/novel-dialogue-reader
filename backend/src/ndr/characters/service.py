@@ -100,6 +100,30 @@ def existing_characters_for_prompt(session: Session, version: BookVersion) -> li
     return [item.model_dump(mode="json") for item in list_book_characters_out(session, version)]
 
 
+def compact_roster_catalog(records):  # noqa: ANN001 - internal prompt dictionaries
+    """Keep every visible identity/value, not every historic proof of that value.
+
+    Original evidence remains in storage. Old spans/source IDs are not reference
+    IDs for this chapter and cannot support a new proposal's facts. Only the
+    roster prompt is compacted; reading and dialogue state are unchanged.
+    """
+    result = []
+    for record in records:
+        person = dict(record)
+        for field in ("identity_records", "relations"):
+            if field not in person:
+                continue
+            unique = {}
+            for item in person[field]:
+                fact = {key: item[key] for key in ("kind", "field", "value", "source")
+                        if key in item}
+                key = json.dumps(fact, sort_keys=True, ensure_ascii=False)
+                unique.setdefault(key, fact)
+            person[field] = list(unique.values())
+        result.append(person)
+    return result
+
+
 def _roster_out(
     session: Session,
     row: ChapterCharacterRoster,
@@ -774,7 +798,7 @@ def roster_messages(
     return build_roster_messages(
         chapter_title=chapter.title,
         chapter_lines=text.splitlines() or [""],
-        existing_characters=existing,
+        existing_characters=compact_roster_catalog(existing),
         sourced=(json.loads(job.range_json or "{}").get("roster_protocol")
                  in SOURCED_ROSTER_VERSIONS),
     )
