@@ -155,14 +155,18 @@ it('does not invent stopped states for old missing records and reads actual chap
 
 it('shows cross-book progress and opens selected details without refreshing book data', async () => {
   vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [
-    { id: 'j1', book_title: '作品一', chapter_title: '第一章', kind: 'INFERENCE', state: 'RUNNING', windows_total: 3, windows_done: 1 },
-    { id: 'j2', book_title: '作品二', chapter_title: '序章', kind: 'CHARACTER_ROSTER', state: 'QUEUED' },
+    { id: 'j1', book_title: '作品一', chapter_title: '第一章', kind: 'INFERENCE', state: 'RUNNING', windows_total: 3, windows_done: 1, selected_window_ids: ['w-internal-running'] },
+    { id: 'j2', book_title: '作品二', chapter_title: '序章', kind: 'CHARACTER_ROSTER', state: 'QUEUED', windows_total: 0, selected_window_ids: ['w-internal-queued'] },
   ], next_cursor: null } as never)
   renderWithProviders(<TaskQueuePage />)
   expect(await screen.findByText('作品一')).toBeVisible()
   expect(screen.getByText('作品二')).toBeVisible()
   expect(screen.getByText('窗口 1/3')).toBeVisible()
   const table = screen.getByRole('table', { name: '后台任务' })
+  expect(within(table).queryByText('窗口详情')).not.toBeInTheDocument()
+  expect(table).not.toHaveTextContent('w-internal-running')
+  expect(table).not.toHaveTextContent('w-internal-queued')
+  expect(within(screen.getByRole('row', { name: /排队中 人物识别 作品二/ })).getAllByRole('cell')[4]).toHaveTextContent('—')
   expect(table).toHaveClass('ndr-batch-task-table')
   expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['状态', '处理类型', '书籍', '章节', '窗口', '原因 / 错误详情', '操作'])
   expect(screen.getByRole('row', { name: /处理中 对白归属/ })).toHaveAttribute('data-task-state', 'running')
