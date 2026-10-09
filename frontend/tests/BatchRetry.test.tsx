@@ -13,17 +13,22 @@ import { readJournal, writeJournal } from '../src/processing/journal'
 import { waitForJobCompletion } from '../src/processing/jobCompletion'
 import type { ChapterOut, EstimateOut, JobDetailOut } from '../src/api/types'
 
-vi.mock('../src/api/books', () => ({ completeChapterProcessing: vi.fn(), fetchBook: vi.fn(), fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn(), setChapterProcessingStatus: vi.fn() }))
+vi.mock('../src/api/books', () => ({ fetchJob: vi.fn(), completeChapterProcessing: vi.fn(), fetchBook: vi.fn(), fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn(), setChapterProcessingStatus: vi.fn() }))
 vi.mock('../src/api/characters', () => ({ analyzeCharacterRoster: vi.fn(), confirmCharacterRoster: vi.fn(), fetchCharacterRoster: vi.fn() }))
-vi.mock('../src/api/jobs', async importOriginal => ({ ...await importOriginal<typeof import('../src/api/jobs')>(), pauseJob: vi.fn(), createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
-vi.mock('../src/processing/jobCompletion', () => ({ waitForJobCompletion: vi.fn(async job => job) }))
+vi.mock('../src/api/jobs', async importOriginal => ({ ...await importOriginal<typeof import('../src/api/jobs')>(), fetchRecentJobs: vi.fn(), pauseJob: vi.fn(), createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
+vi.mock('../src/processing/jobCompletion', async importOriginal => ({ ...await importOriginal<typeof import('../src/processing/jobCompletion')>(), waitForJobCompletion: vi.fn(async job => job) }))
 
 const chapter = { id: 'c1', title: '第一章', ordinal: 0, start_cp: 0, end_cp: 100, dialogue_processed: false } as ChapterOut
 const estimate = { book_version_id: 'v1', windows: [
   { window_id: 'w1', ordinal: 1, target_count: 1, estimated_tokens: 10 },
   { window_id: 'w2', ordinal: 2, target_count: 1, estimated_tokens: 10 },
 ] } as unknown as EstimateOut
-const job = (state: 'COMPLETED' | 'FAILED' | 'NEEDS_RECONCILIATION') => ({ id: crypto.randomUUID(), state, usage: { input_tokens: 7, output_tokens: 3 }, unknown_usage_runs: 0, last_error: state === 'FAILED' ? '模拟失败' : null }) as unknown as JobDetailOut
+const receipts = new Map<string, JobDetailOut>()
+const job = (state: 'COMPLETED' | 'FAILED' | 'NEEDS_RECONCILIATION') => {
+  const receipt = { id: crypto.randomUUID(), state, usage: { input_tokens: 7, output_tokens: 3 }, unknown_usage_runs: 0, last_error: state === 'FAILED' ? '模拟失败' : null } as unknown as JobDetailOut
+  receipts.set(receipt.id, receipt)
+  return receipt
+}
 const roster = { status: 'CONFIRMED', version: 1, candidates: [{ canonical_name: '女生', temp_ref: 'p1', aliases: [] }] }
 const usage = vi.fn()
 function Snapshot() { return <pre data-testid="snapshot">{JSON.stringify(useBatchProgress('b1'))}</pre> }
@@ -35,6 +40,10 @@ async function start() {
 beforeEach(() => {
   localStorage.clear()
   vi.resetAllMocks(); clearBatchProgress('b1')
+  receipts.clear()
+  vi.mocked(jobs.freshIdempotencyKey).mockImplementation(() => crypto.randomUUID())
+  vi.mocked(books.fetchJob).mockImplementation(async id => receipts.get(id)!)
+  vi.mocked(jobs.fetchRecentJobs).mockResolvedValue([])
   vi.mocked(waitForJobCompletion).mockImplementation(async job => job)
   vi.mocked(books.fetchBook).mockResolvedValue({ active_version_id: 'v1' } as never)
   vi.mocked(books.fetchChapters).mockResolvedValue([chapter])
@@ -46,6 +55,95 @@ beforeEach(() => {
   vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: estimate.windows!.map(window => ({ ...window, processing_status: window.window_id === 'w2' ? 'completed' : 'failed' })) })
 })
 afterEach(() => { cleanup(); clearBatchProgress('b1') })
+
+it('does not recount old failed receipts across consecutive window retries', async () => {
+  vi.mocked(jobs.createJob).mockImplementation(async () => job('FAILED'))
+  await start()
+  render(<Snapshot />)
+  const failed = readSnapshot().tasks.filter((task: { type: string }) => task.type === 'dialogue')
+  vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: estimate.windows!.map(window => ({ ...window, processing_status: 'failed' })) })
+  vi.mocked(jobs.createJob).mockImplementation(async () => job('COMPLETED'))
+  await act(async () => { await retryBatchTask('b1', failed[0].id) })
+  await act(async () => { await retryBatchTask('b1', failed[1].id) })
+  expect(readJournal<{ totalSpent: number }>('batch:b1')!.totalSpent).toBe(50)
+})
+
+it('rechecks a reconciled partial result before chapter retry and repairs only unfinished windows', async () => {
+  const uncertain = job('NEEDS_RECONCILIATION')
+  vi.mocked(jobs.createJob).mockImplementation(async input => input.selectedWindowIds?.[0] === 'w1' ? uncertain : job('COMPLETED'))
+  await start()
+  receipts.set(uncertain.id, { ...uncertain, state: 'PARTIAL' })
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  await expect(retryChapterProcessing('b1', 'c1')).resolves.toBeUndefined()
+  expect(books.fetchJob).toHaveBeenCalledWith(uncertain.id)
+  expect(jobs.createJob).toHaveBeenCalledTimes(3)
+  expect(jobs.createJob).toHaveBeenLastCalledWith(expect.objectContaining({ selectedWindowIds: ['w1'] }))
+  expect(characters.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
+})
+
+it('can retry an explicitly rejected submission after the conflicting job was resolved', async () => {
+  vi.mocked(jobs.createJob).mockRejectedValueOnce(new ApiError(409, { code: 'RESOURCE_CONFLICT', message: '该窗口已有任务；结果未知时请先核实原任务' }))
+  await start()
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  await expect(retryChapterProcessing('b1', 'c1')).resolves.toBeUndefined()
+  expect(jobs.fetchRecentJobs).toHaveBeenCalledWith(expect.objectContaining({ bookId: 'b1', idempotencyKey: expect.any(String), limit: 1 }))
+  expect(jobs.createJob).toHaveBeenLastCalledWith(expect.objectContaining({ selectedWindowIds: ['w1'] }))
+})
+
+it('recovers a lost acknowledgement by idempotency key and accounts its known usage once', async () => {
+  vi.mocked(jobs.createJob).mockRejectedValueOnce(new Error('响应读取失败'))
+  await start()
+  vi.mocked(jobs.fetchRecentJobs).mockResolvedValue([job('FAILED')])
+  vi.mocked(jobs.createJob).mockImplementation(async () => job('COMPLETED'))
+  await retryChapterProcessing('b1', 'c1')
+  expect(readJournal<{ totalSpent: number }>('batch:b1')!.totalSpent).toBe(40)
+})
+
+it('retries a finished 429 without treating missing usage as an unknown outcome when no token cap is set', async () => {
+  const limited = { ...job('FAILED'), unknown_usage_runs: 3, last_error: 'RATE_LIMITED: 429' }
+  receipts.set(limited.id, limited)
+  vi.mocked(jobs.createJob).mockImplementation(async input => input.selectedWindowIds?.[0] === 'w1' ? limited : job('COMPLETED'))
+  await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
+    preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: null } })
+  vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+  await expect(retryChapterProcessing('b1', 'c1')).resolves.toBeUndefined()
+  expect(jobs.createJob).toHaveBeenCalledTimes(3)
+})
+
+it('does not resend a receipt that became completed after the browser recorded failure', async () => {
+  const uncertain = job('NEEDS_RECONCILIATION')
+  vi.mocked(jobs.createJob).mockImplementation(async input => input.selectedWindowIds?.[0] === 'w1' ? uncertain : job('COMPLETED'))
+  await start()
+  receipts.set(uncertain.id, { ...uncertain, state: 'COMPLETED' })
+  await expect(retryBatchTask('b1', 'dialogue:c1:w1')).resolves.toBeUndefined()
+  expect(jobs.createJob).toHaveBeenCalledTimes(2)
+})
+
+it.each(['RUNNING', 'NEEDS_RECONCILIATION'] as const)('does not resend an original %s receipt even if the browser marked it retryable', async state => {
+  const failed = job('FAILED')
+  vi.mocked(jobs.createJob).mockImplementation(async input => input.selectedWindowIds?.[0] === 'w1' ? failed : job('COMPLETED'))
+  await start()
+  receipts.set(failed.id, { ...failed, state })
+  await expect(retryChapterProcessing('b1', 'c1')).rejects.toThrow(state === 'RUNNING' ? '尚未结束' : '不明确')
+  expect(jobs.createJob).toHaveBeenCalledTimes(2)
+})
+
+it('keeps finite-budget missing-usage protection and distinguishes it from an unknown outcome', async () => {
+  const failed = { ...job('FAILED'), unknown_usage_runs: 1, last_error: '429' }
+  receipts.set(failed.id, failed)
+  vi.mocked(jobs.createJob).mockResolvedValue(failed)
+  await start()
+  const calls = vi.mocked(jobs.createJob).mock.calls.length
+  await expect(retryChapterProcessing('b1', 'c1')).rejects.toThrow('原请求已结束，但用量仍未知')
+  expect(jobs.createJob).toHaveBeenCalledTimes(calls)
+})
+
+it('does not dispatch or infer success when the read-only status check fails', async () => {
+  await start()
+  vi.mocked(books.fetchJob).mockRejectedValue(new Error('任务状态读取失败'))
+  await expect(retryChapterProcessing('b1', 'c1')).rejects.toThrow('读取失败')
+  expect(jobs.createJob).toHaveBeenCalledTimes(2)
+})
 
 it('persists completed task receipts for the original range when stopped and replaced', async () => {
   const preferences = { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1 }
@@ -440,13 +538,14 @@ it('locks retry planning and refuses overlapping or ambiguous paid requests', as
   let release!: () => void
   vi.mocked(books.fetchProcessingStatus).mockImplementationOnce(() => new Promise(resolve => { release = () => resolve({ active_jobs: 0 }) }))
   const retry = retryBatchTask('b1', 'dialogue:c1:w1')
+  await vi.waitUntil(() => Boolean(release))
   expect(hasBatchWork()).toBe(true)
   await expect(retryBatchTask('b1', 'dialogue:c1:w1')).rejects.toThrow('等待')
   release(); await retry
   clearBatchProgress('b1')
   vi.mocked(jobs.createJob).mockResolvedValue(job('NEEDS_RECONCILIATION'))
   await start()
-  await expect(retryBatchTask('b1', 'dialogue:c1:w1')).rejects.toThrow('不能直接重试')
+  await expect(retryBatchTask('b1', 'dialogue:c1:w1')).rejects.toThrow('不明确')
 })
 
 it('extends the same pool before old dialogue finishes, deduplicates and sequences appended people', async () => {
