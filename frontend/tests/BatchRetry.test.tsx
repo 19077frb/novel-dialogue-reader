@@ -90,6 +90,22 @@ it('can retry an explicitly rejected submission after the conflicting job was re
   expect(jobs.createJob).toHaveBeenLastCalledWith(expect.objectContaining({ selectedWindowIds: ['w1'] }))
 })
 
+it.each([true, false])('only marks a rolled-back database admission directly retryable: %s', async safe => {
+  vi.mocked(jobs.createJob).mockRejectedValueOnce(new ApiError(safe ? 503 : 500, {
+    code: 'INTERNAL_ERROR', message: '数据库繁忙',
+    details: safe ? { task_created: false, safe_to_retry: true } : {},
+  }))
+  render(<Snapshot />)
+  await act(async () => { await start() })
+  expect(readSnapshot().tasks.find((task: { id: string }) => task.id === 'dialogue:c1:w1').retryable).toBe(safe)
+  if (safe) {
+    vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
+    await act(async () => { await retryChapterProcessing('b1', 'c1') })
+    expect(jobs.createJob).toHaveBeenLastCalledWith(expect.objectContaining({ selectedWindowIds: ['w1'] }))
+    expect(jobs.fetchRecentJobs).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) }))
+  }
+})
+
 it('recovers a lost acknowledgement by idempotency key and accounts its known usage once', async () => {
   vi.mocked(jobs.createJob).mockRejectedValueOnce(new Error('响应读取失败'))
   await start()

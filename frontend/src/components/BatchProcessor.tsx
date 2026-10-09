@@ -1331,6 +1331,8 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
             updateBatchTask(bookId, taskId, 'completed')
             if (!restoring || restoredSnapshot?.tasks.find(task => task.id === taskId)?.state !== 'completed') recordCompletedWindow(bookId, chapter.id)
           } catch (reason) {
+            if (reason instanceof ApiError && reason.status === 503 && reason.code === 'INTERNAL_ERROR'
+              && reason.details.task_created === false && reason.details.safe_to_retry === true) retryable = true
             if (plan.cancelled && !isBatchAbortError(reason)) {
               updateBatchTask(bookId, taskId, 'failed', reason instanceof Error ? reason.message : '请求结果不明确')
               publishBatch(bookId, { tasks: (batchSnapshots.get(bookId)?.tasks ?? []).map(task => task.id === taskId ? { ...task, retryable } : task) })

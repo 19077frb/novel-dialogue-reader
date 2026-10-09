@@ -2031,6 +2031,16 @@
               }
             }
           },
+          "503": {
+            "description": "数据库繁忙，提交已回滚",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -7390,6 +7400,49 @@
         ],
         "title": "DataEnvelope[list[QuoteNormalizationOut]]"
       },
+      "ErrorBody": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "稳定业务错误码，见 domain.enums.ErrorCode。"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorBody"
+      },
+      "ErrorEnvelope": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "error",
+          "request_id"
+        ],
+        "title": "ErrorEnvelope"
+      },
       "EstimateIn": {
         "properties": {
           "book_version_id": {
@@ -11054,49 +11107,6 @@
           "request_id"
         ],
         "title": "DataEnvelope",
-        "type": "object"
-      },
-      "ErrorBody": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "description": "稳定业务错误码，见 domain.enums.ErrorCode。",
-            "title": "Code",
-            "type": "string"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "details": {
-            "additionalProperties": true,
-            "title": "Details",
-            "type": "object"
-          }
-        },
-        "required": [
-          "code",
-          "message"
-        ],
-        "title": "ErrorBody",
-        "type": "object"
-      },
-      "ErrorEnvelope": {
-        "additionalProperties": false,
-        "properties": {
-          "error": {
-            "$ref": "#/components/schemas/ErrorBody"
-          },
-          "request_id": {
-            "title": "Request Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "error",
-          "request_id"
-        ],
-        "title": "ErrorEnvelope",
         "type": "object"
       },
       "CursorPage": {

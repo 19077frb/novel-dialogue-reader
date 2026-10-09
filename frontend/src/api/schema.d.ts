@@ -2461,6 +2461,26 @@ export interface components {
              */
             request_id: string;
         };
+        /** ErrorBody */
+        ErrorBody: {
+            /**
+             * Code
+             * @description 稳定业务错误码，见 domain.enums.ErrorCode。
+             */
+            code: string;
+            /** Message */
+            message: string;
+            /** Details */
+            details?: {
+                [key: string]: unknown;
+            };
+        };
+        /** ErrorEnvelope */
+        ErrorEnvelope: {
+            error: components["schemas"]["ErrorBody"];
+            /** Request Id */
+            request_id: string;
+        };
         /** EstimateIn */
         EstimateIn: {
             /** Book Version Id */
@@ -3954,26 +3974,6 @@ export interface components {
              */
             request_id: string;
         };
-        /** ErrorBody */
-        ErrorBody: {
-            /**
-             * Code
-             * @description 稳定业务错误码，见 domain.enums.ErrorCode。
-             */
-            code: string;
-            /** Message */
-            message: string;
-            /** Details */
-            details?: {
-                [key: string]: unknown;
-            };
-        };
-        /** ErrorEnvelope */
-        ErrorEnvelope: {
-            error: components["schemas"]["ErrorBody"];
-            /** Request Id */
-            request_id: string;
-        };
         /** CursorPage */
         CursorPage: {
             /** Items */
@@ -5181,6 +5181,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 数据库繁忙，提交已回滚 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };

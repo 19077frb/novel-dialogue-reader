@@ -17,13 +17,16 @@ export class ApiError extends Error {
   readonly code: string
   readonly status: number
   readonly details: Record<string, unknown>
+  readonly requestId: string | undefined
 
   constructor(status: number, body: ApiErrorBody) {
-    super(body.message)
+    super(body.code === 'INTERNAL_ERROR' && body.request_id
+      ? `${body.message}（错误编号：${body.request_id}）` : body.message)
     this.name = 'ApiError'
     this.status = status
     this.code = body.code
     this.details = body.details ?? {}
+    this.requestId = body.request_id
   }
 }
 
@@ -52,9 +55,9 @@ async function readJson<T>(response: Response): Promise<T> {
       message: `请求失败（HTTP ${response.status}）`,
     }
     try {
-      const parsed = (await response.json()) as { error?: ApiErrorBody }
+      const parsed = (await response.json()) as { error?: ApiErrorBody; request_id?: string }
       if (parsed?.error?.code) {
-        payload = parsed.error
+        payload = { ...parsed.error, request_id: parsed.request_id ?? parsed.error.request_id }
       }
     } catch {
       // 保持兜底信息，不吞掉状态码。
