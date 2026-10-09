@@ -6,7 +6,7 @@ import { readBatchHistory } from '../processing/batchHistory'
 import { JobPanel, JOB_KIND_LABELS, JOB_STATE_LABELS } from '../components/JobPanel'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
 import { PaginatedItems } from '../components/ListPagination'
-import { jobTaskTone, TaskProgressSummary, TaskProgressTable } from '../components/TaskProgressTable'
+import { FilterableTaskProgressTable, jobTaskTone, TaskProgressSummary, TaskProgressTable } from '../components/TaskProgressTable'
 import type { TaskTone } from '../components/TaskProgressTable'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
 import { useAdmissions, stopAdmission, useQueueError } from '../processing/workQueue'
@@ -129,7 +129,7 @@ function AdmissionDetails({ item, onSelect, onSelectPlanned }: { item: QueueAdmi
     <TaskProgressSummary total={tasks.length} finished={tasks.filter(task => ['completed', 'failed', 'cancelled'].includes(task.tone)).length}
       running={tasks.filter(task => task.tone === 'running').length} label={`${item.title}任务进度`} />
     <CollapsibleBlock title="范围内任务" defaultOpen={false} summary={`共 ${tasks.length} 项；失败 ${failed} 项`}>
-      <TaskProgressTable label="范围内任务" scope={item.id} rows={tasks.map(task => ({ id: task.id,
+      <FilterableTaskProgressTable label="范围内任务" scope={item.id} rows={tasks.map(task => ({ id: task.id,
         state: task.tone, stateLabel: task.state, type: task.type, chapter: task.chapter || '未命名章节', window: task.window,
         error: task.error, actions: <button onClick={() => task.jobId ? onSelect(task.jobId) : onSelectPlanned(item, task)}>查看任务</button> }))} />
     </CollapsibleBlock>

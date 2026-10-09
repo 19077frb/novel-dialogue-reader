@@ -20,6 +20,30 @@ function oldAdmission() {
     createdAt: 1, payload: { type: 'batch', work: { plans: [{ chapter: { id: 'c1', title: '第一章' }, estimate: { windows: [] } }] } } }
 }
 
+it('finds failed range tasks without losing the overall progress or selected details', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  writeJournal('admissions', [{ ...oldAdmission(), id: 'range', phase: 'running' }])
+  const tasks = Array.from({ length: 24 }, (_, i) => ({ id: `dialogue:c1:w${i}`, type: 'dialogue',
+    chapterId: 'c1', chapterTitle: '第一章', windowId: `w${i}`, windowLabel: `窗口 ${i + 1}`,
+    state: i === 23 ? 'failed' : 'completed', jobId: `job-${i}`, error: i === 23 ? '处理失败' : null }))
+  writeJournal('batch:b1', { execution: { queueId: 'range' }, snapshot: { startedAt: 1, running: true, tasks } })
+  renderWithProviders(<TaskQueuePage />)
+  await userEvent.click(screen.getByRole('button', { name: '展开范围内任务' }))
+  await userEvent.selectOptions(screen.getByLabelText('筛选任务状态'), 'failed')
+  const table = screen.getByRole('table', { name: '范围内任务' })
+  expect(within(table).getAllByRole('button', { name: '查看任务' })).toHaveLength(1)
+  expect(table).toHaveTextContent('窗口 24')
+  expect(screen.getByText('共 24 项；失败 1 项')).toBeVisible()
+  await userEvent.click(within(table).getByRole('button', { name: '查看任务' }))
+  expect(screen.getByText('详情 job-23')).toBeVisible()
+  writeJournal('batch:b1', { execution: { queueId: 'range' }, snapshot: { startedAt: 1, running: true,
+    tasks: tasks.map(task => ({ ...task, state: 'completed', error: null })) } })
+  expect(await screen.findByText('没有“失败”状态的任务。', {}, { timeout: 3500 })).toBeVisible()
+  expect(screen.getByText('详情 job-23')).toBeVisible()
+  expect(screen.getByRole('option', { name: '失败（0）' })).toBeInTheDocument()
+  expect(fetchRecentJobs).not.toHaveBeenCalled()
+})
+
 it('uses the same detail button for queued and running tasks and follows the queued receipt without querying history', async () => {
   vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
   const item = { ...oldAdmission(), id: 'range', phase: 'running' }

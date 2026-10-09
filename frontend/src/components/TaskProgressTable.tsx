@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useState } from 'react'
 import { ListPagination, useListPagination } from './ListPagination'
 
 export type TaskTone = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
@@ -17,6 +18,33 @@ export interface TaskProgressRow {
   id: string; state: TaskTone; stateLabel: string; type: string
   book?: string; chapter: string; window: ReactNode; windowTitle?: string
   error?: string | null; actions?: ReactNode
+}
+
+const FILTER_LABELS = { all: '全部', failed: '失败', queued: '排队中', running: '处理中',
+  completed: '已完成', cancelled: '已停止', unknown: '状态未知' } as const
+type TaskFilter = keyof typeof FILTER_LABELS
+
+/** Only for complete local collections; remote cursor tables must not hide unloaded tasks. */
+export function FilterableTaskProgressTable({ rows, label, scope = '' }: {
+  rows: TaskProgressRow[]; label: string; scope?: string;
+}) {
+  const [selection, setSelection] = useState<{ scope: string; value: TaskFilter }>({ scope, value: 'all' })
+  const filter = selection.scope === scope ? selection.value : 'all'
+  const counts = rows.reduce((result, row) => { result[row.state]++; return result },
+    { all: rows.length, failed: 0, queued: 0, running: 0, completed: 0, cancelled: 0, unknown: 0 })
+  const visible = filter === 'all' ? rows : rows.filter(row => row.state === filter)
+  return <>
+    <label className="ndr-field"><span>筛选任务状态</span>
+      <select value={filter} onChange={event => setSelection({ scope, value: event.target.value as TaskFilter })}>
+        {(Object.keys(FILTER_LABELS) as TaskFilter[]).map(value => <option key={value} value={value}>
+          {FILTER_LABELS[value]}（{counts[value]}）
+        </option>)}
+      </select>
+    </label>
+    <p className="hint" role="status">显示 {visible.length} / {rows.length} 项</p>
+    {!visible.length && <p>{filter === 'all' ? '没有范围任务。' : `没有“${FILTER_LABELS[filter]}”状态的任务。`}</p>}
+    <TaskProgressTable rows={visible} label={label} scope={`${scope}:${filter}`} />
+  </>
 }
 
 /** Display-only table: preserve mounted controls and caller-owned pagination. */
