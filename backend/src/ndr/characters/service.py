@@ -24,6 +24,7 @@ from ..domain.enums import (
     CharacterSource,
     ContentNodeType,
     ErrorCode,
+    InferenceRunState,
     JobKind,
     JobPurpose,
     JobState,
@@ -48,6 +49,7 @@ from ..storage.models import (
     Chapter,
     ChapterCharacterRoster,
     ContentNode,
+    InferenceRun,
     Job,
     ModelProfile,
 )
@@ -721,25 +723,36 @@ def create_roster_job(
             details={"idempotency_key": idempotency_key, "job_id": existing.id},
             status_code=409,
         )
-    active_duplicate = (
+    occupied = (
         session.execute(
             select(Job)
             .where(
-                Job.request_digest == digest,
-                Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING)),
+                Job.book_version_id == version.id,
+                Job.kind == JobKind.CHARACTER_ROSTER,
+                Job.state.in_((JobState.QUEUED, JobState.RUNNING, JobState.PAUSING,
+                               JobState.NEEDS_RECONCILIATION)),
             )
             .order_by(Job.created_at.desc())
         )
         .scalars()
-        .first()
+        .all()
     )
-    if active_duplicate is not None:
-        return active_duplicate, False
+    from ..jobs.roster import roster_job_is_active
 
-    from ..jobs.occupancy import guard_active_target
-
-    guard_active_target(session, version.id, JobKind.CHARACTER_ROSTER,
-                        {"chapter_id": chapter.id})
+    retired = []
+    for other in occupied:
+        if json.loads(other.range_json or "{}").get("chapter_id") != chapter.id:
+            continue
+        dispatched = session.scalar(select(InferenceRun.id).where(
+            InferenceRun.job_id == other.id,
+            InferenceRun.state == InferenceRunState.DISPATCHED,
+        ).limit(1))
+        if (other.state is JobState.NEEDS_RECONCILIATION
+                and not roster_job_is_active(other.id) and dispatched is None):
+            retired.append(other)
+        else:
+            # Adopt the original frozen request, even when new settings differ.
+            return other, False
 
     job = Job(
         kind=JobKind.CHARACTER_ROSTER,
@@ -768,6 +781,13 @@ def create_roster_job(
         request_digest=digest,
     )
     session.add(job)
+    session.flush()
+    for other in retired:
+        checkpoint = json.loads(other.checkpoint_json or "{}")
+        checkpoint["superseded_by"] = job.id
+        other.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+        other.state = JobState.PAUSED
+        other.last_error = "本地调用已终止，新的本章人物任务已接替；旧调用及未知用量记录保留"
     session.flush()
     return job, True
 

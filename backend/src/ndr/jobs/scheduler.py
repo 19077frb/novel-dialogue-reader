@@ -2292,6 +2292,15 @@ def reconcile_stale_runs(
 def reconcile_job(session: Session, job: Job, *, action: str) -> dict[str, Any]:
     """处理 NEEDS_RECONCILIATION：``retry`` 显式重发；``keep_unknown`` 保留未知结果。"""
 
+    replacement = _json_of(job.checkpoint_json).get("superseded_by")
+    if replacement:
+        from ..api.errors import ApiError
+        from ..domain.enums import ErrorCode
+
+        raise ApiError(ErrorCode.RESOURCE_CONFLICT,
+                       "该人物任务已由新的本章任务接替，请查看新任务",
+                       details={"job_id": replacement})
+
     rows = list(session.execute(select(JobWindow).where(JobWindow.job_id == job.id)).scalars())
     pending = [row for row in rows if row.state is JobState.NEEDS_RECONCILIATION]
     if action == "retry":

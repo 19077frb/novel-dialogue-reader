@@ -31,7 +31,7 @@ from ..domain.characters import (
     RosterConfirmIn,
 )
 from ..domain.common import DataEnvelope
-from ..domain.enums import JobKind
+from ..domain.enums import JobKind, JobState
 from ..domain.jobs import JobDetailOut
 from ..jobs.scheduler import run_job
 from ..jobs.service import job_detail
@@ -296,7 +296,7 @@ def analyze_character_roster_route(
         )
         detail = job_detail(session, job)
 
-    if payload.run_now and created:
+    if payload.run_now and (created or detail.state is JobState.QUEUED):
         background.add_task(
             run_job,
             factory,
