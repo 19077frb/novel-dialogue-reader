@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,6 +8,7 @@ import * as exportsApi from '../src/api/exports'
 import type { ExportArtifactOut, ExportPreviewOut } from '../src/api/types'
 import { ExportDialog } from '../src/components/ExportDialog'
 import { renderWithProviders } from './helpers'
+import { updateGeneralSettings } from '../src/settings/preferences'
 
 vi.mock('../src/api/books', () => ({
   queryKeys: {
@@ -70,11 +71,26 @@ function artifact(overrides: Partial<ExportArtifactOut> = {}): ExportArtifactOut
 
 describe('ExportDialog', () => {
   beforeEach(() => {
+    localStorage.clear()
     vi.mocked(booksApi.fetchChapters).mockReset()
     vi.mocked(exportsApi.previewExport).mockReset()
     vi.mocked(exportsApi.createExport).mockReset()
     vi.mocked(booksApi.fetchChapters).mockResolvedValue(CHAPTERS)
     vi.mocked(exportsApi.previewExport).mockResolvedValue(preview())
+  })
+
+  it('默认重读并隐藏初读，启用后可选初读，关闭后重新冻结重读快照', async () => {
+    renderWithProviders(<ExportDialog bookId="b1" open onClose={vi.fn()} chapters={CHAPTERS} />)
+    await screen.findByTestId('export-preview')
+    expect(screen.queryByTestId('export-policy')).not.toBeInTheDocument()
+    expect(exportsApi.previewExport).toHaveBeenLastCalledWith('b1', expect.objectContaining({ visibilityPolicy: 'reread' }), expect.anything())
+    act(() => updateGeneralSettings({ enableExperimentalFeatures: true }))
+    expect(screen.getByTestId('export-policy-reread')).toBeChecked()
+    await userEvent.click(screen.getByTestId('export-policy-position-safe'))
+    await waitFor(() => expect(exportsApi.previewExport).toHaveBeenLastCalledWith('b1', expect.objectContaining({ visibilityPolicy: 'position_safe' }), expect.anything()))
+    act(() => updateGeneralSettings({ enableExperimentalFeatures: false }))
+    expect(screen.queryByTestId('export-policy')).not.toBeInTheDocument()
+    await waitFor(() => expect(exportsApi.previewExport).toHaveBeenLastCalledWith('b1', expect.objectContaining({ visibilityPolicy: 'reread' }), expect.anything()))
   })
 
   it('人物资料因节选遗漏时显示数量和完整迁移建议，仍允许下载正文', async () => {
@@ -105,7 +121,7 @@ describe('ExportDialog', () => {
     await screen.findByTestId('export-preview')
     expect(exportsApi.previewExport).toHaveBeenCalledWith(
       'b1',
-      expect.objectContaining({ chapterIds: null, visibilityPolicy: 'position_safe' }),
+      expect.objectContaining({ chapterIds: null, visibilityPolicy: 'reread' }),
       expect.anything(),
     )
     expect(screen.getByTestId('export-coverage')).toHaveTextContent('未处理 1')

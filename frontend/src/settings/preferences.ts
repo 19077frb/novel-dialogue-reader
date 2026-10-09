@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { defaultChapterFilter, normalizeChapterFilter } from '../processing/chapterFilter'
 
 export const SETTINGS_KEY = 'ndr:general-settings:v1'
-export const defaultSettings = { ...defaultChapterFilter(), fontSize: 16, lineHeight: 1.95, resumeReading: true, showCandidates: true, showAnnotations: true, showReviewMarkers: false, autoProcessing: false, lookAheadChapters: 2, doubleClickChapterStatus: false, allowOverwriteManualCharacters: false }
+export const defaultSettings = { ...defaultChapterFilter(), enableExperimentalFeatures: false, fontSize: 16, lineHeight: 1.95, resumeReading: true, showCandidates: true, showAnnotations: true, showReviewMarkers: false, autoProcessing: false, lookAheadChapters: 2, doubleClickChapterStatus: false, allowOverwriteManualCharacters: false }
 export type GeneralSettings = typeof defaultSettings
 let fallback = JSON.stringify(defaultSettings)
 let rawCache: string | undefined
@@ -21,6 +21,7 @@ export function getGeneralSettings(): GeneralSettings {
         showCandidates: typeof value.showCandidates === 'boolean' ? value.showCandidates : true,
         showAnnotations: typeof value.showAnnotations === 'boolean' ? value.showAnnotations : true,
         showReviewMarkers: value.showReviewMarkers === true,
+        enableExperimentalFeatures: value.enableExperimentalFeatures === true,
         autoProcessing: typeof value.autoProcessing === 'boolean' ? value.autoProcessing : false,
         allowOverwriteManualCharacters: value.allowOverwriteManualCharacters === true,
         doubleClickChapterStatus: typeof value.doubleClickChapterStatus === 'boolean' ? value.doubleClickChapterStatus : false,
@@ -35,12 +36,12 @@ export function updateGeneralSettings(patch: Partial<GeneralSettings>) {
   rawCache = undefined
   listeners.forEach(listener => listener())
 }
-function subscribe(listener: () => void) {
+export function subscribeGeneralSettings(listener: () => void) {
   listeners.add(listener)
   const changed = (event: StorageEvent) => { if (event.key === SETTINGS_KEY || event.key === null) listener() }
   window.addEventListener('storage', changed)
   return () => { listeners.delete(listener); window.removeEventListener('storage', changed) }
 }
 export function useGeneralSettings() {
-  return [useSyncExternalStore(subscribe, getGeneralSettings), updateGeneralSettings] as const
+  return [useSyncExternalStore(subscribeGeneralSettings, getGeneralSettings), updateGeneralSettings] as const
 }

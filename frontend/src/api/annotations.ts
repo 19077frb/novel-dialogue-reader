@@ -27,7 +27,7 @@ export function fetchAnnotations(
   const params = new URLSearchParams()
   params.set('start_cp', String(query.startCp))
   params.set('end_cp', String(query.endCp))
-  params.set('reading_mode', query.readingMode ?? 'initial')
+  params.set('reading_mode', query.readingMode ?? 'reread')
   if (query.visibleHorizonCp !== null && query.visibleHorizonCp !== undefined) {
     params.set('visible_horizon_cp', String(query.visibleHorizonCp))
   }

@@ -15,7 +15,7 @@ import {
 import { addBookmark, bookmarkKey } from '../api/bookmarks'
 import { BookmarkList } from '../components/BookmarkList'
 import { useReadingProgress } from '../hooks/useReadingProgress'
-import { getGeneralSettings } from '../settings/preferences'
+import { getGeneralSettings, useGeneralSettings } from '../settings/preferences'
 import type { ChapterOut, ContentNodeOut, ReadingMode } from '../api/types'
 import { ChapterNavigation } from '../components/ChapterNavigation'
 import {
@@ -59,6 +59,7 @@ export function findCurrentStartCp(nodes: HTMLElement[], clipTop = 0): number | 
  * （`GET /api/books/{id}/annotations`）。翻页只查投影，不触发任何推理。
  */
 export default function ReaderPage() {
+  const [settings] = useGeneralSettings()
   const { bookId } = useParams<{ bookId: string }>()
   const location = useLocation()
   const [searchParams] = useSearchParams()
@@ -164,7 +165,8 @@ export default function ReaderPage() {
     [quotes.data],
   )
   const activeChapter = chapters.data?.find((chapter) => chapter.id === chapterId) ?? null
-  const readingMode: ReadingMode = readingModeOverride ?? book.data?.reading_mode ?? 'initial'
+  const readingMode: ReadingMode = settings.enableExperimentalFeatures
+    ? readingModeOverride ?? book.data?.reading_mode ?? 'reread' : 'reread'
   const persist = useReadingProgress(bookId ?? '', book.data, setNotice)
   const bookmark = useMutation({ mutationFn: ({ cp, note }: { cp: number; note: string }) => addBookmark(bookId!, {
     book_version_id: book.data!.active_version_id!, chapter_id: chapterId!, position_cp: cp, note,
@@ -429,7 +431,7 @@ export default function ReaderPage() {
                   />
                   本章已标注 {annotations.data?.items?.length ?? 0} 句对白
                 </label>
-                <label>
+                {settings.enableExperimentalFeatures && <label>
                   阅读模式
                   <select
                     value={readingMode}
@@ -438,10 +440,10 @@ export default function ReaderPage() {
                     }
                     data-testid="reader-reading-mode"
                   >
-                    <option value="initial">初读</option>
+                    <option value="initial">初读（试验）</option>
                     <option value="reread">重读</option>
                   </select>
-                </label>
+                </label>}
               </div>
               {readingMode === 'initial' && annotations.data && (
                 <p className="hint" data-testid="reader-horizon">

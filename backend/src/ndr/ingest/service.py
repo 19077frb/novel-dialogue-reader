@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings
 from ..domain.documents import ChapterRepairIn, ChapterRepairsIn
-from ..domain.enums import BookFormat, ImportStatus, JobKind, JobState
+from ..domain.enums import BookFormat, ImportStatus, JobKind, JobState, ReadingMode
 from ..exports.annotations import parse_annotations_manifest
 from ..quotes.normalization import detect_auto_close_suggestions, upsert_suggestions
 from ..quotes.scanner import SCANNER_VERSION, ScanLimits
@@ -149,6 +149,7 @@ def persist_parsed(
             format=BookFormat(parsed.format),
             source_sha256=parsed.source_sha256,
             import_status=ImportStatus.RUNNING,
+            reading_mode=ReadingMode.REREAD,
         )
         session.add(book)
         session.flush()

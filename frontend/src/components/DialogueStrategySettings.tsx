@@ -2,14 +2,18 @@ import type { DialogueStrategy } from '../api/jobs'
 import { dialogueStrategyDisabledReason } from '../api/jobs'
 import { DisabledHint, disabledHint } from './DisabledHint'
 import { CollapsibleBlock } from './CollapsibleBlock'
+import { useGeneralSettings } from '../settings/preferences'
 
-export function DialogueStrategySettings({ value, onChange, disabled = false, disabledReason, rounds }: {
+export function DialogueStrategySettings({ value, onChange, disabled = false, disabledReason, rounds, experimentalEnabled }: {
   value: DialogueStrategy
   onChange: (value: DialogueStrategy) => void
   disabled?: boolean
   disabledReason?: string
   rounds: number
+  experimentalEnabled?: boolean
 }) {
+  const [settings] = useGeneralSettings()
+  if (!(experimentalEnabled ?? settings.enableExperimentalFeatures)) return null
   const reason = disabledReason ?? '任务正在执行，请等待完成或先停止任务再修改对白策略。'
   return <section className="card" aria-label="对白处理策略">
     <label className="ndr-field">对白处理策略

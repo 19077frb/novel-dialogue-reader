@@ -1,11 +1,15 @@
 import type { ProcessingPreferences } from '../processing/preferences'
 import { DisabledHint, disabledHint } from './DisabledHint'
+import { useGeneralSettings } from '../settings/preferences'
 
-export function RosterRepairSettings({ preferences, onChange, disabled = false }: {
+export function RosterRepairSettings({ preferences, onChange, disabled = false, experimentalEnabled }: {
   preferences: ProcessingPreferences
   onChange: (patch: Partial<ProcessingPreferences>) => void
   disabled?: boolean
+  experimentalEnabled?: boolean
 }) {
+  const [settings] = useGeneralSettings()
+  if (!(experimentalEnabled ?? settings.enableExperimentalFeatures)) return null
   const reason = '当前处理任务尚未结束，请等待完成或先停止任务再修改人物分析配置。'
   return <section className="card" aria-label="人物证据修复">
     <label><input type="checkbox" data-testid="roster-repair-enabled" checked={preferences.rosterRepairEnabled}

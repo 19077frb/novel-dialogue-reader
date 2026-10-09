@@ -6,7 +6,7 @@ import SettingsPage from '../src/pages/SettingsPage'
 import { getGeneralSettings, updateGeneralSettings, SETTINGS_KEY } from '../src/settings/preferences'
 import * as profiles from '../src/api/profiles'
 import * as applicationSettings from '../src/api/applicationSettings'
-import { getProcessingPreferences, updateProcessingPreferences } from '../src/processing/preferences'
+import { getProcessingPreferences, getStoredProcessingPreferences, updateProcessingPreferences } from '../src/processing/preferences'
 import { renderWithProviders } from './helpers'
 
 vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['profiles'] } }))
@@ -52,6 +52,7 @@ it('saves the editable chapter filter only after Save and restores it on reopeni
   expect(screen.getByLabelText('过滤名单（每行一项）')).toHaveValue('封面\n自定义')
 })
 it('keeps the dialogue strategy as a draft until save and restores it on reopening', async () => {
+  updateGeneralSettings({ enableExperimentalFeatures: true })
   const page = renderWithProviders(<SettingsPage />)
   await userEvent.selectOptions(screen.getByTestId('dialogue-strategy'), 'complete-review')
   expect(getProcessingPreferences().dialogueStrategy).toBe('legacy')
@@ -63,6 +64,7 @@ it('keeps the dialogue strategy as a draft until save and restores it on reopeni
   expect(screen.getByText(/复核次数为 0，独立复核已关闭/)).toBeVisible()
 })
 it('keeps roster repair as a draft until save and restores the saved values', async () => {
+  updateGeneralSettings({ enableExperimentalFeatures: true })
   const page = renderWithProviders(<SettingsPage />)
   await userEvent.click(screen.getByTestId('roster-repair-enabled'))
   fireEvent.change(screen.getByLabelText(/人物证据最多修复次数/), { target: { value: '2' } })
@@ -73,6 +75,28 @@ it('keeps roster repair as a draft until save and restores the saved values', as
   renderWithProviders(<SettingsPage />)
   expect(screen.getByTestId('roster-repair-enabled')).toBeChecked()
   expect(screen.getByLabelText(/人物证据最多修复次数/)).toHaveValue(2)
+})
+
+it('试验默认隐藏，开关须保存，关闭不删除配置但新流程使用常规设置', async () => {
+  updateProcessingPreferences({ dialogueStrategy: 'complete-blocks-isolated-review', rosterRepairEnabled: true })
+  const page = renderWithProviders(<SettingsPage />)
+  expect(screen.getByLabelText('启用试验功能')).not.toBeChecked()
+  expect(screen.queryByTestId('dialogue-strategy')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('roster-repair-enabled')).not.toBeInTheDocument()
+  await userEvent.click(screen.getByLabelText('启用试验功能'))
+  expect(screen.getByTestId('dialogue-strategy')).toHaveValue('complete-blocks-isolated-review')
+  expect(getGeneralSettings().enableExperimentalFeatures).toBe(false)
+  expect(getProcessingPreferences().dialogueStrategy).toBe('legacy')
+  await userEvent.click(screen.getByRole('button', { name: '保存阅读与处理设置' }))
+  expect(getProcessingPreferences().rosterRepairEnabled).toBe(true)
+  page.unmount()
+  renderWithProviders(<SettingsPage />)
+  expect(screen.getByLabelText('启用试验功能')).toBeChecked()
+  await userEvent.click(screen.getByLabelText('启用试验功能'))
+  expect(getProcessingPreferences().rosterRepairEnabled).toBe(true)
+  await userEvent.click(screen.getByRole('button', { name: '保存阅读与处理设置' }))
+  expect(getProcessingPreferences()).toMatchObject({ dialogueStrategy: 'legacy', rosterRepairEnabled: false })
+  expect(getStoredProcessingPreferences()).toMatchObject({ dialogueStrategy: 'complete-blocks-isolated-review', rosterRepairEnabled: true })
 })
 
 it('后台更新人工人物默认关闭，开启后重新进入仍保留', async () => {

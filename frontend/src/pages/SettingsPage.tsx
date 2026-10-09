@@ -8,7 +8,7 @@ import { RosterRepairSettings } from '../components/RosterRepairSettings'
 import { ApplicationSettings } from '../components/ApplicationSettings'
 import { ChapterFilterSettings } from '../components/ChapterFilterSettings'
 import { useProcessingPreferences } from '../processing/preferences'
-import { getProcessingPreferences, getDefaultProcessingPreferences } from '../processing/preferences'
+import { getProcessingPreferences, getStoredProcessingPreferences, getDefaultProcessingPreferences } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
 import { stopAutomaticProcessing } from '../processing/autoProcessing'
 import { defaultSettings, useGeneralSettings } from '../settings/preferences'
@@ -27,6 +27,18 @@ export default function SettingsPage() {
   const profiles = useQuery({ queryKey: profileKeys.profiles(), queryFn: ({ signal }) => fetchProfiles(signal) })
   return <div className="ndr-page">
     <header className="card ndr-page-header"><h2>通用设置</h2><p className="hint">修改后请点击保存。阅读与处理偏好保存在当前浏览器；应用配置保存在本机，重启服务后生效。</p></header>
+    <section className="card">
+      <h3>试验功能</h3>
+      <label><input type="checkbox" checked={settings.enableExperimentalFeatures} onChange={event => {
+        update({ enableExperimentalFeatures: event.target.checked })
+        if (event.target.checked) {
+          const { dialogueStrategy, rosterRepairEnabled } = getStoredProcessingPreferences()
+          updatePreferences({ dialogueStrategy, rosterRepairEnabled })
+        }
+      }} />启用试验功能</label>
+      <p className="hint">默认关闭。保存后显示初读、完整上下文对白策略和人物证据修复等试验选项；效果可能不稳定。关闭后隐藏这些入口，阅读与导出使用重读（完整标注），新处理使用默认策略。重读可能显示后文才揭示的人名。已启动的任务保持原配置。</p>
+      <p className="hint">保存在当前浏览器，点击“保存阅读与处理设置”后生效，无需重启。</p>
+    </section>
     <section className="card">
       <h3>阅读显示</h3>
       <div className="ndr-range-grid">
@@ -78,25 +90,29 @@ export default function SettingsPage() {
         draftPreferences={preferences} onPreferencesChange={updatePreferences} />
       {profiles.isError && <p className="status-error">模型配置读取失败：{profiles.error.message}<button onClick={() => void profiles.refetch()}>重新读取</button></p>}
       <DialogueStrategySettings value={preferences.dialogueStrategy} rounds={preferences.maxRecheckRounds}
+        experimentalEnabled={settings.enableExperimentalFeatures}
         onChange={dialogueStrategy => updatePreferences({ dialogueStrategy })} />
-      <p className="hint">对白策略修改后也需点击“保存阅读与处理设置”；人物合并不使用此选项。</p>
-      <RosterRepairSettings preferences={preferences} onChange={updatePreferences} />
-      <p className="hint">人物修复配置同样点击“保存阅读与处理设置”后生效，已启动任务保持原配置。</p>
+      {settings.enableExperimentalFeatures && <p className="hint">对白策略修改后也需点击“保存阅读与处理设置”；人物合并不使用此选项。</p>}
+      <RosterRepairSettings preferences={preferences} onChange={updatePreferences} experimentalEnabled={settings.enableExperimentalFeatures} />
+      {settings.enableExperimentalFeatures && <p className="hint">人物修复配置同样点击“保存阅读与处理设置”后生效，已启动任务保持原配置。</p>}
       <p className="hint">这些模型、思考、并发和额度设置与单章、批量处理共用。自动处理额度按本页会话中每本书累计；接近上限时会提醒调整，阅读侧栏可停止或刷新额度并重试。修改设置不改变已启动的任务。</p>
       <Link className="ndr-button" to="/settings/models">管理模型账号</Link>
       <button onClick={() => {
-        if (!window.confirm('恢复本栏的自动处理开关、提前章节数、模型选择、思考、对白策略、人物修复、并发、复核和Token上限默认值？不删除模型账号，其他区域及未在本栏显示的参数不变，点击保存后生效。')) return
+        if (!window.confirm(`恢复本栏的自动处理开关、提前章节数、模型选择、思考、并发、复核和Token上限${settings.enableExperimentalFeatures ? '，以及显示的试验处理选项' : ''}默认值？不删除模型账号，其他区域及未在本栏显示的参数不变，点击保存后生效。`)) return
         update({ autoProcessing: defaultSettings.autoProcessing, lookAheadChapters: defaultSettings.lookAheadChapters })
         const { profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort, dialogueStrategy, rosterRepairEnabled, maxRosterRepairs, maxFormatRetries } = getDefaultProcessingPreferences()
-        updatePreferences({ profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort, dialogueStrategy, rosterRepairEnabled, maxRosterRepairs,
-          ...(preferences.rosterRepairEnabled ? { maxFormatRetries } : {}) })
+        updatePreferences({ profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort,
+          ...(settings.enableExperimentalFeatures ? { dialogueStrategy, rosterRepairEnabled, maxRosterRepairs } : {}),
+          ...(settings.enableExperimentalFeatures && preferences.rosterRepairEnabled ? { maxFormatRetries } : {}) })
       }}>恢复自动处理默认值</button>
-      <p className="hint">恢复仅修改本栏草稿，不停止任务或删除模型账号；保存后生效。输出上限不变；人物修复开启时，本栏可见的校验失败重试次数也会恢复默认值。</p>
+      <p className="hint">恢复仅修改本栏草稿，不停止任务或删除模型账号；保存后生效。输出上限不变。{settings.enableExperimentalFeatures && '人物修复开启时，本栏可见的校验失败重试次数也会恢复默认值。'}</p>
     </section>
     <section className="card" aria-label="保存阅读与处理设置">
       <button className="ndr-primary" disabled={!changed} title={!changed ? '尚未修改阅读或处理设置。' : undefined} onClick={() => {
         if (storedSettings.autoProcessing && !settings.autoProcessing) stopAutomaticProcessing()
-        saveSettings(settings); savePreferences(preferences)
+        saveSettings(settings)
+        if (settings.enableExperimentalFeatures) savePreferences(preferences)
+        else { const { dialogueStrategy: _strategy, rosterRepairEnabled: _repair, ...ordinary } = preferences; savePreferences(ordinary) }
         setSettings(getGeneralSettings()); setPreferences(getProcessingPreferences()); setSaved(true)
       }}>保存阅读与处理设置</button>
       <p className="hint" role="status">{changed ? '有未保存的修改，离开页面会丢弃。保存后生效，不需要重启服务。' : saved ? '阅读与处理设置已保存。' : '修改阅读或处理设置后可保存。'}</p>

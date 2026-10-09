@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { InferenceOptions } from '../api/types'
 import type { DialogueStrategy } from '../api/jobs'
+import { getGeneralSettings, subscribeGeneralSettings } from '../settings/preferences'
 
 export const PROCESSING_PREFERENCES_KEY = 'ndr:processing-preferences:v1'
 export interface ProcessingPreferences {
@@ -69,7 +70,7 @@ export function estimateRosterTokens(characters: number, preferences: Processing
   return preferences.rosterRepairEnabled === true
     ? base * (1 + (preferences.maxRosterRepairs ?? 1) + (preferences.maxFormatRetries ?? 1)) : base
 }
-export function getProcessingPreferences(): ProcessingPreferences {
+export function getStoredProcessingPreferences(): ProcessingPreferences {
   let raw = fallbackRaw
   if (!storageUnavailable) {
     try { raw = localStorage.getItem(PROCESSING_PREFERENCES_KEY) } catch { storageUnavailable = true }
@@ -83,18 +84,32 @@ export function getProcessingPreferences(): ProcessingPreferences {
   }
   return cached
 }
+let effectiveSource: ProcessingPreferences | undefined
+let effectiveEnabled: boolean | undefined
+let effectiveCache = defaults
+/** Only new workflows use these effective preferences; frozen task inputs remain intact. */
+export function getProcessingPreferences(): ProcessingPreferences {
+  const source = getStoredProcessingPreferences()
+  const enabled = getGeneralSettings().enableExperimentalFeatures
+  if (source !== effectiveSource || enabled !== effectiveEnabled) {
+    effectiveSource = source; effectiveEnabled = enabled
+    effectiveCache = enabled ? source : { ...source, dialogueStrategy: 'legacy', rosterRepairEnabled: false }
+  }
+  return effectiveCache
+}
 export function updateProcessingPreferences(patch: Partial<ProcessingPreferences>) {
-  fallbackRaw = JSON.stringify(normalize({ ...getProcessingPreferences(), ...patch }))
+  fallbackRaw = JSON.stringify(normalize({ ...getStoredProcessingPreferences(), ...patch }))
   try { localStorage.setItem(PROCESSING_PREFERENCES_KEY, fallbackRaw) } catch { storageUnavailable = true }
   listeners.forEach(listener => listener())
 }
 function subscribe(listener: () => void) {
   listeners.add(listener)
+  const unsubscribeGeneral = subscribeGeneralSettings(listener)
   const changed = (event: StorageEvent) => {
     if (event.key === PROCESSING_PREFERENCES_KEY || event.key === null) listener()
   }
   window.addEventListener('storage', changed)
-  return () => { listeners.delete(listener); window.removeEventListener('storage', changed) }
+  return () => { listeners.delete(listener); window.removeEventListener('storage', changed); unsubscribeGeneral() }
 }
 export function useProcessingPreferences() {
   return [useSyncExternalStore(subscribe, getProcessingPreferences), updateProcessingPreferences] as const

@@ -212,7 +212,7 @@ describe('ReaderPage', () => {
     expect(screen.getByRole('button', { name: '下一章' })).toBeDisabled()
   })
   beforeEach(() => {
-    act(() => updateGeneralSettings({ showReviewMarkers: false }))
+    act(() => updateGeneralSettings({ showReviewMarkers: false, enableExperimentalFeatures: true }))
     act(() => batch.clearBatchProgress('b1'))
     vi.mocked(booksApi.fetchBook).mockReset()
     vi.mocked(booksApi.fetchChapters).mockReset()
@@ -295,6 +295,23 @@ describe('ReaderPage', () => {
       reading_mode: 'initial',
       version: 4,
     })
+  })
+
+  it('关闭试验时旧初读书籍也用重读，开启显示试验选项，切换不丢章节', async () => {
+    updateGeneralSettings({ enableExperimentalFeatures: false })
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c2')
+    await screen.findByText(/第二章的正文/)
+    await waitFor(() => expect(annotationsApi.fetchAnnotations).toHaveBeenCalledWith('b1',
+      expect.objectContaining({ readingMode: 'reread', visibleHorizonCp: null }), expect.anything()))
+    expect(screen.queryByTestId('reader-reading-mode')).not.toBeInTheDocument()
+    act(() => updateGeneralSettings({ enableExperimentalFeatures: true }))
+    expect(screen.getByRole('option', { name: '初读（试验）' })).toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByTestId('reader-reading-mode'), 'initial')
+    act(() => updateGeneralSettings({ enableExperimentalFeatures: false }))
+    expect(screen.queryByTestId('reader-reading-mode')).not.toBeInTheDocument()
+    await waitFor(() => expect(annotationsApi.fetchAnnotations).toHaveBeenLastCalledWith('b1',
+      expect.objectContaining({ readingMode: 'reread', visibleHorizonCp: null }), expect.anything()))
+    expect(vi.mocked(booksApi.fetchContent).mock.calls.every(call => call[1]?.chapterId === 'c2')).toBe(true)
   })
 
   it('目录双击保存状态，不重新读取正文和标注，也不切换当前阅读章', async () => {
