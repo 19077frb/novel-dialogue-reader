@@ -1304,6 +1304,7 @@ textarea:focus-visible {
 
 .ndr-batch-task-table {
   width: 100%;
+  min-width: 720px;
   border-collapse: collapse;
   font-size: 0.9rem;
 }
@@ -1318,6 +1319,7 @@ textarea:focus-visible {
 }
 
 .ndr-batch-task-table td:last-child { min-width: 110px; }
+.ndr-batch-task-table th { white-space: nowrap; }
 .ndr-batch-task-table td:last-child > button,
 .ndr-batch-task-table td:last-child > .ndr-button { margin: 0 6px 6px 0; }
 
