@@ -74,23 +74,56 @@ function ChapterTaskHistory({ item, chapterId, kind, windowId, onSelect }: {
   </CollapsibleBlock>
 }
 
-function AdmissionDetails({ item, onSelect }: { item: QueueAdmission; onSelect: (id: string) => void }) {
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    if (!['queued', 'running'].includes(item.phase)) return
-    const timer = setInterval(() => setTick(value => value + 1), 2000)
-    return () => clearInterval(timer)
-  }, [item.phase])
-  void tick
-  if (item.payload.type === 'merge') return item.jobId ? <button onClick={() => onSelect(item.jobId!)}>查看任务</button> : <p className="hint">等待本书前序处理结束后分析人物，生成建议后仍需确认。</p>
+function admissionTasks(item: QueueAdmission) {
+  if (item.payload.type === 'merge') return [{ id: 'merge', chapter: '全书', type: '自动合并人物', window: '—', tone: item.phase as TaskTone, state: LABELS[item.phase], error: item.error, jobId: item.jobId }]
   const batch = readJournal<{ execution: { queueId?: string }; snapshot: BatchProgressSnapshot }>(`batch:${item.bookId}`)
   const single = readJournal<SingleWorkflow>(`single:${item.bookId}`)
-  const batchTasks = batch && (batch.execution.queueId === item.id || item.id.startsWith('legacy:'))
+  const plannedTone = item.phase === 'queued' ? 'queued' : 'unknown'
+  const plannedLabel = item.phase === 'queued' ? LABELS.queued : '状态待核实'
+  const batchTasks = batch && (batch.execution.queueId === item.id || item.id === `legacy:batch:${item.bookId}:${batch.snapshot.startedAt}`)
     ? batch.snapshot.tasks : readBatchHistory(item.id)
-  const tasks = item.payload.type === 'batch'
+  return item.payload.type === 'batch'
     ? batchTasks ? batchTasks.map(task => ({ id: task.id, chapterId: task.chapterId, kind: task.type === 'roster' ? 'CHARACTER_ROSTER' as const : 'INFERENCE' as const, windowId: task.windowId, chapter: task.chapterTitle, type: task.type === 'roster' ? '人物识别' : '对白归属', window: task.windowLabel, tone: task.state as TaskTone, state: LABELS[task.state], error: task.error, jobId: task.jobId }))
-      : item.payload.work.plans.flatMap(plan => [{ id: `roster:${plan.chapter.id}`, chapterId: plan.chapter.id, kind: 'CHARACTER_ROSTER' as const, windowId: null, chapter: plan.chapter.title, type: '人物识别', window: '全文', tone: 'unknown' as TaskTone, state: '状态待核实', error: null, jobId: null }, ...(plan.estimate.windows ?? []).map(window => ({ id: `${plan.chapter.id}:${window.window_id}`, chapterId: plan.chapter.id, kind: 'INFERENCE' as const, windowId: window.window_id, chapter: plan.chapter.title, type: '对白归属', window: `窗口 ${window.ordinal}`, tone: 'unknown' as TaskTone, state: '状态待核实', error: null, jobId: null }))])
-    : (single && (single.queueId === item.id || item.id.startsWith('legacy:')) ? single : item.payload.work).tasks.map(task => ({ id: task.windowId, chapter: item.title, type: '对白归属', window: `窗口 ${task.ordinal}`, tone: task.job ? jobTaskTone(task.job.state) : task.error ? 'failed' as TaskTone : item.phase, state: task.job ? JOB_STATE_LABELS[task.job.state] : task.error ? '未执行' : LABELS[item.phase], error: task.error, jobId: task.job?.id }))
+: item.payload.work.plans.flatMap(plan => [{ id: `roster:${plan.chapter.id}`, chapterId: plan.chapter.id, kind: 'CHARACTER_ROSTER' as const, windowId: null, chapter: plan.chapter.title, type: '人物识别', window: '全文', tone: plannedTone as TaskTone, state: plannedLabel, error: null, jobId: null }, ...(plan.estimate.windows ?? []).map(window => ({ id: `dialogue:${plan.chapter.id}:${window.window_id}`, chapterId: plan.chapter.id, kind: 'INFERENCE' as const, windowId: window.window_id, chapter: plan.chapter.title, type: '对白归属', window: `窗口 ${window.ordinal}`, tone: plannedTone as TaskTone, state: plannedLabel, error: null, jobId: null }))])
+    : (single && (single.queueId === item.id || item.id === `legacy:single:${item.bookId}`
+      && single.queueId === item.payload.work.queueId && single.versionId === item.payload.work.versionId
+      && single.chapterId === item.payload.work.chapterId
+      && single.tasks[0]?.input.idempotencyKey === item.payload.work.tasks[0]?.input.idempotencyKey) ? single : item.payload.work).tasks.map(task => ({ id: task.windowId, chapter: item.title, type: '对白归属', window: `窗口 ${task.ordinal}`, tone: task.job ? jobTaskTone(task.job.state) : task.error ? 'failed' as TaskTone : item.phase, state: task.job ? JOB_STATE_LABELS[task.job.state] : task.error ? '未执行' : LABELS[item.phase], error: task.error, jobId: task.job?.id }))
+}
+
+type AdmissionTask = ReturnType<typeof admissionTasks>[number]
+type SelectedTask = { jobId: string } | { item: QueueAdmission; task: AdmissionTask }
+function useTaskRefresh(enabled = true) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!enabled) return
+    const timer = setInterval(() => setTick(value => value + 1), 2000)
+    return () => clearInterval(timer)
+  }, [enabled])
+}
+
+function PlannedTaskDetails({ item, initialTask, onSelect }: { item: QueueAdmission; initialTask: AdmissionTask; onSelect: (id: string) => void }) {
+  useTaskRefresh()
+  const current = admissionTasks(item).find(task => task.id === initialTask.id)
+  if (current?.jobId) return <JobPanel jobId={current.jobId} />
+  const task = current ?? initialTask
+  return <>
+    <TaskProgressTable label="当前任务" rows={[{ id: task.id, state: task.tone, stateLabel: task.state,
+      type: task.type, chapter: task.chapter || '未命名章节', window: task.window, error: task.error }]} />
+    <p className="hint" role="status">{!current ? '原任务记录已更新或缺失，无法确认当前状态。'
+      : task.tone === 'queued' ? '本任务尚未派发，轮到它执行后会在这里显示模型任务详情。'
+      : task.tone === 'running' ? '本任务正在准备提交，收到后台任务回执后会自动显示详情。'
+      : '本任务没有保存后台任务回执，请核实原记录后再处理。'}</p>
+    {item.payload.type === 'merge' && <p className="hint">等待本书前序处理结束后分析人物，生成建议后仍需确认。</p>}
+    {task.tone !== 'queued' && task.tone !== 'running' && 'chapterId' in task && task.chapterId && <ChapterTaskHistory item={item}
+      chapterId={task.chapterId} kind={task.kind} windowId={typeof task.windowId === 'string' ? task.windowId : null} onSelect={onSelect} />}
+  </>
+}
+
+function AdmissionDetails({ item, onSelect, onSelectPlanned }: { item: QueueAdmission; onSelect: (id: string) => void;
+  onSelectPlanned: (item: QueueAdmission, task: AdmissionTask) => void }) {
+  useTaskRefresh(['queued', 'running'].includes(item.phase))
+  const tasks = admissionTasks(item)
   const failed = tasks.filter(task => task.tone === 'failed').length
   return <>
     <TaskProgressSummary total={tasks.length} finished={tasks.filter(task => ['completed', 'failed', 'cancelled'].includes(task.tone)).length}
@@ -98,10 +131,7 @@ function AdmissionDetails({ item, onSelect }: { item: QueueAdmission; onSelect: 
     <CollapsibleBlock title="范围内任务" defaultOpen={false} summary={`共 ${tasks.length} 项；失败 ${failed} 项`}>
       <TaskProgressTable label="范围内任务" scope={item.id} rows={tasks.map(task => ({ id: task.id,
         state: task.tone, stateLabel: task.state, type: task.type, chapter: task.chapter || '未命名章节', window: task.window,
-        error: task.error, actions: <>
-          {task.jobId && <button onClick={() => onSelect(task.jobId!)}>查看任务</button>}
-          {!task.jobId && 'chapterId' in task && <ChapterTaskHistory item={item} chapterId={task.chapterId} kind={task.kind} windowId={typeof task.windowId === 'string' ? task.windowId : null} onSelect={onSelect} />}
-        </> }))} />
+        error: task.error, actions: <button onClick={() => task.jobId ? onSelect(task.jobId) : onSelectPlanned(item, task)}>查看任务</button> }))} />
     </CollapsibleBlock>
   </>
 }
@@ -123,8 +153,8 @@ export default function TaskQueuePage() {
     return () => clearInterval(timer)
   }, [admissions])
   const [history, setHistory] = useState(false)
-  const [selected, setSelected] = useState<string | null>(searchParams.get('jobId'))
-  useEffect(() => { if (searchParams.get('jobId')) setSelected(searchParams.get('jobId')) }, [searchParams])
+  const [selected, setSelected] = useState<SelectedTask | null>(() => searchParams.get('jobId') ? { jobId: searchParams.get('jobId')! } : null)
+  useEffect(() => { if (searchParams.get('jobId')) setSelected({ jobId: searchParams.get('jobId')! }) }, [searchParams])
   const [detailRequest, setDetailRequest] = useState(0)
   const detailRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
@@ -139,7 +169,8 @@ export default function TaskQueuePage() {
     refetchInterval: query => !history || query.state.data?.pages.some(page => page.items.some(job => ['QUEUED', 'RUNNING', 'PAUSING'].includes(job.state))) ? 2000 : false })
   const ranges = [...admissions, ...legacy.items.filter(item => !inventory || inventory.has(item.bookId))].sort((a, b) => b.createdAt - a.createdAt)
   const visible = ranges.filter(item => history || ['queued', 'running'].includes(item.phase))
-  const select = (id: string) => { setSelected(id); setDetailRequest(value => value + 1) }
+  const select = (id: string) => { setSelected({ jobId: id }); setDetailRequest(value => value + 1) }
+  const selectPlanned = (item: QueueAdmission, task: AdmissionTask) => { setSelected({ item, task }); setDetailRequest(value => value + 1) }
   const stop = async (item: QueueAdmission) => {
     if (!item.id.startsWith('legacy:')) return stopAdmission(item.id)
     if (item.payload.type === 'batch') {
@@ -169,7 +200,7 @@ export default function TaskQueuePage() {
             {['queued', 'running'].includes(item.phase) && <button className="ndr-danger" disabled={item.stopRequested} title={item.stopRequested ? '停止请求已提交，请等待在途任务收尾。' : undefined} onClick={() => { void stop(item).catch(err => setError(err.message)) }}>{item.phase === 'queued' ? '取消范围' : '停止范围'}</button>}
           </div>
           {item.error && <p className="status-error">{item.error}</p>}
-          <AdmissionDetails item={item} onSelect={select} />
+          <AdmissionDetails item={item} onSelect={select} onSelectPlanned={selectPlanned} />
         </article>)}
         </PaginatedItems>
       </CollapsibleBlock>
@@ -190,6 +221,10 @@ export default function TaskQueuePage() {
           }))} />
       </CollapsibleBlock>
     </section>
-    {selected && <section className="card" key={selected} ref={detailRef} tabIndex={-1}><h2>任务详情</h2><button onClick={() => setSelected(null)}>关闭详情</button><JobPanel jobId={selected} /></section>}
+    {selected && <section className="card" key={'jobId' in selected ? selected.jobId : `${selected.item.id}:${selected.task.id}`} ref={detailRef} tabIndex={-1}>
+      <h2>任务详情</h2><button onClick={() => setSelected(null)}>关闭详情</button>
+      {'jobId' in selected ? <JobPanel jobId={selected.jobId} /> : <PlannedTaskDetails item={selected.item.id.startsWith('legacy:') ? selected.item : ranges.find(item => item.id === selected.item.id) ?? selected.item}
+        initialTask={selected.task} onSelect={select} />}
+    </section>}
   </>
 }
