@@ -6,6 +6,8 @@ import { readBatchHistory } from '../processing/batchHistory'
 import { JobPanel, JOB_KIND_LABELS, JOB_STATE_LABELS } from '../components/JobPanel'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
 import { PaginatedItems } from '../components/ListPagination'
+import { jobTaskTone, TaskProgressSummary, TaskProgressTable } from '../components/TaskProgressTable'
+import type { TaskTone } from '../components/TaskProgressTable'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
 import { useAdmissions, stopAdmission, useQueueError } from '../processing/workQueue'
 import type { QueueAdmission } from '../processing/workQueue'
@@ -15,7 +17,7 @@ import type { BatchProgressSnapshot, BatchExecution } from '../components/BatchP
 import type { SingleWorkflow } from '../processing/singleWorkflow'
 import { stopSingleWorkflow } from '../processing/singleWorkflow'
 
-const LABELS = { queued: '等待执行', running: '执行中', completed: '已完成', failed: '失败', cancelled: '已停止' }
+const LABELS = { queued: '排队中', running: '处理中', completed: '已完成', failed: '失败', cancelled: '已停止' }
 
 /** Includes automatic/legacy schedulers whose pending windows have no DB job yet. */
 function legacyAdmissions(current: QueueAdmission[]): { items: QueueAdmission[]; errors: string[] } {
@@ -86,17 +88,22 @@ function AdmissionDetails({ item, onSelect }: { item: QueueAdmission; onSelect: 
   const batchTasks = batch && (batch.execution.queueId === item.id || item.id.startsWith('legacy:'))
     ? batch.snapshot.tasks : readBatchHistory(item.id)
   const tasks = item.payload.type === 'batch'
-    ? batchTasks ? batchTasks.map(task => ({ id: task.id, chapterId: task.chapterId, kind: task.type === 'roster' ? 'CHARACTER_ROSTER' as const : 'INFERENCE' as const, windowId: task.windowId, label: `${task.chapterTitle} · ${task.type === 'roster' ? '人物识别' : `对白 ${task.windowLabel}`}`, state: LABELS[task.state], error: task.error, jobId: task.jobId }))
-      : item.payload.work.plans.flatMap(plan => [{ id: `roster:${plan.chapter.id}`, chapterId: plan.chapter.id, kind: 'CHARACTER_ROSTER' as const, windowId: null, label: `${plan.chapter.title} · 人物识别`, state: '状态待核实', error: null, jobId: null }, ...(plan.estimate.windows ?? []).map(window => ({ id: `${plan.chapter.id}:${window.window_id}`, chapterId: plan.chapter.id, kind: 'INFERENCE' as const, windowId: window.window_id, label: `${plan.chapter.title} · 对白窗口 ${window.ordinal}`, state: '状态待核实', error: null, jobId: null }))])
-    : (single && (single.queueId === item.id || item.id.startsWith('legacy:')) ? single : item.payload.work).tasks.map(task => ({ id: task.windowId, label: `对白窗口 ${task.ordinal}`, state: task.job ? JOB_STATE_LABELS[task.job.state] : task.error ? '未执行' : LABELS[item.phase], error: task.error, jobId: task.job?.id }))
-  return <CollapsibleBlock title="范围内任务" defaultOpen={false} summary={`共 ${tasks.length} 项`}>
-    <PaginatedItems label="范围内任务" scope={item.id} listTag="ul" className="ndr-task-queue-list">{tasks.map(task => <li key={task.id}>
-      <span>{task.label} · {task.state}</span>
-      {task.jobId && <button onClick={() => onSelect(task.jobId!)}>查看任务</button>}
-      {!task.jobId && 'chapterId' in task && <ChapterTaskHistory item={item} chapterId={task.chapterId} kind={task.kind} windowId={typeof task.windowId === 'string' ? task.windowId : null} onSelect={onSelect} />}
-      {task.error && <p className="status-error">{task.error}</p>}
-    </li>)}</PaginatedItems>
-  </CollapsibleBlock>
+    ? batchTasks ? batchTasks.map(task => ({ id: task.id, chapterId: task.chapterId, kind: task.type === 'roster' ? 'CHARACTER_ROSTER' as const : 'INFERENCE' as const, windowId: task.windowId, chapter: task.chapterTitle, type: task.type === 'roster' ? '人物识别' : '对白归属', window: task.windowLabel, tone: task.state as TaskTone, state: LABELS[task.state], error: task.error, jobId: task.jobId }))
+      : item.payload.work.plans.flatMap(plan => [{ id: `roster:${plan.chapter.id}`, chapterId: plan.chapter.id, kind: 'CHARACTER_ROSTER' as const, windowId: null, chapter: plan.chapter.title, type: '人物识别', window: '全文', tone: 'unknown' as TaskTone, state: '状态待核实', error: null, jobId: null }, ...(plan.estimate.windows ?? []).map(window => ({ id: `${plan.chapter.id}:${window.window_id}`, chapterId: plan.chapter.id, kind: 'INFERENCE' as const, windowId: window.window_id, chapter: plan.chapter.title, type: '对白归属', window: `窗口 ${window.ordinal}`, tone: 'unknown' as TaskTone, state: '状态待核实', error: null, jobId: null }))])
+    : (single && (single.queueId === item.id || item.id.startsWith('legacy:')) ? single : item.payload.work).tasks.map(task => ({ id: task.windowId, chapter: item.title, type: '对白归属', window: `窗口 ${task.ordinal}`, tone: task.job ? jobTaskTone(task.job.state) : task.error ? 'failed' as TaskTone : item.phase, state: task.job ? JOB_STATE_LABELS[task.job.state] : task.error ? '未执行' : LABELS[item.phase], error: task.error, jobId: task.job?.id }))
+  const failed = tasks.filter(task => task.tone === 'failed').length
+  return <>
+    <TaskProgressSummary total={tasks.length} finished={tasks.filter(task => ['completed', 'failed', 'cancelled'].includes(task.tone)).length}
+      running={tasks.filter(task => task.tone === 'running').length} label={`${item.title}任务进度`} />
+    <CollapsibleBlock title="范围内任务" defaultOpen={false} summary={`共 ${tasks.length} 项；失败 ${failed} 项`}>
+      <TaskProgressTable label="范围内任务" scope={item.id} rows={tasks.map(task => ({ id: task.id,
+        state: task.tone, stateLabel: task.state, type: task.type, chapter: task.chapter || '未命名章节', window: task.window,
+        error: task.error, actions: <>
+          {task.jobId && <button onClick={() => onSelect(task.jobId!)}>查看任务</button>}
+          {!task.jobId && 'chapterId' in task && <ChapterTaskHistory item={item} chapterId={task.chapterId} kind={task.kind} windowId={typeof task.windowId === 'string' ? task.windowId : null} onSelect={onSelect} />}
+        </> }))} />
+    </CollapsibleBlock>
+  </>
 }
 
 export default function TaskQueuePage() {
@@ -156,8 +163,8 @@ export default function TaskQueuePage() {
       <CollapsibleBlock title="已添加的处理范围" summary={`${ranges.filter(item => ['queued', 'running'].includes(item.phase)).length} 个范围等待或执行中；${ranges.filter(item => item.phase === 'failed').length} 个范围失败（勾选“显示已结束任务”查看）`}>
         {!visible.length && <p>没有{history ? '保存的' : '等待或执行中的'}处理范围。</p>}
         <PaginatedItems label="处理范围" pageSize={5} scope={String(history)}>
-        {visible.map(item => <article className="card ndr-task-queue-range" key={item.id}>
-          <div className="ndr-form-actions"><strong>{item.bookTitle ? `${item.bookTitle} · ` : ''}{item.title}</strong><span>{item.stopRequested && item.phase === 'running' ? '正在安全停止' : LABELS[item.phase]}</span>
+        {visible.map(item => <article className="card ndr-batch-progress ndr-task-queue-range" key={item.id}>
+          <div className="ndr-step-heading"><strong>{item.bookTitle ? `${item.bookTitle} · ` : ''}{item.title}</strong><span className={`ndr-task-state ndr-task-${item.phase}`}>{item.stopRequested && item.phase === 'running' ? '正在安全停止' : LABELS[item.phase]}</span>
             <Link className="ndr-button" to={`/books/${item.bookId}/preview`}>打开本书</Link>
             {['queued', 'running'].includes(item.phase) && <button className="ndr-danger" disabled={item.stopRequested} title={item.stopRequested ? '停止请求已提交，请等待在途任务收尾。' : undefined} onClick={() => { void stop(item).catch(err => setError(err.message)) }}>{item.phase === 'queued' ? '取消范围' : '停止范围'}</button>}
           </div>
@@ -170,17 +177,17 @@ export default function TaskQueuePage() {
         {jobs.isPending && <p role="status">正在读取任务…</p>}
         {jobs.isError && <ReadErrorNotice label="任务队列读取失败" error={jobs.error} retrying={jobs.isFetching} onRetry={() => { void jobs.refetch() }} />}
         {jobs.data?.pages.every(page => !page.items.length) && <p>没有{history ? '' : '排队或运行的'}后台任务。</p>}
-        <PaginatedItems label="后台任务" scope={String(history)} listTag="ul" className="ndr-task-queue-list"
+        <TaskProgressTable label="后台任务" scope={String(history)} showBook
           hasMore={jobs.hasNextPage} loading={jobs.isFetchingNextPage} loadMore={async () => {
             const result = await jobs.fetchNextPage()
             if (result.isError) throw result.error
-          }}>{jobs.data?.pages.flatMap(page => page.items).map(job => <li key={job.id}>
-          <div><strong>{job.book_title || '书籍已删除'}</strong> · {job.chapter_title || '全书'} · {JOB_KIND_LABELS[job.kind]} · {JOB_STATE_LABELS[job.state]}</div>
-          {Boolean(job.windows_total) && <span>窗口 {job.windows_done}/{job.windows_total}</span>}
-          {job.selected_window_ids?.length ? <span>窗口：{job.selected_window_ids.join('、')}</span> : null}
-          {job.last_error && <p className="status-error">{job.last_error}</p>}
-          <button onClick={() => select(job.id)}>查看任务</button>
-        </li>)}</PaginatedItems>
+          }} rows={(jobs.data?.pages.flatMap(page => page.items) ?? []).map(job => ({ id: job.id,
+            state: jobTaskTone(job.state), stateLabel: JOB_STATE_LABELS[job.state], type: JOB_KIND_LABELS[job.kind],
+            book: job.book_title || '书籍已删除', chapter: job.chapter_title || '全书',
+            window: job.windows_total || job.selected_window_ids?.length ? <>{Boolean(job.windows_total) && <span>窗口 {job.windows_done}/{job.windows_total}</span>}
+              {job.selected_window_ids?.length ? <details><summary>窗口详情</summary>{job.selected_window_ids.join('、')}</details> : null}</> : '—',
+            error: job.last_error, actions: <button onClick={() => select(job.id)}>查看任务</button>,
+          }))} />
       </CollapsibleBlock>
     </section>
     {selected && <section className="card" key={selected} ref={detailRef} tabIndex={-1}><h2>任务详情</h2><button onClick={() => setSelected(null)}>关闭详情</button><JobPanel jobId={selected} /></section>}

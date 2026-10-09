@@ -24,7 +24,8 @@ import type { AnalyzeRosterInput } from '../api/characters'
 import type { CreateJobInput } from '../api/jobs'
 import { FormatRetrySetting } from './FormatRetrySetting'
 import { CollapsibleBlock } from './CollapsibleBlock'
-import { ListPagination, useListPagination } from './ListPagination'
+import { TaskProgressSummary, TaskProgressTable } from './TaskProgressTable'
+import { useListPagination } from './ListPagination'
 import { getGeneralSettings, useGeneralSettings } from '../settings/preferences'
 import { chapterFilterReason, defaultChapterFilter, normalizeChapterFilter } from '../processing/chapterFilter'
 import type { ChapterFilter } from '../processing/chapterFilter'
@@ -1630,50 +1631,18 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
             {batchProgress.stopRequested ? '正在停止…' : '停止批量处理'}
           </button>}
         </div>
-        <div className="ndr-batch-progress-summary">
-          <progress value={finishedTasks} max={Math.max(1, batchProgress.tasks.length)} />
-          <span data-testid="batch-task-summary">
-            已结束 {finishedTasks}/{batchProgress.tasks.length} 项；当前并发 {runningTasks} 项
-          </span>
-        </div>
+        <TaskProgressSummary total={batchProgress.tasks.length} finished={finishedTasks} running={runningTasks} testId="batch-task-summary" />
         <CollapsibleBlock title="批量任务明细" open={taskListOpen} onOpenChange={setTaskListOpen}
           summary={<span>共 {batchProgress.tasks.length} 项；失败 {batchProgress.tasks.filter(task => task.state === 'failed').length} 项</span>}>
-        <div className="ndr-table-wrap">
-          <table className="ndr-batch-task-table">
-            <thead>
-              <tr>
-                <th>状态</th>
-                <th>处理类型</th>
-                <th>章节</th>
-                <th>窗口</th>
-                <th>原因 / 错误详情</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {batchProgress.tasks.map((task, index) => (
-                <tr key={task.id} hidden={!taskPagination.isVisible(index)} data-task-state={task.state} data-testid="batch-task-row">
-                  <td><span className={`ndr-task-state ndr-task-${task.state}`}>{TASK_STATE_LABELS[task.state]}</span></td>
-                  <td>{task.type === 'roster' ? '人物识别' : '对白归属'}</td>
-                  <td>{task.chapterTitle}</td>
-                  <td title={task.windowId ?? undefined}>
-                    {task.windowLabel}
-                  </td>
-                  <td className={task.error ? 'status-error' : undefined}>
-                    {task.error || (task.type === 'roster'
-                      ? batchProgress.chapterStates[task.chapterId]?.error
-                      : null) || '—'}
-                  </td>
-                  <td><BatchRetryControls bookId={bookId} taskId={task.id} />
-                    {task.jobId && <Link className="ndr-button" to={`/tasks?jobId=${encodeURIComponent(task.jobId)}`}>查看任务</Link>}
-                    {task.state === 'failed' && !task.retryable && <span className="hint">请先查看任务详情，确认请求已结束后再处理。</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <ListPagination pagination={taskPagination} label="批量任务" />
+        <TaskProgressTable label="批量任务" pagination={taskPagination} rowTestId="batch-task-row"
+          rows={batchProgress.tasks.map(task => ({ id: task.id, state: task.state, stateLabel: TASK_STATE_LABELS[task.state],
+            type: task.type === 'roster' ? '人物识别' : '对白归属', chapter: task.chapterTitle,
+            window: task.windowLabel, windowTitle: task.windowId ?? undefined,
+            error: task.error || (task.type === 'roster' ? batchProgress.chapterStates[task.chapterId]?.error : null),
+            actions: <><BatchRetryControls bookId={bookId} taskId={task.id} />
+              {task.jobId && <Link className="ndr-button" to={`/tasks?jobId=${encodeURIComponent(task.jobId)}`}>查看任务</Link>}
+              {task.state === 'failed' && !task.retryable && <span className="hint">请先查看任务详情，确认请求已结束后再处理。</span>}</>,
+          }))} />
         </CollapsibleBlock>
         <p className="hint">{batchProgress.running
           ? '停止后不会再派发排队任务；已经发给模型的请求会安全收尾。'
