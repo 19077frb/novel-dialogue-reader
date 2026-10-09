@@ -1304,6 +1304,7 @@ textarea:focus-visible {
 
 .ndr-batch-task-table {
   width: 100%;
+  min-width: 720px;
   border-collapse: collapse;
   font-size: 0.9rem;
 }
@@ -1314,7 +1315,13 @@ textarea:focus-visible {
   border-bottom: 1px solid var(--ndr-border);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
+
+.ndr-batch-task-table td:last-child { min-width: 110px; }
+.ndr-batch-task-table th { white-space: nowrap; }
+.ndr-batch-task-table td:last-child > button,
+.ndr-batch-task-table td:last-child > .ndr-button { margin: 0 6px 6px 0; }
 
 .ndr-batch-task-table tbody tr[data-task-state='running'] {
   background: color-mix(in srgb, var(--ndr-accent) 10%, transparent);
@@ -1524,6 +1531,8 @@ textarea:focus-visible {
 
 .ndr-task-queue-list { list-style: none; padding: 0; }
 .ndr-task-queue-range { min-width: 0; overflow-wrap: anywhere; }
+.ndr-task-queue-range .ndr-step-heading { flex-wrap: wrap; align-items: center; }
+.ndr-task-queue-range .ndr-step-heading > strong { flex: 1 1 220px; }
 .ndr-task-queue-list > li { padding: 12px 0; border-bottom: 1px solid var(--ndr-border); overflow-wrap: anywhere; }
 .ndr-task-queue-list > li > span { margin-right: 12px; color: var(--ndr-muted); }
 .ndr-task-queue-list > li > button { margin: 8px 8px 0 0; }

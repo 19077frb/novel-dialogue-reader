@@ -6,6 +6,12 @@ import { describe, expect, it } from 'vitest'
 const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/styles/global.css'), 'utf8')
 
 describe('shared UI design rules', () => {
+  it('keeps shared task tables readable with horizontal scrolling on narrow screens', () => {
+    expect(css).toMatch(/\.ndr-table-wrap\s*\{[^}]*overflow-x:\s*auto/)
+    expect(css).toMatch(/\.ndr-batch-task-table\s*\{[^}]*min-width:\s*720px/)
+    expect(css).toMatch(/\.ndr-batch-task-table th\s*\{[^}]*white-space:\s*nowrap/)
+    expect(css).toMatch(/\.ndr-task-queue-range \.ndr-step-heading\s*\{[^}]*flex-wrap:\s*wrap/)
+  })
   it('lets model cards and form groups shrink on narrow screens without clipping long addresses', () => {
     expect(css).toContain('minmax(min(100%, 320px), 1fr)')
     expect(css).toMatch(/\.ndr-profile-card dl\s*\{[^}]*minmax\(0, 1fr\)/)
