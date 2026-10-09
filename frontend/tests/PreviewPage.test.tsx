@@ -965,6 +965,56 @@ describe('PreviewPage', () => {
     await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'))
   })
 
+  it.each([
+    'RATE_LIMITED: 人物分析失败：模型服务限制请求频率（429）',
+    'PROVIDER_QUOTA_EXHAUSTED: 人物分析失败：模型服务余额或额度不足（402）',
+    '人物分析失败：提供方返回 429',
+  ])('批量人物遇到服务拒绝后不连续派发后续章节：%s', async message => {
+    const chapters = Array.from({ length: 3 }, (_, i) => ({ ...CHAPTERS[0], id: `c${i + 1}`, ordinal: i,
+      title: `第${i + 1}章`, start_cp: i * 20, end_cp: (i + 1) * 20, dialogue_processed: false })) as ChapterOut[]
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue(chapters)
+    vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue({ ...JOB, state: 'FAILED', last_error: message,
+      unknown_usage_runs: 0, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, unknown_runs: 0 } } as JobDetailOut)
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await screen.findByTestId('batch-processor')
+    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '2' } })
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await screen.findByTestId('batch-estimate')
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await waitFor(() => expect(screen.getByTestId('batch-error')).toHaveTextContent('请先解决模型服务问题'))
+    expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
+    const rows = within(screen.getByTestId('batch-result-panel')).getAllByRole('row')
+    expect(rows.some(row => row.getAttribute('data-task-state') === 'failed')).toBe(true)
+    expect(rows.some(row => row.getAttribute('data-task-state') === 'cancelled')).toBe(true)
+  })
+
+  it('批量对白遇到服务余额不足保留失败并停止后续派发', async () => {
+    const chapters = Array.from({ length: 4 }, (_, i) => ({ ...CHAPTERS[0], id: `c${i + 1}`, ordinal: i,
+      title: `第${i + 1}章`, start_cp: i * 20, end_cp: (i + 1) * 20, dialogue_processed: false })) as ChapterOut[]
+    const metered = { ...JOB, unknown_usage_runs: 0,
+      usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20, unknown_runs: 0 } } as JobDetailOut
+    vi.mocked(booksApi.fetchChapters).mockResolvedValue(chapters)
+    vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(metered)
+    vi.mocked(jobsApi.createJob).mockResolvedValue({ ...metered, state: 'FAILED',
+      last_error: 'PROVIDER_QUOTA_EXHAUSTED: 模型服务余额或额度不足（402）' })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await screen.findByTestId('batch-processor')
+    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '1' } })
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await screen.findByTestId('batch-estimate')
+    await userEvent.click(screen.getByTestId('batch-run'))
+    await waitFor(() => expect(screen.getByTestId('batch-error')).toHaveTextContent('请先解决模型服务问题'))
+    expect(vi.mocked(charactersApi.analyzeCharacterRoster).mock.calls.length).toBeLessThan(4)
+    expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
+    const rows = within(screen.getByTestId('batch-result-panel')).getAllByRole('row')
+    expect(rows.some(row => row.getAttribute('data-task-state') === 'completed')).toBe(true)
+    expect(rows.some(row => row.getAttribute('data-task-state') === 'failed')).toBe(true)
+  })
+
   it('单个章节失败不会把后续章节统一标为失败', async () => {
     const threeChapters = [
       { ...CHAPTERS[0], dialogue_processed: false },

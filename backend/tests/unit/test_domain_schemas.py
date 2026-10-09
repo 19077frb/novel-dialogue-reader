@@ -90,6 +90,7 @@ def test_error_codes_have_http_status_mapping() -> None:
     assert STATUS_BY_CODE[ErrorCode.PAYLOAD_TOO_LARGE] == 413
     assert STATUS_BY_CODE[ErrorCode.UNSUPPORTED_MEDIA_TYPE] == 415
     assert STATUS_BY_CODE[ErrorCode.RATE_LIMITED] == 429
+    assert STATUS_BY_CODE[ErrorCode.PROVIDER_QUOTA_EXHAUSTED] == 402
 
 
 def test_data_envelope_and_page_shapes() -> None:

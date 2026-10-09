@@ -13,6 +13,7 @@ from ..domain.enums import ErrorCode
 
 class ProviderErrorKind(StrEnum):
     AUTH = "AUTH"
+    QUOTA_EXHAUSTED = "QUOTA_EXHAUSTED"
     MODEL_NOT_FOUND = "MODEL_NOT_FOUND"
     RATE_LIMITED = "RATE_LIMITED"
     TIMEOUT = "TIMEOUT"
@@ -24,6 +25,7 @@ class ProviderErrorKind(StrEnum):
 
 KIND_TO_CODE: dict[ProviderErrorKind, ErrorCode] = {
     ProviderErrorKind.AUTH: ErrorCode.PROVIDER_AUTH_FAILED,
+    ProviderErrorKind.QUOTA_EXHAUSTED: ErrorCode.PROVIDER_QUOTA_EXHAUSTED,
     ProviderErrorKind.MODEL_NOT_FOUND: ErrorCode.MODEL_NOT_FOUND,
     ProviderErrorKind.RATE_LIMITED: ErrorCode.RATE_LIMITED,
     ProviderErrorKind.TIMEOUT: ErrorCode.PROVIDER_TIMEOUT,

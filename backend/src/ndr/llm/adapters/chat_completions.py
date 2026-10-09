@@ -67,6 +67,8 @@ def sanitize(text: str, *, limit: int = ERROR_BODY_SNIPPET_CHARS) -> str:
 
 
 def _status_to_kind(status_code: int) -> ProviderErrorKind:
+    if status_code == 402:
+        return ProviderErrorKind.QUOTA_EXHAUSTED
     if status_code in (401, 403):
         return ProviderErrorKind.AUTH
     if status_code == 404:
@@ -175,7 +177,11 @@ class ChatCompletionsAdapter:
             snippet = sanitize(response.text)
             raise ProviderError(
                 kind,
-                f"提供方返回 {response.status_code}",
+                ("模型服务余额或额度不足（402），请检查服务账户或更换模型配置"
+                 if kind is ProviderErrorKind.QUOTA_EXHAUSTED else
+                 "模型服务限制请求频率（429），请降低并发并稍后重试"
+                 if kind is ProviderErrorKind.RATE_LIMITED else
+                 f"提供方返回 {response.status_code}"),
                 details={"status_code": response.status_code, "body": snippet},
                 receipt={"http_status": response.status_code, "body": response.text},
             )
