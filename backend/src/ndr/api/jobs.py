@@ -14,10 +14,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlalchemy import Integer, func, select, tuple_
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from ..domain.common import CursorPage, DataEnvelope
-from ..domain.enums import CredentialMode, JobKind, JobState
+from ..domain.common import CursorPage, DataEnvelope, ErrorEnvelope
+from ..domain.enums import CredentialMode, ErrorCode, JobKind, JobState
 from ..domain.jobs import (
     JobCreate,
     JobDetailOut,
@@ -35,7 +36,12 @@ from ..jobs.service import (
 )
 from ..recovery.service import job_recovery, profile_snapshot_of
 from ..storage.models import Book, BookVersion, Chapter, Job, JobWindow, ModelProfile, Quote
-from ..storage.transactions import admission_transaction, transaction
+from ..storage.transactions import (
+    database_error_detail,
+    finish_local_write,
+    sqlite_lock_error,
+    transaction,
+)
 from .deps import get_session
 from .errors import ApiError, current_request_id
 from .pagination import decode_cursor, encode_cursor
@@ -147,7 +153,8 @@ def recent_jobs_route(
     )
 
 
-@router.post("", status_code=202, response_model=DataEnvelope[JobDetailOut], summary="创建任务")
+@router.post("", status_code=202, response_model=DataEnvelope[JobDetailOut], summary="创建任务",
+             responses={503: {"model": ErrorEnvelope, "description": "数据库繁忙，提交已回滚"}})
 def create_job_route(
     request: Request,
     payload: JobCreate,
@@ -157,7 +164,7 @@ def create_job_route(
     credentials = request.app.state.credentials
     factory = request.app.state.session_factory
 
-    with admission_transaction(factory) as session:
+    def admit(session):  # noqa: ANN001 - local write callback, no network calls
         book = session.get(Book, payload.book_id)
         if book is None:
             raise ApiError.not_found("书籍不存在", book_id=payload.book_id)
@@ -198,6 +205,20 @@ def create_job_route(
             ),
         )
         detail = job_detail(session, job)
+        return detail, created
+
+    try:
+        detail, created = finish_local_write(factory, admit)
+    except OperationalError as exc:
+        if not sqlite_lock_error(exc):
+            raise
+        raise ApiError(
+            ErrorCode.INTERNAL_ERROR,
+            "数据库正在保存其他任务，本次提交未完成且未派发模型调用；请稍后重试",
+            status_code=503,
+            details={"task_created": False, "safe_to_retry": True,
+                     "database_error": database_error_detail(exc)},
+        ) from exc
 
     if payload.run_now and created:
         background.add_task(run_job, factory, settings, job_id=detail.id, credentials=credentials)

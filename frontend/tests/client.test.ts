@@ -4,6 +4,20 @@ import { ApiError, apiRequest, readRetryDelay, shouldRetryReadRequest } from '..
 import { fetchBooks } from '../src/api/books'
 
 describe('read query retry policy', () => {
+  it('保留顶层错误编号，内部错误展示编号且不改变其他业务错误文案', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error: { code: 'INTERNAL_ERROR', message: '服务器内部错误', details: {} }, request_id: 'request-123',
+    }), { status: 500 }))
+    try {
+      const error = await apiRequest('/api/jobs', { method: 'POST', body: {} }).catch(value => value)
+      expect(error).toBeInstanceOf(ApiError)
+      if (!(error instanceof ApiError)) throw new Error('Expected ApiError')
+      expect(error.requestId).toBe('request-123')
+      expect(error.message).toBe('服务器内部错误（错误编号：request-123）')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(new ApiError(409, { code: 'RESOURCE_CONFLICT', message: '窗口占用', request_id: 'id' }).message).toBe('窗口占用')
+    } finally { fetchMock.mockRestore() }
+  })
   it('书架分页保留默认地址并编码后续页游标', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(
       JSON.stringify({ data: { items: [], next_cursor: null } }), { status: 200 },
