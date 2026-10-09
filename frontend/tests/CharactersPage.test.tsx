@@ -67,8 +67,17 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
-  it('翻页保留人物草稿，搜索更换后回到第一页，不调用模型', async () => {
+  it('六个人物一页显示完整且不显示分页导航', async () => {
     vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(Array.from({ length: 6 }, (_, i) => ({
+      ...entries[0], character_id: `person-${i}`, name: `人物 ${i}`,
+    })))
+    renderPage()
+    await screen.findByRole('article', { name: '人物 人物 5' })
+    expect(screen.getAllByRole('article', { name: /^人物 人物/ })).toHaveLength(6)
+    expect(screen.queryByRole('navigation', { name: '人物资料分页' })).not.toBeInTheDocument()
+  })
+  it('翻页保留人物草稿，搜索更换后回到第一页，不调用模型', async () => {
+    vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(Array.from({ length: 7 }, (_, i) => ({
       ...entries[0], character_id: `person-${i}`, name: `人物 ${i}`,
     })))
     renderPage()
@@ -77,9 +86,11 @@ describe('CharactersPage', () => {
     await userEvent.type(within(card).getByLabelText('姓名'), '草稿')
     expect(within(card).getByLabelText('姓名')).toHaveValue('人物 0草稿')
     const nav = screen.getByRole('navigation', { name: '人物资料分页' })
+    expect(screen.getAllByRole('article', { name: /^人物 人物/ })).toHaveLength(6)
     await userEvent.click(within(nav).getByRole('button', { name: '下一页' }))
     expect(card).not.toBeVisible()
-    expect(screen.getByRole('article', { name: '人物 人物 5' })).toBeVisible()
+    expect(screen.getByRole('article', { name: '人物 人物 6' })).toBeVisible()
+    expect(screen.getAllByRole('article', { name: /^人物 人物/ })).toHaveLength(1)
     await userEvent.click(within(nav).getByRole('button', { name: '上一页' }))
     expect(within(card).getByLabelText('姓名')).toHaveValue('人物 0草稿')
     await userEvent.click(within(nav).getByRole('button', { name: '下一页' }))
