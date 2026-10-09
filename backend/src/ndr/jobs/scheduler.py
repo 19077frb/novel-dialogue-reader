@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import re
 import time
+import traceback
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -1238,6 +1241,26 @@ def _dispatch_with_bounded_retry(
         )
     )
     request_fingerprint = _request_fingerprint(request_payload, snapshot)
+    from .dialogue_lifecycle import restore_dispatch
+
+    with session_factory() as session:
+        restored = restore_dispatch(
+            session, job_id=job_id, window_id=window.window_id,
+            request=request_payload, snapshot=snapshot, fingerprint=request_fingerprint,
+        )
+    if restored is not None:
+        saved_raw, saved_error, saved_id, saved_elapsed = restored
+        if saved_raw is not None and state.production_expression_task is None:
+            from ..llm.receipt import ProviderResult
+
+            mapped = ProviderResult(
+                _restore_output_references(saved_raw, window),
+                receipt=saved_raw.receipt, original_result=saved_raw.original_result,
+            )
+            mapped.restored_attempt = True
+            mapped.dispatch_attempts = 0
+            saved_raw = mapped
+        return saved_raw, saved_error, saved_id, saved_elapsed
     for index in range(allowed):
         with session_factory() as session:
             run = InferenceRun(
@@ -1288,7 +1311,7 @@ def _dispatch_with_bounded_retry(
 
         # Commit transport evidence before semantic validation or application.
         # A received invalid proposal must not vanish when those steps fail.
-        with session_factory() as session:
+        def persist_returned(session, run_id=run_id, raw=raw, error=error, elapsed_ms=elapsed_ms):
             returned_run = session.get(InferenceRun, run_id)
             if returned_run is not None:
                 save_run_archive(
@@ -1299,7 +1322,10 @@ def _dispatch_with_bounded_retry(
                     elapsed_ms=elapsed_ms,
                     phase="returned",
                 )
-                session.commit()
+
+        from ..storage.transactions import finish_local_write
+
+        finish_local_write(session_factory, persist_returned)
 
         if error is None or error.kind not in AUTO_RETRY_KINDS or index + 1 >= allowed:
             from ..llm.receipt import ProviderResult
@@ -1338,6 +1364,59 @@ def _dispatch_with_bounded_retry(
 
 
 def run_job(
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    *,
+    job_id: str,
+    credentials=None,  # noqa: ANN001
+    adapter_factory: Callable[[Job, dict[str, Any] | None], ProviderAdapter] | None = None,
+    max_windows: int | None = None,
+    policy: BudgetPolicy | None = None,
+) -> JobRunOutcome:
+    from ..storage.transactions import database_error_detail
+    from .dialogue_lifecycle import DIALOGUE_KINDS, acquire, release, settle_interrupted
+
+    with session_factory() as session:
+        job = session.get(Job, job_id)
+        dialogue = job is not None and job.kind in DIALOGUE_KINDS
+        current = job.state if job is not None else JobState.FAILED
+    if dialogue and not acquire(job_id):
+        return JobRunOutcome(job_id=job_id, state=current)
+    try:
+        return _run_job(
+            session_factory, settings, job_id=job_id, credentials=credentials,
+            adapter_factory=adapter_factory, max_windows=max_windows, policy=policy,
+        )
+    except Exception as exc:
+        if not dialogue:
+            raise
+        # Never log SQL statements, parameters or model/novel contents.
+        logging.getLogger(__name__).error(
+            "Dialogue worker exited: job=%s error=%s locations=%s",
+            job_id, database_error_detail(exc),
+            [(os.path.basename(frame.filename), frame.lineno, frame.name)
+             for frame in traceback.extract_tb(exc.__traceback__)],
+        )
+        state = settle_interrupted(session_factory, job_id, exc)
+        with session_factory() as session:
+            rows = list(session.scalars(select(JobWindow).where(JobWindow.job_id == job_id)))
+            failed_job = session.get(Job, job_id)
+            detail = (
+                failed_job.last_error if failed_job is not None else None
+            ) or database_error_detail(exc)
+            usage = spent_tokens(session, job_id)
+        return JobRunOutcome(
+            job_id=job_id, state=state, windows_total=len(rows),
+            windows_done=sum(row.state is JobState.COMPLETED for row in rows),
+            unknown_runs=sum(row.state is JobState.NEEDS_RECONCILIATION for row in rows),
+            errors=[detail], usage=usage,
+        )
+    finally:
+        if dialogue:
+            release(job_id)
+
+
+def _run_job(
     session_factory: sessionmaker[Session],
     settings: Settings,
     *,
@@ -1636,10 +1715,14 @@ def run_job(
         pending_review = selected(job_snapshot) and window.window_id in _json_of(
             job_snapshot.checkpoint_json
         ).get("expression_reviews", {})
+        pending_receipt = window.window_id in _json_of(
+            job_snapshot.checkpoint_json
+        ).get("dialogue_receipts", {})
         if (
             max_input is not None
             and spent["input_tokens"] + reserve > int(max_input)
             and not pending_review
+            and not pending_receipt
         ):
             with session_factory() as session:
                 job = session.get(Job, job_id)
@@ -1664,6 +1747,14 @@ def run_job(
         )
         window_adapter = strong_adapter if route.strong else adapter
         window_snapshot = strong_snapshot if route.strong else snapshot
+        if pending_receipt:
+            from .dialogue_lifecycle import verify_receipts
+
+            with session_factory() as session:
+                verify_receipts(
+                    session, job_id=job_id, window_id=window.window_id,
+                    snapshot=window_snapshot, fingerprint_for=_request_fingerprint,
+                )
 
         cache_key = _cache_key_for(
             job=job_snapshot,
@@ -1815,13 +1906,26 @@ def run_job(
                         return outcome
                     spent = spent_tokens(session, job_id)
                     max_input = _budget_of(job).get("max_input_tokens")
+                    restoring_retry = False
+                    if pending_receipt:
+                        from .dialogue_lifecycle import restore_dispatch
+
+                        retry_request = _request_payload_for(
+                            window=window, state=state, correction=correction,
+                            max_tokens_override=attempt_max_tokens,
+                        )
+                        restoring_retry = restore_dispatch(
+                            session, job_id=job_id, window_id=window.window_id,
+                            request=retry_request, snapshot=window_snapshot,
+                            fingerprint=_request_fingerprint(retry_request, window_snapshot),
+                        ) is not None
                     retry_reserve = sum(
                         estimate_tokens(message["content"])
                         for message in _request_payload_for(
                             window=window, state=state, correction=correction
                         )["messages"]
                     ) + max(output_reserve, attempt_max_tokens or 0)
-                    if max_input is not None and (
+                    if max_input is not None and not restoring_retry and (
                         spent["input_tokens"] + spent["unknown_runs"] * reserve + retry_reserve
                         > int(max_input)
                     ):
@@ -2322,6 +2426,7 @@ def reconcile_job(session: Session, job: Job, *, action: str) -> dict[str, Any]:
             generations[stage] = generations.get(stage, 0) + 1
         for row in pending:
             row.state = JobState.QUEUED
+            checkpoint.get("dialogue_receipts", {}).pop(row.window_id, None)
             entry = checkpoint.get("expression_reviews", {}).get(row.window_id)
             if entry and entry.get("failed_stage"):
                 stage = entry["failed_stage"]

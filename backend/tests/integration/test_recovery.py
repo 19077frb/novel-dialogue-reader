@@ -204,13 +204,12 @@ def test_restart_marks_unknown_then_requires_explicit_retry(
     )
     run_id = _crash_after_dispatch(app_settings, job["id"])
 
-    # 租约未过期：不能把可能还在进行的请求判成未知
-    recover_on_startup(factory, lease_seconds=3600)
+    # 启动时旧进程已退出，即使租约未过期，也不能继续显示正在执行。
+    summary = recover_on_startup(factory, lease_seconds=3600)
     state = _job_row(app_settings, job["id"])
-    assert state["runs"][0]["state"] == "DISPATCHED"
-
-    summary = recover_on_startup(factory, lease_seconds=0)
-    assert run_id in summary.stale_runs
+    assert job["id"] in summary.interrupted_jobs
+    with factory() as session:
+        assert session.get(InferenceRun, run_id).state is InferenceRunState.UNKNOWN_OUTCOME
     state = _job_row(app_settings, job["id"])
     assert state["state"] == "NEEDS_RECONCILIATION"
     assert state["runs"][0]["state"] == "UNKNOWN_OUTCOME"

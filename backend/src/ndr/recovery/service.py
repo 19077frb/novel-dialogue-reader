@@ -188,7 +188,7 @@ def job_recovery(
     rows = job_windows(session, job.id)
     done = sum(1 for row in rows if row.state is JobState.COMPLETED)
     remaining = sum(
-        1 for row in rows if row.state in {JobState.QUEUED, JobState.NEEDS_RECONCILIATION}
+        1 for row in rows if row.state is not JobState.COMPLETED
     )
     runs = list(
         session.execute(select(InferenceRun).where(InferenceRun.job_id == job.id)).scalars()
@@ -247,6 +247,15 @@ def job_recovery(
     if json.loads(job.checkpoint_json or "{}").get("superseded_by"):
         result.actions = []
         result.summary = "本章已有新的人物任务接替；旧记录保留，不再执行。"
+    if (job.kind in {JobKind.INFERENCE, JobKind.RECHECK, JobKind.RECOMPUTE}
+            and job.state in {JobState.FAILED, JobState.PARTIAL, JobState.PAUSED}
+            and json.loads(job.checkpoint_json or "{}").get("dialogue_receipts")):
+        result.actions = [RecoveryActionOut(
+            action="resume", label="恢复已返回结果并继续",
+            detail="先校验保存已有返回；后续复核或未处理窗口仍可能调用模型。",
+            paid=True, endpoint="POST /api/jobs/{id}/resume",
+        )]
+        result.summary = "已有模型返回尚未保存完成；恢复时不会重复发送相同请求。"
     return result
 
 
@@ -258,13 +267,30 @@ def recover_on_startup(
 ) -> StartupRecovery:
     """进程重启后的恢复扫描。
 
-    - 超过租约仍是 DISPATCHED 的尝试 → `UNKNOWN_OUTCOME` + 任务/窗口
+    - 旧对白进程未返回的在途尝试立即标为未知；完整返回保留以供显式恢复。
+    - 其他超过租约仍是 DISPATCHED 的尝试 → `UNKNOWN_OUTCOME` + 任务/窗口
       `NEEDS_RECONCILIATION`（不自动重发）。
     - `PAUSING` → `PAUSED`（worker 已随进程退出，暂停确定生效）。
     - `RUNNING` → `PARTIAL`（上次执行被中断；已完成窗口保留，未完成窗口需要用户显式继续）。
     """
 
     summary = StartupRecovery()
+    from ..jobs.dialogue_lifecycle import DIALOGUE_KINDS, settle_interrupted
+
+    with session_factory() as session:
+        interrupted = list(session.scalars(select(Job).where(
+            Job.kind.in_(DIALOGUE_KINDS),
+            Job.state.in_([JobState.RUNNING, JobState.PAUSING]),
+        )))
+        interrupted_ids = [job.id for job in interrupted]
+    for job_id in interrupted_ids:
+        state = settle_interrupted(
+            session_factory, job_id, RuntimeError("process restarted"), startup=True,
+        )
+        if state is JobState.PAUSED:
+            summary.paused_jobs.append(job_id)
+        else:
+            summary.interrupted_jobs.append(job_id)
     summary.stale_runs = reconcile_stale_runs(
         session_factory, lease_seconds=lease_seconds, now=now or datetime.now(tz=UTC)
     )
