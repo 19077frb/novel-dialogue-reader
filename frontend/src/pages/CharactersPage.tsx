@@ -194,7 +194,7 @@ export default function CharactersPage() {
       {directory.data && <p>共 {entries.length} 个人物{term ? `，匹配 ${filtered.length} 个` : ''}</p>}
       {!directory.isPending && !directory.isError && !entries.length && <p>尚未识别人物，请先在预览与处理中分析人物。</p>}
       <CollapsibleBlock title="人物资料列表" summary={`当前显示 ${filtered.length} 个人物`}>
-      <PaginatedItems label="人物资料" pageSize={5} scope={`${bookId}:${term}`} className="ndr-character-list">
+      <PaginatedItems label="人物资料" pageSize={6} scope={`${bookId}:${term}`} className="ndr-character-list">
         {filtered.map((item) => <CharacterEditor key={`${item.character_id}:${item.version}`} item={item} bookId={bookId}
           visibleFromCp={effectiveVisibleFromCp}
           disabled={batchProgress.running || autoMergeBusy}
