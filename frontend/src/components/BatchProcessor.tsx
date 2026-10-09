@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { saveBatchHistory } from '../processing/batchHistory'
 
@@ -817,6 +818,8 @@ interface BatchProcessorProps {
   onFinished: () => void
   showConfiguration?: boolean
   initialChapterId?: string | null
+  progressPlacement?: 'before' | 'after'
+  children?: ReactNode
 }
 
 export interface BatchExecution {
@@ -1493,7 +1496,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
     }
 }
 
-export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished, showConfiguration = true, initialChapterId }: BatchProcessorProps) {
+export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished, showConfiguration = true, initialChapterId, progressPlacement = 'before', children }: BatchProcessorProps) {
   const batchProgress = useBatchProgress(bookId)
   const notifiedFinish = useRef<number | null>(batchProgress.finishedAt)
   useEffect(() => {
@@ -1663,11 +1666,11 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     )
   })()
 
-  if (!showConfiguration) return taskList
+  if (!showConfiguration) return <>{children}{taskList}</>
 
   return (
     <>
-    {taskList}
+    {progressPlacement === 'before' && taskList}
     <section className="card ndr-step-card" data-testid="batch-processor">
       <div className="ndr-step-heading">
         <span className="ndr-step-badge" aria-hidden="true">1</span>
@@ -1742,6 +1745,8 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         {error} {taskList && <a href="#batch-task-list" onClick={() => setTaskListOpen(true)}>查看任务列表</a>}
       </p>}
     </section>
+    {children}
+    {progressPlacement === 'after' && taskList}
     </>
   )
 }

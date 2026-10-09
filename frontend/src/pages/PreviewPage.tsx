@@ -417,6 +417,15 @@ export default function PreviewPage() {
   }
   const runDisabled = runBlockers.length > 0 || jobMutation.isPending
   const selectedTask = singleTasks.find(task => task.job?.id === jobId)
+  const showBatchProcessor = processingMode === 'batch' || batchProgress.running || batchProgress.tasks.length > 0
+  const usagePanel = (
+    <section className="card" data-testid="preview-usage">
+      <h2>用量</h2>
+      {usage.isPending && <p className="hint">正在读取用量…</p>}
+      {usage.isError && <p className="status-error">用量读取失败。</p>}
+      {usage.data && <UsageSummary usage={usage.data} currentJob={currentJob} />}
+    </section>
+  )
 
   if (!bookId) return <p className="status-error">缺少书籍 ID。</p>
 
@@ -696,7 +705,7 @@ export default function PreviewPage() {
         </>
       )}
 
-      {(processingMode === 'batch' || batchProgress.running || batchProgress.tasks.length > 0) && (
+      {showBatchProcessor ? (
         <BatchProcessor
           bookId={bookId}
           initialChapterId={requestedChapterId}
@@ -704,21 +713,17 @@ export default function PreviewPage() {
           chapters={chapters.data ?? []}
           profiles={profiles.data ?? []}
           showConfiguration={processingMode === 'batch'}
+          progressPlacement="after"
           onFinished={() => {
             void queryClient.invalidateQueries({ queryKey: ['window-preview', bookId] })
             void queryClient.invalidateQueries({ queryKey: ['annotations'] })
             void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })
             void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId) })
           }}
-        />
-      )}
-
-      <section className="card">
-        <h2>用量</h2>
-        {usage.isPending && <p className="hint">正在读取用量…</p>}
-        {usage.isError && <p className="status-error">用量读取失败。</p>}
-        {usage.data && <UsageSummary usage={usage.data} currentJob={currentJob} />}
-      </section>
+        >
+          {usagePanel}
+        </BatchProcessor>
+      ) : usagePanel}
 
       <section className="card">
         <div className="ndr-preview-viewbar">
