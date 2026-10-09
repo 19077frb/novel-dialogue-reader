@@ -33,6 +33,14 @@ import { enqueueWork, getAdmissions } from '../processing/workQueue'
 
 class BatchAbortError extends Error {}
 
+function batchJobError(job: JobDetailOut, fallback: string): Error {
+  const message = job.last_error || fallback
+  const serviceBlocked = /^(?:PROVIDER_QUOTA_EXHAUSTED|RATE_LIMITED):/.test(message)
+    || /^人物分析失败：提供方返回 (?:402|429)$/.test(message)
+    || /^INVALID_MODEL_OUTPUT: 提供方返回 402(?:；|$)/.test(message)
+  return serviceBlocked ? new BatchAbortError(`${message}；批量已停止继续派发，请先解决模型服务问题，再重试未完成任务。`) : new Error(message)
+}
+
 function isBatchAbortError(reason: unknown): reason is BatchAbortError {
   return reason instanceof BatchAbortError
 }
@@ -918,7 +926,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         inFlight.delete(promise); wakeQueue?.()
       }, reason => {
         inFlight.delete(promise)
-        if (isBatchAbortError(reason)) { stopRef.current = true; abortReason = reason }
+        if (isBatchAbortError(reason)) { stopRef.current = true; abortReason ??= reason }
         wakeQueue?.()
       })
       return promise
@@ -1112,6 +1120,9 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         if (!existing) reserved += reservation
         try {
           return await task(available === null ? null : reservation)
+        } catch (reason) {
+          if (isBatchAbortError(reason)) { stopRef.current = true; abortReason ??= reason }
+          throw reason
         } finally {
           reserved = Math.max(0, reserved - reservation)
         }
@@ -1140,7 +1151,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         throw new BatchAbortError(`模型没有返回${stage}用量，无法可靠执行 Token 上限，批量处理已停止`)
       }
       try { checkBudgetReminder() } catch (reason) {
-        if (isBatchAbortError(reason)) stopRef.current = true
+        if (isBatchAbortError(reason)) { stopRef.current = true; abortReason ??= reason }
         throw reason
       }
     }
@@ -1213,7 +1224,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
             finishChapterCancellation(bookId, chapter.id)
             return
           }
-          if (rosterJob.state !== 'COMPLETED') throw new Error(rosterJob.last_error || `${prefix}的人物识别未完成`)
+          if (rosterJob.state !== 'COMPLETED') throw batchJobError(rosterJob, `${prefix}的人物识别未完成`)
           const roster = await fetchCharacterRoster(bookId, chapter.id, bookVersionId)
           const accepted = (roster.candidates ?? []).filter((candidate) => Boolean(candidate.canonical_name))
           if (accepted.length === 0) {
@@ -1313,7 +1324,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
               finishChapterCancellation(bookId, chapter.id)
               return
             }
-            if (dialogueJob.state !== 'COMPLETED') throw new Error(dialogueJob.last_error || `${prefix}的窗口 ${windowId} 未完成`)
+            if (dialogueJob.state !== 'COMPLETED') throw batchJobError(dialogueJob, `${prefix}的窗口未完成`)
             updateBatchTask(bookId, taskId, 'completed')
             if (!restoring || restoredSnapshot?.tasks.find(task => task.id === taskId)?.state !== 'completed') recordCompletedWindow(bookId, chapter.id)
           } catch (reason) {
@@ -1416,7 +1427,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         }
         await rosterPromise
         rosterPromise = null
-        if (batchShouldStop(bookId, stopRef.current)) throw new BatchAbortError('批量处理已停止')
+        if (batchShouldStop(bookId, stopRef.current)) throw abortReason ?? new BatchAbortError('批量处理已停止')
         // 本章人物确认成功（或失败/空名单已记录）后，才启动下一章人物。
         // 下一章人物可与已确认章节的对白窗口并发，但人物任务之间绝不并发。
         if (index + 1 < selectedPlans.length) {
@@ -1429,7 +1440,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
         index += 1
       }
       const outcomes = await Promise.allSettled(pendingWork)
-      if (batchShouldStop(bookId, stopRef.current)) throw new BatchAbortError('批量处理已停止')
+      if (batchShouldStop(bookId, stopRef.current)) throw abortReason ?? new BatchAbortError('批量处理已停止')
       const abortOutcome = outcomes.find((outcome) =>
         outcome.status === 'rejected' && isBatchAbortError(outcome.reason)
       )
@@ -1457,7 +1468,8 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
     } catch (reason) {
       stopRef.current = true
       await Promise.allSettled(pendingWork)
-      const message = reason instanceof Error ? reason.message : '批量处理失败'
+      const failure = abortReason ?? reason
+      const message = failure instanceof Error ? failure.message : '批量处理失败'
       setError(message)
       const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
       publishBatch(bookId, {

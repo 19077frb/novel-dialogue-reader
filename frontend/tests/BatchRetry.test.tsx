@@ -105,9 +105,15 @@ it('retries a finished 429 without treating missing usage as an unknown outcome 
   vi.mocked(jobs.createJob).mockImplementation(async input => input.selectedWindowIds?.[0] === 'w1' ? limited : job('COMPLETED'))
   await runBatchProcessing({ bookId: 'b1', bookVersionId: 'v1', requested: [chapter], plans: [{ chapter, estimate }],
     preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: null } })
+  // The rejected first window stops dispatch; the second window was never sent.
+  expect(jobs.createJob).toHaveBeenCalledTimes(1)
+  vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: estimate.windows!.map(window => ({
+    ...window, processing_status: window.window_id === 'w1' ? 'failed' : 'unprocessed',
+  })) } as EstimateOut)
   vi.mocked(jobs.createJob).mockResolvedValue(job('COMPLETED'))
   await expect(retryChapterProcessing('b1', 'c1')).resolves.toBeUndefined()
   expect(jobs.createJob).toHaveBeenCalledTimes(3)
+  expect(vi.mocked(jobs.createJob).mock.calls.slice(1).map(([input]) => input.selectedWindowIds)).toEqual([['w1'], ['w2']])
 })
 
 it('does not resend a receipt that became completed after the browser recorded failure', async () => {

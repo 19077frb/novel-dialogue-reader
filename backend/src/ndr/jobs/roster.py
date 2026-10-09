@@ -408,7 +408,8 @@ def _run_character_roster_job(
                 run.usage_json = _attempt_usage_json(raw, exc)
             if job is not None:
                 job.state = JobState.NEEDS_RECONCILIATION if unknown else JobState.FAILED
-                job.last_error = f"人物分析失败：{exc}"
+                job.last_error = (f"{exc.code.value}: 人物分析失败：{exc}"
+                                  if isinstance(exc, ProviderError) else f"人物分析失败：{exc}")
                 job.progress_json = json.dumps({"stage": job.state.value.lower(), "calls": 1})
                 session.commit()
             outcome.state = JobState.NEEDS_RECONCILIATION if unknown else JobState.FAILED

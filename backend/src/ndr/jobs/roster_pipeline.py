@@ -233,7 +233,7 @@ class _Pipeline:
             }:
                 self.halt(JobState.NEEDS_RECONCILIATION, str(error), stage)
             if error.kind is not ProviderErrorKind.INVALID_OUTPUT:
-                self.halt(JobState.FAILED, error.message, stage)
+                self.halt(JobState.FAILED, f"{error.code.value}: {error.message}", stage)
             failure = error.message
         else:
             try:

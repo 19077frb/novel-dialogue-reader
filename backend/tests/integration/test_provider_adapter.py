@@ -120,6 +120,7 @@ def test_successful_connection_test_returns_usage_and_latency() -> None:
     ("status", "expected_code"),
     [
         (401, ProviderErrorKind.AUTH),
+        (402, ProviderErrorKind.QUOTA_EXHAUSTED),
         (403, ProviderErrorKind.AUTH),
         (404, ProviderErrorKind.MODEL_NOT_FOUND),
         (429, ProviderErrorKind.RATE_LIMITED),
@@ -136,6 +137,21 @@ def test_http_errors_map_to_stable_codes(status: int, expected_code: ProviderErr
     # 对外暴露的是稳定业务错误码（ErrorCode），不是内部 kind
     assert KIND_TO_CODE[expected_code].value in result.detail
     assert result.usage is None  # 失败不伪造用量
+
+
+def test_quota_error_is_not_a_format_error_or_automatic_retry() -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(402, json={"error": {"message": "Insufficient Balance"}})
+
+    result = _run(_adapter(handler).test_connection())
+    assert result.ok is False
+    assert "PROVIDER_QUOTA_EXHAUSTED" in result.detail
+    assert "余额或额度不足" in result.detail
+    assert len(calls) == 1
+    assert ProviderError(ProviderErrorKind.QUOTA_EXHAUSTED, "empty").retryable is False
 
 
 def test_timeout_is_mapped_and_not_reported_as_success() -> None:
