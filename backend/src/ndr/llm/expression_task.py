@@ -17,6 +17,7 @@ PRODUCTION_CACHE_VERSION = "expression-1"
 class ProjectedCompactTask(CompactTask):
     effective_profiles: tuple[dict, ...] = ()
     auxiliary_protocol: str | None = None
+    identity_prompt_version: str | None = None
 
     def validate_effective_profiles(self):
         self.__post_init__()
@@ -54,11 +55,22 @@ class ProjectedCompactTask(CompactTask):
                         raise ValueError("Invalid identity provenance evidence positions")
 
     def messages(self):
+        from ..characters.prompt_catalog import check_version, compact_catalog
+
+        check_version(self.identity_prompt_version)
         messages = super().messages()
         data = json.loads(messages[-1]["content"])
+        profiles = self.effective_profiles
+        if self.identity_prompt_version:
+            profiles = compact_catalog(
+                profiles, context="\n".join(record["text"] for record in self.context),
+            )
+            profiles = [{k: v for k, v in p.items() if k not in {
+                "canonical_name", "aliases", "description",
+            }} for p in profiles]
         data["effective_identity_profiles"] = [
             {**p, "candidate": c.ref, "character_id": c.ref}
-            for c, p in zip(self.candidates, self.effective_profiles, strict=True)
+            for c, p in zip(self.candidates, profiles, strict=True)
         ]
         messages[-1]["content"] = json.dumps(data, ensure_ascii=False)
         return messages
@@ -106,7 +118,9 @@ def bind_sent_identity_profiles(task, state: SceneState):
                           for turn in state.recent_turns if turn.get("speaker_ref") in slots]
 
 
-def build_production_expression_task(window, state: SceneState, *, auxiliary_protocol=None):
+def build_production_expression_task(
+    window, state: SceneState, *, auxiliary_protocol=None, identity_prompt_version=None,
+):
     from ..scenes.runner import _reference_aliases
 
     if not state.projected_identity_input or state.identity_input_horizon is None:
@@ -158,6 +172,7 @@ def build_production_expression_task(window, state: SceneState, *, auxiliary_pro
         visible_horizon_cp=state.identity_input_horizon,
         effective_profiles=profiles,
         auxiliary_protocol=auxiliary_protocol,
+        identity_prompt_version=identity_prompt_version,
     )
     task.validate_effective_profiles()
     return task

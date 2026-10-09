@@ -281,6 +281,11 @@ def _prepare_identity_view(session, job, version, state, window=None, *, people=
         if explicit is not None:
             horizon = min(horizon, int(explicit))
     try:
+        from ..characters.prompt_catalog import check_version
+
+        prompt_version = _range_of(job).get("identity_prompt_version")
+        check_version(prompt_version)
+        state.identity_prompt_version = prompt_version
         project_identity_state(
             state,
             people if people is not None else list_book_characters(session, version),
@@ -294,7 +299,8 @@ def _prepare_identity_view(session, job, version, state, window=None, *, people=
             raise ValueError("不支持的对白输出协议")
         if output_protocol and window is not None:
             state.production_expression_task = build_production_expression_task(
-                window, state, auxiliary_protocol=_range_of(job).get("auxiliary_protocol")
+                window, state, auxiliary_protocol=_range_of(job).get("auxiliary_protocol"),
+                identity_prompt_version=prompt_version,
             )
     except (ValueError, TypeError, KeyError) as exc:
         return False, f"人物资料无法安全读取：{exc}"

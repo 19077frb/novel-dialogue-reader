@@ -258,6 +258,7 @@ def _messages_for(
         for slot in state.participants
     ]
     confirmed_records = [item.prompt_record() for item in state.confirmed_characters]
+    book_records = [item.prompt_record() for item in state.book_characters]
     pov_character = next(
         (
             item.prompt_record()
@@ -266,6 +267,15 @@ def _messages_for(
         ),
         None,
     )
+    if state.identity_prompt_version:
+        from ..characters.prompt_catalog import check_version, compact_catalog
+
+        check_version(state.identity_prompt_version)
+        context = "\n".join(f.text for f in window.fragments)
+        confirmed_records = compact_catalog(confirmed_records, context=context)
+        book_records = compact_catalog(book_records, context=context)
+        if pov_character is not None:
+            pov_character = compact_catalog([pov_character], context=context)[0]
     messages = build_labeling_messages(
         context_lines=(),
         context_records=context_records,
@@ -283,7 +293,7 @@ def _messages_for(
             for name, description in state.known_characters.items()
         ],
         confirmed_characters=confirmed_records,
-        book_characters=[item.prompt_record() for item in state.book_characters],
+        book_characters=book_records,
         pov_character=pov_character,
         evidence_ids=[alias(ref) for ref in window.fragment_ids],
         locked_summary=locked_summary or state.prompt_state(max_chars=600),
