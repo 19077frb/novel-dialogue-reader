@@ -8,6 +8,7 @@ import * as booksApi from '../src/api/books'
 import type { ChapterRosterOut, JobDetailOut } from '../src/api/types'
 import { CharacterRosterPanel } from '../src/components/CharacterRosterPanel'
 import { updateProcessingPreferences } from '../src/processing/preferences'
+import { updateGeneralSettings } from '../src/settings/preferences'
 
 vi.mock('../src/api/characters', async importOriginal => ({
   ...await importOriginal<typeof import('../src/api/characters')>(),
@@ -46,6 +47,7 @@ beforeEach(() => {
 })
 
 it('submits shared repair limits and quota with a new single-chapter analysis', async () => {
+  updateGeneralSettings({ enableExperimentalFeatures: true })
   updateProcessingPreferences({ rosterRepairEnabled: true, maxRosterRepairs: 2, maxFormatRetries: 3, tokenLimit: 50000 })
   const completed = { id: 'new-roster', state: 'COMPLETED' } as JobDetailOut
   vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(completed)

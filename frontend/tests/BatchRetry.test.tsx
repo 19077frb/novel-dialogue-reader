@@ -396,6 +396,7 @@ it('retries failed people first and continues only remaining windows', async () 
 })
 
 it('keeps original roster repair settings on failed-task retry after preferences change', async () => {
+  updateGeneralSettings({ enableExperimentalFeatures: true })
   updateProcessingPreferences({ rosterRepairEnabled: true, maxRosterRepairs: 2, maxFormatRetries: 3 })
   vi.mocked(characters.analyzeCharacterRoster).mockResolvedValueOnce(job('FAILED'))
   await start()

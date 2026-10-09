@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,6 +8,7 @@ import * as profilesApi from '../src/api/profiles'
 import * as jobsApi from '../src/api/jobs'
 import * as completion from '../src/processing/jobCompletion'
 import { updateProcessingPreferences } from '../src/processing/preferences'
+import { updateGeneralSettings } from '../src/settings/preferences'
 import type { CharacterDirectoryOut } from '../src/api/types'
 import CharactersPage from '../src/pages/CharactersPage'
 import { renderRoute } from './helpers'
@@ -139,12 +140,13 @@ describe('CharactersPage', () => {
     expect(within(anonymous).getByText(/请先保存人物资料，纳入全书人物后再设置颜色/)).toBeVisible()
   })
   it('按用户选择的揭示章节提交人物修改，默认不推断提前可见', async () => {
+    updateGeneralSettings({ enableExperimentalFeatures: true })
     vi.mocked(booksApi.fetchChapters).mockResolvedValue([
       { id: 'c1', ordinal: 0, title: '第一章', start_cp: 0, end_cp: 100 },
       { id: 'c2', ordinal: 1, title: '第二章', start_cp: 100, end_cp: 200 },
     ] as never)
     renderPage()
-    const select = await screen.findByLabelText('本次人物修改从哪一章起可见（初读）')
+    const select = await screen.findByLabelText('本次人物修改从哪一章起可见（初读·试验）')
     expect(select).toHaveValue('')
     await screen.findByRole('option', { name: '第二章结束后' })
     await waitFor(() => expect(select).toBeEnabled())
@@ -153,6 +155,12 @@ describe('CharactersPage', () => {
     await userEvent.click(within(card).getByRole('button', { name: '保存人物资料' }))
     await waitFor(() => expect(api.editBookCharacter).toHaveBeenCalledWith('b1', 'u1',
       expect.objectContaining({ visible_from_cp: 200 })))
+    act(() => updateGeneralSettings({ enableExperimentalFeatures: false }))
+    expect(screen.queryByLabelText(/本次人物修改从哪一章/)).not.toBeInTheDocument()
+    await waitFor(() => expect(within(card).getByRole('button', { name: '保存人物资料' })).toBeEnabled())
+    await userEvent.click(within(card).getByRole('button', { name: '保存人物资料' }))
+    await waitFor(() => expect(api.editBookCharacter).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(api.editBookCharacter).mock.calls[1][2]).not.toHaveProperty('visible_from_cp')
   })
   it('折叠人物资料不丢失未保存编辑，也不发起修改或模型请求', async () => {
     renderPage()

@@ -223,7 +223,7 @@ export function recheckQuote(
         max_recheck_rounds: input.maxRecheckRounds ?? 0,
         max_format_retries: input.maxFormatRetries ?? 1,
       },
-      reading_mode: input.readingMode ?? 'initial',
+      reading_mode: input.readingMode ?? 'reread',
       visible_horizon_cp: null,
       idempotency_key: input.idempotencyKey,
       run_now: input.runNow ?? true,

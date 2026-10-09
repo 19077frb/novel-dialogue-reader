@@ -11,6 +11,7 @@ import { CollapsibleBlock } from '../components/CollapsibleBlock'
 import { PaginatedItems } from '../components/ListPagination'
 import { DisabledHint } from '../components/DisabledHint'
 import { colorForIndex } from '../styles/palette'
+import { useGeneralSettings } from '../settings/preferences'
 
 const COLOR_NAMES = ['蓝色', '橙色', '绿色', '红色', '紫色', '青色', '金黄色', '粉色',
   '棕色', '墨绿色', '靛蓝色', '酒红色', '橄榄绿', '灰蓝色', '灰紫色', '深灰色']
@@ -109,6 +110,7 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
 }
 
 export default function CharactersPage() {
+  const [settings] = useGeneralSettings()
   const { bookId = '' } = useParams<{ bookId: string }>()
   const [searchParams] = useSearchParams()
   const chapterId = searchParams.get('chapterId')
@@ -116,6 +118,7 @@ export default function CharactersPage() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [visibleFromCp, setVisibleFromCp] = useState<number | null>(null)
+  const effectiveVisibleFromCp = settings.enableExperimentalFeatures ? visibleFromCp : null
   const [message, setMessage] = useState('')
   const batchProgress = useBatchProgress(bookId)
   const [autoMergeBusy, setAutoMergeBusy] = useState(false)
@@ -130,7 +133,7 @@ export default function CharactersPage() {
     enabled: Boolean(bookId),
   })
   const chapters = useQuery({ queryKey: queryKeys.chapters(bookId),
-    queryFn: ({ signal }) => fetchChapters(bookId, signal), enabled: Boolean(bookId) })
+    queryFn: ({ signal }) => fetchChapters(bookId, signal), enabled: Boolean(bookId) && settings.enableExperimentalFeatures })
   const saved = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['character-directory', bookId] }),
@@ -160,8 +163,8 @@ export default function CharactersPage() {
         <Link to="/library">返回书架</Link>
       </nav>
     </header>
-    <section className="card">
-      <label className="ndr-field">本次人物修改从哪一章起可见（初读）
+    {settings.enableExperimentalFeatures && <section className="card">
+      <label className="ndr-field">本次人物修改从哪一章起可见（初读·试验）
         <select value={visibleFromCp ?? ''} disabled={batchProgress.running || autoMergeBusy}
           title={batchProgress.running || autoMergeBusy ? '本书任务或合并决定正在执行，请等待结束或先停止任务，再调整可见章节。' : undefined}
           onChange={event => setVisibleFromCp(event.target.value === '' ? null : Number(event.target.value))}>
@@ -173,13 +176,13 @@ export default function CharactersPage() {
       </label>
       <p className="hint">适用于本次保存资料、手动合并及接受自动合并建议。更早章节保留当时的姓名、说明与不同身份；重读立即显示最终结果。请选择原文已经揭示该信息的章节，不确定时保留默认。</p>
       {chapters.isError && <p role="alert" className="status-error">可见章节读取失败：{chapters.error.message}，可使用全书末尾或重新读取页面。</p>}
-    </section>
-    <CharacterAutoMerge key={bookId} bookId={bookId} versionId={book.data?.active_version_id} count={entries.length} visibleFromCp={visibleFromCp}
+    </section>}
+    <CharacterAutoMerge key={bookId} bookId={bookId} versionId={book.data?.active_version_id} count={entries.length} visibleFromCp={effectiveVisibleFromCp}
       disabled={batchProgress.running} onBusyChange={setAutoMergeBusy} onSaved={saved} />
     <section className="card">
       <p className="hint">汇总当前书籍版本已识别的人物（包括未发言人物），可能包含后文剧透。人工确认只是来源记录，并不表示永远正确；仍可手动修改，或让模型提出更名、合并与说明修正建议，预览接受后才生效。后台是否更新人工姓名与说明由通用设置决定，默认关闭。修改会影响已有对白、后续人物识别和导出，不改原文或章节完成状态。请先停止本书处理任务再编辑。</p>
       {(batchProgress.running || autoMergeBusy) && <p role="status">本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。</p>}
-      <p className="hint">颜色由程序生成，保存不调用模型、不更改人工确认状态。选择“自动分配”可恢复；自动占用的色号会为手动选择让位。改色在初读和重读中均生效。</p>
+      <p className="hint">颜色由程序生成，保存不调用模型、不更改人工确认状态。选择“自动分配”可恢复；自动占用的色号会为手动选择让位。改色在所有阅读模式中均生效。</p>
       {message && <p role="status">{message}</p>}
       <div className="ndr-toolbar">
         <label className="ndr-field">搜索人物<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="姓名、别名或说明" /></label>
@@ -193,7 +196,7 @@ export default function CharactersPage() {
       <CollapsibleBlock title="人物资料列表" summary={`当前显示 ${filtered.length} 个人物`}>
       <PaginatedItems label="人物资料" pageSize={5} scope={`${bookId}:${term}`} className="ndr-character-list">
         {filtered.map((item) => <CharacterEditor key={`${item.character_id}:${item.version}`} item={item} bookId={bookId}
-          visibleFromCp={visibleFromCp}
+          visibleFromCp={effectiveVisibleFromCp}
           disabled={batchProgress.running || autoMergeBusy}
           targets={entries.filter((row) => row.kind !== 'speaker' && row.character_id !== item.character_id)} onSaved={saved} />)}
       </PaginatedItems>

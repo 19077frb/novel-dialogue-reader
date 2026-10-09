@@ -6,6 +6,7 @@ import * as reviewApi from '../src/api/review'
 import * as jobsApi from '../src/api/jobs'
 import { RecheckPanel } from '../src/components/RecheckPanel'
 import { updateProcessingPreferences } from '../src/processing/preferences'
+import { updateGeneralSettings } from '../src/settings/preferences'
 import type { JobDetailOut, ModelProfileOut } from '../src/api/types'
 import { renderWithProviders } from './helpers'
 
@@ -22,6 +23,7 @@ const profile: ModelProfileOut = {
 }
 beforeEach(() => {
   localStorage.clear()
+  updateGeneralSettings({ enableExperimentalFeatures: true })
   vi.clearAllMocks()
   vi.mocked(jobsApi.fetchRecentJobs).mockResolvedValue([])
   vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile])

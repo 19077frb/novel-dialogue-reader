@@ -46,7 +46,7 @@ export function previewExport(
     body: {
       book_version_id: null,
       chapter_ids: input.chapterIds ?? null,
-      visibility_policy: input.visibilityPolicy ?? 'position_safe',
+      visibility_policy: input.visibilityPolicy ?? 'reread',
       style: stylePayload(input.style),
     },
   })

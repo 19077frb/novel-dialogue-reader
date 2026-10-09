@@ -64,6 +64,7 @@ def test_import_txt_then_read_whole_book(migrated_client: TestClient) -> None:
     book = migrated_client.get(f"/api/books/{data['book_id']}").json()["data"]
     assert book["id"] == data["book_id"]
     assert book["format"] == "TXT"
+    assert book["reading_mode"] == "reread"
     assert book["active_version"]["canonical_length_cp"] == len(SAMPLE)
     assert book["active_version"]["encoding"] == "utf-8"
     # 不向客户端暴露磁盘路径。
@@ -131,12 +132,21 @@ def test_auto_detected_import_without_encoding(migrated_client: TestClient) -> N
 def test_repeated_import_reuses_book_and_version(migrated_client: TestClient) -> None:
     raw = SAMPLE.encode("utf-8")
     first = _import(migrated_client, raw).json()["data"]
+    changed = migrated_client.put(
+        f"/api/books/{first['book_id']}/reading-progress",
+        json={"book_version_id": first["book_version_id"], "read_position_cp": 5,
+              "reading_mode": "initial", "expected_version": 1},
+    )
+    assert changed.status_code == 200, changed.text
     second = _import(migrated_client, raw).json()["data"]
 
     assert second["book_id"] == first["book_id"]
     assert second["book_version_id"] == first["book_version_id"]
     assert second["reused_book"] is True
     assert second["reused_version"] is True
+    book = migrated_client.get(f"/api/books/{first['book_id']}").json()["data"]
+    assert book["reading_mode"] == "initial"
+    assert book["read_position_cp"] == 5
 
     books = migrated_client.get("/api/books").json()["data"]["items"]
     assert len(books) == 1

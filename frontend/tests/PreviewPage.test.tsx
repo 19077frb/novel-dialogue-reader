@@ -290,6 +290,7 @@ const USAGE = {
 describe('PreviewPage', () => {
   beforeEach(() => {
     localStorage.clear()
+    updateGeneralSettings({ enableExperimentalFeatures: true })
     vi.mocked(booksApi.fetchBook).mockReset()
     vi.mocked(booksApi.fetchChapters).mockReset()
     vi.mocked(booksApi.fetchContent).mockReset()

@@ -49,6 +49,7 @@ describe('shared processing preferences', () => {
   })
 
   it.each(['complete-review', 'complete-blocks', 'complete-blocks-review', 'complete-blocks-isolated', 'complete-blocks-isolated-review', 'complete-blocks-isolated-feedback-review'] as const)('persists %s and never upgrades old or unknown values', async dialogueStrategy => {
+    ;(await import('../src/settings/preferences')).updateGeneralSettings({ enableExperimentalFeatures: true })
     const module = await import('../src/processing/preferences')
     expect(module.getProcessingPreferences().dialogueStrategy).toBe('legacy')
     module.updateProcessingPreferences({ dialogueStrategy })
@@ -59,11 +60,30 @@ describe('shared processing preferences', () => {
   })
 
   it('persists explicit repair settings and safely normalizes old or invalid values', async () => {
+    ;(await import('../src/settings/preferences')).updateGeneralSettings({ enableExperimentalFeatures: true })
     const module = await import('../src/processing/preferences')
     localStorage.setItem(module.PROCESSING_PREFERENCES_KEY, JSON.stringify({ rosterRepairEnabled: 'true', maxRosterRepairs: -1 }))
     expect(module.getProcessingPreferences()).toMatchObject({ rosterRepairEnabled: false, maxRosterRepairs: 1 })
     module.updateProcessingPreferences({ rosterRepairEnabled: true, maxRosterRepairs: 9 })
     vi.resetModules()
     expect((await import('../src/processing/preferences')).getProcessingPreferences()).toMatchObject({ rosterRepairEnabled: true, maxRosterRepairs: 5 })
+  })
+
+  it('hides saved experiments from new workflows without rewriting frozen tasks or saved choices', async () => {
+    const general = await import('../src/settings/preferences')
+    const module = await import('../src/processing/preferences')
+    expect(general.getGeneralSettings().enableExperimentalFeatures).toBe(false)
+    module.updateProcessingPreferences({ dialogueStrategy: 'complete-blocks-isolated-review', rosterRepairEnabled: true })
+    const frozen = { ...module.getStoredProcessingPreferences() }
+    expect(module.getProcessingPreferences()).toMatchObject({ dialogueStrategy: 'legacy', rosterRepairEnabled: false })
+    expect(module.getProcessingPreferences()).toBe(module.getProcessingPreferences())
+    module.updateProcessingPreferences({ concurrency: 4 })
+    expect(module.getStoredProcessingPreferences()).toMatchObject({ dialogueStrategy: frozen.dialogueStrategy, rosterRepairEnabled: true })
+    general.updateGeneralSettings({ enableExperimentalFeatures: true })
+    expect(module.getProcessingPreferences()).toMatchObject({ dialogueStrategy: frozen.dialogueStrategy, rosterRepairEnabled: true, concurrency: 4 })
+    general.updateGeneralSettings({ enableExperimentalFeatures: false })
+    expect(module.getProcessingPreferences().dialogueStrategy).toBe('legacy')
+    expect(frozen.rosterRepairEnabled).toBe(true)
+    expect(module.rosterRepairOptions(frozen).rosterRepairEnabled).toBe(true)
   })
 })

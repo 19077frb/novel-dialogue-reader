@@ -23,6 +23,7 @@ import { ExportProgress } from './ExportProgress'
 import { ExportScopePicker } from './ExportScopePicker'
 import { ExportStylePreview } from './ExportStylePreview'
 import { OperationTimer, useOperationClock } from './OperationTimer'
+import { useGeneralSettings } from '../settings/preferences'
 
 export interface ExportDialogProps {
   bookId: string
@@ -46,7 +47,9 @@ export function ExportDialog({
   const [scope, setScope] = useState<'book' | 'chapters'>('book')
   const [selectedChapterIds, setSelectedChapterIds] = useState<string[]>([])
   const [style, setStyle] = useState<ExportStylePreset>('color_and_label')
-  const [visibilityPolicy, setVisibilityPolicy] = useState<VisibilityPolicy>('position_safe')
+  const [settings] = useGeneralSettings()
+  const [selectedPolicy, setVisibilityPolicy] = useState<VisibilityPolicy>('reread')
+  const visibilityPolicy: VisibilityPolicy = settings.enableExperimentalFeatures ? selectedPolicy : 'reread'
   const [format, setFormat] = useState<ExportFormat>('epub')
   const [artifact, setArtifact] = useState<ExportArtifactOut | null>(null)
   // 记录「生成时用的快照指纹」：用来判断标注是否在生成之后又变了（内容哈希，不是行 ID）
@@ -171,8 +174,8 @@ export function ExportDialog({
         />
         <ExportStylePreview value={style} onChange={setStyle} />
 
-        <fieldset className="ndr-export-policy" data-testid="export-policy">
-          <legend>初读策略</legend>
+        {settings.enableExperimentalFeatures && <fieldset className="ndr-export-policy" data-testid="export-policy">
+          <legend>标注显示模式</legend>
           <label>
             <input
               type="radio"
@@ -181,7 +184,7 @@ export function ExportDialog({
               onChange={() => setVisibilityPolicy('position_safe')}
               data-testid="export-policy-position-safe"
             />
-            初读安全（只到阅读位置 {readPositionCp} 为止的证据）
+            初读安全（试验，只到阅读位置 {readPositionCp} 为止的证据）
           </label>
           <label>
             <input
@@ -193,7 +196,7 @@ export function ExportDialog({
             />
             重读（显示完整标注）
           </label>
-        </fieldset>
+        </fieldset>}
 
         <fieldset className="ndr-export-format" data-testid="export-format">
           <legend>格式</legend>

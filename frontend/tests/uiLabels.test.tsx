@@ -50,7 +50,7 @@ describe('Chinese display labels and processing choices', () => {
   })
   it('groups all existing strategies without changing values or hiding costs and locks', () => {
     const change = vi.fn()
-    const { rerender } = render(<DialogueStrategySettings value="complete-blocks-isolated-review" onChange={change} rounds={1} />)
+    const { rerender } = render(<DialogueStrategySettings experimentalEnabled value="complete-blocks-isolated-review" onChange={change} rounds={1} />)
     const select = screen.getByTestId('dialogue-strategy')
     expect(select.querySelectorAll('option')).toHaveLength(8)
     expect(select.querySelectorAll('optgroup')).toHaveLength(2)
@@ -59,14 +59,14 @@ describe('Chinese display labels and processing choices', () => {
     fireEvent.click(screen.getByRole('button', { name: '展开策略区别与使用说明' }))
     fireEvent.change(select, { target: { value: 'legacy' } })
     expect(change).toHaveBeenCalledWith('legacy')
-    rerender(<DialogueStrategySettings value="complete-blocks-isolated-feedback-review" onChange={change} rounds={0} disabled disabledReason="等待当前任务结束" />)
+    rerender(<DialogueStrategySettings experimentalEnabled value="complete-blocks-isolated-feedback-review" onChange={change} rounds={0} disabled disabledReason="等待当前任务结束" />)
     expect(select).toBeDisabled()
     expect(screen.getByText('等待当前任务结束')).toBeVisible()
     expect(screen.getByText(/人物名单反馈需要独立复核/)).toBeVisible()
   })
   it('gives plain selection guidance without changing existing choices', () => {
     const change = vi.fn()
-    const { rerender } = render(<DialogueStrategySettings value="legacy" onChange={change} rounds={1} />)
+    const { rerender } = render(<DialogueStrategySettings experimentalEnabled value="legacy" onChange={change} rounds={1} />)
     const select = screen.getByTestId('dialogue-strategy')
     expect(select).toHaveValue('legacy')
     expect(screen.queryByText('原有窗口流程')).not.toBeInTheDocument()
@@ -83,7 +83,7 @@ describe('Chinese display labels and processing choices', () => {
       'legacy', 'complete-blocks', 'complete-blocks-review', 'complete-blocks-isolated',
       'complete-blocks-isolated-review', 'complete-blocks-isolated-feedback-review', 'complete', 'complete-review',
     ])
-    rerender(<DialogueStrategySettings value="complete-blocks-isolated-review" onChange={change} rounds={0} />)
+    rerender(<DialogueStrategySettings experimentalEnabled value="complete-blocks-isolated-review" onChange={change} rounds={0} />)
     expect(select).toHaveValue('complete-blocks-isolated-review')
     expect(screen.queryByRole('option', { name: /推荐·质量优先/ })).not.toBeInTheDocument()
     expect(screen.getByRole('option', { name: /需开启复核/ })).toHaveValue('complete-blocks-isolated-review')
