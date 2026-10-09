@@ -4,6 +4,7 @@ import json
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from tests.integration.test_sourced_roster_jobs import prepare, response
 
@@ -63,6 +64,97 @@ def test_returned_roster_recovers_final_commit_failure_without_recharging(migrat
         assert len(list(session.scalars(select(BookCharacter).where(
             BookCharacter.book_version_id == data["book_version_id"],
         )))) == 1
+
+
+@pytest.mark.parametrize("pipeline", [False, True])
+@pytest.mark.parametrize("failure", ["busy_once", "busy_always", "disk_error"])
+def test_roster_finalization_retries_only_local_locks_atomically(
+    migrated_client, monkeypatch, pipeline, failure,
+):
+    import sqlite3
+
+    client = migrated_client
+    _, job = prepare(client)
+    if pipeline:
+        from tests.integration.test_roster_pipeline import update
+        update(client, job)
+    factory, settings = client.app.state.session_factory, client.app.state.settings
+    commit = Session.commit
+    attempts = 0
+
+    def fail_final_commit(session):
+        nonlocal attempts
+        if any(isinstance(row, Job) and row.state == JobState.COMPLETED
+               for row in session.dirty):
+            attempts += 1
+            if failure != "busy_once" or attempts == 1:
+                error = sqlite3.OperationalError("private database detail")
+                error.sqlite_errorcode = (sqlite3.SQLITE_IOERR if failure == "disk_error"
+                                          else sqlite3.SQLITE_BUSY)
+                error.sqlite_errorname = ("SQLITE_IOERR" if failure == "disk_error"
+                                          else "SQLITE_BUSY")
+                raise OperationalError("private SQL", {"secret": "private"}, error)
+        return commit(session)
+
+    monkeypatch.setattr(Session, "commit", fail_final_commit)
+    monkeypatch.setattr("ndr.storage.transactions.time.sleep", lambda *_: None)
+    adapter = FakeProviderAdapter(script=[response()])
+    outcome = run_character_roster_job(factory, settings, job_id=job["id"],
+                                      adapter_factory=lambda *_: adapter)
+    assert len(adapter.calls) == 1
+    assert attempts == {"busy_once": 2, "busy_always": 3, "disk_error": 1}[failure]
+    with factory() as session:
+        people = list(session.scalars(select(BookCharacter)))
+        stored = session.get(Job, job["id"])
+        runs = list(session.scalars(select(InferenceRun).where(InferenceRun.job_id == job["id"])))
+        assert len(runs) == 1
+        assert decode_archive(runs[0].call_archive)["phase"] == "returned"
+        if failure == "busy_once":
+            assert outcome.state == stored.state == JobState.COMPLETED
+            assert len(people) == 1
+        else:
+            assert outcome.state == stored.state == JobState.FAILED
+            assert not people
+            expected = "SQLITE_IOERR" if failure == "disk_error" else "SQLITE_BUSY"
+            assert expected in stored.last_error and "private" not in stored.last_error
+
+
+@pytest.mark.parametrize("pipeline", [False, True])
+def test_stop_between_finalization_lock_retries_does_not_save_people(
+    migrated_client, monkeypatch, pipeline,
+):
+    import sqlite3
+
+    client = migrated_client
+    _, job = prepare(client)
+    if pipeline:
+        from tests.integration.test_roster_pipeline import update
+        update(client, job)
+    factory, settings = client.app.state.session_factory, client.app.state.settings
+    commit = Session.commit
+    failed = []
+
+    def fail_once(session):
+        if not failed and any(isinstance(row, Job) and row.state == JobState.COMPLETED
+                              for row in session.dirty):
+            failed.append(True)
+            raise OperationalError(None, None, sqlite3.OperationalError("database is locked"))
+        return commit(session)
+
+    def pause(_):
+        with factory() as session:
+            session.get(Job, job["id"]).state = JobState.PAUSING
+            session.commit()
+
+    monkeypatch.setattr(Session, "commit", fail_once)
+    monkeypatch.setattr("ndr.storage.transactions.time.sleep", pause)
+    adapter = FakeProviderAdapter(script=[response()])
+    outcome = run_character_roster_job(factory, settings, job_id=job["id"],
+                                      adapter_factory=lambda *_: adapter)
+    assert outcome.state == JobState.PAUSED and len(adapter.calls) == 1
+    with factory() as session:
+        assert not list(session.scalars(select(BookCharacter)))
+        assert session.get(Job, job["id"]).state == JobState.PAUSED
 
 
 def test_unknown_roster_requires_explicit_reconciliation_before_new_call(migrated_client):

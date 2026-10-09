@@ -8,6 +8,7 @@ from contextlib import suppress
 from copy import deepcopy
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
 from ..characters.service import complete_textless_chapter, store_roster_candidates
 from ..context.budget import estimate_tokens
@@ -28,6 +29,7 @@ from ..llm.sourced_roster import (
 )
 from ..storage.models import BookVersion, Chapter, InferenceRun, Job
 from ..storage.run_archive import decode_archive, save_run_archive
+from ..storage.transactions import database_error_detail, finish_local_write
 
 _ACTIVE = set()
 _GUARD = threading.Lock()
@@ -446,11 +448,19 @@ class _Pipeline:
                 JobState.FAILED, "人物修复后仍无有效身份：" + (repair_error or "修复次数已耗尽")
             )
         self.check_stop()
-        with self.sessions() as session:
+
+        def finalize(session):  # noqa: ANN001 - local transaction callback
             job = session.get(Job, self.job_id)
+            if job is None:
+                self.outcome.state = JobState.FAILED
+                self.outcome.errors.append("job_not_found")
+                return False
             if job.state not in {JobState.QUEUED, JobState.RUNNING}:
-                session.close()
-                self.check_stop()
+                if job.state is JobState.PAUSING:
+                    job.state = JobState.PAUSED
+                    self._progress(session, job, "paused")
+                self.outcome.state = job.state
+                return False
             version = session.get(BookVersion, job.book_version_id)
             chapter = session.get(Chapter, self.chapter_id)
             with session.begin_nested():
@@ -483,8 +493,10 @@ class _Pipeline:
                 candidate_count=len(output.characters),
                 proposal_diagnostics=diagnostic,
             )
-            session.commit()
-        self.outcome.state = JobState.COMPLETED
+            return True
+
+        if finish_local_write(self.sessions, finalize):
+            self.outcome.state = JobState.COMPLETED
 
 
 def run_repaired_roster_job(
@@ -504,7 +516,9 @@ def run_repaired_roster_job(
         pass
     except Exception as exc:  # noqa: BLE001 - preserve receipts and rollback candidate writes
         with suppress(_Halt):
-            pipeline.halt(JobState.FAILED, f"人物修复任务失败：{str(exc)[:400]}")
+            detail = (database_error_detail(exc) if isinstance(exc, OperationalError)
+                      else str(exc)[:400])
+            pipeline.halt(JobState.FAILED, f"人物修复任务失败：{detail}")
     finally:
         with _GUARD:
             _ACTIVE.discard(job_id)

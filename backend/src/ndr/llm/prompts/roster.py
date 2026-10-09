@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 
 from .labeling import DATA_DELIMITER, IDENTITY_LINKING_POLICY, escape_data_markers
 
-ROSTER_PROMPT_VERSION = "roster-10"
+ROSTER_PROMPT_VERSION = "roster-11"
 
 ROSTER_SYSTEM_PROMPT = """你是中文轻小说的人物名单分析助手。
 你只做一件事：从给定章节里找出会说话、被称呼、被叙述为说话对象的人物，并判断谁可能是本章视角人物。

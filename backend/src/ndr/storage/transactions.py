@@ -5,11 +5,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+import sqlite3
+import time
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any, TypeVar
 
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 T = TypeVar("T")
@@ -57,6 +60,47 @@ def admission_transaction(session_factory: sessionmaker[Session]) -> Iterator[Se
         if session.get_bind().dialect.name == "sqlite":
             session.execute(text("BEGIN IMMEDIATE"))
         yield session
+
+
+def sqlite_lock_error(error: Exception) -> bool:
+    """Only retry SQLite lock contention, never disk/schema/permission failures."""
+    if not isinstance(error, OperationalError) or not isinstance(error.orig, sqlite3.Error):
+        return False
+    code = getattr(error.orig, "sqlite_errorcode", None)
+    if isinstance(code, int):
+        return code & 0xFF in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+    return str(error.orig).lower() in {
+        "database is locked", "database table is locked", "database schema is locked",
+    }
+
+
+def database_error_detail(error: Exception) -> str:
+    """Diagnostic without SQL statements, parameters, or user data."""
+    if isinstance(error, OperationalError) and isinstance(error.orig, sqlite3.Error):
+        name = getattr(error.orig, "sqlite_errorname", None) or type(error.orig).__name__
+        code = getattr(error.orig, "sqlite_errorcode", None)
+        reason = "数据库写入繁忙" if sqlite_lock_error(error) else "数据库操作失败"
+        return f"{reason}（{name}, code={code}）"
+    return type(error).__name__
+
+
+def finish_local_write(session_factory: sessionmaker[Session], action: Callable[[Session], T]) -> T:
+    """Atomic local finalization; retry a fresh transaction, never a model call.
+
+    BEGIN IMMEDIATE precedes reads/SAVEPOINTs so SQLite cannot commit the
+    candidate savepoint separately or upgrade a stale read snapshot to a writer.
+    Each lock wait uses the engine's busy_timeout; three attempts at most.
+    """
+    for attempt in range(3):
+        try:
+            with admission_transaction(session_factory) as session:
+                result = action(session)
+            return result
+        except OperationalError as exc:
+            if not sqlite_lock_error(exc) or attempt == 2:
+                raise
+            time.sleep(0.1 * (attempt + 1))
+    raise AssertionError("unreachable")
 
 
 def check_version(instance: Any, expected_version: int | None) -> None:

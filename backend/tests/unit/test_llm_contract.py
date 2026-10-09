@@ -547,7 +547,7 @@ class FakeUnavailableSystem:
 
 def test_prompt_examples_use_original_names_without_rewriting_input_characters():
     assert LABELING_PROMPT_VERSION == "labeling-20"
-    assert ROSTER_PROMPT_VERSION == "roster-10"
+    assert ROSTER_PROMPT_VERSION == "roster-11"
     assert "facts只写本章可证明的称呼" in ROSTER_SYSTEM_PROMPT
     assert "name可以沿用该ID" in ROSTER_SYSTEM_PROMPT
     assert "不要把目录中的全名虚构成本章姓名事实" in ROSTER_SYSTEM_PROMPT
