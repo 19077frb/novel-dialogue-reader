@@ -56,6 +56,7 @@ from ..storage.models import (
 from .identity import supplement_aliases
 from .input_view import IDENTITY_INPUT_VERSION, project_identity_state
 from .names import GENERIC_NAMES, matches_name, revealed_name, undecorated_name
+from .prompt_catalog import IDENTITY_PROMPT_VERSION
 
 
 def _json_list(raw: str | None) -> list[str]:
@@ -768,6 +769,7 @@ def create_roster_job(
                 "end_cp": chapter.end_cp,
                 "roster_protocol": SOURCED_ROSTER_VERSION,
                 "identity_input_version": IDENTITY_INPUT_VERSION,
+                "identity_prompt_version": IDENTITY_PROMPT_VERSION,
                 **repair_range,
             },
             ensure_ascii=False,
@@ -815,10 +817,16 @@ def roster_messages(
                     for p in people]
     else:
         raise ValueError("人物输入版本不受支持")
+    from .prompt_catalog import check_version, compact_catalog
+
+    prompt_version = json.loads(job.range_json or "{}").get("identity_prompt_version")
+    check_version(prompt_version)
+    catalog = (compact_catalog(existing, context=text) if prompt_version
+               else compact_roster_catalog(existing))
     return build_roster_messages(
         chapter_title=chapter.title,
         chapter_lines=text.splitlines() or [""],
-        existing_characters=compact_roster_catalog(existing),
+        existing_characters=catalog,
         sourced=(json.loads(job.range_json or "{}").get("roster_protocol")
                  in SOURCED_ROSTER_VERSIONS),
     )

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
 from ..characters.input_view import IDENTITY_INPUT_VERSION
+from ..characters.prompt_catalog import IDENTITY_PROMPT_VERSION
 from ..config import Settings
 from ..context.budget import DEFAULT_POLICY, BudgetPolicy
 from ..context.service import plan_range
@@ -420,6 +421,7 @@ def create_inference_job(
                 "reading_mode": reading_mode.value,
                 "visible_horizon_cp": visible_horizon_cp,
                 "identity_input_version": IDENTITY_INPUT_VERSION,
+                "identity_prompt_version": IDENTITY_PROMPT_VERSION,
             },
             ensure_ascii=False,
         ),

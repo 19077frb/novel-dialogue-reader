@@ -204,6 +204,8 @@ class CompactTask:
         fields = asdict(self)
         if fields.get("auxiliary_protocol") is None:
             fields.pop("auxiliary_protocol", None)  # Preserve historical task/cache fingerprints.
+        if fields.get("identity_prompt_version") is None:
+            fields.pop("identity_prompt_version", None)
         payload = {
             "protocol": PROTOCOL_VERSION,
             "prompt": PROMPT_VERSION,

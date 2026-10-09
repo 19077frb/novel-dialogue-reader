@@ -131,6 +131,7 @@ class SceneState:
     projected_identity_input: bool = False
     identity_input_horizon: int | None = None
     identity_input_mode: str = "initial"
+    identity_prompt_version: str | None = None
     production_expression_task: Any = None
     projected_presentation_cache: dict[str, list[dict]] = field(default_factory=dict)
     known_characters: dict[str, str] = field(default_factory=dict)
