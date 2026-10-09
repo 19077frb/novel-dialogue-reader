@@ -20,6 +20,75 @@ function oldAdmission() {
     createdAt: 1, payload: { type: 'batch', work: { plans: [{ chapter: { id: 'c1', title: '第一章' }, estimate: { windows: [] } }] } } }
 }
 
+it('uses the same detail button for queued and running tasks and follows the queued receipt without querying history', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  const item = { ...oldAdmission(), id: 'range', phase: 'running' }
+  const tasks = [
+    { id: 'roster:c1', type: 'roster', chapterId: 'c1', chapterTitle: '第一章', windowLabel: '全文', state: 'running', jobId: 'roster-job' },
+    { id: 'dialogue:c1:w1', type: 'dialogue', chapterId: 'c1', chapterTitle: '第一章', windowId: 'w1', windowLabel: '窗口 1', state: 'queued' },
+  ]
+  writeJournal('admissions', [item])
+  writeJournal('batch:b1', { execution: { queueId: 'range' }, snapshot: { startedAt: 1, running: true, tasks } })
+  renderWithProviders(<TaskQueuePage />)
+  await userEvent.click(screen.getByRole('button', { name: '展开范围内任务' }))
+  const table = screen.getByRole('table', { name: '范围内任务' })
+  expect(within(table).getAllByRole('button', { name: '查看任务' })).toHaveLength(2)
+  expect(within(table).queryByText('本章后台任务')).not.toBeInTheDocument()
+  await userEvent.click(within(table).getAllByRole('button', { name: '查看任务' })[1])
+  expect(screen.getByRole('table', { name: '当前任务' })).toHaveTextContent('排队中对白归属第一章窗口 1')
+  expect(screen.getByText(/本任务尚未派发/)).toBeVisible()
+  expect(fetchRecentJobs).not.toHaveBeenCalled()
+  writeJournal('batch:b1', { execution: { queueId: 'range' }, snapshot: { startedAt: 1, running: true,
+    tasks: [tasks[0], { ...tasks[1], state: 'running', jobId: 'dialogue-job' }] } })
+  await waitFor(() => expect(screen.getByText('详情 dialogue-job')).toBeVisible(), { timeout: 3500 })
+  expect(fetchRecentJobs).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: '关闭详情' }))
+  expect(screen.queryByText('详情 dialogue-job')).not.toBeInTheDocument()
+})
+
+it('does not switch an old planned selection to a replacement batch with the same window id', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  const item = { ...oldAdmission(), id: 'old-range', phase: 'running', payload: { type: 'batch', work: { plans: [] } } }
+  const task = { id: 'dialogue:c1:w1', type: 'dialogue', chapterId: 'c1', chapterTitle: '第一章', windowId: 'w1', windowLabel: '窗口 1', state: 'queued' }
+  writeJournal('admissions', [item])
+  writeJournal('batch:b1', { execution: { queueId: 'old-range' }, snapshot: { startedAt: 1, running: true, tasks: [task] } })
+  renderWithProviders(<TaskQueuePage />)
+  await userEvent.click(screen.getByRole('button', { name: '展开范围内任务' }))
+  await userEvent.click(screen.getByRole('button', { name: '查看任务' }))
+  writeJournal('batch:b1', { execution: { queueId: 'new-range' }, snapshot: { startedAt: 2, running: true, tasks: [{ ...task, jobId: 'unrelated-job' }] } })
+  await screen.findByText(/原任务记录已更新或缺失/, {}, { timeout: 3500 })
+  expect(screen.queryByText('详情 unrelated-job')).not.toBeInTheDocument()
+  expect(fetchRecentJobs).not.toHaveBeenCalled()
+})
+
+it.each(['single', 'merge'])('provides the unified detail entry for an undispatched %s range', async type => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  writeJournal('admissions', [{ ...oldAdmission(), phase: 'queued', payload: type === 'single'
+    ? { type: 'single', work: { tasks: [{ windowId: 'w1', ordinal: '1', job: null, error: null }] } }
+    : { type: 'merge', work: {} } }])
+  renderWithProviders(<TaskQueuePage />)
+  await userEvent.click(screen.getByRole('button', { name: '展开范围内任务' }))
+  await userEvent.click(screen.getByRole('button', { name: '查看任务' }))
+  expect(screen.getByText(/本任务尚未派发/)).toBeVisible()
+  expect(fetchRecentJobs).not.toHaveBeenCalled()
+})
+
+it('shows a waiting batch plan before its execution journal exists without querying chapter history', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  writeJournal('admissions', [{ ...oldAdmission(), phase: 'queued' }])
+  renderWithProviders(<TaskQueuePage />)
+  await userEvent.click(screen.getByRole('button', { name: '展开范围内任务' }))
+  await userEvent.click(screen.getByRole('button', { name: '查看任务' }))
+  expect(screen.getByRole('table', { name: '当前任务' })).toHaveTextContent('排队中人物识别第一章全文')
+  expect(screen.getByText(/本任务尚未派发/)).toBeVisible()
+  expect(screen.queryByText('本章后台任务')).not.toBeInTheDocument()
+  expect(fetchRecentJobs).not.toHaveBeenCalled()
+  writeJournal('batch:b1', { execution: { queueId: 'old-range' }, snapshot: { startedAt: 1, running: true,
+    tasks: [{ id: 'roster:c1', type: 'roster', chapterId: 'c1', chapterTitle: '第一章', windowLabel: '全文', state: 'running', jobId: 'started-roster' }] } })
+  await screen.findByText('详情 started-roster', {}, { timeout: 3500 })
+  expect(fetchRecentJobs).not.toHaveBeenCalled()
+})
+
 it('pages background tasks and loads the next cursor only after all loaded pages', async () => {
   const rows = Array.from({ length: 21 }, (_, i) => ({ id: `j${i}`, book_title: `作品 ${i}`, chapter_title: '第一章', kind: 'INFERENCE', state: 'COMPLETED' }))
   vi.mocked(fetchTaskQueue).mockImplementation(async (_active, cursor) => ({
@@ -76,8 +145,10 @@ it('does not invent stopped states for old missing records and reads actual chap
   expect(screen.getByRole('row', { name: /状态待核实 人物识别 第一章/ })).toBeVisible()
   expect(screen.getByRole('progressbar', { name: '旧批次任务进度' })).toHaveAttribute('value', '0')
   expect(fetchRecentJobs).not.toHaveBeenCalled()
+  await userEvent.click(screen.getByRole('button', { name: '查看任务' }))
   await userEvent.click(screen.getByRole('button', { name: '展开本章后台任务' }))
-  await userEvent.click(await screen.findByRole('button', { name: '查看任务' }))
+  await screen.findByText(/待核对/)
+  await userEvent.click(within(screen.getByText('任务详情').closest('section')!).getByRole('button', { name: '查看任务' }))
   expect(screen.getByText('详情 orphan-job')).toBeVisible()
   expect(fetchRecentJobs).toHaveBeenCalledWith({ bookId: 'b1', versionId: 'v1', chapterId: 'c1', kind: 'CHARACTER_ROSTER', limit: 200 }, expect.anything())
 })
