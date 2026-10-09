@@ -46,6 +46,12 @@ _GUARD = threading.Lock()
 logger = logging.getLogger(__name__)
 
 
+def roster_job_is_active(job_id: str) -> bool:
+    """Local execution is independent of persisted queue/recovery state."""
+    with _GUARD:
+        return job_id in _ACTIVE
+
+
 @dataclass
 class RosterJobOutcome:
     job_id: str
@@ -158,7 +164,8 @@ def run_character_roster_job(
             if job is not None and job.state is JobState.PAUSING:
                 job.state = JobState.PAUSED
                 session.commit()
-            if job is not None and job.state in {JobState.COMPLETED, JobState.PAUSED}:
+            if job is not None and (job.state in {JobState.COMPLETED, JobState.PAUSED}
+                                   or json.loads(job.checkpoint_json or "{}").get("superseded_by")):
                 return RosterJobOutcome(job_id, job.state)
         return _run_character_roster_job(
             session_factory, settings, job_id=job_id, credentials=credentials,

@@ -263,6 +263,11 @@ def resume_job_route(
         job = session.get(Job, job_id)
         if job is None:
             raise ApiError.not_found("任务不存在", job_id=job_id)
+        replacement = json.loads(job.checkpoint_json or "{}").get("superseded_by")
+        if replacement:
+            raise ApiError(ErrorCode.RESOURCE_CONFLICT,
+                           "该人物任务已由新的本章任务接替，请查看新任务",
+                           details={"job_id": replacement})
         if job.kind is JobKind.CHARACTER_ROSTER and job.state in {
             JobState.FAILED, JobState.NEEDS_RECONCILIATION, JobState.PAUSED,
             JobState.PARTIAL, JobState.BUDGET_EXHAUSTED,

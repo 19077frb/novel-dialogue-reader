@@ -244,6 +244,9 @@ def job_recovery(
                 paid=False, endpoint="POST /api/jobs/{id}/resume",
             )]
             result.summary = "模型已返回，人物结果尚未保存完成，可以直接恢复。"
+    if json.loads(job.checkpoint_json or "{}").get("superseded_by"):
+        result.actions = []
+        result.summary = "本章已有新的人物任务接替；旧记录保留，不再执行。"
     return result
 
 
