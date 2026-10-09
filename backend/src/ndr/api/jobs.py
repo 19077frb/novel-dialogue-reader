@@ -282,6 +282,9 @@ def resume_job_route(
                 job.state = JobState.QUEUED
         if job.state in {JobState.PAUSED, JobState.PARTIAL, JobState.BUDGET_EXHAUSTED}:
             job.state = JobState.QUEUED
+        if (job.state is JobState.FAILED
+                and json.loads(job.checkpoint_json or "{}").get("dialogue_receipts")):
+            job.state = JobState.QUEUED
     # 后台继续跑；这里只返回当前快照，真实进度由 GET /api/jobs/{id} 轮询
     background.add_task(run_job, factory, settings, job_id=job_id, credentials=credentials)
     with transaction(factory) as session:
