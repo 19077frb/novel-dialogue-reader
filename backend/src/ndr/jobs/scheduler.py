@@ -1906,13 +1906,26 @@ def _run_job(
                         return outcome
                     spent = spent_tokens(session, job_id)
                     max_input = _budget_of(job).get("max_input_tokens")
+                    restoring_retry = False
+                    if pending_receipt:
+                        from .dialogue_lifecycle import restore_dispatch
+
+                        retry_request = _request_payload_for(
+                            window=window, state=state, correction=correction,
+                            max_tokens_override=attempt_max_tokens,
+                        )
+                        restoring_retry = restore_dispatch(
+                            session, job_id=job_id, window_id=window.window_id,
+                            request=retry_request, snapshot=window_snapshot,
+                            fingerprint=_request_fingerprint(retry_request, window_snapshot),
+                        ) is not None
                     retry_reserve = sum(
                         estimate_tokens(message["content"])
                         for message in _request_payload_for(
                             window=window, state=state, correction=correction
                         )["messages"]
                     ) + max(output_reserve, attempt_max_tokens or 0)
-                    if max_input is not None and (
+                    if max_input is not None and not restoring_retry and (
                         spent["input_tokens"] + spent["unknown_runs"] * reserve + retry_reserve
                         > int(max_input)
                     ):

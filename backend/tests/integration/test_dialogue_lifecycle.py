@@ -202,3 +202,34 @@ def test_missing_usage_after_local_failure_is_unknown():
     )])
     assert spent["unknown_runs"] == 1
     assert spent["total_tokens"] == 0
+
+
+def test_format_correction_receipts_replay_exact_requests(fake_provider_client):
+    from ndr.jobs.dialogue_lifecycle import restore_dispatch
+    from ndr.storage.run_archive import save_run_archive
+
+    create, factory = prepare(fake_provider_client)
+    job_id = create("format-receipts")["id"]
+    requests = [{"messages": ["primary"]}, {"messages": ["correction"]}]
+    with transaction(factory) as session:
+        job = session.get(Job, job_id)
+        ids = []
+        for request in requests:
+            run = InferenceRun(
+                job_id=job_id, window_id="one", state=InferenceRunState.FAILED,
+                profile_snapshot_json="{}",
+                request_fingerprint=scheduler._request_fingerprint(request, {}),
+            )
+            session.add(run)
+            session.flush()
+            save_run_archive(run, request, raw={"value": request["messages"][0]}, phase="returned")
+            ids.append(run.id)
+        job.checkpoint_json = json.dumps({"dialogue_receipts": {"one": ids}})
+    with factory() as session:
+        for request, expected in zip(requests, ids, strict=True):
+            raw, error, run_id, _ = restore_dispatch(
+                session, job_id=job_id, window_id="one", request=request,
+                snapshot={}, fingerprint=scheduler._request_fingerprint(request, {}),
+            )
+            assert run_id == expected and error is None
+            assert raw.dispatch_attempts == 0

@@ -134,6 +134,7 @@ def restore_dispatch(session, *, job_id, window_id, request, snapshot, fingerpri
     job = session.get(Job, job_id)
     ids = json.loads(job.checkpoint_json or "{}").get("dialogue_receipts", {}).get(window_id, [])
     stage = request.get("review_stage")
+    found_stage = False
     for run_id in reversed(ids):
         run = session.get(InferenceRun, run_id)
         archive = returned_archive(run) if run is not None else None
@@ -143,9 +144,12 @@ def restore_dispatch(session, *, job_id, window_id, request, snapshot, fingerpri
         saved_request = archive.get("request", {})
         if saved_request.get("review_stage") != stage:
             continue
+        found_stage = True
         if (run.request_fingerprint != fingerprint or saved_request != request
                 or json.loads(run.profile_snapshot_json or "{}") != (snapshot or {})):
-            raise ReceiptRecoveryError("对白回执与当前人物、原文或模型配置不一致；不会自动重发")
+            # A format correction has the same stage but a different request.
+            # Replay its earlier primary first, then the exact saved correction.
+            continue
         error = archive.get("error")
         if error:
             restored = ProviderError(
@@ -158,6 +162,8 @@ def restore_dispatch(session, *, job_id, window_id, request, snapshot, fingerpri
         result.restored_attempt = True
         result.dispatch_attempts = 0
         return result, None, run.id, run.elapsed_ms or 0
+    if found_stage:
+        raise ReceiptRecoveryError("对白回执与当前人物、原文或模型配置不一致；不会自动重发")
     return None
 
 
