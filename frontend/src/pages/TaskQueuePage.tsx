@@ -215,8 +215,7 @@ export default function TaskQueuePage() {
           }} rows={(jobs.data?.pages.flatMap(page => page.items) ?? []).map(job => ({ id: job.id,
             state: jobTaskTone(job.state), stateLabel: JOB_STATE_LABELS[job.state], type: JOB_KIND_LABELS[job.kind],
             book: job.book_title || '书籍已删除', chapter: job.chapter_title || '全书',
-            window: job.windows_total || job.selected_window_ids?.length ? <>{Boolean(job.windows_total) && <span>窗口 {job.windows_done}/{job.windows_total}</span>}
-              {job.selected_window_ids?.length ? <details><summary>窗口详情</summary>{job.selected_window_ids.join('、')}</details> : null}</> : '—',
+            window: job.windows_total ? <span>窗口 {job.windows_done}/{job.windows_total}</span> : '—',
             error: job.last_error, actions: <button onClick={() => select(job.id)}>查看任务</button>,
           }))} />
       </CollapsibleBlock>
