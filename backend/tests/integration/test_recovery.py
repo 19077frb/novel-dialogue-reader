@@ -235,12 +235,18 @@ def test_restart_marks_unknown_then_requires_explicit_retry(
     assert outcome.state is JobState.NEEDS_RECONCILIATION
     assert len(_job_row(app_settings, job["id"])["runs"]) == 1
 
-    # 显式重发 → 窗口回到队列 → 再跑成功
+    # 显式重发直接启动后台任务；不再需要第二次点击立即执行。
     reconciled = fake_provider_client.post(
         f"/api/jobs/{job['id']}/reconcile", json={"action": "retry"}
     )
     assert reconciled.status_code == 200, reconciled.text
-    assert _job_row(app_settings, job["id"])["state"] == "QUEUED"
+    assert _job_row(app_settings, job["id"])["state"] == "COMPLETED"
+    runs_after_retry = len(_job_row(app_settings, job["id"])["runs"])
+    repeated = fake_provider_client.post(
+        f"/api/jobs/{job['id']}/reconcile", json={"action": "retry"}
+    )
+    assert repeated.status_code == 409
+    assert len(_job_row(app_settings, job["id"])["runs"]) == runs_after_retry
 
     outcome = run_job(
         factory,
@@ -427,6 +433,10 @@ def test_provider_timeout_is_unknown_outcome_not_auto_resent(
     )
     assert kept.status_code == 200, kept.text
     assert _job_row(app_settings, job["id"])["state"] == "PARTIAL"
+    assert len(_job_row(app_settings, job["id"])["runs"]) == 1
+    assert fake_provider_client.post(
+        f"/api/jobs/{job['id']}/reconcile", json={"action": "retry"}
+    ).status_code == 409
 
 
 def test_missing_credential_is_explainable_and_recoverable(

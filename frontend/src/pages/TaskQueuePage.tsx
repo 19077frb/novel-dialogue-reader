@@ -200,6 +200,8 @@ export default function TaskQueuePage() {
             {['queued', 'running'].includes(item.phase) && <button className="ndr-danger" disabled={item.stopRequested} title={item.stopRequested ? '停止请求已提交，请等待在途任务收尾。' : undefined} onClick={() => { void stop(item).catch(err => setError(err.message)) }}>{item.phase === 'queued' ? '取消范围' : '停止范围'}</button>}
           </div>
           {item.error && <p className="status-error">{item.error}</p>}
+          {item.waiting && <p className="hint" role="status">{item.waiting.reason}{item.waiting.title && ` 等待任务：${item.waiting.title}`}
+            {item.waiting.jobId && <button onClick={() => select(item.waiting!.jobId!)}>查看等待任务</button>}</p>}
           <AdmissionDetails item={item} onSelect={select} onSelectPlanned={selectPlanned} />
         </article>)}
         </PaginatedItems>

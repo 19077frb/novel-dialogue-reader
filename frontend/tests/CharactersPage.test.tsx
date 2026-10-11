@@ -67,6 +67,24 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('本次合并等待单独计时，旧结果保持结束时间并显示阻塞章节', async () => {
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
+    vi.mocked(jobsApi.fetchTaskQueue).mockResolvedValue({ items: [{ id: 'old', state: 'QUEUED',
+      chapter_title: '第十二卷 10月22日' }], next_cursor: null } as never)
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('用时 1 秒')
+    await user.click(screen.getByRole('checkbox', { name: /我同意调用模型/ }))
+    await user.click(screen.getByRole('button', { name: '分析合并建议' }))
+    await screen.findByText('本次自动合并：等待执行')
+    await screen.findByText(/等待任务：第十二卷 10月22日/)
+    expect(screen.getByText('用时 1 秒')).toBeInTheDocument()
+    expect(screen.getByText('以下为上一次合并结果。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看等待任务' })).toBeInTheDocument()
+    expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '停止本次分析' }))
+    await waitFor(() => expect(screen.queryByText('本次自动合并：等待执行')).not.toBeInTheDocument(), { timeout: 2500 })
+  })
   it('六个人物一页显示完整且不显示分页导航', async () => {
     vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(Array.from({ length: 6 }, (_, i) => ({
       ...entries[0], character_id: `person-${i}`, name: `人物 ${i}`,

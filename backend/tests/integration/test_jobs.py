@@ -1026,7 +1026,7 @@ def test_unknown_outcome_is_not_resent_automatically(
     assert retry.status_code == 200
     assert retry.json()["data"]["affected_windows"]
     detail = fake_provider_client.get(f"/api/jobs/{job['id']}").json()["data"]
-    assert detail["state"] == "QUEUED"
+    assert detail["state"] == "COMPLETED"
 
 
 def test_pause_marks_paused_between_windows(

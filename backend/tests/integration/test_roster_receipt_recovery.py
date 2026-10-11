@@ -10,7 +10,6 @@ from tests.integration.test_sourced_roster_jobs import prepare, response
 
 from ndr.domain.enums import InferenceRunState, JobState
 from ndr.jobs.roster import run_character_roster_job
-from ndr.jobs.scheduler import reconcile_job
 from ndr.llm.adapters.fake import FakeProviderAdapter
 from ndr.llm.errors import ProviderError, ProviderErrorKind
 from ndr.storage.models import BookCharacter, InferenceRun, Job
@@ -157,7 +156,7 @@ def test_stop_between_finalization_lock_retries_does_not_save_people(
         assert session.get(Job, job["id"]).state == JobState.PAUSED
 
 
-def test_unknown_roster_requires_explicit_reconciliation_before_new_call(migrated_client):
+def test_unknown_roster_requires_explicit_reconciliation_before_new_call(migrated_client, monkeypatch):
     client = migrated_client
     _, job = prepare(client)
     factory, settings = client.app.state.session_factory, client.app.state.settings
@@ -172,13 +171,15 @@ def test_unknown_roster_requires_explicit_reconciliation_before_new_call(migrate
     blocked = run_character_roster_job(factory, settings, job_id=job["id"],
                                       adapter_factory=lambda *_: pytest.fail("No automatic resend"))
     assert blocked.state == JobState.NEEDS_RECONCILIATION
-    with factory() as session:
-        reconcile_job(session, session.get(Job, job["id"]), action="retry")
-        session.commit()
     adapter = FakeProviderAdapter(script=[response()])
-    retried = run_character_roster_job(factory, settings, job_id=job["id"],
-                                     adapter_factory=lambda *_: adapter)
-    assert retried.state == JobState.COMPLETED and retried.calls == 1
+    monkeypatch.setattr("ndr.jobs.roster._build_adapter", lambda *_: adapter)
+    reconciled = client.post(f"/api/jobs/{job['id']}/reconcile", json={"action": "retry"})
+    assert reconciled.status_code == 200
+    assert client.get(f"/api/jobs/{job['id']}").json()["data"]["state"] == "COMPLETED"
+    assert len(adapter.calls) == 1
+    assert client.post(f"/api/jobs/{job['id']}/reconcile",
+                       json={"action": "retry"}).status_code == 409
+    assert len(adapter.calls) == 1
 
 
 def test_roster_pause_keeps_returned_result_and_reentry_does_not_call(migrated_client):

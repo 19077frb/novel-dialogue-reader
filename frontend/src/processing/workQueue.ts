@@ -18,6 +18,7 @@ export interface QueueAdmission {
   phase: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
   payload: Payload; error: string | null; jobId?: string; createdAt: number; stopRequested?: boolean
   bookTitle?: string
+  waiting?: { reason: string; jobId?: string; title?: string }
 }
 const KEY = 'admissions'
 const listeners = new Set<() => void>()
@@ -158,28 +159,47 @@ async function execute(id: string) {
         const { startCharacterAutoMerge } = await import('../api/characters')
         const { fetchJob } = await import('../api/books')
         const input = item.payload.input
-        await withWorkflowLock(`processing:${item.bookId}`, () => inSharedTaskPool(getProcessingPreferences().concurrency, async () => {
+        await withWorkflowLock(`processing:${item.bookId}`, async () => {
           // Direct roster/recheck submissions also live in the backend. Wait for
           // them instead of dropping a merge behind an unrelated active job.
           const { fetchTaskQueue } = await import('../api/jobs')
-          while (!item.jobId && (await fetchTaskQueue(true, null, undefined, item.bookId)).items.length) {
-            if (getAdmissions().find(row => row.id === id)?.stopRequested) return
-            await new Promise(resolve => setTimeout(resolve, 1000))
+          const stopped = () => getAdmissions().find(row => row.id === id)?.stopRequested
+          const blocked = async () => {
+            if (item.jobId) return false
+            const jobs = (await fetchTaskQueue(true, null, undefined, item.bookId)).items
+            const first = jobs[0]
+            if (!first) return false
+            const waiting = { jobId: first.id, title: first.chapter_title || '全书任务',
+              reason: first.state === 'QUEUED' ? '本书有排队中的旧任务，请查看任务并选择继续或暂停。'
+                : '等待本书正在执行的任务结束后再分析合并。' }
+            if (JSON.stringify(getAdmissions().find(row => row.id === id)?.waiting) !== JSON.stringify(waiting)) await change(id, { waiting })
+            return true
           }
-          if (getAdmissions().find(row => row.id === id)?.stopRequested) return
-          const initial = item.jobId ? await fetchJob(item.jobId)
-            : await startCharacterAutoMerge(item.bookId, input)
-          await change(id, { jobId: initial.id })
-          const { pauseJob } = await import('../api/jobs')
-          const current = getAdmissions().find(row => row.id === id)?.stopRequested ? await pauseJob(initial.id) : initial
-          const job = await waitForJobCompletion(current, () => undefined)
-          if (job.state !== 'COMPLETED') throw new Error(job.last_error || `自动合并结束于${job.state}`)
-        }))
+          while (!stopped()) {
+            // Waiting for another job must not occupy a model slot across books.
+            if (await blocked()) { await new Promise(resolve => setTimeout(resolve, 1000)); continue }
+            await change(id, { waiting: { reason: '等待可用的并发额度后开始分析合并。' } })
+            const finished = await inSharedTaskPool(getProcessingPreferences().concurrency, async () => {
+              if (stopped()) return true
+              // Another entry point may have submitted work while this slot waited.
+              if (await blocked()) return false
+              const initial = item.jobId ? await fetchJob(item.jobId)
+                : await startCharacterAutoMerge(item.bookId, input)
+              await change(id, { jobId: initial.id, waiting: undefined })
+              const { pauseJob } = await import('../api/jobs')
+              const current = stopped() ? await pauseJob(initial.id) : initial
+              const job = await waitForJobCompletion(current, () => undefined)
+              if (job.state !== 'COMPLETED') throw new Error(job.last_error || `自动合并结束于${job.state}`)
+              return true
+            })
+            if (finished) break
+          }
+        })
       }
-      await change(id, { phase: cancelled || getAdmissions().find(row => row.id === id)?.stopRequested ? 'cancelled' : 'completed' })
+      await change(id, { phase: cancelled || getAdmissions().find(row => row.id === id)?.stopRequested ? 'cancelled' : 'completed', waiting: undefined })
       window.dispatchEvent(new CustomEvent('ndr:queue-completed', { detail: { bookId: item.bookId } }))
     } catch (error) {
-      await change(id, { phase: getAdmissions().find(row => row.id === id)?.stopRequested ? 'cancelled' : 'failed', error: error instanceof Error ? error.message : String(error) })
+      await change(id, { phase: getAdmissions().find(row => row.id === id)?.stopRequested ? 'cancelled' : 'failed', error: error instanceof Error ? error.message : String(error), waiting: undefined })
     }
   })
 }

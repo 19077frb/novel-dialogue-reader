@@ -6,8 +6,15 @@ import { runSingleWorkflow, stopSingleWorkflow } from '../src/processing/singleW
 import { fetchBook } from '../src/api/books'
 import { writeJournal } from '../src/processing/journal'
 import { inSharedTaskPool } from '../src/processing/concurrency'
+import { fetchTaskQueue } from '../src/api/jobs'
+import { startCharacterAutoMerge } from '../src/api/characters'
+import { waitForJobCompletion } from '../src/processing/jobCompletion'
+import { fetchJob } from '../src/api/books'
 
-vi.mock('../src/api/books', () => ({ fetchBook: vi.fn() }))
+vi.mock('../src/api/books', () => ({ fetchBook: vi.fn(), fetchJob: vi.fn() }))
+vi.mock('../src/api/jobs', () => ({ fetchTaskQueue: vi.fn(), pauseJob: vi.fn() }))
+vi.mock('../src/api/characters', () => ({ startCharacterAutoMerge: vi.fn() }))
+vi.mock('../src/processing/jobCompletion', () => ({ waitForJobCompletion: vi.fn() }))
 vi.mock('../src/processing/singleWorkflow', () => ({ runSingleWorkflow: vi.fn(), stopSingleWorkflow: vi.fn() }))
 
 const work = (bookId: string, windowId: string): SingleWorkflow => ({
@@ -30,6 +37,46 @@ beforeEach(() => {
     value: { request: async (_key: string, action: () => Promise<unknown>) => action() } })
   vi.mocked(fetchBook).mockImplementation(async id => ({ id, title: id, active_version_id: 'v1' } as never))
   vi.mocked(runSingleWorkflow).mockResolvedValue({ id: 'job', state: 'COMPLETED' } as never)
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  vi.mocked(startCharacterAutoMerge).mockResolvedValue({ id: 'merge-job', state: 'QUEUED' } as never)
+  vi.mocked(waitForJobCompletion).mockResolvedValue({ id: 'merge-job', state: 'COMPLETED' } as never)
+})
+
+const mergeInput = { bookId: 'merge-book', versionId: 'v1', title: '自动合并', keys: ['merge'],
+  payload: { type: 'merge' as const, input: { book_version_id: 'v1', profile_id: 'p1',
+    idempotency_key: 'merge-key', run_now: true } } }
+
+it('explains blocked merge tasks without holding a model slot and cancels without dispatch', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [{ id: 'old-roster', state: 'QUEUED',
+    chapter_title: '第十二卷章节' }], next_cursor: null } as never)
+  const id = await enqueueWork(mergeInput)
+  await waitFor(() => expect(getAdmissions().find(item => item.id === id)?.waiting?.jobId).toBe('old-roster'))
+  expect(getAdmissions().find(item => item.id === id)?.waiting?.reason).toContain('继续或暂停')
+  let entered = false
+  await inSharedTaskPool(1, async () => { entered = true })
+  expect(entered).toBe(true)
+  await stopAdmission(id)
+  await waitFor(() => expect(getAdmissions().find(item => item.id === id)?.phase).toBe('cancelled'), { timeout: 2500 })
+  expect(startCharacterAutoMerge).not.toHaveBeenCalled()
+})
+
+it('dispatches merge once after the blocker ends and clears its waiting summary', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValueOnce({ items: [{ id: 'active', state: 'RUNNING' }], next_cursor: null } as never)
+  const id = await enqueueWork(mergeInput)
+  await waitFor(() => expect(getAdmissions().find(item => item.id === id)?.phase).toBe('completed'), { timeout: 2500 })
+  expect(startCharacterAutoMerge).toHaveBeenCalledTimes(1)
+  expect(getAdmissions().find(item => item.id === id)?.waiting).toBeUndefined()
+})
+
+it('restores an admitted merge by jobId rather than creating another request', async () => {
+  vi.mocked(fetchJob).mockResolvedValue({ id: 'saved-job', state: 'COMPLETED' } as never)
+  writeJournal('admissions', [{ ...mergeInput, id: 'saved-merge', jobId: 'saved-job',
+    phase: 'running', error: null, createdAt: 1 }])
+  await pumpQueue()
+  await waitFor(() => expect(getAdmissions()[0].phase).toBe('completed'))
+  expect(fetchJob).toHaveBeenCalledWith('saved-job')
+  expect(startCharacterAutoMerge).not.toHaveBeenCalled()
+  expect(fetchTaskQueue).not.toHaveBeenCalled()
 })
 
 it('keeps frozen options, serializes a book and accepts other books and windows', async () => {
