@@ -84,19 +84,70 @@ def database_error_detail(error: Exception) -> str:
     return type(error).__name__
 
 
-def finish_local_write(session_factory: sessionmaker[Session], action: Callable[[Session], T]) -> T:
+@contextmanager
+def local_write_session(session_factory: sessionmaker[Session], *, job_id=None):
+    """Acquire a writer with bounded retries before any reads; never replay the body."""
+    from ..diagnostics import logger
+
+    session = None
+    started = time.monotonic()
+    for attempt in range(3):
+        candidate = session_factory()
+        try:
+            if candidate.get_bind().dialect.name == "sqlite":
+                candidate.execute(text("BEGIN IMMEDIATE"))
+            session = candidate
+            break
+        except OperationalError as error:
+            candidate.rollback()
+            candidate.close()
+            logger.warning("writer_wait job=%s attempt=%s elapsed_ms=%s error=%s",
+                           job_id, attempt + 1, int((time.monotonic() - started) * 1000),
+                           database_error_detail(error))
+            if not sqlite_lock_error(error) or attempt == 2:
+                raise
+            time.sleep(0.1 * (attempt + 1))
+        except Exception:
+            candidate.close()
+            raise
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+        elapsed = time.monotonic() - started
+        if elapsed >= 1:
+            logger.info("writer_released job=%s elapsed_ms=%s", job_id, int(elapsed * 1000))
+
+
+def finish_local_write(session_factory: sessionmaker[Session], action: Callable[[Session], T],
+                       *, job_id: str | None = None) -> T:
     """Atomic local finalization; retry a fresh transaction, never a model call.
 
     BEGIN IMMEDIATE precedes reads/SAVEPOINTs so SQLite cannot commit the
     candidate savepoint separately or upgrade a stale read snapshot to a writer.
     Each lock wait uses the engine's busy_timeout; three attempts at most.
     """
+    from ..diagnostics import logger
+
+    started = time.monotonic()
     for attempt in range(3):
         try:
             with admission_transaction(session_factory) as session:
                 result = action(session)
+            elapsed = time.monotonic() - started
+            if attempt or elapsed >= 1:
+                logger.info("local_write_done job=%s operation=%s attempts=%s elapsed_ms=%s",
+                            job_id, action.__name__, attempt + 1, int(elapsed * 1000))
             return result
         except OperationalError as exc:
+            logger.warning("local_write_error job=%s operation=%s attempt=%s "
+                           "elapsed_ms=%s error=%s",
+                           job_id, action.__name__, attempt + 1,
+                           int((time.monotonic() - started) * 1000), database_error_detail(exc))
             if not sqlite_lock_error(exc) or attempt == 2:
                 raise
             time.sleep(0.1 * (attempt + 1))

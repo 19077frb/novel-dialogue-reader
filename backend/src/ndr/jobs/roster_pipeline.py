@@ -76,7 +76,7 @@ class _Pipeline:
         )
 
     def halt(self, state, message, stage=None):
-        with self.sessions() as session:
+        def persist_halt(session):
             job = session.get(Job, self.job_id)
             checkpoint = json.loads(job.checkpoint_json or "{}")
             if stage:
@@ -84,7 +84,7 @@ class _Pipeline:
             job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
             job.state, job.last_error = state, message
             self._progress(session, job, state.value.lower())
-            session.commit()
+        finish_local_write(self.sessions, persist_halt)
         self.outcome.state = state
         if message:
             self.outcome.errors.append(message)
@@ -107,7 +107,7 @@ class _Pipeline:
     def _settle(self, run_id, request, raw, error, elapsed):
         from .roster import _attempt_usage_json
 
-        with self.sessions() as session:
+        def persist_returned(session):
             run = session.get(InferenceRun, run_id)
             save_run_archive(
                 run, request, raw=raw, error=error, elapsed_ms=elapsed, phase="returned"
@@ -122,7 +122,16 @@ class _Pipeline:
             ):
                 run.state = InferenceRunState.UNKNOWN_OUTCOME
                 run.error_code = "UNKNOWN_OUTCOME"
-            session.commit()
+        try:
+            finish_local_write(self.sessions, persist_returned)
+        except OperationalError as write_error:
+            from ..storage.transactions import sqlite_lock_error
+            from .local_finalization import PendingLocalWrite
+            if not sqlite_lock_error(write_error):
+                raise
+            raise PendingLocalWrite(
+                lambda: finish_local_write(self.sessions, persist_returned),
+            ) from write_error
 
     def attempt(self, stage, request, validator):
         """Reuse one exact stage receipt; never resend an unaccounted attempt."""
@@ -515,6 +524,9 @@ def run_repaired_roster_job(
     except _Halt:
         pass
     except Exception as exc:  # noqa: BLE001 - preserve receipts and rollback candidate writes
+        from .local_finalization import PendingLocalWrite
+        if isinstance(exc, PendingLocalWrite):
+            raise
         with suppress(_Halt):
             detail = (database_error_detail(exc) if isinstance(exc, OperationalError)
                       else str(exc)[:400])

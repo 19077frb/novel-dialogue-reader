@@ -74,6 +74,13 @@ const RECOVERY = {
 } as unknown as JobRecoveryOut
 
 describe('JobPanel', () => {
+  it('显示执行已退出而正在保存本地状态的提示', async () => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, state: 'RUNNING',
+      progress: { stage: 'local_finalization_pending' } })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByText('模型任务已退出，正在等待数据库保存状态；不会重新调用模型。')).toBeInTheDocument()
+    expect(screen.getByTestId('job-state')).toHaveTextContent('正在保存状态')
+  })
   it.each([
     ['identity_feedback:1', '正在检查人物名单反馈'],
     ['review:2', '正在独立复核本窗口全部对白：第 2 轮'],

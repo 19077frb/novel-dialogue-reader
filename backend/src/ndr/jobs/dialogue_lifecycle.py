@@ -24,8 +24,9 @@ class ReceiptRecoveryError(ValueError):
 
 
 def acquire(job_id: str) -> bool:
+    from .local_finalization import settlement_pending
     with _guard:
-        if job_id in _active:
+        if job_id in _active or settlement_pending(job_id):
             return False
         _active.add(job_id)
         return True
@@ -110,15 +111,22 @@ def settle_interrupted(factory, job_id: str, error: Exception, *, startup=False)
             JobState.FAILED
         )
         detail = database_error_detail(error)
+        from .local_finalization import PendingLocalWrite
+        if isinstance(error, PendingLocalWrite):
+            detail = "模型返回后的本地保存曾被阻塞"
         if isinstance(error, ReceiptRecoveryError):
             detail = str(error)
         if startup:
             detail = f"进程重启，{detail}"
-        job.last_error = (
-            f"对白任务执行中断：{detail}；已有返回保留，可从任务详情恢复。"
-            if not unknown else
-            f"对白任务执行中断：{detail}；部分调用结果未知，不会自动重发。"
-        )
+        if unknown:
+            next_step = "部分调用结果未知，不会自动重发。"
+        elif receipts:
+            next_step = "已有返回保留，可从任务详情恢复。"
+        elif not runs:
+            next_step = "尚未派发模型调用，可以重新开始任务。"
+        else:
+            next_step = "已完成结果保持有效，请从任务详情查看下一步。"
+        job.last_error = f"对白任务执行中断：{detail}；{next_step}"
         progress = json.loads(job.progress_json or "{}")
         job.progress_json = json.dumps({
             **progress, "stage": "interrupted", "error_type": detail,
@@ -126,7 +134,7 @@ def settle_interrupted(factory, job_id: str, error: Exception, *, startup=False)
         }, ensure_ascii=False)
         return job.state
 
-    return finish_local_write(factory, finish)
+    return finish_local_write(factory, finish, job_id=job_id)
 
 
 def restore_dispatch(session, *, job_id, window_id, request, snapshot, fingerprint):
