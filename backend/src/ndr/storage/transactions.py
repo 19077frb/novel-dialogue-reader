@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any, TypeVar
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -110,6 +110,26 @@ def local_write_session(session_factory: sessionmaker[Session], *, job_id=None):
         except Exception:
             candidate.close()
             raise
+    acquired = time.monotonic()
+    commit_started = None
+    commit_seconds = 0.0
+    first_release = None
+
+    def before_commit(_):
+        nonlocal commit_started
+        commit_started = time.monotonic()
+
+    def after_commit(_):
+        nonlocal commit_seconds, commit_started, first_release
+        now = time.monotonic()
+        if first_release is None:
+            first_release = now
+        if commit_started is not None:
+            commit_seconds += now - commit_started
+            commit_started = None
+
+    event.listen(session, "before_commit", before_commit)
+    event.listen(session, "after_commit", after_commit)
     try:
         yield session
         session.commit()
@@ -117,10 +137,21 @@ def local_write_session(session_factory: sessionmaker[Session], *, job_id=None):
         session.rollback()
         raise
     finally:
+        if commit_started is not None:
+            commit_seconds += time.monotonic() - commit_started
+        event.remove(session, "before_commit", before_commit)
+        event.remove(session, "after_commit", after_commit)
         session.close()
         elapsed = time.monotonic() - started
         if elapsed >= 1:
-            logger.info("writer_released job=%s elapsed_ms=%s", job_id, int(elapsed * 1000))
+            held = time.monotonic() - acquired
+            logger.info("writer_released job=%s elapsed_ms=%s wait_ms=%s "
+                        "initial_hold_ms=%s write_context_ms=%s work_ms=%s commit_ms=%s",
+                        job_id, int(elapsed * 1000), int((acquired - started) * 1000),
+                        int(((first_release - acquired) if first_release is not None
+                             else held) * 1000),
+                        int(held * 1000), int(max(0, held - commit_seconds) * 1000),
+                        int(commit_seconds * 1000))
 
 
 def finish_local_write(session_factory: sessionmaker[Session], action: Callable[[Session], T],

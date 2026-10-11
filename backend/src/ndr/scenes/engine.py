@@ -18,9 +18,10 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import wraps
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..characters.identity import supplement_aliases
@@ -44,6 +45,7 @@ from ..llm.schemas import IdentityProposal, LlmOutput, NewSpeaker
 from ..llm.validation import LabelingTargets, parse_and_validate
 from ..speakers.groups import SpeakerRegistry
 from ..speakers.revisions import IdentityProposalView, evaluate_identity_proposal
+from ..storage.base import new_id
 from ..storage.models import (
     Annotation,
     AnnotationHistory,
@@ -350,10 +352,11 @@ def _record_annotation(
     visible_from_cp: int,
     dependency_hash: str,
     run_id: str | None = None,
+    rows: dict[str, Annotation] | None = None,
 ) -> tuple[Annotation, bool]:
     """写入当前标注投影；返回 ``(annotation, replaced_existing)``。"""
 
-    existing = session.execute(
+    existing = rows.get(quote_id) if rows is not None else session.execute(
         select(Annotation).where(Annotation.quote_id == quote_id)
     ).scalar_one_or_none()
     payload = {
@@ -371,30 +374,36 @@ def _record_annotation(
     }
     if existing is None:
         row = Annotation(
+            id=new_id(), version=1,
             quote_id=quote_id,
             user_locked=False,
             **payload,
         )
         session.add(row)
-        session.flush()
+        if rows is None:
+            session.flush()
+        else:
+            rows[quote_id] = row
         return row, False
 
     _write_history(session, existing, run_id=run_id)
     for key, value in payload.items():
         setattr(existing, key, value)
     existing.version += 1
-    session.flush()
+    if rows is None:
+        session.flush()
     return existing, True
 
 
-def _member_of_scene(session: Session, *, quote_id: str, scene_id: str, revision: int) -> None:
-    existing = session.execute(
+def _member_of_scene(session: Session, *, quote_id: str, scene_id: str, revision: int,
+                     memberships: set[tuple[str, str]] | None = None) -> None:
+    existing = (quote_id, scene_id) in memberships if memberships is not None else session.execute(
         select(SceneMembership).where(
             SceneMembership.quote_id == quote_id,
             SceneMembership.scene_id == scene_id,
         )
     ).scalar_one_or_none()
-    if existing is not None:
+    if (bool(existing) if memberships is not None else existing is not None):
         return
     session.add(
         SceneMembership(
@@ -403,6 +412,8 @@ def _member_of_scene(session: Session, *, quote_id: str, scene_id: str, revision
             valid_from_revision=revision,
         )
     )
+    if memberships is not None:
+        memberships.add((quote_id, scene_id))
 
 
 def _upsert_review_item(
@@ -413,9 +424,11 @@ def _upsert_review_item(
     reason: ReviewReason,
     candidates: Mapping[str, Any] | None = None,
     annotation_version: int | None = None,
+    rows: dict[tuple[str | None, str | None, ReviewReason], ReviewItem] | None = None,
 ) -> str:
     target_filter = [ReviewItem.quote_id == quote_id] if quote_id else [ReviewItem.gap_id == gap_id]
-    existing = session.execute(
+    key = (quote_id, gap_id, reason)
+    existing = rows.get(key) if rows is not None else session.execute(
         select(ReviewItem).where(ReviewItem.reason == reason, *target_filter)
     ).scalar_one_or_none()
     if existing is not None:
@@ -432,9 +445,11 @@ def _upsert_review_item(
         existing.resolved_by_correction_id = None
         if candidates is not None:
             existing.candidates_json = json.dumps(candidates, ensure_ascii=False)
-        session.flush()
+        if rows is None:
+            session.flush()
         return existing.id
     row = ReviewItem(
+        id=new_id(), version=1,
         target_type=ReviewTargetType.QUOTE if quote_id else ReviewTargetType.GAP,
         quote_id=quote_id,
         gap_id=gap_id,
@@ -444,7 +459,10 @@ def _upsert_review_item(
         annotation_version=annotation_version,
     )
     session.add(row)
-    session.flush()
+    if rows is None:
+        session.flush()
+    else:
+        rows[key] = row
     return row.id
 
 
@@ -464,6 +482,22 @@ def _resolve_speaker(
     return slot.group_id, None
 
 
+def _batched_window(function):
+    @wraps(function)
+    def apply(session, *args, **kwargs):
+        # Preserve caller-created manual flags and other pending changes before
+        # prefetching; otherwise no_autoflush could miss a unique review row.
+        session.flush()
+        # Explicit scene/group flushes still establish FK parents. Ordinary
+        # reads must not flush pending annotations once per dialogue.
+        with session.no_autoflush:
+            result = function(session, *args, **kwargs)
+        session.flush()
+        return result
+    return apply
+
+
+@_batched_window
 def apply_window(
     session: Session,
     *,
@@ -530,6 +564,17 @@ def apply_window(
 
     parsed = report.output
     accepted = report.accepted_labels
+    quote_ids = list(window.target_quote_ids)
+    gap_ids = [decision.gap_id for decision in parsed.gap_decisions]
+    annotation_rows = {row.quote_id: row for row in session.scalars(
+        select(Annotation).where(Annotation.quote_id.in_(quote_ids)))}
+    memberships = set(session.execute(select(
+        SceneMembership.quote_id, SceneMembership.scene_id,
+    ).where(SceneMembership.quote_id.in_(quote_ids))).all())
+    review_rows = {(row.quote_id, row.gap_id, row.reason): row for row in session.scalars(
+        select(ReviewItem).where(or_(
+            ReviewItem.quote_id.in_(quote_ids), ReviewItem.gap_id.in_(gap_ids),
+        )))}
     validation_warnings = dict(validation_warnings or {})
     if (set(validation_warnings) - {label.quote_id for label in accepted}
             or any(not isinstance(message, str) for message in validation_warnings.values())):
@@ -737,8 +782,7 @@ def apply_window(
             )
         if (preserve_existing_candidates and label.quote_id not in ceilings
                 and decision_out.status is not AnnotationStatus.ACCEPTED):
-            previous = session.scalar(select(Annotation).where(
-                Annotation.quote_id == label.quote_id))
+            previous = annotation_rows.get(label.quote_id)
             if (previous is not None and not previous.stale and previous.speaker_id
                     and previous.scene_id == scene_id
                     and (previous.status is AnnotationStatus.ACCEPTED or (
@@ -761,6 +805,7 @@ def apply_window(
             visible_from_cp=visible_from_cp,
             dependency_hash=effective_hash,
             run_id=run_id,
+            rows=annotation_rows,
         )
         application.annotation_ids.append(annotation.id)
         _member_of_scene(
@@ -768,8 +813,12 @@ def apply_window(
             quote_id=label.quote_id,
             scene_id=scene_id,
             revision=state.version,
+            memberships=memberships,
         )
-        sync_attribution_reviews(session, annotation, current_reason=decision_out.review_reason)
+        sync_attribution_reviews(
+            session, annotation, current_reason=decision_out.review_reason,
+            existing_rows=[row for key, row in review_rows.items() if key[0] == label.quote_id],
+        )
         if decision_out.needs_review and decision_out.review_reason is not None:
             review_id = _upsert_review_item(
                 session,
@@ -786,6 +835,7 @@ def apply_window(
                        if label.quote_id in validation_warnings else {}),
                 },
                 annotation_version=annotation.version,
+                rows=review_rows,
             )
             application.review_item_ids.append(review_id)
         if replaced and annotation.user_locked:
@@ -806,10 +856,13 @@ def apply_window(
                 gap_id=gap_decision.gap_id,
                 reason=ReviewReason.SCENE_BOUNDARY,
                 candidates={"decision": gap_decision.decision.value},
+                rows=review_rows,
             )
             application.review_item_ids.append(review_id)
 
     # 身份修订：明确证据且不触碰人工锁定时才自动应用
+    if parsed.identity_proposals:
+        session.flush()  # Merge/split queries must see this window's new annotations.
     for proposal in parsed.identity_proposals:
         revision_id, deferred = _apply_identity_proposal(
             session,

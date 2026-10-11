@@ -25,6 +25,7 @@ from ..llm.receipt import ProviderResult
 from ..storage.cache import fingerprint
 from ..storage.models import Annotation, InferenceRun, Job, JobWindow
 from ..storage.run_archive import decode_archive
+from ..storage.transactions import local_write_session
 
 REVIEW_CACHE_VERSION = "expr-review-1"
 
@@ -147,7 +148,7 @@ def run_review_pipeline(
     base = first.get("primary_payload", base)
     result = PipelineResult(primary_raw)
     original_breaks = tuple(base.get("breaks", ()))
-    with session_factory() as session:
+    with local_write_session(session_factory, job_id=job_id) as session:
         job = session.get(Job, job_id)
         feedback_version = json.loads(job.range_json or "{}").get("identity_feedback_protocol")
         locked_targets = (
@@ -176,10 +177,9 @@ def run_review_pipeline(
         primary.elapsed_ms = primary_elapsed_ms
         usage = primary_raw.get("_usage")
         primary.usage_json = json.dumps(usage) if _known_call_usage(usage) else None
-        session.commit()
 
     def stopped(reason, *, unknown=False, pause=False, failed_stage=None):
-        with session_factory() as session:
+        with local_write_session(session_factory, job_id=job_id) as session:
             job = session.get(Job, job_id)
             checkpoint = json.loads(job.checkpoint_json or "{}")
             checkpoint.setdefault("review_stopped", {})[window.window_id] = reason[:400]
@@ -196,7 +196,6 @@ def run_review_pipeline(
                 )
                 if row is not None:
                     row.state = JobState.NEEDS_RECONCILIATION
-            session.commit()
         result.unknown, result.stopped = unknown, pause or unknown
 
     def stage(stage_name, messages, validate, *, binding=None):
@@ -228,7 +227,7 @@ def run_review_pipeline(
                 )
             proof = _request_fingerprint(request, model_snapshot)
             reused = False
-            with session_factory() as session:
+            with local_write_session(session_factory, job_id=job_id) as session:
                 job = session.get(Job, job_id)
                 if job.state in STOP_STATES or job.state is JobState.PAUSING:
                     result.stopped = True
@@ -301,7 +300,6 @@ def run_review_pipeline(
                         "review_stage": stage_name,
                     }
                 )
-                session.commit()
             if not reused:
                 raw, error, run_id, elapsed = _dispatch_with_bounded_retry(
                     session_factory,
@@ -328,7 +326,7 @@ def run_review_pipeline(
                     valid = validate(_clean(raw), run_id)
                 except (ValueError, ProviderError, TypeError, KeyError) as exc:
                     problem = str(exc)[:800]
-            with session_factory() as session:
+            with local_write_session(session_factory, job_id=job_id) as session:
                 run = session.get(InferenceRun, run_id)
                 run.state = (
                     InferenceRunState.SUCCEEDED if valid is not None else InferenceRunState.FAILED
@@ -346,7 +344,6 @@ def run_review_pipeline(
                     run.state = InferenceRunState.UNKNOWN_OUTCOME
                 active = session.get(Job, job_id)
                 halt = active.state in STOP_STATES or active.state is JobState.PAUSING
-                session.commit()
             if error and error.kind is ProviderErrorKind.TIMEOUT:
                 stopped("复核超时，结果未知，需人工核对", unknown=True, failed_stage=stage_name)
                 return None
@@ -397,7 +394,7 @@ def run_review_pipeline(
                 if issue["kind"] != "incorrect_pov"
                 for q in issue["targets"]
             }
-            with session_factory() as session:
+            with local_write_session(session_factory, job_id=job_id) as session:
                 job = session.get(Job, job_id)
                 checkpoint = json.loads(job.checkpoint_json or "{}")
                 checkpoint["expression_reviews"][window.window_id]["identity_feedback"] = {
@@ -407,7 +404,6 @@ def run_review_pipeline(
                     "pov_candidate": feedback.pov_candidate,
                 }
                 job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
-                session.commit()
             if feedback_targets:
                 pending = {
                     q: replace(d, admissible=False) if q in feedback_targets else d
@@ -576,7 +572,7 @@ def run_review_pipeline(
             owner_approvals=approvals,
         )
         base = payload
-        with session_factory() as session:
+        with local_write_session(session_factory, job_id=job_id) as session:
             job = session.get(Job, job_id)
             checkpoint = json.loads(job.checkpoint_json or "{}")
             checkpoint.setdefault("expression_reviews", {})[window.window_id][
@@ -584,7 +580,6 @@ def run_review_pipeline(
             ] = round_index + 1
             checkpoint.setdefault("expression_review_reasons", {})[window.window_id] = reasons
             job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
-            session.commit()
     if isinstance(result.raw, ReviewedExpression):
         result.raw.auxiliary_warnings = diagnostic_warnings[-5:]
     return result

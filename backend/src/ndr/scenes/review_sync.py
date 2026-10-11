@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -23,16 +24,20 @@ ENGINE_REASONS = {"insufficient_evidence", "unknown_quote_kind", "style_only_bas
 def sync_attribution_reviews(
     session: Session, annotation: Annotation, *, current_reason: ReviewReason | None,
     apply: bool = True,
+    existing_rows: Iterable[ReviewItem] | None = None,
 ) -> int:
     """Close superseded automatic reasons; preserve independently flagged items."""
     if annotation.stale:
         return 0
     changed = 0
-    rows = session.scalars(select(ReviewItem).where(
+    rows = existing_rows if existing_rows is not None else session.scalars(select(ReviewItem).where(
         ReviewItem.quote_id == annotation.quote_id, ReviewItem.reason.in_(MODEL_REASONS),
         ReviewItem.queue_status != ReviewQueueStatus.RESOLVED,
     ))
     for row in rows:
+        if (row.reason not in MODEL_REASONS
+                or row.queue_status is ReviewQueueStatus.RESOLVED):
+            continue
         try:
             data = json.loads(row.candidates_json)
         except (ValueError, TypeError):
