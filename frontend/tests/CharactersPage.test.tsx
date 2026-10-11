@@ -10,7 +10,7 @@ import * as completion from '../src/processing/jobCompletion'
 import { updateProcessingPreferences } from '../src/processing/preferences'
 import { updateGeneralSettings } from '../src/settings/preferences'
 import type { CharacterDirectoryOut } from '../src/api/types'
-import CharactersPage from '../src/pages/CharactersPage'
+import CharactersPage, { characterPageLayout } from '../src/pages/CharactersPage'
 import { renderRoute } from './helpers'
 
 vi.mock('../src/api/characters', () => ({
@@ -46,6 +46,8 @@ const mergeResult = {
 }
 
 beforeEach(() => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1200 })
+  Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 1000 })
   vi.resetAllMocks()
   localStorage.clear()
   vi.mocked(jobsApi.fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
@@ -67,6 +69,35 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('默认摘要收起表单，折叠编辑保留草稿并显示未保存提示', async () => {
+    renderPage()
+    const card = await screen.findByRole('article', { name: '人物 悠太' })
+    const input = within(card).getByLabelText('姓名')
+    expect(input).not.toBeVisible()
+    expect(within(card).getByText('男主角', { selector: 'p' })).toBeVisible()
+    await userEvent.click(within(card).getByRole('button', { name: '展开编辑与合并' }))
+    await waitFor(() => expect(input).toBeEnabled())
+    await userEvent.type(input, '草稿')
+    await userEvent.click(within(card).getByRole('button', { name: '收起编辑与合并' }))
+    expect(input).not.toBeVisible()
+    expect(within(card).getByText('有未保存的修改')).toBeVisible()
+    await userEvent.click(within(card).getByRole('button', { name: '展开编辑与合并' }))
+    expect(input).toHaveValue('悠太草稿')
+    expect(api.editBookCharacter).not.toHaveBeenCalled()
+  })
+  it('短屏窄屏分页减少人数，调整尺寸保留表单', async () => {
+    vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(Array.from({ length: 7 }, (_, i) => ({
+      ...entries[0], character_id: `person-${i}`, name: `人物 ${i}`,
+    })))
+    renderPage()
+    const first = await screen.findByRole('article', { name: '人物 人物 0' })
+    expect(screen.getAllByRole('article')).toHaveLength(6)
+    act(() => { window.innerWidth = 360; window.innerHeight = 400; window.dispatchEvent(new Event('resize')) })
+    expect(screen.getAllByRole('article')).toHaveLength(1)
+    expect(first).toBeVisible()
+    expect(characterPageLayout(1050, 768, 450)).toEqual({ columns: 3, pageSize: 3 })
+    expect(characterPageLayout(650, 1000, 0)).toEqual({ columns: 1, pageSize: 2 })
+  })
   it('拿到新合并回执但进度尚未刷新时，不声称尚未调用模型', async () => {
     vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
     vi.mocked(api.startCharacterAutoMerge).mockResolvedValue({ id: 'new-merge', state: 'RUNNING' } as never)
@@ -118,6 +149,7 @@ describe('CharactersPage', () => {
     })))
     renderPage()
     const card = await screen.findByRole('article', { name: '人物 人物 0' })
+    await userEvent.click(within(card).getByRole('button', { name: '展开编辑与合并' }))
     await waitFor(() => expect(within(card).getByLabelText('姓名')).toBeEnabled())
     await userEvent.type(within(card).getByLabelText('姓名'), '草稿')
     expect(within(card).getByLabelText('姓名')).toHaveValue('人物 0草稿')
@@ -158,6 +190,7 @@ describe('CharactersPage', () => {
     renderPage()
     const card = await screen.findByRole('article', { name: '人物 悠太' })
     await waitFor(() => expect(within(card).getByLabelText('人物颜色')).toBeEnabled())
+    await userEvent.click(within(card).getByRole('button', { name: '展开编辑与合并' }))
     await userEvent.selectOptions(within(card).getByLabelText('人物颜色'), '')
     await userEvent.type(within(card).getByLabelText('姓名'), '未保存')
     expect(within(card).getByRole('button', { name: '保存颜色' })).toBeDisabled()
@@ -176,6 +209,7 @@ describe('CharactersPage', () => {
     renderPage()
     const card = await screen.findByRole('article', { name: '人物 悠太' })
     await waitFor(() => expect(within(card).getByLabelText('人物颜色')).toBeEnabled())
+    await userEvent.click(within(card).getByRole('button', { name: '展开编辑与合并' }))
     expect(within(card).getByRole('button', { name: '保存颜色' })).toBeDisabled()
     await userEvent.selectOptions(within(card).getByLabelText('人物颜色'), '8')
     await userEvent.click(within(card).getByRole('button', { name: '保存颜色' }))
@@ -183,6 +217,7 @@ describe('CharactersPage', () => {
     expect(api.editBookCharacter).not.toHaveBeenCalled()
     expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
     const anonymous = screen.getByRole('article', { name: '人物 女店员' })
+    await userEvent.click(within(anonymous).getByRole('button', { name: '展开编辑与合并' }))
     expect(within(anonymous).getByLabelText('人物颜色')).toBeDisabled()
     expect(within(anonymous).getByText(/请先保存人物资料，纳入全书人物后再设置颜色/)).toBeVisible()
   })
@@ -199,6 +234,7 @@ describe('CharactersPage', () => {
     await waitFor(() => expect(select).toBeEnabled())
     await userEvent.selectOptions(select, '200')
     const card = await screen.findByRole('article', { name: '人物 悠太' })
+    await userEvent.click(within(card).getByRole('button', { name: '展开编辑与合并' }))
     await userEvent.click(within(card).getByRole('button', { name: '保存人物资料' }))
     await waitFor(() => expect(api.editBookCharacter).toHaveBeenCalledWith('b1', 'u1',
       expect.objectContaining({ visible_from_cp: 200 })))
@@ -213,6 +249,7 @@ describe('CharactersPage', () => {
     renderPage()
     const card = await screen.findByRole('article', { name: '人物 悠太' })
     const input = within(card).getByLabelText('姓名')
+    await userEvent.click(within(card).getByRole('button', { name: '展开编辑与合并' }))
     await waitFor(() => expect(input).toBeEnabled())
     await userEvent.clear(input)
     await userEvent.type(input, '未保存姓名')
@@ -491,6 +528,7 @@ describe('CharactersPage', () => {
     const page = renderPage()
     await screen.findByText('自动合并：处理中')
     expect(screen.getByRole('button', { name: '分析合并建议' })).toBeDisabled()
+    for (const button of screen.getAllByRole('button', { name: '展开编辑与合并' })) await userEvent.click(button)
     expect(screen.getAllByRole('button', { name: '保存人物资料' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true)
     expect(screen.getByRole('button', { name: '停止自动合并' })).toBeEnabled()
     expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
@@ -549,6 +587,7 @@ describe('CharactersPage', () => {
   it('保存姓名、别名和说明并携带并发版本', async () => {
     renderPage()
     const card = within(await screen.findByRole('article', { name: '人物 浅村悠太' }))
+    await userEvent.click(card.getByRole('button', { name: '展开编辑与合并' }))
     await waitFor(() => expect(card.getByLabelText('姓名')).toBeEnabled())
     await userEvent.clear(card.getByLabelText('姓名'))
     expect(card.getByRole('button', { name: '保存人物资料' })).toBeDisabled()
@@ -568,6 +607,7 @@ describe('CharactersPage', () => {
     renderPage()
     const card = within(await screen.findByRole('article', { name: '人物 浅村悠太' }))
     const select = card.getByLabelText('合并到全书人物')
+    await userEvent.click(card.getByRole('button', { name: '展开编辑与合并' }))
     await waitFor(() => expect(select).toBeEnabled())
     expect(card.getByRole('button', { name: '合并人物…' })).toBeDisabled()
     expect(card.getByText('请选择合并目标后再合并。')).toBeInTheDocument()
@@ -588,6 +628,7 @@ describe('CharactersPage', () => {
     vi.mocked(api.editBookCharacter).mockRejectedValue(new Error('人物版本冲突，请重新读取'))
     renderPage()
     const card = within(await screen.findByRole('article', { name: '人物 浅村悠太' }))
+    await userEvent.click(card.getByRole('button', { name: '展开编辑与合并' }))
     await userEvent.click(card.getByRole('button', { name: '保存人物资料' }))
     expect(await card.findByRole('alert')).toHaveTextContent('人物版本冲突，请重新读取')
     expect(card.getByLabelText('姓名')).toHaveValue('浅村悠太')

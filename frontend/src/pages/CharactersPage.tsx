@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { editBookCharacter, fetchCharacterDirectory, mergeBookCharacter, setCharacterColor } from '../api/characters'
@@ -15,6 +16,38 @@ import { useGeneralSettings } from '../settings/preferences'
 
 const COLOR_NAMES = ['蓝色', '橙色', '绿色', '红色', '紫色', '青色', '金黄色', '粉色',
   '棕色', '墨绿色', '靛蓝色', '酒红色', '橄榄绿', '灰蓝色', '灰紫色', '深灰色']
+
+export function characterPageLayout(width: number, height: number, top: number, rowHeight = 212) {
+  const columns = Math.max(1, Math.min(3, Math.floor((width + 12) / 332)))
+  const rows = Math.max(1, Math.min(2, Math.floor((height - Math.max(0, top) - (width < 500 ? 104 : 64)) / rowHeight)))
+  return { columns, pageSize: columns * rows }
+}
+
+function CharacterPages({ children, scope }: { children: ReactNode; scope: string }) {
+  const container = useRef<HTMLDivElement>(null)
+  const [layout, setLayout] = useState(() => characterPageLayout(window.innerWidth - 48, window.innerHeight, 0))
+  useEffect(() => {
+    const measure = () => {
+      const rect = container.current?.getBoundingClientRect()
+      const summaries = Array.from(container.current?.querySelectorAll<HTMLElement>('.ndr-character-card') ?? [])
+        .filter(card => card.querySelector('.ndr-collapse-toggle')?.getAttribute('aria-expanded') === 'false')
+        .map(card => card.getBoundingClientRect().height).filter(height => height > 0)
+      const next = characterPageLayout(rect?.width || window.innerWidth - 48, window.innerHeight, rect?.top ?? 0,
+        Math.max(212, ...summaries.map(height => height + 12)))
+      setLayout(old => old.columns === next.columns && old.pageSize === next.pageSize ? old : next)
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    if (container.current) observer?.observe(container.current)
+    window.addEventListener('resize', measure)
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure) }
+  }, [])
+  return <div ref={container} className="ndr-character-directory" style={{ '--ndr-character-columns': layout.columns } as CSSProperties}>
+    <PaginatedItems label="人物资料" pageSize={layout.pageSize} scope={scope} className="ndr-character-list">
+      {children}
+    </PaginatedItems>
+  </div>
+}
 
 function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFromCp }: {
   item: CharacterDirectoryOut
@@ -65,7 +98,7 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
   if (color != null && !colorChoices.includes(color)) colorChoices.push(color)
   if (item.color_index != null && item.color_index >= 32 && !colorChoices.includes(item.color_index)) colorChoices.push(item.color_index)
   return <article className="ndr-character-card" aria-label={`人物 ${item.name}`}>
-    <h3 style={{ color: colorForIndex(item.color_index) }}>{item.name}</h3>
+    <h3 title={item.name} style={{ color: colorForIndex(item.color_index) }}>{item.name}</h3>
     {!disabled && <DisabledHint reason={lockReason} />}
     {item.chapter_count != null && item.dialogue_count != null && <p className="hint">
       出现 {item.chapter_count} 章 · {item.dialogue_count} 句对白
@@ -74,6 +107,11 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
       ({ manual: '已人工确认', automatic: '批量自动确认（未经人工复核）',
         legacy: '已确认（旧记录未区分来源）', imported: '导入恢复的人物',
         model: '模型识别人物' }[item.confirmation_source ?? (item.user_confirmed ? 'legacy' : 'model')])}</p>
+    <p className="ndr-character-alias-summary hint" title={(item.aliases ?? []).join('、')}>别名：{item.aliases?.join('、') || '暂无'}</p>
+    <p className="ndr-character-description" title={item.description || undefined}>{item.description || '暂无人物说明'}</p>
+    {(dirty || color !== (item.preferred_color_index ?? null)) && <p className="hint" role="status">有未保存的修改</p>}
+    <CollapsibleBlock title="编辑与合并" defaultOpen={false}>
+    <div className="ndr-character-editor-fields">
     <label className="ndr-field">人物颜色<select value={color ?? ''} disabled={busy || item.kind === 'speaker'}
       title={lockReason ?? (item.kind === 'speaker' ? '请先保存人物资料，纳入全书人物后再设置颜色。' : undefined)}
       onChange={event => setColor(event.target.value === '' ? null : Number(event.target.value))}>
@@ -104,6 +142,8 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
         <button title={lockReason} type="button" className="ndr-danger" disabled={busy} onClick={() => merge.mutate()}>确认合并</button>
         <button title={lockReason} type="button" disabled={busy} onClick={() => setConfirmMerge(false)}>取消</button>
       </div>}
+    </div>
+    </CollapsibleBlock>
     {error && <p role="alert" className="status-error">{error instanceof Error ? error.message : '操作失败，请重新读取后重试'}</p>}
     {message && <p role="status">{message}</p>}
   </article>
@@ -180,9 +220,11 @@ export default function CharactersPage() {
     <CharacterAutoMerge key={bookId} bookId={bookId} versionId={book.data?.active_version_id} count={entries.length} visibleFromCp={effectiveVisibleFromCp}
       disabled={batchProgress.running} onBusyChange={setAutoMergeBusy} onSaved={saved} />
     <section className="card">
+      <CollapsibleBlock title="使用说明" defaultOpen={false}>
       <p className="hint">汇总当前书籍版本已识别的人物（包括未发言人物），可能包含后文剧透。人工确认只是来源记录，并不表示永远正确；仍可手动修改，或让模型提出更名、合并与说明修正建议，预览接受后才生效。后台是否更新人工姓名与说明由通用设置决定，默认关闭。修改会影响已有对白、后续人物识别和导出，不改原文或章节完成状态。请先停止本书处理任务再编辑。</p>
-      {(batchProgress.running || autoMergeBusy) && <p role="status">本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。</p>}
       <p className="hint">颜色由程序生成，保存不调用模型、不更改人工确认状态。选择“自动分配”可恢复；自动占用的色号会为手动选择让位。改色在所有阅读模式中均生效。</p>
+      </CollapsibleBlock>
+      {(batchProgress.running || autoMergeBusy) && <p role="status">本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。</p>}
       {message && <p role="status">{message}</p>}
       <div className="ndr-toolbar">
         <label className="ndr-field">搜索人物<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="姓名、别名或说明" /></label>
@@ -194,12 +236,12 @@ export default function CharactersPage() {
       {directory.data && <p>共 {entries.length} 个人物{term ? `，匹配 ${filtered.length} 个` : ''}</p>}
       {!directory.isPending && !directory.isError && !entries.length && <p>尚未识别人物，请先在预览与处理中分析人物。</p>}
       <CollapsibleBlock title="人物资料列表" summary={`当前显示 ${filtered.length} 个人物`}>
-      <PaginatedItems label="人物资料" pageSize={6} scope={`${bookId}:${term}`} className="ndr-character-list">
+      <CharacterPages scope={`${bookId}:${term}`}>
         {filtered.map((item) => <CharacterEditor key={`${item.character_id}:${item.version}`} item={item} bookId={bookId}
           visibleFromCp={effectiveVisibleFromCp}
           disabled={batchProgress.running || autoMergeBusy}
           targets={entries.filter((row) => row.kind !== 'speaker' && row.character_id !== item.character_id)} onSaved={saved} />)}
-      </PaginatedItems>
+      </CharacterPages>
       </CollapsibleBlock>
     </section>
   </div>
