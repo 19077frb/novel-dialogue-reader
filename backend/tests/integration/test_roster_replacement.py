@@ -68,7 +68,11 @@ def test_explicit_timeout_retry_queued_without_worker_is_woken_by_new_start(migr
     outcome = run_character_roster_job(factory, settings, job_id=old["id"],
                                        adapter_factory=lambda *_: failed)
     assert outcome.state is JobState.NEEDS_RECONCILIATION
+    # Simulate the response committing before a scheduled worker gets CPU time.
+    scheduled = []
+    monkeypatch.setattr("ndr.api.jobs.run_job", lambda *_, job_id, **__: scheduled.append(job_id))
     assert client.post(f"/api/jobs/{old['id']}/reconcile", json={"action": "retry"}).status_code == 200
+    assert scheduled == [old["id"]]
     adapter = FakeProviderAdapter(script=[response()])
     monkeypatch.setattr("ndr.api.characters.run_job", lambda factory, settings, job_id, **_:
         run_character_roster_job(factory, settings, job_id=job_id, adapter_factory=lambda *_: adapter))

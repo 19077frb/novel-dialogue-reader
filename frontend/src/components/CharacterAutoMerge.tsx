@@ -8,7 +8,7 @@ import { fetchProfiles, profileKeys } from '../api/profiles'
 import { useProcessingPreferences, inferenceOptions } from '../processing/preferences'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 import { ThinkingSettings } from './ThinkingSettings'
-import { JOB_STATE_LABELS } from './JobPanel'
+import { JOB_STATE_LABELS, JobPanel } from './JobPanel'
 import { OperationTimer } from './OperationTimer'
 import { CollapsibleBlock } from './CollapsibleBlock'
 import { PaginatedItems } from './ListPagination'
@@ -21,6 +21,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
   const [open, setOpen] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
+  const [waitingDetails, setWaitingDetails] = useState(false)
   const [preferences, update] = useProcessingPreferences()
   const refreshed = useRef('')
   const admissions = useAdmissions()
@@ -31,6 +32,8 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     queryFn: ({ signal }) => fetchLatestCharacterAutoMerge(bookId, versionId!, signal), enabled: Boolean(versionId),
     refetchInterval: query => queued || query.state.data && !query.state.error && !TERMINAL_JOB_STATES.has(query.state.data.state) ? 2000 : false })
   const jobId = result.data?.job_id
+  const waitingForNewJob = Boolean(queued && (!queued.jobId || queued.jobId !== jobId))
+  const resultRunning = Boolean(result.data && !TERMINAL_JOB_STATES.has(result.data.state))
   useEffect(() => { if (jobId) setOpen(true); setSelected([]); setConfirmed(false) }, [jobId])
   const start = useMutation({ mutationFn: () => enqueueWork({ bookId, versionId: versionId!, title: '全书人物自动合并', keys: ['merge'], payload: { type: 'merge', input: {
     book_version_id: versionId!, profile_id: preferences.profileId,
@@ -38,6 +41,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     idempotency_key: freshIdempotencyKey('character-auto-merge', `${bookId}:${versionId}`), run_now: true,
   } } }), onSuccess: () => { setConfirmed(false) }, onSettled: async () => { await result.refetch() } })
   const stop = useMutation({ mutationFn: () => pauseJob(jobId!), onSuccess: () => { void result.refetch() } })
+  const stopQueued = useMutation({ mutationFn: (id: string) => stopAdmission(id) })
   const accept = useMutation({ mutationFn: (ids: string[]) => visibleFromCp == null
     ? confirmCharacterAutoMerge(bookId, jobId!, ids)
     : confirmCharacterAutoMerge(bookId, jobId!, ids, visibleFromCp),
@@ -91,17 +95,26 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
         title={blockedReason ?? (!versionId ? '请先重新读取书籍版本。' : count < 1 ? '请先识别或添加人物。' : !profileReady ? '请先选择可用的模型配置。' : !confirmed ? '请先勾选同意调用模型。' : undefined)}
         onClick={() => start.mutate()}>分析合并建议</button>
       {disabled && <p className="hint">本书处理尚未结束，合并分析会加入队列，等待前序处理完成后执行。</p>}
-      {queued && <p role="status">已添加自动合并任务。<Link to="/tasks">查看任务队列</Link> <button className="ndr-danger" disabled={queued.stopRequested} title={queued.stopRequested ? '停止请求已提交，请等待安全收尾。' : undefined} onClick={() => { void stopAdmission(queued.id).catch(() => result.refetch()) }}>停止本次分析</button></p>}
+      {queued && <p role="status">已添加自动合并任务。<Link to="/tasks">查看任务队列</Link> <button className="ndr-danger" disabled={queued.stopRequested || stopQueued.isPending} title={queued.stopRequested || stopQueued.isPending ? '停止请求已提交，请等待安全收尾。' : undefined} onClick={() => stopQueued.mutate(queued.id)}>停止本次分析</button></p>}
       {queueError && <p role="alert" className="status-error">{queueError}</p>}
       {count < 1 && <p className="hint">至少有一个人物才能分析合并或更名建议。</p>}
       {!profileReady && <p className="hint">请选择可用的模型配置。</p>}
       {!confirmed && !awaiting && <p className="hint">开始前请勾选同意调用模型。</p>}
       {awaiting && <p className="hint">请先确认或放弃当前建议，再开始新的分析。</p>}
       {(start.error || stop.error || accept.error) && <p className="status-error" role="alert">{(start.error ?? stop.error ?? accept.error)?.message}</p>}
+      {stopQueued.error && <p className="status-error" role="alert">{stopQueued.error.message}</p>}
+      {queued && waitingForNewJob && <div role="status">
+        <p>本次自动合并：{queued.jobId ? '正在读取进度' : '等待执行'}</p>
+        <OperationTimer key={queued.id} startedAt={queued.createdAt} />
+        <p className="hint">{queued.jobId ? '任务已提交，正在读取本次进度；模型可能已开始处理。' : queued.waiting?.reason ?? '等待前面的本书处理范围或可用并发额度，尚未调用模型。'}{queued.waiting?.title && ` 等待任务：${queued.waiting.title}`}</p>
+        {queued.waiting?.jobId && <button onClick={() => setWaitingDetails(value => !value)}>查看等待任务</button>}
+        {waitingDetails && queued.waiting?.jobId && <JobPanel jobId={queued.waiting.jobId} />}
+      </div>}
       {jobId && <div>
         {result.data && <>
           <p role="status">自动合并：{noSuggestions ? '分析完成，没有可接受的合并或更名建议' : awaiting ? '建议已生成，等待确认' : result.data.phase === 'discarded' ? '本次建议已放弃' : JOB_STATE_LABELS[result.data.state]}</p>
-          <OperationTimer startedAt={Date.parse(result.data.created_at)} finishedAt={busy ? null : Date.parse(result.data.updated_at)} />
+          {waitingForNewJob && <p className="hint">以下为上一次合并结果。</p>}
+          <OperationTimer key={jobId} startedAt={Date.parse(result.data.created_at)} finishedAt={resultRunning ? null : Date.parse(result.data.updated_at)} />
           <p>已知消耗 {result.data.usage?.total_tokens ?? 0} Tokens{result.data.unknown_usage_runs > 0 ? `；另有 ${result.data.unknown_usage_runs} 次调用用量未知` : ''}</p>
           {noSuggestions && <p className="hint">本次未修改人物，无需确认或放弃。{result.data.skipped_groups > 0 ? `有 ${result.data.skipped_groups} 组建议未达到接受条件，未纳入结果。` : '模型未提供合并或更名建议。'}你可以调整配置，重新勾选同意后再次分析；不会自动调用模型。</p>}
           {result.data.last_error && <p className="status-error" role="alert">{result.data.last_error}</p>}

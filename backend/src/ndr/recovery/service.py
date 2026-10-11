@@ -146,7 +146,7 @@ def recovery_actions(
             RecoveryActionOut(
                 action="reconcile_retry",
                 label="确认重发这些窗口",
-                detail="只有在你确认“重复计费可以接受”时才选择：窗口会回到队列并重新调用模型。",
+                detail="只有在你确认“重复计费可以接受”时才选择：确认后会启动后台执行，重新调用模型。",
                 paid=True,
                 endpoint="POST /api/jobs/{id}/reconcile",
             ),

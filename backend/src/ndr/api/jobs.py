@@ -37,6 +37,7 @@ from ..jobs.service import (
 from ..recovery.service import job_recovery, profile_snapshot_of
 from ..storage.models import Book, BookVersion, Chapter, Job, JobWindow, ModelProfile, Quote
 from ..storage.transactions import (
+    admission_transaction,
     database_error_detail,
     finish_local_write,
     sqlite_lock_error,
@@ -317,13 +318,26 @@ def run_job_route(request: Request, job_id: str) -> DataEnvelope[JobRunOut]:
 
 
 @router.post("/{job_id}/reconcile", response_model=DataEnvelope[dict])
-def reconcile_job_route(request: Request, job_id: str, payload: ReconcileIn) -> DataEnvelope[dict]:
+def reconcile_job_route(
+    request: Request, job_id: str, payload: ReconcileIn, background: BackgroundTasks,
+) -> DataEnvelope[dict]:
     factory = request.app.state.session_factory
-    with transaction(factory) as session:
+    with admission_transaction(factory) as session:
         job = session.get(Job, job_id)
         if job is None:
             raise ApiError.not_found("任务不存在", job_id=job_id)
+        replacement = json.loads(job.checkpoint_json or "{}").get("superseded_by")
+        if replacement:
+            raise ApiError(ErrorCode.RESOURCE_CONFLICT,
+                           "该人物任务已由新的本章任务接替，请查看新任务",
+                           details={"job_id": replacement})
+        if job.state is not JobState.NEEDS_RECONCILIATION:
+            raise ApiError(ErrorCode.RESOURCE_CONFLICT,
+                           "任务已不处于结果待核对状态，请重新读取任务详情")
         result = reconcile_job(session, job, action=payload.action)
+    if payload.action == "retry":
+        background.add_task(run_job, factory, request.app.state.settings,
+                            job_id=job_id, credentials=request.app.state.credentials)
     return DataEnvelope(data=result, request_id=current_request_id(request))
 
 
