@@ -67,6 +67,22 @@ function renderPage() {
 }
 
 describe('CharactersPage', () => {
+  it('拿到新合并回执但进度尚未刷新时，不声称尚未调用模型', async () => {
+    vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
+    vi.mocked(api.startCharacterAutoMerge).mockResolvedValue({ id: 'new-merge', state: 'RUNNING' } as never)
+    let finish!: (value: never) => void
+    vi.mocked(completion.waitForJobCompletion).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('用时 1 秒')
+    await user.click(screen.getByRole('checkbox', { name: /我同意调用模型/ }))
+    await user.click(screen.getByRole('button', { name: '分析合并建议' }))
+    await screen.findByText('本次自动合并：正在读取进度')
+    expect(screen.getByText('任务已提交，正在读取本次进度；模型可能已开始处理。')).toBeInTheDocument()
+    expect(screen.getByText('用时 1 秒')).toBeInTheDocument()
+    finish({ id: 'new-merge', state: 'COMPLETED' } as never)
+    await waitFor(() => expect(screen.queryByText('本次自动合并：正在读取进度')).not.toBeInTheDocument())
+  })
   it('本次合并等待单独计时，旧结果保持结束时间并显示阻塞章节', async () => {
     vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
     vi.mocked(jobsApi.fetchTaskQueue).mockResolvedValue({ items: [{ id: 'old', state: 'QUEUED',

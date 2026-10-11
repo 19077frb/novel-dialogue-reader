@@ -104,9 +104,9 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
       {(start.error || stop.error || accept.error) && <p className="status-error" role="alert">{(start.error ?? stop.error ?? accept.error)?.message}</p>}
       {stopQueued.error && <p className="status-error" role="alert">{stopQueued.error.message}</p>}
       {queued && waitingForNewJob && <div role="status">
-        <p>本次自动合并：等待执行</p>
+        <p>本次自动合并：{queued.jobId ? '正在读取进度' : '等待执行'}</p>
         <OperationTimer key={queued.id} startedAt={queued.createdAt} />
-        <p className="hint">{queued.waiting?.reason ?? '等待前面的本书处理范围或可用并发额度，尚未调用模型。'}{queued.waiting?.title && ` 等待任务：${queued.waiting.title}`}</p>
+        <p className="hint">{queued.jobId ? '任务已提交，正在读取本次进度；模型可能已开始处理。' : queued.waiting?.reason ?? '等待前面的本书处理范围或可用并发额度，尚未调用模型。'}{queued.waiting?.title && ` 等待任务：${queued.waiting.title}`}</p>
         {queued.waiting?.jobId && <button onClick={() => setWaitingDetails(value => !value)}>查看等待任务</button>}
         {waitingDetails && queued.waiting?.jobId && <JobPanel jobId={queued.waiting.jobId} />}
       </div>}
