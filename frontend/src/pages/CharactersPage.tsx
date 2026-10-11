@@ -17,23 +17,18 @@ import { useGeneralSettings } from '../settings/preferences'
 const COLOR_NAMES = ['蓝色', '橙色', '绿色', '红色', '紫色', '青色', '金黄色', '粉色',
   '棕色', '墨绿色', '靛蓝色', '酒红色', '橄榄绿', '灰蓝色', '灰紫色', '深灰色']
 
-export function characterPageLayout(width: number, height: number, top: number, rowHeight = 212) {
+export function characterPageLayout(width: number) {
   const columns = Math.max(1, Math.min(3, Math.floor((width + 12) / 332)))
-  const rows = Math.max(1, Math.min(2, Math.floor((height - Math.max(0, top) - (width < 500 ? 104 : 64)) / rowHeight)))
-  return { columns, pageSize: columns * rows }
+  return { columns, pageSize: 6 }
 }
 
 function CharacterPages({ children, scope }: { children: ReactNode; scope: string }) {
   const container = useRef<HTMLDivElement>(null)
-  const [layout, setLayout] = useState(() => characterPageLayout(window.innerWidth - 48, window.innerHeight, 0))
+  const [layout, setLayout] = useState(() => characterPageLayout(window.innerWidth - 48))
   useEffect(() => {
     const measure = () => {
       const rect = container.current?.getBoundingClientRect()
-      const summaries = Array.from(container.current?.querySelectorAll<HTMLElement>('.ndr-character-card') ?? [])
-        .filter(card => card.querySelector('.ndr-collapse-toggle')?.getAttribute('aria-expanded') === 'false')
-        .map(card => card.getBoundingClientRect().height).filter(height => height > 0)
-      const next = characterPageLayout(rect?.width || window.innerWidth - 48, window.innerHeight, rect?.top ?? 0,
-        Math.max(212, ...summaries.map(height => height + 12)))
+      const next = characterPageLayout(rect?.width || window.innerWidth - 48)
       setLayout(old => old.columns === next.columns && old.pageSize === next.pageSize ? old : next)
     }
     measure()
