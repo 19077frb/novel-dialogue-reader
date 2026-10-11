@@ -78,6 +78,7 @@ def test_new_transport_preserves_local_profiles_and_initial_visibility():
     fields = asdict(old)
     fields.pop("identity_prompt_version")
     fields.pop("auxiliary_protocol")
+    fields.pop("nonperson_policy_version")
     assert old.fingerprint() == fingerprint({
         "protocol": PROTOCOL_VERSION, "prompt": PROMPT_VERSION,
         "compiler": COMPILER_VERSION, "task": fields,

@@ -113,7 +113,7 @@ def test_short_window_executes_and_preserves_programme_acceptance(
         assert rows[ids[1]].status is AnnotationStatus.ACCEPTED
         assert rows[ids[0]].basis is SpeakerBasis.DIRECT
         assert rows[ids[0]].speaker_id == rows[ids[1]].speaker_id
-        assert session.scalar(select(ReviewItem)).reason is ReviewReason.LOW_CONFIDENCE
+        assert session.scalar(select(ReviewItem)).reason is ReviewReason.AMBIGUOUS_SPEAKER
         assert not result.application.scene_state.recent_turns if kind != "speech" else True
         assert '"q": "Q1"' in result.raw_outputs[0]
         compiled = compile_expression_output(_short_output(task, kind), task,

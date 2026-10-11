@@ -88,7 +88,7 @@ def dialogue_strategy_range(strategy: str) -> dict[str, str]:
     }:
         raise ApiError.validation("不支持的对白处理策略")
     return {
-        "context_policy": "context-chapter-2"
+        "context_policy": "context-chapter-3"
         if strategy.startswith("complete-blocks")
         else "context-chapter-1",
         "output_protocol": "expression-production-1",
@@ -330,11 +330,15 @@ def create_inference_job(
         auxiliary_protocol != DIAGNOSTICS_VERSION or protocol != PRODUCTION_EXPRESSION_VERSION
     ):
         raise ApiError.validation("辅助诊断隔离须选择受支持的版本与短表达协议")
-    from ..context.budget import CONTEXT_POLICY_CHAPTER, CONTEXT_POLICY_DIALOGUE_BLOCKS
+    from ..context.budget import (
+        CONTEXT_POLICY_BOUNDED_BLOCKS,
+        CONTEXT_POLICY_CHAPTER,
+        CONTEXT_POLICY_DIALOGUE_BLOCKS,
+    )
 
     if (
         range_payload.get("context_policy")
-        in {CONTEXT_POLICY_CHAPTER, CONTEXT_POLICY_DIALOGUE_BLOCKS}
+        in {CONTEXT_POLICY_CHAPTER, CONTEXT_POLICY_DIALOGUE_BLOCKS, CONTEXT_POLICY_BOUNDED_BLOCKS}
         and protocol != PRODUCTION_EXPRESSION_VERSION
     ):
         raise ApiError.validation("完整章节上下文策略须配合短表达协议")
@@ -422,6 +426,7 @@ def create_inference_job(
                 "visible_horizon_cp": visible_horizon_cp,
                 "identity_input_version": IDENTITY_INPUT_VERSION,
                 "identity_prompt_version": IDENTITY_PROMPT_VERSION,
+                "nonperson_policy_version": "nonperson-2",
             },
             ensure_ascii=False,
         ),

@@ -18,6 +18,7 @@ class ProjectedCompactTask(CompactTask):
     effective_profiles: tuple[dict, ...] = ()
     auxiliary_protocol: str | None = None
     identity_prompt_version: str | None = None
+    nonperson_policy_version: str | None = None
 
     def validate_effective_profiles(self):
         self.__post_init__()
@@ -173,6 +174,7 @@ def build_production_expression_task(
         effective_profiles=profiles,
         auxiliary_protocol=auxiliary_protocol,
         identity_prompt_version=identity_prompt_version,
+        nonperson_policy_version=state.nonperson_policy_version,
     )
     task.validate_effective_profiles()
     return task

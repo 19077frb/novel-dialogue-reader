@@ -16,7 +16,7 @@ from pydantic import Field
 from ..domain.common import ApiModel
 from ..domain.enums import Assignment, GapDecision, QuoteKind, SpeakerBasis
 from ..llm.errors import InvalidModelOutput
-from ..llm.nonperson_policy import NONPERSON_POLICY
+from ..llm.nonperson_policy import nonperson_policy
 from ..llm.prompts.labeling import IDENTITY_LINKING_POLICY
 from ..llm.schemas import GapDecisionOut, LlmOutput, NewSpeaker, QuoteLabel, SceneUpdate
 from ..llm.validation import LabelingTargets, load_json_object, validate_output
@@ -179,7 +179,7 @@ class CompactTask:
             '{"labels":[{"q":"Q1","kind":"speech","character":"C1",'
             '"basis":"direct","evidence":["G1"]},{"q":"Q2","kind":"thought"}],'
             '"breaks":[],"new_characters":[],"needs_context":[]}\n'
-            + NONPERSON_POLICY + "\n"
+            + nonperson_policy(getattr(self, "nonperson_policy_version", None)) + "\n"
             + json.dumps(CompactOutput.model_json_schema(), ensure_ascii=False)
         )
         if self.evidence_hints or self.relay:
@@ -206,6 +206,8 @@ class CompactTask:
             fields.pop("auxiliary_protocol", None)  # Preserve historical task/cache fingerprints.
         if fields.get("identity_prompt_version") is None:
             fields.pop("identity_prompt_version", None)
+        if fields.get("nonperson_policy_version") is None:
+            fields.pop("nonperson_policy_version", None)
         payload = {
             "protocol": PROTOCOL_VERSION,
             "prompt": PROMPT_VERSION,

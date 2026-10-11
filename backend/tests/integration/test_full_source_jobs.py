@@ -571,7 +571,7 @@ def _recheck_strategy_creation(migrated_client, strategy):
         assert "output_protocol" not in scope and "context_policy" not in scope
     else:
         assert scope["context_policy"] == (
-            "context-chapter-2" if strategy.startswith("complete-blocks") else "context-chapter-1"
+            "context-chapter-3" if strategy.startswith("complete-blocks") else "context-chapter-1"
         )
         assert scope["output_protocol"] == "expression-production-1"
         assert scope.get("auxiliary_protocol") == (

@@ -733,7 +733,7 @@ def apply_window(
         if label.quote_id in ceilings and decision_out.status is AnnotationStatus.ACCEPTED:
             decision_out = AcceptanceDecision(
                 status=AnnotationStatus.PROVISIONAL, reason="unapproved_expression_owner",
-                needs_review=True, review_reason=ReviewReason.LOW_CONFIDENCE,
+                needs_review=True, review_reason=ReviewReason.AMBIGUOUS_SPEAKER,
             )
         if (preserve_existing_candidates and label.quote_id not in ceilings
                 and decision_out.status is not AnnotationStatus.ACCEPTED):

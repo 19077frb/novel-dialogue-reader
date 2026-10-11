@@ -100,6 +100,7 @@ class BudgetPolicy:
     strong_model_share: float = 0.0
     full_source: bool = False
     dialogue_blocks: bool = False
+    dialogue_target_limit: int = 0
 
     def as_key(self) -> dict[str, Any]:
         """参与依赖哈希/缓存键的字段（改动会影响缓存复用）。"""
@@ -118,6 +119,8 @@ class BudgetPolicy:
             "strong_model_share": self.strong_model_share,
             **({"full_source": True} if self.full_source else {}),
             **({"dialogue_blocks": True} if self.dialogue_blocks else {}),
+            **({"dialogue_target_limit": self.dialogue_target_limit}
+               if self.dialogue_target_limit else {}),
         }
 
 
@@ -136,12 +139,18 @@ CONTEXT_POLICY_CHAPTER = "context-chapter-1"
 CHAPTER_POLICY = BudgetPolicy(context_tokens=32000, full_source=True)
 CONTEXT_POLICY_DIALOGUE_BLOCKS = "context-chapter-2"
 DIALOGUE_BLOCK_POLICY = BudgetPolicy(context_tokens=32000, full_source=True, dialogue_blocks=True)
+CONTEXT_POLICY_BOUNDED_BLOCKS = "context-chapter-3"
+BOUNDED_BLOCK_POLICY = BudgetPolicy(
+    context_tokens=32000, full_source=True, dialogue_blocks=True, dialogue_target_limit=128,
+)
 
 
 def policy_version_for(policy: BudgetPolicy) -> str:
     """策略版本号：进入依赖哈希与缓存键，默认仍是 context-1。"""
 
     if policy.full_source:
+        if policy.dialogue_blocks and policy.dialogue_target_limit:
+            return CONTEXT_POLICY_BOUNDED_BLOCKS
         return CONTEXT_POLICY_DIALOGUE_BLOCKS if policy.dialogue_blocks else CONTEXT_POLICY_CHAPTER
     return CONTEXT_POLICY_COMPRESSED if policy.gap_compression else CONTEXT_POLICY_CONSERVATIVE
 
@@ -151,6 +160,7 @@ POLICY_BY_VERSION: dict[str, BudgetPolicy] = {
     CONTEXT_POLICY_COMPRESSED: COMPRESSED_POLICY,
     CONTEXT_POLICY_CHAPTER: CHAPTER_POLICY,
     CONTEXT_POLICY_DIALOGUE_BLOCKS: DIALOGUE_BLOCK_POLICY,
+    CONTEXT_POLICY_BOUNDED_BLOCKS: BOUNDED_BLOCK_POLICY,
 }
 
 

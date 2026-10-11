@@ -44,7 +44,7 @@ export function dialogueStrategyDisabledReason(strategy: DialogueStrategy | unde
 
 export function dialogueStrategyPayload(strategy?: DialogueStrategy) {
   return strategy && ['complete', 'complete-review', 'complete-blocks', 'complete-blocks-review', 'complete-blocks-isolated', 'complete-blocks-isolated-review', 'complete-blocks-isolated-feedback-review'].includes(strategy) ? {
-    context_policy: strategy.startsWith('complete-blocks') ? 'context-chapter-2' : 'context-chapter-1',
+    context_policy: strategy.startsWith('complete-blocks') ? 'context-chapter-3' : 'context-chapter-1',
     output_protocol: 'expression-production-1',
     ...(strategy.includes('-isolated') ? { auxiliary_protocol: 'expression-auxiliary-isolation-1' } : {}),
     ...(strategy.endsWith('-review') ? { review_protocol: 'expression-evidence-review-1' } : {}),

@@ -220,7 +220,7 @@ describe('ReviewPage', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]).toHaveTextContent('「雨停了。」')
     expect(rows[0]).toHaveTextContent('原因：置信度低')
-    expect(rows[0]).toHaveTextContent('原因：说话人有歧义')
+    expect(rows[0]).toHaveTextContent('原因：人物归属有分歧')
     expect(screen.getAllByText('「雨停了。」')).toHaveLength(1)
     expect(rows[1]).toHaveTextContent('少女合上伞。')
     expect(rows[1]).toHaveTextContent('原因：场景边界待确认')

@@ -9,7 +9,7 @@ from pydantic import Field
 
 from ndr.domain.common import ApiModel
 from ndr.evaluation.compact import DiscoveredCharacter
-from ndr.llm.nonperson_policy import NONPERSON_POLICY
+from ndr.llm.nonperson_policy import nonperson_policy
 from ndr.llm.prompts.labeling import IDENTITY_LINKING_POLICY
 from ndr.scenes.acceptance import decide_acceptance
 
@@ -80,7 +80,7 @@ class ExplicitOwnerProtocol:
             + "\n"
             + ENUMERATED_VIEW_POLICY
             + "\n"
-            + NONPERSON_POLICY
+            + nonperson_policy(getattr(task, "nonperson_policy_version", None))
             + "\n"
             + IDENTITY_LINKING_POLICY
             + "\n"

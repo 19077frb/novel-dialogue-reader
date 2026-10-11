@@ -57,9 +57,9 @@ def test_production_prompt_preserves_nonblank_and_independent_numbering_rules(pr
     system, user = (m["content"] for m in protocol.messages())
     assert EVIDENCE_VIEW_POLICY in system
     assert ENUMERATED_VIEW_POLICY in system
-    from ndr.llm.nonperson_policy import NONPERSON_POLICY
+    from ndr.llm.nonperson_policy import nonperson_policy
 
-    assert NONPERSON_POLICY in system
+    assert nonperson_policy(getattr(source, "nonperson_policy_version", None)) in system
     nonperson = protocol.compile({'labels': [{'q': q, 'kind': 'other'} for q in ('Q1', 'Q2')]})
     assert all(row['kind'] == 'other' and row['character_id'] is None for row in nonperson['rows'])
     assert json.loads(system.rsplit("\n", 1)[1]) == protocol.schema

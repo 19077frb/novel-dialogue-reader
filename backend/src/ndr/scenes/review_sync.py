@@ -16,7 +16,8 @@ MODEL_REASONS = {ReviewReason.MODEL_OUTPUT_WARNING, ReviewReason.UNKNOWN_SPEAKER
                  ReviewReason.AMBIGUOUS_SPEAKER}
 ENGINE_REASONS = {"insufficient_evidence", "unknown_quote_kind", "style_only_basis",
                   "model_output_validation_warning",
-                  "unverified_direct_basis", "unverified_coreference", "unverified_response_link"}
+                  "unverified_direct_basis", "unverified_coreference", "unverified_response_link",
+                  "unapproved_expression_owner"}
 
 
 def sync_attribution_reviews(

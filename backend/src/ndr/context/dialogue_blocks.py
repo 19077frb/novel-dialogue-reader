@@ -70,7 +70,10 @@ def dialogue_units(inputs, start, end, targets, *, separator, error):
             + interval(targets[right - 1].end_cp, b)
         )
 
-    if body_cost(start, end) <= budget:
+    target_limit = inputs.policy.dialogue_target_limit
+    if type(target_limit) is not int or target_limit < 0:
+        raise error("完整对话块目标上限需要非负整数")
+    if body_cost(start, end) <= budget and (not target_limit or len(targets) <= target_limit):
         return ((start, end, ()),)
 
     boundaries = {start, end}
@@ -130,6 +133,10 @@ def dialogue_units(inputs, start, end, targets, *, separator, error):
             if following > index and blocks[following][0] in explicit:
                 break
             b = blocks[following][1]
+            target_count = bisect_left(target_starts, b) - bisect_left(target_starts, a)
+            # Never cut a continuous turn block just to meet the soft limit.
+            if following > index and target_limit and target_count > target_limit:
+                break
             body_tokens = body_cost(a, b)
             if body_tokens > budget:
                 break
