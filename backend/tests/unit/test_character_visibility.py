@@ -1,7 +1,46 @@
 import json
+from types import SimpleNamespace
+
+import pytest
 
 from ndr.characters.visibility import capture, initialize, visible_value
 from ndr.storage.models import BookCharacter, SpeakerGroup
+
+
+@pytest.mark.parametrize("merge_accepted", [True, False])
+def test_ledger_history_parses_once_and_matches_visible_profiles(monkeypatch, merge_accepted):
+    from ndr.characters import facts
+    from ndr.characters.visibility import identity_presentation_history
+
+    version = SimpleNamespace(id="v", canonical_sha256="a" * 64, canonical_length_cp=100)
+    records = [{"kind": "description", "value": f"说明{i}", "visible_from_cp": i,
+                "canonical_sha256": version.canonical_sha256, "source": "user",
+                "source_ref": "edit", "accepted": True} for i in range(1, 20)]
+    records.append({"kind": "name", "value": "林舟", "visible_from_cp": 3,
+                    "canonical_sha256": version.canonical_sha256, "source": "user",
+                    "source_ref": "edit", "accepted": True, "identity_links": [{
+                        "source_id": "old", "target_id": "c", "visible_from_cp": 50,
+                        "source": "user", "source_ref": "merge", "accepted": merge_accepted}]})
+    character = BookCharacter(id="c", book_version_id="v", identity_facts_json=json.dumps(records))
+    original = facts.read_identity_records
+    calls = []
+
+    def counted(*args):
+        calls.append(True)
+        return original(*args)
+
+    monkeypatch.setattr(facts, "read_identity_records", counted)
+    rows = identity_presentation_history(character, version)
+    assert len(calls) == 1
+    for row in rows:
+        profile = facts.visible_identity_profile(character, version, horizon=row["cp"])
+        assert row["name"] == (profile["name"] or "")
+        assert row["description"] == profile["description"]
+    assert rows[-1]["name"] == ("林舟" if merge_accepted else "")
+    # No cross-call cache: edits are visible immediately.
+    character.identity_facts_json = "[]"
+    character.presentation_history_json = '[{"cp":0,"name":"已修改"}]'
+    assert identity_presentation_history(character, version)[0]["name"] == "已修改"
 
 
 def test_history_uses_chapter_boundary_and_preserves_current_reread():

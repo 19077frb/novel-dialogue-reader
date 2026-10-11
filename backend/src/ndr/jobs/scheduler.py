@@ -514,6 +514,7 @@ def _apply_payload(
     preserve_existing_candidates: bool = False,
     attribution_only: bool = False,
     allow_partial: bool = False,
+    precompiled_expression=None,
 ) -> tuple[bool, list[str], list[str], list[str]]:
     """校验并应用一次输出；成功时写缓存。
 
@@ -553,13 +554,16 @@ def _apply_payload(
                 and raw.task_fingerprint != state.production_expression_task.fingerprint()
             ):
                 raise ValueError("Resolved review does not match current task")
-            compilation = compile_expression_output(
+            compilation = (precompiled_expression[1] if precompiled_expression is not None
+                           and precompiled_expression[0]
+                           == state.production_expression_task.fingerprint()
+                           else compile_expression_output(
                 payload,
                 state.production_expression_task,
                 owner_approvals=raw.owner_approvals
                 if isinstance(raw, ReviewedExpression)
                 else None,
-            )
+            ))
             if isinstance(raw, ReviewedExpression):
                 cache_payload = raw.cache_payload()
         except (ValueError, InvalidModelOutput, ValidationError) as exc:
@@ -2077,6 +2081,24 @@ def _run_job(
                     outcome.recheck_targets += len(window.target_quote_ids)
 
             retry_correction = None
+            precompiled_expression = None
+            if error is None and expression_task is not None:
+                # Pure compilation can run before acquiring SQLite's writer.
+                # Reuse only after the locked identity refresh matches exactly.
+                from pydantic import ValidationError
+
+                from ..llm.errors import InvalidModelOutput
+                from ..llm.expression_compiler import compile_expression_output
+
+                try:
+                    task = state.production_expression_task
+                    precompiled_expression = (task.fingerprint(), compile_expression_output(
+                        {k: v for k, v in raw.items() if not str(k).startswith("_")}, task,
+                        owner_approvals=raw.owner_approvals
+                        if isinstance(raw, ReviewedExpression) else None,
+                    ))
+                except (ValueError, InvalidModelOutput, ValidationError, TypeError, AttributeError):
+                    pass  # Existing validation/recovery owns errors and partial results.
             with local_write_session(session_factory, job_id=job_id) as session:
                 job = session.get(Job, job_id)
                 assert job is not None
@@ -2169,6 +2191,7 @@ def _run_job(
                         run_id=run_id,
                         cache_key=cache_key,
                         allow_partial=attempt >= format_retry_limit,
+                        precompiled_expression=precompiled_expression,
                     )
                     if not ok:
                         run.state = InferenceRunState.FAILED

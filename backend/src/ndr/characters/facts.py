@@ -263,9 +263,14 @@ def visible_identity_facts(
 def visible_identity_records(character, version, *, horizon: int) -> tuple[IdentityRecord, ...]:
     if type(horizon) is not int or not 0 <= horizon <= version.canonical_length_cp:
         raise ValueError("Explicit identity horizon must be within the original")
+    return _visible_records(read_identity_records(character, version), horizon)
+
+
+def _visible_records(records, horizon):
+    """Filter already validated records; callers own version/horizon validation."""
     return tuple(
         f
-        for f in read_identity_records(character, version)
+        for f in records
         if f.accepted
         and f.visible_from_cp <= horizon
         and all(link.accepted and link.visible_from_cp <= horizon for link in f.identity_links)
@@ -276,12 +281,17 @@ def visible_identity_profile(
     character: BookCharacter, version: BookVersion, *, horizon: int
 ) -> dict:
     records = visible_identity_records(character, version, horizon=horizon)
+    return _profile_for_records(character.id, records)
+
+
+def _profile_for_records(character_id, records):
+    """Pure projection, shared by normal reads and one-shot display history."""
     cohorts = {}
     for index, record in enumerate(records):
-        origin = record.identity_links[0].source_id if record.identity_links else character.id
+        origin = record.identity_links[0].source_id if record.identity_links else character_id
         cohorts.setdefault(origin, []).append((index, record))
     profiles = {origin: _cohort_profile(rows) for origin, rows in cohorts.items()}
-    own = profiles.get(character.id, {})
+    own = profiles.get(character_id, {})
     named = [p for p in profiles.values() if p["name"] is not None]
     chosen = (
         own
@@ -296,7 +306,7 @@ def visible_identity_profile(
     aliases = list(own.get("aliases", {}))
     alias_reset = own.get("alias_reset_index", -1)
     for origin, profile in profiles.items():
-        if origin == character.id:
+        if origin == character_id:
             continue
         if profile["name"] and profile["name_position"][1] > alias_reset:
             aliases.append(profile["name"])
@@ -315,7 +325,7 @@ def visible_identity_profile(
     )
     facts = tuple(f for f in records if isinstance(f, CharacterIdentityFact))
     return {
-        "character_id": character.id,
+        "character_id": character_id,
         "name": name,
         "aliases": tuple(dict.fromkeys(v for v in aliases if v != name)),
         "description": description.get("description", ""),

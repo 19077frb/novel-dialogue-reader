@@ -48,7 +48,7 @@ def initialize(row, cp, character=None):
 
 def identity_presentation_history(character, version):
     """Materialize accepted ledger reveal times for display, never for model input."""
-    from .facts import read_identity_records, visible_identity_profile
+    from .facts import _profile_for_records, _visible_records, read_identity_records
 
     records = read_identity_records(character, version)
     if not records:
@@ -58,7 +58,7 @@ def identity_presentation_history(character, version):
         if r.accepted and all(link.accepted for link in r.identity_links))})
     result = []
     for cp in positions:
-        profile = visible_identity_profile(character, version, horizon=cp)
+        profile = _profile_for_records(character.id, _visible_records(records, cp))
         row = {"cp": cp, "identity": identity(character), "name": profile["name"] or "",
                "description": profile["description"]}
         if not result or any(row[key] != result[-1][key] for key in ("name", "description")):
