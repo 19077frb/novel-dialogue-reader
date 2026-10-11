@@ -28,6 +28,13 @@ export const JOB_KIND_LABELS: Record<string, string> = {
   RECHECK: '局部复核', RECOMPUTE: '重新计算', EXPORT: '导出',
 }
 
+export function jobStateLabel(job: Pick<JobDetailOut, 'state' | 'progress'>): string {
+  if (job.progress?.stage === 'write_queue_waiting') return '等待保存'
+  if (job.progress?.stage === 'write_queue_active') return '正在保存'
+  if (job.progress?.stage === 'local_finalization_pending') return '正在保存状态'
+  return JOB_STATE_LABELS[job.state] ?? job.state
+}
+
 function reviewProgress(progress: Record<string, unknown>): string {
   const stage = typeof progress.review_stage === 'string' ? progress.review_stage : ''
   const [kind, round] = stage.split(':')
@@ -106,14 +113,17 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
       <p role="status" aria-live="polite">
         {JOB_KIND_LABELS[job.data.kind] ?? job.data.kind}任务
         {job.data.purpose === 'preview' ? ' · 试运行' : ''} ·{' '}
-        <strong data-testid="job-state" title={state}>{job.data.progress?.stage === 'local_finalization_pending'
-          ? '正在保存状态' : JOB_STATE_LABELS[state ?? ''] ?? state}</strong>
+        <strong data-testid="job-state" title={state}>{jobStateLabel(job.data)}</strong>
       </p>
       {job.data.progress?.stage === 'rechecking' && (
         <p className="hint">{reviewProgress(job.data.progress)}</p>
       )}
       {job.data.progress?.stage === 'local_finalization_pending' && (
         <p className="hint" role="status">模型任务已退出，正在等待数据库保存状态；不会重新调用模型。</p>
+      )}
+      {['write_queue_waiting', 'write_queue_active'].includes(String(job.data.progress?.stage)) && (
+        <p className="hint" role="status">{job.data.progress?.stage === 'write_queue_waiting'
+          ? '正在等待其他保存操作完成，请勿重复提交。' : '正在保存任务数据，请稍候。'}</p>
       )}
       <IdentityFeedbackSummary checkpoint={job.data.checkpoint} />
       {Array.isArray(job.data.checkpoint?.auxiliary_warnings) && (

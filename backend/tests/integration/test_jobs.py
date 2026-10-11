@@ -1003,8 +1003,9 @@ def test_unknown_outcome_is_not_resent_automatically(
             session.add(run)
             session.flush()
             run.updated_at = datetime.now(tz=UTC) - timedelta(hours=1)
-        with transaction(factory) as session:
-            reconciled = reconcile_stale_runs(factory, lease_seconds=60)
+        # Reconciliation owns its write transaction; inspect it with a read session.
+        reconciled = reconcile_stale_runs(factory, lease_seconds=60)
+        with factory() as session:
             assert reconciled
             refreshed = session.get(Job, job["id"])
             assert refreshed is not None

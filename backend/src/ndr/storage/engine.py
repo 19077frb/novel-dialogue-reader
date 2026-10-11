@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
 from ..domain.enums import DatabaseState
+from .write_queue import QueuedSession
 
 
 def create_db_engine(settings: Settings) -> Engine:
@@ -39,7 +40,8 @@ def create_db_engine(settings: Settings) -> Engine:
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:
-    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
+    return sessionmaker(bind=engine, class_=QueuedSession, autoflush=False,
+                        expire_on_commit=False, future=True)
 
 
 @dataclass(frozen=True)

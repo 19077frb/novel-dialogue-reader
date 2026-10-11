@@ -29,6 +29,11 @@ def settlement_pending(job_id):
 
 
 def settlement_progress(job_id, progress):
+    from ..storage.write_queue import writer_progress
+
+    writing = writer_progress(job_id)
+    if writing:
+        return {**(progress or {}), **writing}
     if not settlement_pending(job_id):
         return progress
     return {**(progress or {}), "stage": "local_finalization_pending",
