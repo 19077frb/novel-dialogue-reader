@@ -228,6 +228,7 @@ def test_production_legacy_fingerprint_and_schema_remain_exactly_compatible():
     fields = asdict(old)
     fields.pop("auxiliary_protocol")
     fields.pop("identity_prompt_version")  # Absent from the historical task dataclass.
+    fields.pop("nonperson_policy_version")  # Also absent from historical task fingerprints.
     original = {
         "protocol": compact.PROTOCOL_VERSION,
         "prompt": compact.PROMPT_VERSION,
