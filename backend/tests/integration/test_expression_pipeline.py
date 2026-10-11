@@ -107,6 +107,42 @@ def prepare(
     return create, factory
 
 
+def test_format_retry_retains_archived_valid_rows_and_charges_each_call(fake_provider_client):
+    client = fake_provider_client
+    create, factory = prepare(client, all_quotes=True, context_policy="context-chapter-3")
+    job = create("retain-valid-format-rows")
+    with transaction(factory) as session:
+        stored = session.get(Job, job["id"])
+        scope = json.loads(stored.range_json)
+        scope.pop("review_protocol")
+        stored.range_json = json.dumps(scope)
+        stored.budget_json = json.dumps({"max_recheck_rounds": 0, "max_format_retries": 1})
+
+    class ChangingErrorAdapter(StageAdapter):
+        async def generate_labels(self, request):
+            output = await super().generate_labels(request)
+            output["labels"][0 if len(self.calls) == 1 else 1]["evidence"] = ["UNSENT"]
+            return output
+
+    adapter = ChangingErrorAdapter(["林舟"])
+    result = run_job(factory, client.app.state.settings, job_id=job["id"],
+                     adapter_factory=lambda *_: adapter)
+    assert result.state is JobState.COMPLETED and len(adapter.calls) == 2
+    with factory() as session:
+        annotations = list(session.scalars(select(Annotation)))
+        assert len(annotations) == 2
+        assert all(a.status is AnnotationStatus.ACCEPTED for a in annotations)
+        assert session.scalar(select(ReviewItem)) is None
+        assert session.scalar(select(ResultCache)) is None
+        runs = list(session.scalars(select(InferenceRun).where(InferenceRun.job_id == job["id"])))
+        assert sum(json.loads(r.usage_json)["total_tokens"] for r in runs) == 60
+        assert "沿用前次" in session.get(Job, job["id"]).checkpoint_json
+        # Recovery uses original immutable archives, not a changed provider receipt.
+        from ndr.storage.run_archive import decode_archive
+
+        assert decode_archive(runs[1].call_archive)["adapter_result"]["labels"][1]["evidence"] == ["UNSENT"]
+
+
 class StageAdapter(FakeProviderAdapter):
     def __init__(self, owners, *, basis="direct", pause=None, kind="speech"):
         super().__init__()
@@ -449,6 +485,44 @@ def test_cache_keeps_pending_owner_ceiling_without_new_review_calls(fake_provide
         with factory() as session:
             assert session.scalar(select(Annotation)).status is AnnotationStatus.PROVISIONAL
     assert len(adapter.calls) == 2
+
+
+def test_retained_format_rows_survive_review_pause_without_repeating_calls(fake_provider_client):
+    client = fake_provider_client
+    create, factory = prepare(client, all_quotes=True, context_policy="context-chapter-3")
+    job = create("retained-review-pause")
+    with transaction(factory) as session:
+        session.get(Job, job["id"]).budget_json = json.dumps(
+            {"max_recheck_rounds": 1, "max_format_retries": 1}
+        )
+
+    def pause():
+        with transaction(factory) as session:
+            session.get(Job, job["id"]).state = JobState.PAUSING
+
+    class ChangingErrorAdapter(StageAdapter):
+        async def generate_labels(self, request):
+            output = await super().generate_labels(request)
+            if len(self.calls) <= 2:
+                output["labels"][len(self.calls) - 1]["evidence"] = ["UNSENT"]
+            return output
+
+    adapter = ChangingErrorAdapter(["林舟"], pause=(3, pause))
+    first = run_job(factory, client.app.state.settings, job_id=job["id"],
+                    adapter_factory=lambda *_: adapter)
+    assert first.state is JobState.PAUSED, first.errors
+    with transaction(factory) as session:
+        session.get(Job, job["id"]).state = JobState.QUEUED
+    second = run_job(factory, client.app.state.settings, job_id=job["id"],
+                     adapter_factory=lambda *_: adapter)
+    assert second.state is JobState.COMPLETED, second.errors
+    assert len(adapter.calls) == 3
+    with factory() as session:
+        assert all(a.status is AnnotationStatus.ACCEPTED for a in session.scalars(select(Annotation)))
+        assert session.scalar(select(ReviewItem)) is None
+        assert session.scalar(select(ResultCache)) is None
+        assert sum(json.loads(r.usage_json)["total_tokens"] for r in session.scalars(
+            select(InferenceRun).where(InferenceRun.job_id == job["id"]))) == 90
 
 
 def test_pause_after_received_review_resumes_without_repeating_either_call(fake_provider_client):

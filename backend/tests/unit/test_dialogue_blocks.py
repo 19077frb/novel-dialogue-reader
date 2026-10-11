@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 
 from ndr.context.budget import (
+    BOUNDED_BLOCK_POLICY,
     CHAPTER_POLICY,
     DEFAULT_POLICY,
     DIALOGUE_BLOCK_POLICY,
@@ -92,6 +93,29 @@ def test_fitting_chapter_stays_whole_and_v1_cache_keys_do_not_change():
     old = plan(replace(data, policy=replace(CHAPTER_POLICY, context_tokens=100)))
     assert old.windows[0].window_id != result.windows[0].window_id
     assert old.dependency_hash != result.dependency_hash
+
+
+@pytest.mark.parametrize("mode", [ReadingMode.INITIAL, ReadingMode.REREAD])
+def test_new_soft_target_limit_splits_only_at_complete_block_boundaries(mode):
+    text = "".join("旁白。\n「甲。」\n「乙。」\n" for _ in range(8))
+    data = inputs(text, budget=1000, mode=mode)
+    old = plan(data)
+    bounded = plan(replace(data, policy=replace(BOUNDED_BLOCK_POLICY, context_tokens=1000, dialogue_target_limit=5)))
+    assert len(old.windows) == 1
+    assert len(bounded.windows) == 4
+    assert all(len(w.target_quote_ids) == 4 for w in bounded.windows)
+    assert all(w.policy_version == "context-chapter-3" for w in bounded.windows)
+    assert "".join(f.text for w in bounded.windows for f in main(w)) == text
+    assert [q for w in bounded.windows for q in w.target_quote_ids] == [q.quote_id for q in data.quotes]
+    assert "dialogue_target_limit" not in data.policy.as_key()
+    assert policy_for_version("context-chapter-2") is DIALOGUE_BLOCK_POLICY
+    assert policy_for_version("context-chapter-3") is BOUNDED_BLOCK_POLICY
+
+
+def test_soft_target_limit_does_not_cut_an_indivisible_dialogue_block():
+    data = inputs("「甲。」\n「乙。」\n「丙。」\n", budget=1000)
+    bounded = plan(replace(data, policy=replace(BOUNDED_BLOCK_POLICY, dialogue_target_limit=2)))
+    assert len(bounded.windows) == 1 and len(bounded.windows[0].target_quote_ids) == 3
 
 
 @pytest.mark.parametrize("budget", [0, -1, True, 1.5, 5])

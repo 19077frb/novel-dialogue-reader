@@ -91,6 +91,9 @@ def review_item_out(item: ReviewItem, *, target_text: str = "",
     if item.queue_status is not ReviewQueueStatus.RESOLVED and isinstance(data, dict):
         if reason is ReviewReason.LOW_CONFIDENCE and data.get("reason") == "unknown_quote_kind":
             reason = ReviewReason.UNKNOWN_QUOTE_KIND
+        elif (reason is ReviewReason.LOW_CONFIDENCE
+              and data.get("reason") == "unapproved_expression_owner"):
+            reason = ReviewReason.AMBIGUOUS_SPEAKER
         elif (reason is ReviewReason.UNKNOWN_SPEAKER and kind is QuoteKind.QUOTATION
               and data.get("reason") == "insufficient_evidence"):
             reason = ReviewReason.UNKNOWN_QUOTE_SOURCE
@@ -126,6 +129,8 @@ def _display_reason():
     return case(
         (and_(active, ReviewItem.reason == ReviewReason.LOW_CONFIDENCE,
               cause == "unknown_quote_kind"), ReviewReason.UNKNOWN_QUOTE_KIND.value),
+        (and_(active, ReviewItem.reason == ReviewReason.LOW_CONFIDENCE,
+              cause == "unapproved_expression_owner"), ReviewReason.AMBIGUOUS_SPEAKER.value),
         (and_(active, ReviewItem.reason == ReviewReason.UNKNOWN_SPEAKER,
               Annotation.kind == QuoteKind.QUOTATION, cause == "insufficient_evidence"),
          ReviewReason.UNKNOWN_QUOTE_SOURCE.value),

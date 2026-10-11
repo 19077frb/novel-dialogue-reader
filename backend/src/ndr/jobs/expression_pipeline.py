@@ -99,6 +99,9 @@ def restore_primary(session, job, window, task, model_snapshot):
         raise ValueError("首次提案原文映射已改变")
     raw = ProviderResult(record["adapter_result"])
     raw.restored_attempt = True
+    from .scheduler import _retain_format_rows_in_session
+
+    raw = _retain_format_rows_in_session(session, job.id, window.window_id, run.id, raw, task)
     compile_expression_output(_clean(raw), task)
     return raw, None, run.id, run.elapsed_ms or 0
 

@@ -18,6 +18,70 @@ from .validation import load_json_object
 RECOVERY_VERSION = "expression-local-recovery-1"
 
 
+def retain_valid_retry_rows(payload, previous, task):
+    """Repair only invalid latest rows using a validated, same-task prior proposal.
+
+    Never guess a reference or transfer anonymous declaration namespaces. A
+    linked prior row is usable only when every cited target still has the same
+    identity/type and is valid in the latest proposal. Entire blocks recompile.
+    """
+    current = load_json_object(payload) if isinstance(payload, str) else deepcopy(dict(payload))
+    prior = load_json_object(previous) if isinstance(previous, str) else deepcopy(dict(previous))
+
+    def checked(raw):
+        try:
+            compilation = compile_expression_output(raw, task)
+            return compilation, set()
+        except (ValueError, InvalidModelOutput, ValidationError):
+            recovered = recover_expression_output(raw, task)
+            return recovered.compilation, set(recovered.warnings)
+
+    try:
+        _, invalid = checked(current)
+        old_compilation, old_invalid = checked(prior)
+    except (ValueError, InvalidModelOutput, ValidationError, TypeError):
+        return current, ()
+    if not invalid or current.get("breaks", []) != prior.get("breaks", []):
+        return current, ()
+    known = {c.ref for c in task.candidates}
+    old = {row["q"]: row for row in prior["labels"]}
+    rows = defaultdict(list)
+    for row in current["labels"]:
+        rows[row["q"]].append(row)
+    restored = {}
+    for q in task.quote_ids:
+        stable = task.references[q]
+        candidate = old.get(q)
+        if (stable not in invalid or stable in old_invalid or candidate is None
+                or stable in old_compilation.acceptance_ceilings):
+            continue
+        if (candidate.get("kind") not in {"other", "group"}
+                and (candidate.get("character") not in known
+                     or candidate.get("basis") not in {"direct", "coreference", "response_link"})):
+            continue
+        linked = set(candidate.get("evidence", [])) & set(task.quote_ids) - {q}
+        if any(
+            task.references[ref] in invalid or len(rows[ref]) != 1 or ref not in old
+            or (rows[ref][0].get("kind"), rows[ref][0].get("character"))
+            != (old[ref].get("kind"), old[ref].get("character"))
+            for ref in linked
+        ):
+            continue
+        restored[q] = deepcopy(candidate)
+    if not restored:
+        return current, ()
+    combined = deepcopy(current)
+    combined["labels"] = [row for row in current["labels"] if row["q"] not in restored]
+    combined["labels"].extend(restored.values())
+    try:
+        _, remaining = checked(combined)
+    except (ValueError, InvalidModelOutput, ValidationError, TypeError):
+        return current, ()
+    if any(task.references[q] in remaining for q in restored):
+        return current, ()
+    return combined, tuple(task.references[q] for q in task.quote_ids if q in restored)
+
+
 @dataclass(frozen=True)
 class RecoveredExpression:
     compilation: ExpressionCompilation

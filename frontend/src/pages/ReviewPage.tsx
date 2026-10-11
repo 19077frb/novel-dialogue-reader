@@ -40,7 +40,7 @@ const REASONS: ReviewReason[] = [
 const REASON_LABELS: Record<ReviewReason, string> = {
   MODEL_OUTPUT_WARNING: '模型结果校验警告',
   LOW_CONFIDENCE: '置信度低',
-  AMBIGUOUS_SPEAKER: '说话人有歧义',
+  AMBIGUOUS_SPEAKER: '人物归属有分歧',
   UNKNOWN_SPEAKER: '无法确定说话人',
   UNKNOWN_QUOTE_KIND: '表达类型待确认',
   UNKNOWN_QUOTE_SOURCE: '引用来源待确认',

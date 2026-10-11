@@ -18,7 +18,7 @@ it.each<DialogueStrategy>(['legacy', 'complete', 'complete-review', 'complete-bl
   expect(first).toEqual(second)
   expect(first).toMatchObject({ chapter_id: 'c', start_cp: 10, end_cp: 90 })
   if (strategy === 'legacy') expect(first).not.toHaveProperty('output_protocol')
-  else expect(first).toMatchObject({ context_policy: strategy.startsWith('complete-blocks') ? 'context-chapter-2' : 'context-chapter-1', output_protocol: 'expression-production-1' })
+  else expect(first).toMatchObject({ context_policy: strategy.startsWith('complete-blocks') ? 'context-chapter-3' : 'context-chapter-1', output_protocol: 'expression-production-1' })
   expect(first.review_protocol === 'expression-evidence-review-1').toBe(strategy.endsWith('-review'))
   expect(first.auxiliary_protocol).toBe(strategy.includes('-isolated') ? 'expression-auxiliary-isolation-1' : undefined)
   expect(first.identity_feedback_protocol).toBe(strategy === 'complete-blocks-isolated-feedback-review' ? 'identity-feedback-1' : undefined)

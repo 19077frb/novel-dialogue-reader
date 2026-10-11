@@ -286,6 +286,7 @@ def _prepare_identity_view(session, job, version, state, window=None, *, people=
         prompt_version = _range_of(job).get("identity_prompt_version")
         check_version(prompt_version)
         state.identity_prompt_version = prompt_version
+        state.nonperson_policy_version = _range_of(job).get("nonperson_policy_version")
         project_identity_state(
             state,
             people if people is not None else list_book_characters(session, version),
@@ -640,7 +641,8 @@ def _apply_payload(
     )
     if not result.validation_ok:
         return False, result.validation_codes, result.warnings, list(report.warnings)
-    if not validation_warnings:
+    retained_rows = raw.get("_retained_format_rows", 0) if isinstance(raw, dict) else 0
+    if not validation_warnings and not retained_rows:
         ResultCacheStore(session).put(
             cache_key=cache_key,
             result_json=json.dumps(
@@ -654,6 +656,9 @@ def _apply_payload(
             created_run_id=run_id,
         )
     auxiliary_warnings = compilation.auxiliary_warnings if compilation else []
+    if retained_rows:
+        auxiliary_warnings.append(
+            f"已沿用前次有有效证据的 {retained_rows} 句归属，未增加模型调用。")
     if validation_warnings:
         auxiliary_warnings.append(
             f"已保留有效对白归属；{len(validation_warnings)} 句存在校验警告，"
@@ -1977,6 +1982,10 @@ def _run_job(
                 max_tokens_override=attempt_max_tokens,
             )
 
+            if error is None and expression_task is not None and isinstance(raw, dict):
+                raw = _retain_archived_format_rows(
+                    session_factory, job_id, window.window_id, run_id, raw, expression_task)
+
             if (
                 error is None
                 and expression_task is not None
@@ -2019,6 +2028,8 @@ def _run_job(
                         outcome.unknown_runs += int(review.unknown)
                         return outcome
                     review.raw["_usage"] = raw.get("_usage")
+                    if raw.get("_retained_format_rows"):
+                        review.raw["_retained_format_rows"] = raw["_retained_format_rows"]
                     raw = review.raw
                     outcome.recheck_windows += 1
                     outcome.recheck_targets += len(window.target_quote_ids)
@@ -2269,6 +2280,10 @@ def _request_payload_for(
         messages = _messages_for(
             window=window, state=state, locked_summary=None, correction=correction
         )
+        from ..llm.nonperson_policy import NONPERSON_POLICY, nonperson_policy
+
+        messages[0]["content"] = messages[0]["content"].replace(
+            NONPERSON_POLICY, nonperson_policy(state.nonperson_policy_version))
     else:
         from ..evaluation.owner_constraints import ConstrainedOwnerProtocol
         from ..scenes.runner import _validate_expression_task
@@ -2312,6 +2327,61 @@ def _request_fingerprint(payload: dict[str, Any], snapshot: dict[str, Any] | Non
             },
         }
     )
+
+
+def _retain_archived_format_rows(factory, job_id, window_id, run_id, raw, task):
+    with factory() as session:
+        return _retain_format_rows_in_session(session, job_id, window_id, run_id, raw, task)
+
+
+def _retain_format_rows_in_session(session, job_id, window_id, run_id, raw, task):
+    from copy import copy
+
+    from pydantic import ValidationError
+
+    from ..llm.errors import InvalidModelOutput
+    from ..llm.expression_compiler import compile_expression_output
+    from ..llm.expression_recovery import retain_valid_retry_rows
+    from ..storage.run_archive import decode_archive
+
+    if isinstance(raw, ReviewedExpression):
+        return raw  # Explicit review approvals must never be discarded.
+    payload = {k: v for k, v in raw.items() if not str(k).startswith("_")}
+    try:
+        compile_expression_output(payload, task)
+        return raw  # Normal valid calls need no archive query or decompression.
+    except (ValueError, InvalidModelOutput, ValidationError):
+        pass
+    retained = set()
+    # Bounded by the format-retry limit, not a scan of book history.
+    archives = list(session.scalars(select(InferenceRun.call_archive).where(
+        InferenceRun.job_id == job_id, InferenceRun.window_id == window_id,
+        InferenceRun.id != run_id, InferenceRun.state == InferenceRunState.FAILED,
+        InferenceRun.error_code == "INVALID_MODEL_OUTPUT",
+    ).order_by(InferenceRun.created_at.desc(), InferenceRun.id.desc()).limit(5)))
+    for blob in archives:
+        try:
+            archive = decode_archive(blob)
+            request = archive.get("request", {})
+            previous = archive.get("adapter_result")
+            if (archive.get("phase") != "returned"
+                    or request.get("review_stage")
+                    or request.get("compiler_task_fingerprint") != task.fingerprint()
+                    or not isinstance(previous, dict)):
+                continue
+            previous = {k: v for k, v in previous.items() if not str(k).startswith("_")}
+            payload, rows = retain_valid_retry_rows(payload, previous, task)
+            retained.update(rows)
+        except (ValueError, TypeError, KeyError):
+            continue
+    if not retained:
+        return raw
+    result = copy(raw)  # Preserve ProviderResult receipt/recovery metadata.
+    result.clear()
+    result.update(payload)
+    result.update({k: v for k, v in raw.items() if str(k).startswith("_")})
+    result["_retained_format_rows"] = len(retained)
+    return result
 
 
 def _known_call_usage(usage) -> bool:

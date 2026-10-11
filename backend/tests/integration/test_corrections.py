@@ -908,6 +908,38 @@ def test_recheck_creates_bounded_job_and_does_not_call_model_at_creation(
     assert missing.status_code == 404
 
 
+def test_old_owner_disagreement_is_displayed_and_superseded_read_only(
+    fake_provider_client: TestClient, migrated_settings: Settings,
+) -> None:
+    from ndr.scenes.review_sync import sync_attribution_reviews
+
+    data = _prepare(fake_provider_client, migrated_settings)
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        annotation = session.scalar(select(Annotation))
+        for old in list(session.scalars(select(ReviewItem).where(ReviewItem.quote_id == annotation.quote_id))):
+            session.delete(old)
+        session.flush()
+        item = ReviewItem(target_type="quote", quote_id=annotation.quote_id,
+                          reason=ReviewReason.LOW_CONFIDENCE, queue_status=ReviewQueueStatus.PENDING,
+                          candidates_json='{"reason":"unapproved_expression_owner"}')
+        session.add(item)
+        session.flush()
+        item_id = item.id
+    response = fake_provider_client.get(f"/api/books/{data['book_id']}/review-items",
+                                        params={"reason": "AMBIGUOUS_SPEAKER"}).json()["data"]
+    assert any(item["id"] == item_id and item["reason"] == "AMBIGUOUS_SPEAKER"
+               for item in response["items"])
+    assert response["counts"]["by_reason"]["AMBIGUOUS_SPEAKER"] == 1
+    detail = fake_provider_client.get(f"/api/review-items/{item_id}").json()["data"]
+    assert detail["item"]["reason"] == "AMBIGUOUS_SPEAKER"
+    with session_scope(migrated_settings) as factory, transaction(factory) as session:
+        item = session.get(ReviewItem, item_id)
+        assert item.reason is ReviewReason.LOW_CONFIDENCE
+        annotation = session.scalar(select(Annotation).where(Annotation.quote_id == item.quote_id))
+        assert sync_attribution_reviews(session, annotation, current_reason=None) == 1
+        assert item.queue_status is ReviewQueueStatus.RESOLVED
+
+
 def test_old_review_reasons_are_normalized_read_only_with_matching_filters(
     fake_provider_client: TestClient, migrated_settings: Settings,
 ) -> None:

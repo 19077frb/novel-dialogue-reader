@@ -8,7 +8,7 @@ from ndr.domain.enums import AnnotationStatus, Assignment
 from ndr.evaluation.compact import Candidate, CompactTask
 from ndr.llm.errors import InvalidModelOutput
 from ndr.llm.expression_compiler import compile_expression_output
-from ndr.llm.expression_recovery import recover_expression_output
+from ndr.llm.expression_recovery import recover_expression_output, retain_valid_retry_rows
 
 
 def task():
@@ -134,3 +134,49 @@ def test_undeclared_auxiliary_fields_are_local_warnings_not_silently_accepted():
     result = recover_expression_output(raw, task())
     assert set(result.warnings) == {"quote1"}
     assert result.compilation.acceptance_ceilings == {"quote1": AnnotationStatus.PROVISIONAL}
+
+
+def test_retry_preserves_valid_prior_rows_not_latest_invalid_replacements():
+    previous, latest = payload(), payload()
+    previous["labels"][0]["evidence"] = ["G1"]
+    latest["labels"][1]["evidence"] = ["UNSENT"]
+    frozen = deepcopy((previous, latest))
+    combined, restored = retain_valid_retry_rows(latest, previous, task())
+    assert restored == ("quote2",)
+    assert not compile_expression_output(combined, task()).acceptance_ceilings
+    assert (previous, latest) == frozen
+
+
+def test_retry_does_not_replace_a_valid_new_answer_or_transfer_anonymous_identity():
+    previous, latest = payload(), payload()
+    latest["labels"][0]["kind"] = "thought"
+    assert retain_valid_retry_rows(latest, previous, task()) == (latest, ())
+    previous["new_characters"] = [{"ref": "N1", "name": "门卫", "description": "工作人员", "evidence": ["E1"]}]
+    previous["labels"][0]["character"] = "N1"
+    latest["labels"][0]["evidence"] = ["G1"]
+    assert retain_valid_retry_rows(latest, previous, task()) == (latest, ())
+
+
+@pytest.mark.parametrize("change", ["dependency", "boundary", "self_only", "global"])
+def test_retry_rejects_changed_dependencies_scene_structure_and_unsupported_prior(change):
+    previous, latest = payload(), payload()
+    latest["labels"][1]["evidence"] = ["UNSENT"]
+    if change == "dependency":
+        previous["labels"][1].update(basis="response_link", evidence=["Q1"])
+        latest["labels"][0] = {"q": "Q1", "kind": "other"}
+    elif change == "boundary":
+        latest["breaks"] = ["B1"]
+    elif change == "self_only":
+        previous["labels"][1]["evidence"] = ["Q2"]
+    else:
+        latest["labels"][0]["q"] = "NOT_SENT"
+    assert retain_valid_retry_rows(latest, previous, task()) == (latest, ())
+
+
+def test_retry_can_restore_omitted_nonperson_without_inventing_an_owner():
+    previous, latest = payload(), payload()
+    previous["labels"][0] = {"q": "Q1", "kind": "other"}
+    latest["labels"].pop(0)
+    combined, restored = retain_valid_retry_rows(latest, previous, task())
+    assert restored == ("quote1",)
+    assert compile_expression_output(combined, task()).output.labels[0].kind.value == "other"
