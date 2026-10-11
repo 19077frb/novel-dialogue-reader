@@ -1233,6 +1233,35 @@ textarea:focus-visible {
   align-items: center;
 }
 
+/* Directory summaries stay compact; full forms remain mounted when collapsed. */
+.ndr-character-directory .ndr-character-list {
+  grid-template-columns: repeat(var(--ndr-character-columns), minmax(0, 1fr));
+  align-items: start;
+}
+.ndr-character-directory .ndr-character-card {
+  min-width: 0;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.ndr-character-directory .ndr-character-card h3,
+.ndr-character-directory .ndr-character-card p { margin: 0; }
+.ndr-character-directory .ndr-character-card > h3,
+.ndr-character-alias-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ndr-character-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.45;
+  min-height: 2.9em;
+}
+.ndr-character-editor-fields { display: grid; gap: 10px; padding-top: 8px; }
+.ndr-character-directory .ndr-character-card .ndr-collapsible-heading { margin: 0; }
+
 /* Merge previews contain long names and multiline model explanations. */
 .ndr-character-merge,
 .ndr-merge-preview,
