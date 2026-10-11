@@ -565,7 +565,7 @@ def apply_window(
     parsed = report.output
     accepted = report.accepted_labels
     quote_ids = list(window.target_quote_ids)
-    gap_ids = list(gap_positions)
+    gap_ids = [decision.gap_id for decision in parsed.gap_decisions]
     annotation_rows = {row.quote_id: row for row in session.scalars(
         select(Annotation).where(Annotation.quote_id.in_(quote_ids)))}
     memberships = set(session.execute(select(
