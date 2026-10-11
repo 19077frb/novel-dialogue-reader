@@ -34,7 +34,7 @@ export function AutomaticProcessing({ bookId, bookVersionId, chapterId }: { book
   if (!settings.autoProcessing) return null
   return <section className="card" data-testid="automatic-processing">
     <h3>自动提前处理</h3>
-    <p className="hint">处理当前章及后 {settings.lookAheadChapters} 章；切换阅读章节时自动补充队列，有空闲位置就继续处理，不必等整批结束。已完成章节不会重复消耗额度。<Link to="/settings/general">调整设置</Link></p>
+    <p className="hint">处理当前章及后 {settings.lookAheadChapters} 章；切换阅读章节时自动补充队列，有空闲位置就继续处理，不必等整批结束。已完成章节不会重复消耗额度。<Link className="ndr-button" to="/settings/general">调整设置</Link></p>
     {!preferences.profileId && <p className="hint">请先在通用设置中选择模型。</p>}
     {preferences.profileId && profiles.isSuccess && !profiles.data.some(profile => profile.id === preferences.profileId) && <p className="status-error">所选模型配置已不可用，请到通用设置重新选择。</p>}
     {profiles.isError && <ReadErrorNotice label="模型配置读取失败" error={profiles.error} retrying={profiles.isFetching} onRetry={() => void profiles.refetch()} />}

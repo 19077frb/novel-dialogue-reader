@@ -107,6 +107,7 @@ it('成功重启后锁定编辑并显示重新打开入口', async () => {
   await screen.findByLabelText('服务端口')
   await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
   expect(await screen.findByRole('link', { name: '重新打开设置' })).toHaveAttribute('href', 'http://127.0.0.1:8765/settings/general')
+  expect(screen.getByRole('link', { name: '重新打开设置' })).toHaveClass('ndr-button')
   expect(screen.getByLabelText('服务端口')).toBeDisabled()
 })
 

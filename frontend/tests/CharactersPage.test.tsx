@@ -97,6 +97,8 @@ describe('CharactersPage', () => {
     expect(screen.getByText('用时 1 秒')).toBeInTheDocument()
     expect(screen.getByText('以下为上一次合并结果。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '查看等待任务' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看任务队列' })).toHaveClass('ndr-button')
+    expect(screen.getByRole('link', { name: '查看任务队列' })).toHaveAttribute('href', '/tasks')
     expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: '停止本次分析' }))
     await waitFor(() => expect(screen.queryByText('本次自动合并：等待执行')).not.toBeInTheDocument(), { timeout: 2500 })
