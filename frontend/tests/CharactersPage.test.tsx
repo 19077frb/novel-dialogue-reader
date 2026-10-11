@@ -85,18 +85,23 @@ describe('CharactersPage', () => {
     expect(input).toHaveValue('悠太草稿')
     expect(api.editBookCharacter).not.toHaveBeenCalled()
   })
-  it('短屏窄屏分页减少人数，调整尺寸保留表单', async () => {
+  it('短屏窄屏仍固定每页六人，调整尺寸保留表单草稿', async () => {
     vi.mocked(api.fetchCharacterDirectory).mockResolvedValue(Array.from({ length: 7 }, (_, i) => ({
       ...entries[0], character_id: `person-${i}`, name: `人物 ${i}`,
     })))
     renderPage()
     const first = await screen.findByRole('article', { name: '人物 人物 0' })
+    await userEvent.click(within(first).getByRole('button', { name: '展开编辑与合并' }))
+    await waitFor(() => expect(within(first).getByLabelText('姓名')).toBeEnabled())
+    await userEvent.type(within(first).getByLabelText('姓名'), '草稿')
     expect(screen.getAllByRole('article')).toHaveLength(6)
     act(() => { window.innerWidth = 360; window.innerHeight = 400; window.dispatchEvent(new Event('resize')) })
-    expect(screen.getAllByRole('article')).toHaveLength(1)
+    expect(screen.getAllByRole('article')).toHaveLength(6)
     expect(first).toBeVisible()
-    expect(characterPageLayout(1050, 768, 450)).toEqual({ columns: 3, pageSize: 3 })
-    expect(characterPageLayout(650, 1000, 0)).toEqual({ columns: 1, pageSize: 2 })
+    expect(within(first).getByLabelText('姓名')).toHaveValue('人物 0草稿')
+    expect(characterPageLayout(1050)).toEqual({ columns: 3, pageSize: 6 })
+    expect(characterPageLayout(650)).toEqual({ columns: 1, pageSize: 6 })
+    expect(characterPageLayout(312)).toEqual({ columns: 1, pageSize: 6 })
   })
   it('拿到新合并回执但进度尚未刷新时，不声称尚未调用模型', async () => {
     vi.mocked(api.fetchLatestCharacterAutoMerge).mockResolvedValue(mergeResult)
