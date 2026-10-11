@@ -127,7 +127,7 @@ export function ApplicationSettings() {
         }}>保存并重启</button>
       {data.restart_blocked_reason && <p className="hint">{data.restart_blocked_reason}</p>}
       {restarting && <p role="status">已保存，服务正在重新启动。请稍等几秒后
-        <a href={`${restartAddress}/settings/general`}>重新打开设置</a>；若无法打开，请查看启动窗口的具体错误。</p>}
+<a className="ndr-button" href={`${restartAddress}/settings/general`}>重新打开设置</a>；若无法打开，请查看启动窗口的具体错误。</p>}
       <p className="hint">{mutation.isPending ? '正在保存，请等待完成。' : !changed ? '修改配置后可保存，重启后生效。' : '有尚未保存的修改；切换页面会丢弃这些修改。'}</p>
       <button disabled={busy} title={busy ? '请等待保存或重启完成后再读取。' : '重新读取会放弃未保存的应用配置修改。'}
         onClick={() => {

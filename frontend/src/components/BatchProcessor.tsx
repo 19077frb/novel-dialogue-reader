@@ -1725,7 +1725,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         <p className="hint">所选范围内的全部章节将重新识别人物和处理对白，保留人工确认或锁定的标注。</p>
       )}
       <p className="hint">并发数同时约束人物识别和对白窗口；设为 1 即按顺序处理，建议从 2 开始。</p>
-      {filterSettings.chapterFilterEnabled && <p className="hint">已启用章节过滤名单，匹配的章节会自动跳过处理，强制重做也不例外。<a href="/settings/general">调整过滤名单</a></p>}
+{filterSettings.chapterFilterEnabled && <p className="hint">已启用章节过滤名单，匹配的章节会自动跳过处理，强制重做也不例外。<a className="ndr-button" href="/settings/general">调整过滤名单</a></p>}
       <div className="ndr-form-actions">
         <button type="button" className="ndr-primary" title={running ? '批量处理正在运行，请等待结束或先停止任务。' : estimating ? '正在估算 Token，请等待估算完成。' : !bookVersionId ? '书籍版本尚未读取，请先重新读取书籍。' : !validRange ? '请选择有效的开始和结束章节，结束章节不能早于开始章节。' : !profileId ? '请先选择模型配置，再估算和启动批量处理。' : strategyReason ?? undefined} disabled={running || estimating || !validRange || !profileId || !bookVersionId || Boolean(strategyReason)} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
           {running ? '批量处理中…' : estimating ? '正在估算…' : estimatedTokens === null ? '预估 Token' : '确认并开始批量处理'}
@@ -1744,7 +1744,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       {!validRange && <p className="status-error">结束章节不能早于开始章节。</p>}
       {(progress || batchProgress.message) && <p className="hint" data-testid="batch-progress">{batchProgress.message || progress}</p>}
       {error && <p className="status-error" data-testid="batch-error">
-        {error} {taskList && <a href="#batch-task-list" onClick={() => setTaskListOpen(true)}>查看任务列表</a>}
+{error} {taskList && <a className="ndr-button" href="#batch-task-list" onClick={() => setTaskListOpen(true)}>查看任务列表</a>}
       </p>}
     </section>
     {children}

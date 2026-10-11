@@ -1054,6 +1054,7 @@ describe('PreviewPage', () => {
     expect(within(resultPanel).getByText('第一章人物识别失败')).toBeInTheDocument()
     expect(within(resultPanel).getByRole('columnheader', { name: '原因 / 错误详情' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看任务列表' })).toHaveAttribute('href', '#batch-task-list')
+    expect(screen.getByRole('link', { name: '查看任务列表' })).toHaveClass('ndr-button')
     await userEvent.click(within(resultPanel).getByRole('button', { name: '收起批量任务明细' }))
     expect(within(resultPanel).getByText('第一章人物识别失败')).not.toBeVisible()
     expect(within(resultPanel).getByTestId('batch-task-summary')).toBeVisible()
