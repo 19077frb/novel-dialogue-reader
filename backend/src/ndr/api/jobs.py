@@ -326,6 +326,11 @@ def reconcile_job_route(
         job = session.get(Job, job_id)
         if job is None:
             raise ApiError.not_found("任务不存在", job_id=job_id)
+        replacement = json.loads(job.checkpoint_json or "{}").get("superseded_by")
+        if replacement:
+            raise ApiError(ErrorCode.RESOURCE_CONFLICT,
+                           "该人物任务已由新的本章任务接替，请查看新任务",
+                           details={"job_id": replacement})
         if job.state is not JobState.NEEDS_RECONCILIATION:
             raise ApiError(ErrorCode.RESOURCE_CONFLICT,
                            "任务已不处于结果待核对状态，请重新读取任务详情")
