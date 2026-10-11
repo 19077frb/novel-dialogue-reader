@@ -95,7 +95,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
         title={blockedReason ?? (!versionId ? '请先重新读取书籍版本。' : count < 1 ? '请先识别或添加人物。' : !profileReady ? '请先选择可用的模型配置。' : !confirmed ? '请先勾选同意调用模型。' : undefined)}
         onClick={() => start.mutate()}>分析合并建议</button>
       {disabled && <p className="hint">本书处理尚未结束，合并分析会加入队列，等待前序处理完成后执行。</p>}
-{queued && <p role="status">已添加自动合并任务。<Link className="ndr-button" to="/tasks">查看任务队列</Link> <button className="ndr-danger" disabled={queued.stopRequested || stopQueued.isPending} title={queued.stopRequested || stopQueued.isPending ? '停止请求已提交，请等待安全收尾。' : undefined} onClick={() => stopQueued.mutate(queued.id)}>停止本次分析</button></p>}
+      {queued && <p role="status">已添加自动合并任务。<Link className="ndr-button" to="/tasks">查看任务队列</Link> <button className="ndr-danger" disabled={queued.stopRequested || stopQueued.isPending} title={queued.stopRequested || stopQueued.isPending ? '停止请求已提交，请等待安全收尾。' : undefined} onClick={() => stopQueued.mutate(queued.id)}>停止本次分析</button></p>}
       {queueError && <p role="alert" className="status-error">{queueError}</p>}
       {count < 1 && <p className="hint">至少有一个人物才能分析合并或更名建议。</p>}
       {!profileReady && <p className="hint">请选择可用的模型配置。</p>}
