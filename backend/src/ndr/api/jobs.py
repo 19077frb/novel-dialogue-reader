@@ -27,6 +27,7 @@ from ..domain.jobs import (
     TaskQueueItemOut,
 )
 from ..domain.recovery import JobRecoveryOut
+from ..jobs.local_finalization import settlement_progress
 from ..jobs.scheduler import reconcile_job, run_job
 from ..jobs.service import (
     create_inference_job,
@@ -95,7 +96,8 @@ def task_queue_route(request: Request, active_only: bool = True, book_id: str | 
                              start_cp=row.start_cp, end_cp=row.end_cp,
                              selected_window_ids=(json.loads(row.selected_window_ids)
                                                   if row.selected_window_ids else None),
-                             progress=json.loads(row.progress_json or "{}"),
+                             progress=settlement_progress(
+                                 row.id, json.loads(row.progress_json or "{}")),
                              windows_total=window_counts.get(row.id, (0, 0))[0],
                              windows_done=window_counts.get(row.id, (0, 0))[1] or 0,
                              last_error=row.last_error, created_at=row.created_at.isoformat())

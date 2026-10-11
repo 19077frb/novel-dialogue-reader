@@ -48,8 +48,9 @@ logger = logging.getLogger(__name__)
 
 def roster_job_is_active(job_id: str) -> bool:
     """Local execution is independent of persisted queue/recovery state."""
+    from .local_finalization import settlement_pending
     with _GUARD:
-        return job_id in _ACTIVE
+        return job_id in _ACTIVE or settlement_pending(job_id)
 
 
 @dataclass
@@ -148,6 +149,9 @@ def run_character_roster_job(
     session_factory, settings, *, job_id, credentials=None, adapter_factory=None,
 ) -> RosterJobOutcome:
     """Always settle unexpected worker failures; serialize re-entry for one job."""
+    from .local_finalization import settlement_pending
+    if settlement_pending(job_id):
+        return RosterJobOutcome(job_id, JobState.RUNNING)
     with _GUARD:
         if job_id in _ACTIVE:
             with session_factory() as session:
@@ -172,23 +176,31 @@ def run_character_roster_job(
             adapter_factory=adapter_factory,
         )
     except Exception as exc:  # noqa: BLE001 - background exceptions must not leave RUNNING
+        from ..diagnostics import log_failure
+        from .local_finalization import defer_settlement
         from .roster_receipts import RosterReceiptError
 
-        logger.exception("人物任务收尾异常 job_id=%s", job_id)
+        log_failure("roster_worker_exit", job_id, exc)
         state = (JobState.NEEDS_RECONCILIATION if isinstance(exc, RosterReceiptError)
                  else JobState.FAILED)
         new_calls = 0
-        with session_factory() as session:
+
+        def settle(session, error=exc):
+            nonlocal state, new_calls
             job = session.get(Job, job_id)
             if job is not None:
-                if job.state == JobState.COMPLETED:
+                if job.state in {JobState.COMPLETED, JobState.PAUSED}:
                     return RosterJobOutcome(job_id, job.state)
-                if not isinstance(exc, RosterReceiptError):
+                if json.loads(job.checkpoint_json or "{}").get("superseded_by"):
+                    return RosterJobOutcome(job_id, job.state)
+                if not isinstance(error, RosterReceiptError):
                     from ..storage.run_archive import decode_archive
 
                     attempt = session.scalar(select(InferenceRun).where(
                         InferenceRun.job_id == job_id,
                     ).order_by(InferenceRun.created_at.desc(), InferenceRun.id.desc()).limit(1))
+                    if attempt is not None and attempt.state is InferenceRunState.UNKNOWN_OUTCOME:
+                        state = JobState.NEEDS_RECONCILIATION
                     if attempt is not None and attempt.state is InferenceRunState.DISPATCHED:
                         try:
                             receipt = decode_archive(attempt.call_archive)
@@ -205,9 +217,11 @@ def run_character_roster_job(
                             state = JobState.NEEDS_RECONCILIATION
                             attempt.state = InferenceRunState.UNKNOWN_OUTCOME
                             attempt.error_code = "UNKNOWN_OUTCOME"
+                if job.state is JobState.PAUSING:
+                    state = JobState.PAUSED
                 job.state = state
-                job.last_error = (str(exc) if isinstance(exc, RosterReceiptError) else
-                                  f"人物任务收尾失败（{database_error_detail(exc)}）；"
+                job.last_error = (str(error) if isinstance(error, RosterReceiptError) else
+                                  f"人物任务收尾失败（{database_error_detail(error)}）；"
                                   "重试将优先恢复已保存的返回")
                 runs = set(session.scalars(select(InferenceRun.id).where(
                     InferenceRun.job_id == job_id,
@@ -215,10 +229,23 @@ def run_character_roster_job(
                 new_calls = len(runs - previous_runs)
                 job.progress_json = json.dumps({
                     "stage": state.value.lower(), "calls": len(runs),
-                    "receipt_recovery_blocked": isinstance(exc, RosterReceiptError),
+                    "receipt_recovery_blocked": isinstance(error, RosterReceiptError),
                 })
-                session.commit()
-        return RosterJobOutcome(job_id, state, calls=new_calls, errors=[type(exc).__name__])
+            return RosterJobOutcome(job_id, state, calls=new_calls, errors=[type(error).__name__])
+
+        def persist_exit(error=exc):
+            from .local_finalization import PendingLocalWrite
+            if isinstance(error, PendingLocalWrite):
+                error.persist()
+            return finish_local_write(session_factory, settle, job_id=job_id)
+
+        try:
+            return persist_exit()
+        except Exception as settlement_error:
+            log_failure("roster_exit_write", job_id, settlement_error)
+            defer_settlement(session_factory, job_id, persist_exit)
+            return RosterJobOutcome(job_id, JobState.RUNNING, calls=new_calls,
+                                    errors=["本地状态保存等待中，不会重新调用模型"])
     finally:
         with _GUARD:
             _ACTIVE.discard(job_id)
@@ -322,18 +349,6 @@ def _run_character_roster_job(
         fingerprint = hashlib.sha256(
             json.dumps(messages, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        job.state = JobState.RUNNING
-        job.progress_json = json.dumps({"stage": "running", "calls": 0}, ensure_ascii=False)
-        run = restored[0] if restored else InferenceRun(
-            job_id=job.id,
-            window_id=f"roster:{chapter.id}",
-            profile_snapshot_json=job.profile_snapshot_json or "{}",
-            request_fingerprint=fingerprint,
-            state=InferenceRunState.DISPATCHED,
-        )
-        session.add(run)
-        session.commit()
-        run_id = run.id
         chapter_id_value = chapter.id
 
     started = time.monotonic()
@@ -346,25 +361,53 @@ def _run_character_roster_job(
         _, archive, allowed_character_ids = restored
         request_payload = archive["request"]
         elapsed_ms = archive.get("elapsed_ms")
+        run_id = restored[0].id
     else:
-        with session_factory() as session:
-            save_run_archive(session.get(InferenceRun, run_id), request_payload)
-            session.commit()
+        def prepare_dispatch(session):
+            current = session.get(Job, job_id)
+            if current.state in {JobState.PAUSING, JobState.PAUSED, JobState.COMPLETED}:
+                raise RuntimeError("任务已停止，不派发模型调用")
+            current.state = JobState.RUNNING
+            current.progress_json = json.dumps({"stage": "running", "calls": 0})
+            run = InferenceRun(
+                job_id=job_id, window_id=f"roster:{chapter_id_value}",
+                profile_snapshot_json=current.profile_snapshot_json or "{}",
+                request_fingerprint=fingerprint, state=InferenceRunState.DISPATCHED,
+            )
+            save_run_archive(run, request_payload)
+            session.add(run)
+            session.flush()
+            return run.id
+
+        run_id = finish_local_write(session_factory, prepare_dispatch, job_id=job_id)
     known_character_names = _catalog_names(request_payload["messages"])
     raw = None
     outcome.calls = 0 if restored else 1
+    from ..diagnostics import logger as diagnostic_logger
+    diagnostic_logger.info("roster_call_start job=%s run=%s restored=%s",
+                           job_id, run_id, bool(restored))
     try:
         raw = (archive["adapter_result"] if restored else
                asyncio.run(adapter.generate_labels(deepcopy(request_payload))))
         elapsed_ms = elapsed_ms if restored else int((time.monotonic() - started) * 1000)
-        with session_factory() as session:
+        diagnostic_logger.info("roster_call_returned job=%s run=%s elapsed_ms=%s",
+                               job_id, run_id, elapsed_ms)
+        def persist_returned(session):
             run = session.get(InferenceRun, run_id)
             if not restored:
                 save_run_archive(run, request_payload, raw=raw,
                                  elapsed_ms=elapsed_ms, phase="returned")
             run.elapsed_ms = elapsed_ms
             run.usage_json = _attempt_usage_json(raw)
-            session.commit()
+        try:
+            finish_local_write(session_factory, persist_returned, job_id=job_id)
+        except OperationalError as write_error:
+            if not sqlite_lock_error(write_error):
+                raise
+            from .local_finalization import PendingLocalWrite
+            raise PendingLocalWrite(
+                lambda: finish_local_write(session_factory, persist_returned, job_id=job_id),
+            ) from write_error
         payload = {
             key: value
             for key, value in dict(raw).items()
@@ -398,6 +441,13 @@ def _run_character_roster_job(
                for person in output.characters):
             raise ValueError("真实姓名必须有原文证据且为简短姓名")
     except Exception as exc:  # noqa: BLE001
+        diagnostic_logger.warning("roster_call_failed job=%s run=%s elapsed_ms=%s error=%s",
+                                  job_id, run_id, int((time.monotonic() - started) * 1000),
+                                  exc.kind.value if isinstance(exc, ProviderError)
+                                  else type(exc).__name__)
+        from .local_finalization import PendingLocalWrite
+        if isinstance(exc, PendingLocalWrite):
+            raise
         unknown = isinstance(exc, ProviderError) and exc.kind in {
             ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME,
         }

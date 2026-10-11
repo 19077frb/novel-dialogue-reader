@@ -477,6 +477,8 @@ def job_detail(session: Session, job: Job) -> JobDetailOut:
     usage = _spent_tokens(runs)
     unknown_runs = sum(1 for run in runs if run.usage_json is None)
     progress = json.loads(job.progress_json) if job.progress_json else None
+    from .local_finalization import settlement_progress
+    progress = settlement_progress(job.id, progress)
     return JobDetailOut(
         range=json.loads(job.range_json or "{}"),
         id=job.id,

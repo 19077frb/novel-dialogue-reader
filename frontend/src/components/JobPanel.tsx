@@ -106,10 +106,14 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
       <p role="status" aria-live="polite">
         {JOB_KIND_LABELS[job.data.kind] ?? job.data.kind}任务
         {job.data.purpose === 'preview' ? ' · 试运行' : ''} ·{' '}
-        <strong data-testid="job-state" title={state}>{JOB_STATE_LABELS[state ?? ''] ?? state}</strong>
+        <strong data-testid="job-state" title={state}>{job.data.progress?.stage === 'local_finalization_pending'
+          ? '正在保存状态' : JOB_STATE_LABELS[state ?? ''] ?? state}</strong>
       </p>
       {job.data.progress?.stage === 'rechecking' && (
         <p className="hint">{reviewProgress(job.data.progress)}</p>
+      )}
+      {job.data.progress?.stage === 'local_finalization_pending' && (
+        <p className="hint" role="status">模型任务已退出，正在等待数据库保存状态；不会重新调用模型。</p>
       )}
       <IdentityFeedbackSummary checkpoint={job.data.checkpoint} />
       {Array.isArray(job.data.checkpoint?.auxiliary_warnings) && (

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -83,8 +84,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 logger.info("已补齐 %s 个无正文章节的完成状态", completed)
         except Exception as exc:  # noqa: BLE001 - do not prevent startup with an unmigrated DB
             logger.warning("无正文章节完成状态检查失败：%s", type(exc).__name__)
-        yield
-        engine.dispose()
+        from .diagnostics import start_diagnostics, stop_diagnostics
+        from .jobs.local_finalization import forget_settlements, retry_settlements
+
+        diagnostic_handler = start_diagnostics(resolved.log_dir)
+        stopping = asyncio.Event()
+
+        async def monitor_settlements():
+            while not stopping.is_set():
+                await asyncio.to_thread(retry_settlements, session_factory)
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(stopping.wait(), timeout=2)
+
+        monitor = asyncio.create_task(monitor_settlements())
+        try:
+            yield
+        finally:
+            stopping.set()
+            await monitor
+            forget_settlements(session_factory)
+            stop_diagnostics(diagnostic_handler)
+            engine.dispose()
 
     app = FastAPI(
         title="Novel Dialogue Reader API",

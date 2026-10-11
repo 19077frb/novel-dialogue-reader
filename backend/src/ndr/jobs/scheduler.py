@@ -13,11 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
-import os
 import re
 import time
-import traceback
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -25,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Bundle, Session, sessionmaker
 
 from ..characters.input_view import IDENTITY_INPUT_VERSION, project_identity_state
@@ -34,7 +32,7 @@ from ..context.budget import DEFAULT_POLICY, BudgetPolicy, estimate_tokens, poli
 from ..context.full_source import FullContextError
 from ..context.recheck import plan_recheck, route_window
 from ..context.service import load_window_inputs, plan_range
-from ..context.window_builder import plan_windows
+from ..context.window_builder import WindowPlan, plan_windows
 from ..domain.enums import (
     AnnotationSource,
     AnnotationStatus,
@@ -81,6 +79,7 @@ from ..storage.models import (
     Scene,
     SpeakerGroup,
 )
+from ..storage.transactions import local_write_session
 from .expression_pipeline import (
     ReviewedExpression,
     cached_proposal,
@@ -389,10 +388,11 @@ def ensure_windows(
     version: BookVersion,
     *,
     policy: BudgetPolicy | None = None,
+    plan: WindowPlan | None = None,
 ) -> list[JobWindow]:
     """按任务范围规划窗口并落库 `job_windows`（幂等）。"""
 
-    plan = _plan(session, settings, job, version, policy or DEFAULT_POLICY)
+    plan = plan or _plan(session, settings, job, version, policy or DEFAULT_POLICY)
     existing = {
         row.window_id: row
         for row in session.execute(select(JobWindow).where(JobWindow.job_id == job.id)).scalars()
@@ -409,8 +409,8 @@ def ensure_windows(
                 state=JobState.QUEUED,
             )
             session.add(row)
-            session.flush()
         rows.append(row)
+    session.flush()
     return rows
 
 
@@ -1252,6 +1252,7 @@ def _dispatch_with_bounded_retry(
         )
     )
     request_fingerprint = _request_fingerprint(request_payload, snapshot)
+    from ..storage.run_archive import save_run_archive
     from .dialogue_lifecycle import restore_dispatch
 
     with session_factory() as session:
@@ -1273,7 +1274,7 @@ def _dispatch_with_bounded_retry(
             saved_raw = mapped
         return saved_raw, saved_error, saved_id, saved_elapsed
     for index in range(allowed):
-        with session_factory() as session:
+        def prepare_call(session):
             run = InferenceRun(
                 job_id=job_id,
                 window_id=window.window_id,
@@ -1283,11 +1284,8 @@ def _dispatch_with_bounded_retry(
             )
             session.add(run)
             session.flush()
-            from ..storage.run_archive import save_run_archive
-
             save_run_archive(run, request_payload)
             run.state = InferenceRunState.DISPATCHED
-            run_id = run.id
             row = session.scalar(select(JobWindow).where(
                 JobWindow.job_id == job_id, JobWindow.window_id == window.window_id,
             ))
@@ -1302,7 +1300,13 @@ def _dispatch_with_bounded_retry(
                     job.progress_json = json.dumps({
                         **progress, "stage": "running", "window_id": window.window_id,
                     })
-            session.commit()
+            return run.id
+
+        from ..storage.transactions import finish_local_write
+        run_id = finish_local_write(session_factory, prepare_call, job_id=job_id)
+        from ..diagnostics import logger as diagnostic_logger
+        diagnostic_logger.info("dialogue_call_start job=%s run=%s window=%s",
+                               job_id, run_id, window.window_id)
 
         started = time.perf_counter()
         raw = None
@@ -1319,6 +1323,9 @@ def _dispatch_with_bounded_retry(
         except ProviderError as exc:
             error = exc
         elapsed_ms = int((time.perf_counter() - started) * 1000)
+        diagnostic_logger.info("dialogue_call_returned job=%s run=%s elapsed_ms=%s error=%s",
+                               job_id, run_id, elapsed_ms,
+                               error.kind.value if error is not None else None)
 
         # Commit transport evidence before semantic validation or application.
         # A received invalid proposal must not vanish when those steps fail.
@@ -1336,7 +1343,16 @@ def _dispatch_with_bounded_retry(
 
         from ..storage.transactions import finish_local_write
 
-        finish_local_write(session_factory, persist_returned)
+        try:
+            finish_local_write(session_factory, persist_returned, job_id=job_id)
+        except OperationalError as write_error:
+            from ..storage.transactions import sqlite_lock_error
+            from .local_finalization import PendingLocalWrite
+            if not sqlite_lock_error(write_error):
+                raise
+            raise PendingLocalWrite(
+                lambda: finish_local_write(session_factory, persist_returned, job_id=job_id),
+            ) from write_error
 
         if error is None or error.kind not in AUTO_RETRY_KINDS or index + 1 >= allowed:
             from ..llm.receipt import ProviderResult
@@ -1402,13 +1418,24 @@ def run_job(
         if not dialogue:
             raise
         # Never log SQL statements, parameters or model/novel contents.
-        logging.getLogger(__name__).error(
-            "Dialogue worker exited: job=%s error=%s locations=%s",
-            job_id, database_error_detail(exc),
-            [(os.path.basename(frame.filename), frame.lineno, frame.name)
-             for frame in traceback.extract_tb(exc.__traceback__)],
-        )
-        state = settle_interrupted(session_factory, job_id, exc)
+        from ..diagnostics import log_failure
+        log_failure("dialogue_worker_exit", job_id, exc)
+        from .local_finalization import defer_settlement
+
+        def persist_exit(error=exc):
+            from .local_finalization import PendingLocalWrite
+            if isinstance(error, PendingLocalWrite):
+                error.persist()
+            return settle_interrupted(session_factory, job_id, error)
+
+        try:
+            state = persist_exit()
+        except Exception as settlement_error:
+            from ..diagnostics import log_failure
+            log_failure("dialogue_exit_write", job_id, settlement_error)
+            defer_settlement(session_factory, job_id, persist_exit)
+            return JobRunOutcome(job_id=job_id, state=JobState.RUNNING,
+                                 errors=["本地状态保存等待中，不会重新调用模型"])
         with session_factory() as session:
             rows = list(session.scalars(select(JobWindow).where(JobWindow.job_id == job_id)))
             failed_job = session.get(Job, job_id)
@@ -1532,7 +1559,6 @@ def _run_job(
         if job.state is not JobState.PAUSING:
             job.state = JobState.RUNNING
         try:
-            ensure_windows(session, settings, job, version, policy=policy)
             plan = _plan(session, settings, job, version, policy)
         except FullContextError as exc:
             job.state = JobState.FAILED
@@ -1575,8 +1601,24 @@ def _run_job(
         )
         strong_mode = credential_mode_of(strong_profile)
         strong_ref = credential_reference(strong_profile)
-        session.commit()
+        # No write lock during context loading/planning; publish in a short,
+        # independently retried transaction after the read session closes.
 
+    from ..storage.transactions import finish_local_write
+
+    def prepare_windows(session):
+        current = session.get(Job, job_id)
+        if current.state in STOP_STATES:
+            return current.state
+        if current.state is not JobState.PAUSING:
+            current.state = JobState.RUNNING
+        ensure_windows(session, settings, current, version, policy=policy, plan=plan)
+        return current.state
+
+    prepared_state = finish_local_write(session_factory, prepare_windows, job_id=job_id)
+    if prepared_state in STOP_STATES:
+        outcome.state = prepared_state
+        return outcome
     outcome.windows_total = len(plan.windows)
     adapter: ProviderAdapter | None = None
     if adapter_factory is not None:
@@ -2035,7 +2077,7 @@ def _run_job(
                     outcome.recheck_targets += len(window.target_quote_ids)
 
             retry_correction = None
-            with session_factory() as session:
+            with local_write_session(session_factory, job_id=job_id) as session:
                 job = session.get(Job, job_id)
                 assert job is not None
                 run = session.get(InferenceRun, run_id)
@@ -2211,7 +2253,7 @@ def _run_job(
             return outcome
 
     # ---------- 阶段 3：收尾 ----------
-    with session_factory() as session:
+    with local_write_session(session_factory, job_id=job_id) as session:
         job = session.get(Job, job_id)
         assert job is not None
         outcome.windows_done = done
