@@ -15,6 +15,8 @@ from sqlalchemy import event, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .write_queue import reserve_write, writer_job_scope
+
 T = TypeVar("T")
 
 
@@ -44,6 +46,7 @@ def transaction(session_factory: sessionmaker[Session]) -> Iterator[Session]:
 
     session = session_factory()
     try:
+        reserve_write(session)
         yield session
         session.commit()
     except Exception:
@@ -94,6 +97,7 @@ def local_write_session(session_factory: sessionmaker[Session], *, job_id=None):
     for attempt in range(3):
         candidate = session_factory()
         try:
+            reserve_write(candidate, job_id=job_id)
             if candidate.get_bind().dialect.name == "sqlite":
                 candidate.execute(text("BEGIN IMMEDIATE"))
             session = candidate
@@ -154,6 +158,7 @@ def local_write_session(session_factory: sessionmaker[Session], *, job_id=None):
                         int(commit_seconds * 1000))
 
 
+@writer_job_scope
 def finish_local_write(session_factory: sessionmaker[Session], action: Callable[[Session], T],
                        *, job_id: str | None = None) -> T:
     """Atomic local finalization; retry a fresh transaction, never a model call.

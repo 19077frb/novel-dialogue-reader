@@ -80,6 +80,7 @@ from ..storage.models import (
     SpeakerGroup,
 )
 from ..storage.transactions import local_write_session
+from ..storage.write_queue import writer_job_scope
 from .expression_pipeline import (
     ReviewedExpression,
     cached_proposal,
@@ -1394,6 +1395,7 @@ def _dispatch_with_bounded_retry(
     return raw, error, run_id, elapsed_ms
 
 
+@writer_job_scope
 def run_job(
     session_factory: sessionmaker[Session],
     settings: Settings,

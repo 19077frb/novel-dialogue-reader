@@ -25,6 +25,7 @@ from ..llm.adapters import sanitize
 from ..llm.errors import ProviderError, ProviderErrorKind
 from ..storage.models import Book, BookCharacter, BookVersion, InferenceRun, Job
 from ..storage.transactions import transaction
+from ..storage.write_queue import writer_job_scope
 from .directory import _guard, _sync, directory, edit, merge
 from .facts import IdentityProfileUpdate, prepare_profile_updates
 from .merge_diagnostics import MergePlanError, character_refs, saved_model_groups
@@ -566,6 +567,7 @@ def confirm_auto_merge(session, job, selected_ids, visible_from_cp=None, *, sett
     return auto_merge_result(session, job)
 
 
+@writer_job_scope
 def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_factory=None):
     """Returns (state, calls). A job is claimed once; no implicit paid retries."""
     run_id = None

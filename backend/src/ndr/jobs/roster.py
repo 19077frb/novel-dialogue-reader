@@ -39,6 +39,7 @@ from ..llm.sourced_roster import (
 )
 from ..storage.models import BookVersion, Chapter, InferenceRun, Job
 from ..storage.transactions import database_error_detail, finish_local_write, sqlite_lock_error
+from ..storage.write_queue import writer_job_scope
 
 ROSTER_MAX_TOKENS = 2000
 _ACTIVE = set()
@@ -145,6 +146,7 @@ def _catalog_names(messages):
             if isinstance(item.get("name"), str) and item["name"].strip()}
 
 
+@writer_job_scope
 def run_character_roster_job(
     session_factory, settings, *, job_id, credentials=None, adapter_factory=None,
 ) -> RosterJobOutcome:

@@ -74,6 +74,16 @@ const RECOVERY = {
 } as unknown as JobRecoveryOut
 
 describe('JobPanel', () => {
+  it.each([
+    ['write_queue_waiting', '等待保存', '正在等待其他保存操作完成，请勿重复提交。'],
+    ['write_queue_active', '正在保存', '正在保存任务数据，请稍候。'],
+  ])('shows %s without treating it as a failed model call', async (stage, label, message) => {
+    vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, state: 'RUNNING', progress: { stage } })
+    vi.mocked(jobsApi.fetchJobRecovery).mockResolvedValue({ ...RECOVERY, state: 'RUNNING', actions: [] })
+    renderWithProviders(<JobPanel jobId="j1" />)
+    expect(await screen.findByTestId('job-state')).toHaveTextContent(label)
+    expect(screen.getByText(message)).toBeInTheDocument()
+  })
   it('显示执行已退出而正在保存本地状态的提示', async () => {
     vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, state: 'RUNNING',
       progress: { stage: 'local_finalization_pending' } })

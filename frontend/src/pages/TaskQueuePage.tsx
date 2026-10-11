@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { fetchTaskQueue, fetchRecentJobs } from '../api/jobs'
 import { readBatchHistory } from '../processing/batchHistory'
-import { JobPanel, JOB_KIND_LABELS, JOB_STATE_LABELS } from '../components/JobPanel'
+import { JobPanel, JOB_KIND_LABELS, JOB_STATE_LABELS, jobStateLabel } from '../components/JobPanel'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
 import { PaginatedItems } from '../components/ListPagination'
 import { FilterableTaskProgressTable, jobTaskTone, TaskProgressSummary, TaskProgressTable } from '../components/TaskProgressTable'
@@ -215,7 +215,7 @@ export default function TaskQueuePage() {
             const result = await jobs.fetchNextPage()
             if (result.isError) throw result.error
           }} rows={(jobs.data?.pages.flatMap(page => page.items) ?? []).map(job => ({ id: job.id,
-            state: jobTaskTone(job.state), stateLabel: JOB_STATE_LABELS[job.state], type: JOB_KIND_LABELS[job.kind],
+            state: jobTaskTone(job.state), stateLabel: jobStateLabel(job), type: JOB_KIND_LABELS[job.kind],
             book: job.book_title || '书籍已删除', chapter: job.chapter_title || '全书',
             window: job.windows_total ? <span>窗口 {job.windows_done}/{job.windows_total}</span> : '—',
             error: job.last_error, actions: <button onClick={() => select(job.id)}>查看任务</button>,

@@ -8,12 +8,24 @@ import { writeJournal } from '../src/processing/journal'
 import { saveBatchHistory } from '../src/processing/batchHistory'
 
 vi.mock('../src/api/jobs', () => ({ fetchTaskQueue: vi.fn(), fetchRecentJobs: vi.fn() }))
-vi.mock('../src/components/JobPanel', () => ({
+vi.mock('../src/components/JobPanel', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../src/components/JobPanel')>(),
   JOB_KIND_LABELS: { INFERENCE: '对白归属', CHARACTER_ROSTER: '人物识别' },
   JOB_STATE_LABELS: { RUNNING: '处理中', QUEUED: '排队中', COMPLETED: '已完成', NEEDS_RECONCILIATION: '待核对' },
   JobPanel: ({ jobId }: { jobId: string }) => <p>详情 {jobId}</p>,
 }))
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks() })
+
+it('shows database saving stages in background task rows', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [
+    { id: 'waiting', state: 'RUNNING', kind: 'INFERENCE', book_title: '测试书', chapter_title: '第一章', progress: { stage: 'write_queue_waiting' } },
+    { id: 'saving', state: 'RUNNING', kind: 'CHARACTER_ROSTER', book_title: '测试书', chapter_title: '第二章', progress: { stage: 'write_queue_active' } },
+  ] as never, next_cursor: null })
+  renderWithProviders(<TaskQueuePage />)
+  const table = await screen.findByRole('table', { name: '后台任务' })
+  expect(await within(table).findByText('等待保存')).toBeVisible()
+  expect(within(table).getByText('正在保存')).toBeVisible()
+})
 
 function oldAdmission() {
   return { id: 'old-range', bookId: 'b1', versionId: 'v1', title: '旧批次', phase: 'cancelled',
