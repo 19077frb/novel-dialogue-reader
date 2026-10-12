@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { fetchTaskQueue, fetchRecentJobs } from '../api/jobs'
 import { readBatchHistory } from '../processing/batchHistory'
@@ -15,6 +15,7 @@ import { readJournal } from '../processing/journal'
 import { requestBatchStop } from '../components/BatchProcessor'
 import type { BatchProgressSnapshot, BatchExecution } from '../components/BatchProcessor'
 import type { SingleWorkflow } from '../processing/singleWorkflow'
+import type { TaskQueueItemOut } from '../api/types'
 import { stopSingleWorkflow } from '../processing/singleWorkflow'
 
 const LABELS = { queued: '排队中', running: '处理中', completed: '已完成', failed: '失败', cancelled: '已停止' }
@@ -75,7 +76,7 @@ function ChapterTaskHistory({ item, chapterId, kind, windowId, onSelect }: {
 }
 
 function admissionTasks(item: QueueAdmission) {
-  if (item.payload.type === 'merge') return [{ id: 'merge', chapter: '全书', type: '自动合并人物', window: '—', tone: item.phase as TaskTone, state: LABELS[item.phase], error: item.error, jobId: item.jobId }]
+  if (item.payload.type === 'merge') return [{ id: 'merge', chapter: '全书', type: '自动合并人物', window: '全书人物', tone: item.phase as TaskTone, state: LABELS[item.phase], error: item.error, jobId: item.jobId }]
   const batch = readJournal<{ execution: { queueId?: string }; snapshot: BatchProgressSnapshot }>(`batch:${item.bookId}`)
   const single = readJournal<SingleWorkflow>(`single:${item.bookId}`)
   const plannedTone = item.phase === 'queued' ? 'queued' : 'unknown'
@@ -83,8 +84,8 @@ function admissionTasks(item: QueueAdmission) {
   const batchTasks = batch && (batch.execution.queueId === item.id || item.id === `legacy:batch:${item.bookId}:${batch.snapshot.startedAt}`)
     ? batch.snapshot.tasks : readBatchHistory(item.id)
   return item.payload.type === 'batch'
-    ? batchTasks ? batchTasks.map(task => ({ id: task.id, chapterId: task.chapterId, kind: task.type === 'roster' ? 'CHARACTER_ROSTER' as const : 'INFERENCE' as const, windowId: task.windowId, chapter: task.chapterTitle, type: task.type === 'roster' ? '人物识别' : '对白归属', window: task.windowLabel, tone: task.state as TaskTone, state: LABELS[task.state], error: task.error, jobId: task.jobId }))
-: item.payload.work.plans.flatMap(plan => [{ id: `roster:${plan.chapter.id}`, chapterId: plan.chapter.id, kind: 'CHARACTER_ROSTER' as const, windowId: null, chapter: plan.chapter.title, type: '人物识别', window: '全文', tone: plannedTone as TaskTone, state: plannedLabel, error: null, jobId: null }, ...(plan.estimate.windows ?? []).map(window => ({ id: `dialogue:${plan.chapter.id}:${window.window_id}`, chapterId: plan.chapter.id, kind: 'INFERENCE' as const, windowId: window.window_id, chapter: plan.chapter.title, type: '对白归属', window: `窗口 ${window.ordinal}`, tone: plannedTone as TaskTone, state: plannedLabel, error: null, jobId: null }))])
+    ? batchTasks ? batchTasks.map(task => ({ id: task.id, chapterId: task.chapterId, kind: task.type === 'roster' ? 'CHARACTER_ROSTER' as const : 'INFERENCE' as const, windowId: task.windowId, chapter: task.chapterTitle, type: task.type === 'roster' ? '人物识别' : '对白归属', window: task.type === 'roster' ? '整章人物识别' : task.windowLabel, tone: task.state as TaskTone, state: LABELS[task.state], error: task.error, jobId: task.jobId }))
+: item.payload.work.plans.flatMap(plan => [{ id: `roster:${plan.chapter.id}`, chapterId: plan.chapter.id, kind: 'CHARACTER_ROSTER' as const, windowId: null, chapter: plan.chapter.title, type: '人物识别', window: '整章人物识别', tone: plannedTone as TaskTone, state: plannedLabel, error: null, jobId: null }, ...(plan.estimate.windows ?? []).map(window => ({ id: `dialogue:${plan.chapter.id}:${window.window_id}`, chapterId: plan.chapter.id, kind: 'INFERENCE' as const, windowId: window.window_id, chapter: plan.chapter.title, type: '对白归属', window: `窗口 ${window.ordinal}${typeof window.target_count === 'number' ? ` · ${window.target_count} 句对白` : ''}`, tone: plannedTone as TaskTone, state: plannedLabel, error: null, jobId: null }))])
     : (single && (single.queueId === item.id || item.id === `legacy:single:${item.bookId}`
       && single.queueId === item.payload.work.queueId && single.versionId === item.payload.work.versionId
       && single.chapterId === item.payload.work.chapterId
@@ -92,6 +93,21 @@ function admissionTasks(item: QueueAdmission) {
 }
 
 type AdmissionTask = ReturnType<typeof admissionTasks>[number]
+
+function backgroundWindowLabel(job: TaskQueueItemOut, savedLabels: ReadonlyMap<string, string>): string {
+  // Completed-window counts are progress, not the chapter's window ordinal.
+  if (job.kind === 'CHARACTER_ROSTER') return '整章人物识别'
+  if (job.kind === 'CHARACTER_MERGE') return '全书人物'
+  if (job.kind === 'RECHECK') return '局部复核'
+  const saved = savedLabels.get(job.id)
+  if (saved) return saved
+  if (job.kind === 'INFERENCE' || job.kind === 'RECOMPUTE') {
+    const selected = job.selected_window_ids?.length ?? 0
+    return selected > 1 ? `${selected} 个对白窗口` : selected === 1 ? '所选对白窗口' : '范围内对白窗口'
+  }
+  return '—'
+}
+
 type SelectedTask = { jobId: string } | { item: QueueAdmission; task: AdmissionTask }
 function useTaskRefresh(enabled = true) {
   const [, setTick] = useState(0)
@@ -168,6 +184,16 @@ export default function TaskQueuePage() {
     getNextPageParam: page => page.next_cursor ?? undefined,
     refetchInterval: query => !history || query.state.data?.pages.some(page => page.items.some(job => ['QUEUED', 'RUNNING', 'PAUSING'].includes(job.state))) ? 2000 : false })
   const ranges = [...admissions, ...legacy.items.filter(item => !inventory || inventory.has(item.bookId))].sort((a, b) => b.createdAt - a.createdAt)
+  const windowLabels = useMemo(() => {
+    const labels = new Map<string, string>()
+    // Read each saved range once, never query individual job details for labels.
+    for (const item of [...admissions, ...legacy.items]) {
+      for (const task of admissionTasks(item)) {
+        if (task.jobId && task.window) labels.set(task.jobId, task.window)
+      }
+    }
+    return labels
+  }, [admissions, legacy])
   const visible = ranges.filter(item => history || ['queued', 'running'].includes(item.phase))
   const select = (id: string) => { setSelected({ jobId: id }); setDetailRequest(value => value + 1) }
   const selectPlanned = (item: QueueAdmission, task: AdmissionTask) => { setSelected({ item, task }); setDetailRequest(value => value + 1) }
@@ -217,7 +243,7 @@ export default function TaskQueuePage() {
           }} rows={(jobs.data?.pages.flatMap(page => page.items) ?? []).map(job => ({ id: job.id,
             state: jobTaskTone(job.state), stateLabel: jobStateLabel(job), type: JOB_KIND_LABELS[job.kind],
             book: job.book_title || '书籍已删除', chapter: job.chapter_title || '全书',
-            window: job.windows_total ? <span>窗口 {job.windows_done}/{job.windows_total}</span> : '—',
+            window: backgroundWindowLabel(job, windowLabels),
             error: job.last_error, actions: <button onClick={() => select(job.id)}>查看任务</button>,
           }))} />
       </CollapsibleBlock>
