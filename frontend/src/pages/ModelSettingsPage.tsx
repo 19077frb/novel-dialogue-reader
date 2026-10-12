@@ -281,10 +281,12 @@ export default function ModelSettingsPage() {
           {selectedProtocol && (
             <details className="hint" data-testid="protocol-capabilities">
               <summary>如何填写接口配置</summary>
-              {selectedProtocol.protocol === 'chat-completions-compatible' ? <>
+              {['chat-completions-compatible', 'anthropic-messages'].includes(selectedProtocol.protocol) ? <>
+                <p>按服务商提供的接口格式选择协议，再参考对应说明填写。</p>
+                <h4>OpenAI 协议</h4>
                 <p>适用于使用 OpenAI 接口格式的云端模型和本地服务。服务地址和模型名称按服务商提供的信息填写；服务地址填写 API 根地址，不要包含 /chat/completions。</p>
                 <p>云端服务通常需要 API 密钥，在“凭据”中选择保存方式并填写密钥。只有明确无需认证的本地服务，才选择“不需要密钥（本地服务）”。</p>
-              </> : selectedProtocol.protocol === 'anthropic-messages' ? <>
+                <h4>Anthropic 协议</h4>
                 <p>适用于 Anthropic Messages 接口。官方服务地址可填 https://api.anthropic.com/v1，兼容服务按服务商说明填写；不要包含 /messages。模型名称按服务商提供的信息填写。</p>
                 <p>官方服务需要 API 密钥，在“凭据”中选择保存方式并填写密钥。思考模式按模型支持情况选择；开启思考时不发送随机性与采样参数。手动思考要求最大输出 Token 大于 1024，自适应使用所选思考强度。</p>
               </> : selectedProtocol.protocol === 'fake-provider'
