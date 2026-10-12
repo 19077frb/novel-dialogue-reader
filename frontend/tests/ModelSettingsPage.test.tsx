@@ -86,6 +86,25 @@ describe('ModelSettingsPage', () => {
     vi.mocked(profilesApi.fetchProtocols).mockResolvedValue(PROTOCOLS)
   })
 
+  it('新增和编辑配置都标示必填字段，不将密钥或参数标为必填', async () => {
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile()])
+    renderWithProviders(<ModelSettingsPage />)
+    await screen.findByTestId('profile-card')
+    const checkLabels = () => {
+      expect(screen.getByText('* 为必填项。')).toBeInTheDocument()
+      expect(screen.getByLabelText('* 名称')).toBeRequired()
+      expect(screen.getByLabelText('* 协议')).toHaveValue('chat-completions-compatible')
+      expect(screen.getByLabelText('* 服务地址（Base URL）')).toBeRequired()
+      expect(screen.getByLabelText('* 模型名')).toBeRequired()
+      expect(screen.getByTestId('profile-max_tokens')).not.toBeRequired()
+    }
+    checkLabels()
+    expect(screen.getByLabelText('接口密钥（API Key，留空不保存）')).not.toBeRequired()
+    await userEvent.click(screen.getByTestId('profile-edit-p1'))
+    checkLabels()
+    expect(screen.getByTestId('key-action-keep')).toBeChecked()
+  })
+
   it('空状态说明可配置，并提示连接测试的入口', async () => {
     renderWithProviders(<ModelSettingsPage />)
 
@@ -96,9 +115,7 @@ describe('ModelSettingsPage', () => {
     await userEvent.click(screen.getByText('如何填写接口配置'))
     expect(help).toHaveTextContent('云端服务通常需要 API 密钥')
     expect(help).toHaveTextContent('只有明确无需认证的本地服务')
-    expect(help).toHaveTextContent('https://api.anthropic.com/v1')
-    expect(help).toHaveTextContent('官方服务需要 API 密钥')
-    expect(help).toHaveTextContent('按服务商提供的接口格式选择协议')
+    expect(help).not.toHaveTextContent('https://api.anthropic.com/v1')
     expect(help).not.toHaveTextContent('json_object')
     expect(help).not.toHaveTextContent('json_schema')
     expect(help).not.toHaveTextContent('需要 Key：否')
@@ -131,7 +148,7 @@ describe('ModelSettingsPage', () => {
     expect(help).toHaveTextContent('https://api.anthropic.com/v1')
     expect(help).toHaveTextContent('官方服务需要 API 密钥')
     expect(help).toHaveTextContent('手动思考要求最大输出 Token 大于 1024')
-    expect(help).toHaveTextContent('/chat/completions')
+    expect(help).not.toHaveTextContent('/chat/completions')
     await fillNewProfile()
     await userEvent.click(screen.getByTestId('profile-save'))
     await waitFor(() => expect(profilesApi.createProfile).toHaveBeenCalledWith(expect.objectContaining({
