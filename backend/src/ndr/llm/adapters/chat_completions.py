@@ -86,6 +86,7 @@ class ChatCompletionsAdapter:
     name = "chat-completions"
     protocol = CHAT_COMPLETIONS_COMPATIBLE.protocol
     capabilities: AdapterCapabilities = CHAT_COMPLETIONS_COMPATIBLE
+    connection_test_max_tokens = CONNECTION_TEST_MAX_TOKENS
 
     def __init__(
         self,
@@ -286,7 +287,8 @@ class ChatCompletionsAdapter:
         """微型结构化任务：检查鉴权 + 输出可解析（不代表小说效果）。"""
 
         payload = self._payload(
-            build_connection_messages(), max_tokens=CONNECTION_TEST_MAX_TOKENS, json_object=True
+            build_connection_messages(), max_tokens=self.connection_test_max_tokens,
+            json_object=True,
         )
         try:
             data, elapsed_ms = await self._post(payload)

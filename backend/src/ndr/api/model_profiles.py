@@ -1,12 +1,12 @@
 """模型配置路由。
 
 - `GET /api/model-profiles`：非敏感配置 + `has_key`，**从不回传密钥**。
-- `GET /api/model-profiles/protocols`：协议能力声明（页面据此说明实际能力）。
+- `GET /api/model-profiles/protocols`：协议能力声明与配置页可选协议。
 - `POST /api/model-profiles`：新建配置（可选 api_key 与凭据模式）。
 - `PATCH /api/model-profiles/{id}`：字段变更 + keep/replace/remove 密钥三态 + expected_version。
 - `DELETE /api/model-profiles/{id}`：删除配置与其凭据引用；被任务引用时 409。
 
-连接测试（`POST /api/model-profiles/test`）本任务不发起任何真实调用。
+连接测试（`POST /api/model-profiles/test`）调用所选服务，可能产生费用。
 """
 
 from __future__ import annotations

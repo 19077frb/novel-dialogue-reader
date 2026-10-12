@@ -25,6 +25,11 @@ const SECRET = 'sk-secret-in-form'
 
 const PROTOCOLS: ProtocolCapabilitiesOut[] = [
   {
+    protocol: 'anthropic-messages', supports_json_schema: false, supports_json_object: false,
+    supports_temperature: true, supports_max_tokens: true, requires_api_key: false,
+    notes: 'Anthropic Messages API',
+  },
+  {
     protocol: 'chat-completions-compatible',
     supports_json_schema: false,
     supports_json_object: true,
@@ -110,6 +115,24 @@ describe('ModelSettingsPage', () => {
     expect(screen.getByTestId('profile-protocol')).toHaveValue('chat-completions-compatible')
     expect(profilesApi.createProfile).not.toHaveBeenCalled()
     expect(profilesApi.testConnection).not.toHaveBeenCalled()
+  })
+
+  it('offers Anthropic with matching help and saves its original protocol identifier', async () => {
+    vi.mocked(profilesApi.createProfile).mockResolvedValue(profile({ protocol: 'anthropic-messages' }))
+    renderWithProviders(<ModelSettingsPage />)
+    await screen.findByRole('option', { name: 'Anthropic 协议' })
+    await userEvent.selectOptions(screen.getByTestId('profile-protocol'), 'anthropic-messages')
+    await userEvent.click(screen.getByText('如何填写接口配置'))
+    const help = screen.getByTestId('protocol-capabilities')
+    expect(help).toHaveTextContent('https://api.anthropic.com/v1')
+    expect(help).toHaveTextContent('官方服务需要 API 密钥')
+    expect(help).toHaveTextContent('手动思考要求最大输出 Token 大于 1024')
+    expect(help).not.toHaveTextContent('/chat/completions')
+    await fillNewProfile()
+    await userEvent.click(screen.getByTestId('profile-save'))
+    await waitFor(() => expect(profilesApi.createProfile).toHaveBeenCalledWith(expect.objectContaining({
+      protocol: 'anthropic-messages', api_key: SECRET,
+    })))
   })
 
   it('新建配置时提交密钥，但界面上不回显密钥', async () => {

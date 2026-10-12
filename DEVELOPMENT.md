@@ -108,8 +108,9 @@ pwsh -File scripts/verify.ps1
 
 ## 6. 模型、安全与成本
 
-- 正式适配器使用 OpenAI Chat Completions 兼容协议。
-- Base URL 是 API 根地址，由适配器追加 `/chat/completions`。
+- 正式适配器支持 OpenAI Chat Completions 兼容协议及 Anthropic Messages 协议；均通过共享工厂供人物、对白、复核及合并任务使用。
+- Base URL 是 API 根地址。OpenAI 适配器追加 `/chat/completions`；Anthropic 根地址以 `/v1` 结尾时追加 `/messages`，否则追加 `/v1/messages`。兼容网关填写其带版本的根地址，不填完整业务端点。
+- Anthropic 使用 `x-api-key` 与 `anthropic-version: 2023-06-01`，将 system 消息转换为顶层字段，仅读取最终文本块，使用非流式纯文本 JSON 任务。不强制 OpenAI 的 `response_format`，仍按同一业务 schema 校验。接入测试使用隔离 MockTransport，不代表真实服务质量已验证；请求与思考参数依据 [Messages 文档](https://platform.claude.com/docs/en/api/messages/create)。
 - API Key 只存入系统凭据库或会话内存，不进入数据库、日志、缓存或响应。
 - 自动测试默认不能访问真实付费模型。
 - 重试必须有次数上限；请求结果未知时不能静默自动重发。

@@ -59,7 +59,7 @@ def normalize_base_url(raw: str) -> str:
         raise ApiError.validation(
             "base_url 应当是 API 根路径，不要包含具体端点；适配器会自行追加相对端点。",
             base_url=value,
-            hint="例如填 https://api.example.com/v1，而不是 .../v1/chat/completions",
+            hint="例如填 https://api.example.com/v1，不要包含 /chat/completions 或 /messages",
         )
     return value
 
