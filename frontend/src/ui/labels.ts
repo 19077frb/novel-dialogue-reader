@@ -23,7 +23,7 @@ export const gapDecisionLabel = (value: string): string => ({
 } as Record<string, string>)[value] ?? '场景待确认'
 
 export const protocolLabel = (value: string): string => ({
-  'chat-completions-compatible': '兼容聊天接口',
+  'chat-completions-compatible': 'OpenAI 兼容协议',
   'fake-provider': '模拟服务（仅测试，不调用模型）',
 } as Record<string, string>)[value] ?? value
 
