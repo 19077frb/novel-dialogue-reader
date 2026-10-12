@@ -86,6 +86,25 @@ describe('ModelSettingsPage', () => {
     vi.mocked(profilesApi.fetchProtocols).mockResolvedValue(PROTOCOLS)
   })
 
+  it('新增和编辑配置都标示必填字段，不将密钥或参数标为必填', async () => {
+    vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile()])
+    renderWithProviders(<ModelSettingsPage />)
+    await screen.findByTestId('profile-card')
+    const checkLabels = () => {
+      expect(screen.getByText('* 为必填项。')).toBeInTheDocument()
+      expect(screen.getByLabelText('* 名称')).toBeRequired()
+      expect(screen.getByLabelText('* 协议')).toHaveValue('chat-completions-compatible')
+      expect(screen.getByLabelText('* 服务地址（Base URL）')).toBeRequired()
+      expect(screen.getByLabelText('* 模型名')).toBeRequired()
+      expect(screen.getByTestId('profile-max_tokens')).not.toBeRequired()
+    }
+    checkLabels()
+    expect(screen.getByLabelText('接口密钥（API Key，留空不保存）')).not.toBeRequired()
+    await userEvent.click(screen.getByTestId('profile-edit-p1'))
+    checkLabels()
+    expect(screen.getByTestId('key-action-keep')).toBeChecked()
+  })
+
   it('空状态说明可配置，并提示连接测试的入口', async () => {
     renderWithProviders(<ModelSettingsPage />)
 
@@ -96,19 +115,21 @@ describe('ModelSettingsPage', () => {
     await userEvent.click(screen.getByText('如何填写接口配置'))
     expect(help).toHaveTextContent('云端服务通常需要 API 密钥')
     expect(help).toHaveTextContent('只有明确无需认证的本地服务')
+    expect(help).not.toHaveTextContent('https://api.anthropic.com/v1')
     expect(help).not.toHaveTextContent('json_object')
     expect(help).not.toHaveTextContent('json_schema')
     expect(help).not.toHaveTextContent('需要 Key：否')
     await userEvent.selectOptions(screen.getByTestId('profile-protocol'), 'fake-provider')
     expect(help).toHaveTextContent('不连接真实模型服务，也不需要 API 密钥')
     expect(help).not.toHaveTextContent('云端服务通常需要 API 密钥')
+    expect(help).not.toHaveTextContent('https://api.anthropic.com/v1')
   })
 
   it('shows Chinese protocol and credential labels without changing saved identifiers', async () => {
     vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile()])
     renderWithProviders(<ModelSettingsPage />)
     const card = await screen.findByTestId('profile-card')
-    expect(card).toHaveTextContent('OpenAI 兼容协议')
+    expect(card).toHaveTextContent('OpenAI 协议')
     expect(card).toHaveTextContent('仅本次会话')
     expect(card).not.toHaveTextContent('chat-completions-compatible')
     expect(card).toHaveTextContent('https://api.example.com/v1')
@@ -335,7 +356,7 @@ describe('ModelSettingsPage / 连接测试', () => {
     expect(result).toHaveTextContent('连接成功')
     expect(result).toHaveTextContent('123 ms')
     expect(result).toHaveTextContent('合计 20')
-    expect(result).toHaveTextContent('协议 / 模型：OpenAI 兼容协议 / example-chat-model')
+    expect(result).toHaveTextContent('协议 / 模型：OpenAI 协议 / example-chat-model')
     expect(result).not.toHaveTextContent('chat-completions-compatible')
     expect(result).toHaveTextContent('未评估小说标注效果')
     expect(profilesApi.testConnection).toHaveBeenCalledWith({ profile_id: 'p1' })

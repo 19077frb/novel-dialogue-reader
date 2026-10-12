@@ -251,8 +251,9 @@ export default function ModelSettingsPage() {
             save.mutate(params)
           }}
         >
+          <p className="hint">* 为必填项。</p>
           <label>
-            名称
+            * 名称
             <input
               type="text"
               value={form.name}
@@ -263,7 +264,7 @@ export default function ModelSettingsPage() {
           </label>
 
           <label>
-            协议
+            * 协议
             <select
               value={form.protocol}
               data-testid="profile-protocol"
@@ -294,7 +295,7 @@ export default function ModelSettingsPage() {
           )}
 
           <label>
-            服务地址（Base URL）
+            * 服务地址（Base URL）
             <input
               type="text"
               value={form.baseUrl}
@@ -306,7 +307,7 @@ export default function ModelSettingsPage() {
           </label>
 
           <label>
-            模型名
+            * 模型名
             <input
               type="text"
               value={form.model}
