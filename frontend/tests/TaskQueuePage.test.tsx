@@ -16,6 +16,68 @@ vi.mock('../src/components/JobPanel', async (importOriginal) => ({
 }))
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks() })
 
+it('reuses the exact batch window label after reload and receipt updates without fetching details', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [{ id: 'job-3', kind: 'INFERENCE', state: 'RUNNING',
+    book_title: '测试书', chapter_title: '第一章', windows_total: 1, windows_done: 0 }] as never, next_cursor: null })
+  writeJournal('admissions', [{ ...oldAdmission(), id: 'range', phase: 'running' }])
+  const task = { id: 'dialogue:c1:w3', type: 'dialogue', chapterId: 'c1', chapterTitle: '第一章',
+    windowId: 'w3', windowLabel: '窗口 3 · 59 句对白', state: 'running', jobId: null }
+  writeJournal('batch:b1', { execution: { queueId: 'range' }, snapshot: { startedAt: 1, running: true, tasks: [task] } })
+  const view = renderWithProviders(<TaskQueuePage />)
+  const table = await screen.findByRole('table', { name: '后台任务' })
+  expect(await within(table).findByText('范围内对白窗口')).toBeVisible()
+  writeJournal('batch:b1', { execution: { queueId: 'range' }, snapshot: { startedAt: 1, running: true,
+    tasks: [{ ...task, jobId: 'job-3' }] } })
+  await within(table).findByText('窗口 3 · 59 句对白', {}, { timeout: 4000 })
+  await userEvent.click(screen.getByRole('button', { name: '展开范围内任务' }))
+  expect(screen.getByRole('table', { name: '范围内任务' })).toHaveTextContent('窗口 3 · 59 句对白')
+  view.unmount()
+  renderWithProviders(<TaskQueuePage />)
+  expect(await within(screen.getByRole('table', { name: '后台任务' })).findByText('窗口 3 · 59 句对白')).toBeVisible()
+  expect(fetchRecentJobs).not.toHaveBeenCalled()
+})
+
+it('matches historical batches and single windows by job id, not a reused window id', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [
+    { id: 'old-job', kind: 'INFERENCE', state: 'COMPLETED' },
+    { id: 'single-job', kind: 'INFERENCE', state: 'RUNNING' },
+    { id: 'unrelated-job', kind: 'INFERENCE', state: 'RUNNING', selected_window_ids: ['w1'] },
+  ] as never, next_cursor: null })
+  writeJournal('admissions', [oldAdmission(), { ...oldAdmission(), id: 'single-range', bookId: 'b2', phase: 'running',
+    payload: { type: 'single', work: { tasks: [{ windowId: 'w1', ordinal: '7', error: null, job: { id: 'single-job', state: 'RUNNING' } }] } } }])
+  writeJournal('batch:b1', { execution: { queueId: 'replacement' }, snapshot: { startedAt: 2, running: true,
+    tasks: [{ id: 'dialogue:c1:w1', type: 'dialogue', windowId: 'w1', windowLabel: '窗口 99', jobId: 'replacement-job' }] } })
+  saveBatchHistory('old-range', [{ id: 'dialogue:c1:w1', type: 'dialogue', chapterId: 'c1', chapterTitle: '第一章',
+    windowId: 'w1', windowLabel: '窗口 4 · 31 句对白', state: 'completed', error: null, jobId: 'old-job' }])
+  renderWithProviders(<TaskQueuePage />)
+  const table = await screen.findByRole('table', { name: '后台任务' })
+  expect(await within(table).findByText('窗口 4 · 31 句对白')).toBeVisible()
+  expect(within(table).getByText('窗口 7')).toBeVisible()
+  expect(within(table).getByText('所选对白窗口')).toBeVisible()
+  expect(table).not.toHaveTextContent('窗口 99')
+  expect(fetchRecentJobs).not.toHaveBeenCalled()
+})
+
+it('uses meaningful scope labels without inventing ordinals when saved receipts are missing', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [
+    { id: 'roster', kind: 'CHARACTER_ROSTER', state: 'RUNNING' },
+    { id: 'local', kind: 'RECHECK', state: 'RUNNING', windows_total: 1 },
+    { id: 'merge', kind: 'CHARACTER_MERGE', state: 'RUNNING' },
+    { id: 'many', kind: 'INFERENCE', state: 'RUNNING', selected_window_ids: ['internal-a', 'internal-b'], windows_done: 0, windows_total: 2 },
+    { id: 'whole', kind: 'INFERENCE', state: 'RUNNING', windows_done: 0, windows_total: 1 },
+  ] as never, next_cursor: null })
+  renderWithProviders(<TaskQueuePage />)
+  const table = await screen.findByRole('table', { name: '后台任务' })
+  expect(await within(table).findByText('整章人物识别')).toBeVisible()
+  expect(within(table).getByText('局部复核')).toBeVisible()
+  expect(within(table).getByText('全书人物')).toBeVisible()
+  expect(within(table).getByText('2 个对白窗口')).toBeVisible()
+  expect(within(table).getByText('范围内对白窗口')).toBeVisible()
+  expect(table).not.toHaveTextContent('0/1')
+  expect(table).not.toHaveTextContent('0/2')
+  expect(table).not.toHaveTextContent('internal-')
+})
+
 it('shows database saving stages in background task rows', async () => {
   vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [
     { id: 'waiting', state: 'RUNNING', kind: 'INFERENCE', book_title: '测试书', chapter_title: '第一章', progress: { stage: 'write_queue_waiting' } },
@@ -115,7 +177,7 @@ it('shows a waiting batch plan before its execution journal exists without query
   renderWithProviders(<TaskQueuePage />)
   await userEvent.click(screen.getByRole('button', { name: '展开范围内任务' }))
   await userEvent.click(screen.getByRole('button', { name: '查看任务' }))
-  expect(screen.getByRole('table', { name: '当前任务' })).toHaveTextContent('排队中人物识别第一章全文')
+  expect(screen.getByRole('table', { name: '当前任务' })).toHaveTextContent('排队中人物识别第一章整章人物识别')
   expect(screen.getByText(/本任务尚未派发/)).toBeVisible()
   expect(screen.queryByText('本章后台任务')).not.toBeInTheDocument()
   expect(fetchRecentJobs).not.toHaveBeenCalled()
@@ -197,12 +259,12 @@ it('shows cross-book progress and opens selected details without refreshing book
   renderWithProviders(<TaskQueuePage />)
   expect(await screen.findByText('作品一')).toBeVisible()
   expect(screen.getByText('作品二')).toBeVisible()
-  expect(screen.getByText('窗口 1/3')).toBeVisible()
+  expect(screen.getByText('所选对白窗口')).toBeVisible()
   const table = screen.getByRole('table', { name: '后台任务' })
   expect(within(table).queryByText('窗口详情')).not.toBeInTheDocument()
   expect(table).not.toHaveTextContent('w-internal-running')
   expect(table).not.toHaveTextContent('w-internal-queued')
-  expect(within(screen.getByRole('row', { name: /排队中 人物识别 作品二/ })).getAllByRole('cell')[4]).toHaveTextContent('—')
+  expect(within(screen.getByRole('row', { name: /排队中 人物识别 作品二/ })).getAllByRole('cell')[4]).toHaveTextContent('整章人物识别')
   expect(table).toHaveClass('ndr-batch-task-table')
   expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['状态', '处理类型', '书籍', '章节', '窗口', '原因 / 错误详情', '操作'])
   expect(screen.getByRole('row', { name: /处理中 对白归属/ })).toHaveAttribute('data-task-state', 'running')
