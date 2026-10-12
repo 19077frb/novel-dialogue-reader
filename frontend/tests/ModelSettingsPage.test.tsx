@@ -25,6 +25,11 @@ const SECRET = 'sk-secret-in-form'
 
 const PROTOCOLS: ProtocolCapabilitiesOut[] = [
   {
+    protocol: 'anthropic-messages', supports_json_schema: false, supports_json_object: false,
+    supports_temperature: true, supports_max_tokens: true, requires_api_key: false,
+    notes: 'Anthropic Messages API',
+  },
+  {
     protocol: 'chat-completions-compatible',
     supports_json_schema: false,
     supports_json_object: true,
@@ -87,20 +92,47 @@ describe('ModelSettingsPage', () => {
     expect(await screen.findByTestId('profiles-empty')).toHaveTextContent('不需要修改源码')
     await waitFor(() => expect(profilesApi.fetchProtocols).toHaveBeenCalled())
     expect(screen.getByText(/保存前可以用/)).toBeInTheDocument()
-    expect(await screen.findByTestId('protocol-capabilities')).toHaveTextContent('json_schema：未声明')
+    const help = await screen.findByTestId('protocol-capabilities')
+    await userEvent.click(screen.getByText('如何填写接口配置'))
+    expect(help).toHaveTextContent('云端服务通常需要 API 密钥')
+    expect(help).toHaveTextContent('只有明确无需认证的本地服务')
+    expect(help).not.toHaveTextContent('json_object')
+    expect(help).not.toHaveTextContent('json_schema')
+    expect(help).not.toHaveTextContent('需要 Key：否')
+    await userEvent.selectOptions(screen.getByTestId('profile-protocol'), 'fake-provider')
+    expect(help).toHaveTextContent('不连接真实模型服务，也不需要 API 密钥')
+    expect(help).not.toHaveTextContent('云端服务通常需要 API 密钥')
   })
 
   it('shows Chinese protocol and credential labels without changing saved identifiers', async () => {
     vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile()])
     renderWithProviders(<ModelSettingsPage />)
     const card = await screen.findByTestId('profile-card')
-    expect(card).toHaveTextContent('兼容聊天接口')
+    expect(card).toHaveTextContent('OpenAI 兼容协议')
     expect(card).toHaveTextContent('仅本次会话')
     expect(card).not.toHaveTextContent('chat-completions-compatible')
     expect(card).toHaveTextContent('https://api.example.com/v1')
     expect(screen.getByTestId('profile-protocol')).toHaveValue('chat-completions-compatible')
     expect(profilesApi.createProfile).not.toHaveBeenCalled()
     expect(profilesApi.testConnection).not.toHaveBeenCalled()
+  })
+
+  it('offers Anthropic with matching help and saves its original protocol identifier', async () => {
+    vi.mocked(profilesApi.createProfile).mockResolvedValue(profile({ protocol: 'anthropic-messages' }))
+    renderWithProviders(<ModelSettingsPage />)
+    await screen.findByRole('option', { name: 'Anthropic 协议' })
+    await userEvent.selectOptions(screen.getByTestId('profile-protocol'), 'anthropic-messages')
+    await userEvent.click(screen.getByText('如何填写接口配置'))
+    const help = screen.getByTestId('protocol-capabilities')
+    expect(help).toHaveTextContent('https://api.anthropic.com/v1')
+    expect(help).toHaveTextContent('官方服务需要 API 密钥')
+    expect(help).toHaveTextContent('手动思考要求最大输出 Token 大于 1024')
+    expect(help).not.toHaveTextContent('/chat/completions')
+    await fillNewProfile()
+    await userEvent.click(screen.getByTestId('profile-save'))
+    await waitFor(() => expect(profilesApi.createProfile).toHaveBeenCalledWith(expect.objectContaining({
+      protocol: 'anthropic-messages', api_key: SECRET,
+    })))
   })
 
   it('新建配置时提交密钥，但界面上不回显密钥', async () => {
@@ -303,6 +335,8 @@ describe('ModelSettingsPage / 连接测试', () => {
     expect(result).toHaveTextContent('连接成功')
     expect(result).toHaveTextContent('123 ms')
     expect(result).toHaveTextContent('合计 20')
+    expect(result).toHaveTextContent('协议 / 模型：OpenAI 兼容协议 / example-chat-model')
+    expect(result).not.toHaveTextContent('chat-completions-compatible')
     expect(result).toHaveTextContent('未评估小说标注效果')
     expect(profilesApi.testConnection).toHaveBeenCalledWith({ profile_id: 'p1' })
   })

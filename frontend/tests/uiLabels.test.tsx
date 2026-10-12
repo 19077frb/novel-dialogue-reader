@@ -34,7 +34,8 @@ it('人物显示隐藏内部引用，非人物和集体表达显示真实含义'
 
 describe('Chinese display labels and processing choices', () => {
   it('translates known values without inventing a meaning for unknown identifiers', () => {
-    expect(protocolLabel('chat-completions-compatible')).toBe('兼容聊天接口')
+    expect(protocolLabel('chat-completions-compatible')).toBe('OpenAI 兼容协议')
+    expect(protocolLabel('anthropic-messages')).toBe('Anthropic 协议')
     expect(credentialLabel('session')).toBe('仅本次会话')
     expect(annotationStatusLabel('USER_CONFIRMED')).toBe('已人工确认')
     expect(quoteKindLabel('quotation')).toBe('人物原话引用')

@@ -16,6 +16,7 @@ from ...domain.enums import CredentialMode
 from ..adapter import FAKE_PROVIDER_PROTOCOL, ProviderAdapter
 from ..credentials import CredentialService
 from ..errors import ProviderError, ProviderErrorKind
+from .anthropic_messages import AnthropicMessagesAdapter
 from .chat_completions import DEFAULT_TIMEOUT_SECONDS, ChatCompletionsAdapter
 from .fake import FakeProviderAdapter
 
@@ -71,6 +72,12 @@ def build_adapter(
             params=spec.params,
             timeout_seconds=spec.timeout_seconds,
             client=client,
+        )
+
+    if spec.protocol == "anthropic-messages":
+        return AnthropicMessagesAdapter(
+            base_url=spec.base_url, model=spec.model, api_key=api_key, params=spec.params,
+            timeout_seconds=spec.timeout_seconds, client=client,
         )
 
     raise ProviderError(

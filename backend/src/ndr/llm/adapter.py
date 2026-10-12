@@ -1,7 +1,7 @@
 """模型适配器接口与协议能力。
 
 本层只**定义契约**：接口方法、能力声明与结果数据结构。实现真实
-``chat-completions-compatible`` 适配器与仅测试用的 FakeProvider。
+OpenAI 兼容、Anthropic Messages 适配器与仅测试用的 FakeProvider。
 
 设计要点：
 
@@ -43,6 +43,17 @@ CHAT_COMPLETIONS_COMPATIBLE = AdapterCapabilities(
 PROTOCOL_CAPABILITIES: dict[str, AdapterCapabilities] = {
     CHAT_COMPLETIONS_COMPATIBLE.protocol: CHAT_COMPLETIONS_COMPATIBLE,
 }
+
+ANTHROPIC_MESSAGES = AdapterCapabilities(
+    protocol="anthropic-messages",
+    supports_json_schema=False,
+    supports_json_object=False,
+    supports_temperature=True,
+    supports_max_tokens=True,
+    requires_api_key=False,  # 无认证兼容网关可用；官方服务仍需要密钥。
+    notes="Anthropic Messages。填写 API 根地址，适配器追加 /messages；官方服务需要 API 密钥。",
+)
+PROTOCOL_CAPABILITIES[ANTHROPIC_MESSAGES.protocol] = ANTHROPIC_MESSAGES
 
 # 仅测试用：页面必须明确标注，真实提供方失败时不得回退到它。
 FAKE_PROVIDER_PROTOCOL = "fake-provider"
