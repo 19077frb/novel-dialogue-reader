@@ -29,16 +29,14 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# 缓存放在仓库内（已 .gitignore），这样受限沙箱中也能读写依赖缓存。
-[tool.uv]
-cache-dir = "../.uv-cache"
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/ndr"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+tmp_path_retention_count = 3
+tmp_path_retention_policy = "failed"
 # 让测试可以直接 import fixtures.*（原创夹具构造器放在 tests/fixtures/）。
 pythonpath = ["tests"]
 

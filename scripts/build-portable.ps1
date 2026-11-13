@@ -1,6 +1,36 @@
 # Build only. GitHub Actions publishes the tested ZIP as a Release asset.
 [CmdletBinding()]
-param()
+param([switch]$KeepBuildFiles)
+
+function Remove-BuildIntermediates {
+    param([string]$RepoRoot, [string]$BuildRoot)
+
+    $repoPath = [IO.Path]::GetFullPath($RepoRoot)
+    $distPath = Join-Path $repoPath 'dist'
+    $buildPath = [IO.Path]::GetFullPath($BuildRoot)
+    if ((Split-Path -Parent $buildPath) -ne $distPath -or
+        (Split-Path -Leaf $buildPath) -notmatch '^portable-[a-f0-9]{32}$') {
+        throw "Refusing cleanup outside the generated build directory: $buildPath"
+    }
+    # Inspect all ancestors and descendants before removing either intermediate tree.
+    $item = Get-Item -LiteralPath $buildPath -Force -ErrorAction Stop
+    while ($null -ne $item) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Refusing cleanup through a reparse point: $($item.FullName)"
+        }
+        $item = $item.Parent
+    }
+    $redirected = Get-ChildItem -LiteralPath $buildPath -Recurse -Force -ErrorAction Stop |
+        Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint } |
+        Select-Object -First 1
+    if ($redirected) { throw "Refusing cleanup of a reparse point: $($redirected.FullName)" }
+    foreach ($name in @('work', 'app')) {
+        $target = Join-Path $buildPath $name
+        if (Test-Path -LiteralPath $target) {
+            Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+        }
+    }
+}
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT' -or -not [Environment]::Is64BitProcess) {
@@ -66,6 +96,9 @@ try {
     Compress-Archive -LiteralPath $appDir -DestinationPath $zip -CompressionLevel Optimal
     $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $([IO.Path]::GetFileName($zip))" | Set-Content -LiteralPath "$zip.sha256" -Encoding ascii
+    if (-not $KeepBuildFiles) {
+        Remove-BuildIntermediates -RepoRoot $repoRoot -BuildRoot $buildRoot
+    }
     Write-Host "Portable package: $zip"
     if ($env:GITHUB_OUTPUT) {
         "zip=$zip" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8

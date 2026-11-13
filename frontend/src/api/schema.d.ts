@@ -70,7 +70,7 @@ export interface paths {
         get: operations["get_book_route_api_books__book_id__get"];
         put?: never;
         post?: never;
-        /** 删除书籍与关联记录，文件移入回收区 */
+        /** 永久删除书籍、关联记录与独占文件 */
         delete: operations["delete_book_route_api_books__book_id__delete"];
         options?: never;
         head?: never;

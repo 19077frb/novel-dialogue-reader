@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from fixtures.corrections import create_fake_profile, run_deterministic_job
+from ndr.api.errors import ApiError
 from ndr.config import Settings
-from ndr.domain.enums import CorrectionAction, CorrectionTargetType, ExportFormat, JobState
+from ndr.domain.enums import (
+    BookFormat,
+    CorrectionAction,
+    CorrectionTargetType,
+    ExportFormat,
+    JobState,
+)
 from ndr.storage.engine import create_db_engine, create_session_factory
 from ndr.storage.models import (
     Annotation,
@@ -87,8 +97,7 @@ def test_delete_only_selected_book_with_annotations_and_exports(
         assert not (root / "books" / first["book_id"]).exists()
         assert (root / "books" / other["book_id"]).exists()
         assert not export_dir.exists()
-        assert list((root / "trash").glob(f"*/books/{first['book_id']}/source.txt"))
-        assert list((root / "trash").glob(f"*/exports/{artifact_id}/book.html"))
+        assert list((root / "trash").iterdir()) == []
         with transaction(factory) as session:
             assert session.get(BookVersion, first["book_version_id"]) is None
             assert session.get(Correction, correction_id) is None
@@ -192,5 +201,188 @@ def test_database_delete_precedes_file_move(
         delete_book(factory, migrated_settings, imported["book_id"])
         with transaction(factory) as session:
             assert session.get(Book, imported["book_id"]) is None
+    finally:
+        engine.dispose()
+
+
+def test_successful_delete_preserves_previous_trash_and_external_upload(
+    migrated_client: TestClient, migrated_settings: Settings, tmp_path: Path,
+) -> None:
+    imported = import_book(migrated_client, "第一章\n「你好。」")
+    previous = migrated_settings.data_dir / "trash" / "previous-deletion" / "source.txt"
+    previous.parent.mkdir(parents=True)
+    previous.write_text("以前留下的文件", encoding="utf-8")
+    upload = tmp_path / "original.txt"
+    upload.write_text("外部源文件", encoding="utf-8")
+
+    response = migrated_client.delete(f"/api/books/{imported['book_id']}")
+
+    assert response.status_code == 204, response.text
+    assert previous.read_text(encoding="utf-8") == "以前留下的文件"
+    assert upload.read_text(encoding="utf-8") == "外部源文件"
+    assert list(previous.parent.parent.iterdir()) == [previous.parent]
+
+
+def test_commit_failure_restores_files_without_running_cleanup(
+    migrated_client: TestClient, migrated_settings: Settings, monkeypatch,
+) -> None:
+    from sqlalchemy import event
+
+    from ndr.ingest import deletion
+
+    imported = import_book(migrated_client, "第一章\n「提交失败仍可读。」")
+    source = migrated_settings.data_dir / "books" / imported["book_id"] / "source.txt"
+    original = source.read_bytes()
+    engine = create_db_engine(migrated_settings)
+    factory = create_session_factory(engine)
+
+    def fail_commit(session):
+        assert not source.exists(), "本测试必须在文件移到暂存后触发提交失败"
+        raise RuntimeError("模拟事务提交失败")
+
+    def reject_cleanup(*args):
+        pytest.fail("提交失败不得永久清理暂存文件")
+
+    monkeypatch.setattr(deletion, "_remove_staged_files", reject_cleanup)
+    event.listen(factory, "before_commit", fail_commit)
+    try:
+        with pytest.raises(RuntimeError, match="模拟事务提交失败"):
+            deletion.delete_book(factory, migrated_settings, imported["book_id"])
+        assert source.read_bytes() == original
+        assert migrated_client.get(f"/api/books/{imported['book_id']}").status_code == 200
+    finally:
+        event.remove(factory, "before_commit", fail_commit)
+        engine.dispose()
+
+
+def test_cleanup_failure_keeps_success_response_and_logs_residual(
+    migrated_client: TestClient, migrated_settings: Settings, monkeypatch, caplog,
+) -> None:
+    from ndr.ingest import deletion
+
+    imported = import_book(migrated_client, "第一章\n「清理失败。」")
+    root = migrated_settings.data_dir
+
+    def fail_cleanup(path):
+        engine = create_db_engine(migrated_settings)
+        try:
+            with transaction(create_session_factory(engine)) as session:
+                assert session.get(Book, imported["book_id"]) is None
+        finally:
+            engine.dispose()
+        assert path.parent == root / "trash"
+        raise PermissionError("模拟文件占用")
+
+    monkeypatch.setattr(deletion.shutil, "rmtree", fail_cleanup)
+    with caplog.at_level("WARNING", logger="ndr.diagnostics"):
+        response = migrated_client.delete(f"/api/books/{imported['book_id']}")
+
+    assert response.status_code == 204, response.text
+    assert migrated_client.get(f"/api/books/{imported['book_id']}").status_code == 404
+    assert list((root / "trash").glob(f"*/books/{imported['book_id']}/source.txt"))
+    assert "book_delete_cleanup_pending" in caplog.text
+    assert "PermissionError" in caplog.text
+    assert "模拟文件占用" not in caplog.text
+
+
+def directory_link(link: Path, target: Path) -> None:
+    if os.name == "nt":
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+@pytest.mark.parametrize("redirect", ["book", "trash"])
+@pytest.mark.parametrize("outside", [False, True])
+def test_redirected_owned_directory_is_rejected_without_deleting_data(
+    migrated_client: TestClient, migrated_settings: Settings, tmp_path: Path,
+    redirect: str, outside: bool,
+) -> None:
+    imported = import_book(migrated_client, "第一章\n「路径保护。」")
+    root = migrated_settings.data_dir
+    target = (tmp_path if outside else root) / "retained"
+    source = root / "books" / imported["book_id"]
+    if redirect == "book":
+        source.rename(target)
+        link = source
+    else:
+        target.mkdir()
+        link = root / "trash"
+    sentinel = target / "sentinel.txt"
+    sentinel.write_text("保留", encoding="utf-8")
+    directory_link(link, target)
+    try:
+        response = migrated_client.delete(f"/api/books/{imported['book_id']}")
+
+        assert response.status_code == 422, response.text
+        assert "重定向" in response.json()["error"]["message"]
+        assert sentinel.read_text(encoding="utf-8") == "保留"
+        assert source.exists()
+        assert migrated_client.get(f"/api/books/{imported['book_id']}").status_code == 200
+    finally:
+        # Remove only the link, leaving its target for the isolated fixture cleanup.
+        if os.name == "nt":
+            link.rmdir()
+        else:
+            link.unlink()
+
+
+def test_cleanup_rejects_redirect_in_staged_tree_and_preserves_target(
+    migrated_client: TestClient, migrated_settings: Settings, tmp_path: Path, caplog,
+) -> None:
+    imported = import_book(migrated_client, "第一章\n「嵌套链接保护。」")
+    root = migrated_settings.data_dir
+    external = tmp_path / "external"
+    external.mkdir()
+    sentinel = external / "sentinel.txt"
+    sentinel.write_text("保留", encoding="utf-8")
+    directory_link(root / "books" / imported["book_id"] / "linked", external)
+    try:
+        with caplog.at_level("WARNING", logger="ndr.diagnostics"):
+            response = migrated_client.delete(f"/api/books/{imported['book_id']}")
+
+        assert response.status_code == 204, response.text
+        assert migrated_client.get(f"/api/books/{imported['book_id']}").status_code == 404
+        assert sentinel.read_text(encoding="utf-8") == "保留"
+        assert "book_delete_cleanup_pending" in caplog.text
+        assert list((root / "trash").glob(f"*/books/{imported['book_id']}/source.txt"))
+    finally:
+        for link in (root / "trash").glob(f"*/books/{imported['book_id']}/linked"):
+            if os.name == "nt":
+                link.rmdir()
+            else:
+                link.unlink()
+
+
+@pytest.mark.parametrize("mode, attributes", [
+    (stat.S_IFLNK, 0),
+    (stat.S_IFDIR, stat.FILE_ATTRIBUTE_REPARSE_POINT),
+    (stat.S_IFREG, stat.FILE_ATTRIBUTE_REPARSE_POINT),
+])
+def test_cleanup_rejects_symlink_and_reparse_metadata(mode: int, attributes: int) -> None:
+    from ndr.ingest.deletion import _reject_redirect
+
+    with pytest.raises(ApiError, match="重定向"):
+        _reject_redirect(SimpleNamespace(st_mode=mode, st_file_attributes=attributes))
+
+
+def test_empty_book_id_cannot_remove_entire_books_directory(
+    migrated_client: TestClient, migrated_settings: Settings,
+) -> None:
+    from ndr.ingest.deletion import delete_book
+
+    other = import_book(migrated_client, "第一章\n「正常书籍。」")
+    engine = create_db_engine(migrated_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            session.add(Book(id="", title="异常ID夹具", format=BookFormat.TXT, source_sha256="a" * 64))
+        with pytest.raises(ApiError, match="书籍文件目录无效"):
+            delete_book(factory, migrated_settings, "")
+        assert (migrated_settings.data_dir / "books" / other["book_id"] / "source.txt").exists()
+        with transaction(factory) as session:
+            assert session.get(Book, "") is not None
     finally:
         engine.dispose()
