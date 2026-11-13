@@ -107,6 +107,7 @@ export function fetchContent(
 
 export interface QuoteQuery {
   chapterId?: string | null
+  cursor?: string | null
   limit?: number
 }
 
@@ -126,6 +127,7 @@ export function fetchQuotes(
 ): Promise<CursorPageQuote> {
   const params = new URLSearchParams()
   if (query.chapterId) params.set('chapter_id', query.chapterId)
+  if (query.cursor) params.set('cursor', query.cursor)
   params.set('limit', String(query.limit ?? 500))
   return apiData<CursorPageQuote>(`/api/books/${bookId}/quotes?${params.toString()}`, { signal })
 }

@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useQueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -42,6 +42,7 @@ vi.mock('../src/api/books', () => ({
   fetchChapters: vi.fn(),
   fetchContent: vi.fn(),
   fetchQuotes: vi.fn(),
+  fetchQuoteDetail: vi.fn(() => new Promise(() => {})),
   saveReadingProgress: vi.fn(),
   setChapterProcessingStatus: vi.fn(),
   resourceUrl: (bookId: string, resourceId: string) =>
@@ -121,6 +122,127 @@ function quotesFor(chapterId: string) {
 }
 
 describe('ReaderPage', () => {
+  function longChapterQuotes() {
+    const items = Array.from({ length: 501 }, (_, i) => ({
+      ...quotesFor('c1').items[0], quote_id: `long-${i}`, start_cp: i * 3, end_cp: i * 3 + 3,
+      text: '话', delimited_text: '「话」',
+    }))
+    vi.mocked(booksApi.fetchContent).mockResolvedValue({
+      book_id: 'b1', book_version_id: 'v1', canonical_length_cp: 1503,
+      chapter_id: 'c1', start_cp: 0, end_cp: 1503, next_cursor: null,
+      nodes: [{ ...nodesFor('c1')[0], text: '「话」'.repeat(501), end_cp: 1503 }],
+    })
+    vi.mocked(booksApi.fetchQuotes).mockImplementation(async (_id, query) => ({
+      items: query?.cursor ? items.slice(500) : items.slice(0, 500),
+      next_cursor: query?.cursor ? null : 'next-500',
+    }))
+    return items
+  }
+
+  it('501条候选按需追加，不切断正文，后续候选可打开详情', async () => {
+    longChapterQuotes()
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c1')
+    await waitFor(() => expect(screen.getAllByTestId('candidate-quote')).toHaveLength(500))
+    expect(booksApi.fetchQuotes).toHaveBeenCalledTimes(1)
+    expect(screen.getByText(/候选引语 500 条/)).toBeInTheDocument()
+    const contentCalls = vi.mocked(booksApi.fetchContent).mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: '加载更多候选引语' }))
+    await waitFor(() => expect(screen.getAllByTestId('candidate-quote')).toHaveLength(501))
+    expect(booksApi.fetchQuotes).toHaveBeenLastCalledWith('b1', {
+      chapterId: 'c1', cursor: 'next-500', limit: 500,
+    }, expect.anything())
+    expect(booksApi.fetchContent).toHaveBeenCalledTimes(contentCalls)
+    expect(screen.queryByRole('button', { name: '加载更多候选引语' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getAllByTestId('candidate-quote')[500])
+    expect(await screen.findByTestId('quote-detail-drawer')).toBeInTheDocument()
+    expect(booksApi.fetchQuoteDetail).toHaveBeenCalledWith('long-500', expect.anything())
+  })
+
+  it('后续页失败保留500条，重试只请求失败游标，按ID消除重复候选', async () => {
+    const items = longChapterQuotes()
+    let attempts = 0
+    vi.mocked(booksApi.fetchQuotes).mockImplementation(async (_id, query) => {
+      if (!query?.cursor) return { items: items.slice(0, 500), next_cursor: 'next-500' }
+      if (++attempts === 1) throw new Error('候选分页暂时不可读')
+      return { items: items.slice(499), next_cursor: null }
+    })
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c1')
+    await screen.findByRole('button', { name: '加载更多候选引语' })
+    await userEvent.click(screen.getByRole('button', { name: '加载更多候选引语' }))
+    const error = await screen.findByTestId('quotes-read-error')
+    expect(error).toHaveTextContent('后续候选引语读取失败：候选分页暂时不可读')
+    expect(screen.getAllByTestId('candidate-quote')).toHaveLength(500)
+    await userEvent.click(within(error).getByRole('button', { name: '重新读取' }))
+    await waitFor(() => expect(screen.getAllByTestId('candidate-quote')).toHaveLength(501))
+    expect(vi.mocked(booksApi.fetchQuotes).mock.calls.map(call => call[1]?.cursor)).toEqual([null, 'next-500', 'next-500'])
+    expect(screen.queryByTestId('quotes-read-error')).not.toBeInTheDocument()
+  })
+
+  it('首次候选读取失败可重试，正文保持显示', async () => {
+    vi.mocked(booksApi.fetchQuotes).mockRejectedValueOnce(new Error('候选首次读取失败'))
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c1')
+    await screen.findByText(/第一章的正文/)
+    const error = await screen.findByTestId('quotes-read-error')
+    expect(error).toHaveTextContent('候选引语读取失败：候选首次读取失败')
+    await userEvent.click(within(error).getByRole('button', { name: '重新读取' }))
+    expect(await screen.findByTestId('candidate-quote')).toBeInTheDocument()
+  })
+
+  it('切章时不沿用候选游标，在途旧章响应不能混入新章', async () => {
+    let resolveOld!: (page: ReturnType<typeof quotesFor>) => void
+    vi.mocked(booksApi.fetchQuotes).mockImplementation(async (_id, query) => {
+      if (query?.chapterId === 'c2') return quotesFor('c2')
+      if (query?.cursor) return new Promise(resolve => { resolveOld = resolve })
+      return { ...quotesFor('c1'), next_cursor: 'old-chapter-cursor' }
+    })
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c1')
+    await screen.findByRole('button', { name: '加载更多候选引语' })
+    await userEvent.click(screen.getByRole('button', { name: '加载更多候选引语' }))
+    expect(screen.getByRole('button', { name: '正在读取候选引语…' })).toBeDisabled()
+    const oldSignal = vi.mocked(booksApi.fetchQuotes).mock.calls.at(-1)?.[2]
+    await userEvent.click(screen.getByRole('button', { name: /第二章/ }))
+    await screen.findByText(/第二章的正文/)
+    expect(oldSignal?.aborted).toBe(true)
+    await act(async () => resolveOld({
+      items: [{ ...quotesFor('c2').items[0], quote_id: 'late-old-quote' }], next_cursor: null,
+    }))
+    expect(screen.getAllByTestId('candidate-quote')).toHaveLength(1)
+    expect(screen.getByTestId('candidate-quote')).toHaveAttribute('data-quote-id', 'q-c2')
+    expect(booksApi.fetchQuotes).toHaveBeenLastCalledWith('b1', {
+      chapterId: 'c2', cursor: null, limit: 500,
+    }, expect.anything())
+  })
+
+  it('重扫刷新从首页重算游标，书籍版本变化也从首页读取', async () => {
+    let revision = 0
+    vi.mocked(booksApi.fetchQuotes).mockImplementation(async (_id, query) => ({
+      items: [{ ...quotesFor('c1').items[0], quote_id: `r${revision}-${query?.cursor ?? 'first'}` }],
+      next_cursor: query?.cursor ? null : `cursor-r${revision}`,
+    }))
+    function Fixture() {
+      const client = useQueryClient()
+      return <><button onClick={() => {
+        revision++
+        void client.invalidateQueries({ queryKey: ['quotes', 'b1'] })
+      }}>测试重扫刷新</button><button onClick={() => {
+        client.setQueryData(booksApi.queryKeys.book('b1'), { ...BOOK, active_version_id: 'v2' })
+      }}>测试版本变化</button><ReaderPage /></>
+    }
+    renderRoute('/books/:bookId/read', <Fixture />, '/books/b1/read?chapterId=c1')
+    await screen.findByRole('button', { name: '加载更多候选引语' })
+    await userEvent.click(screen.getByRole('button', { name: '加载更多候选引语' }))
+    await waitFor(() => expect(booksApi.fetchQuotes).toHaveBeenCalledTimes(2))
+    await userEvent.click(screen.getByRole('button', { name: '测试重扫刷新' }))
+    await waitFor(() => expect(booksApi.fetchQuotes).toHaveBeenCalledTimes(4))
+    expect(vi.mocked(booksApi.fetchQuotes).mock.calls.map(call => call[1]?.cursor))
+      .toEqual([null, 'cursor-r0', null, 'cursor-r1'])
+    await userEvent.click(screen.getByRole('button', { name: '测试版本变化' }))
+    await waitFor(() => expect(booksApi.fetchQuotes).toHaveBeenCalledTimes(5))
+    expect(vi.mocked(booksApi.fetchQuotes).mock.calls.at(-1)?.[1]?.cursor).toBeNull()
+    expect(await screen.findByRole('button', { name: '加载更多候选引语' })).toBeInTheDocument()
+    expect(screen.getByText(/候选引语 1 条/)).toBeInTheDocument()
+  })
+
   it('同步异页完成状态且连续章节完成不会推迟目录刷新，普通进度不刷新正文目录', async () => {
     batch.clearBatchProgress('b1')
     const view = renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')

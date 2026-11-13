@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 
@@ -119,10 +119,15 @@ export default function ReaderPage() {
   })
 
   // 候选引语（扫描器结果，不含说话人判断）
-  const quotes = useQuery({
-    queryKey: queryKeys.quotes(bookId ?? '', chapterId),
-    queryFn: ({ signal }) => fetchQuotes(bookId as string, { chapterId, limit: 500 }, signal),
-    enabled: Boolean(bookId) && chapterId !== null,
+  const quotes = useInfiniteQuery({
+    // Keep the shared invalidation prefix, but isolate the infinite data shape
+    // from PreviewPage's single-page query and from other book versions.
+    queryKey: [...queryKeys.quotes(bookId ?? '', chapterId), 'reader-pages', book.data?.active_version_id],
+    initialPageParam: null as string | null,
+    queryFn: ({ signal, pageParam }) =>
+      fetchQuotes(bookId as string, { chapterId, cursor: pageParam, limit: 500 }, signal),
+    getNextPageParam: (page) => page.next_cursor ?? undefined,
+    enabled: Boolean(bookId && book.data?.active_version_id) && chapterId !== null,
   })
 
   // Each real navigation may repeat a bookmark URL; data refreshes must not
@@ -156,7 +161,8 @@ export default function ReaderPage() {
   const nodes = useMemo(() => pages.flat(), [pages])
   const candidates = useMemo<CandidateRange[]>(
     () =>
-      (quotes.data?.items ?? []).map((quote) => ({
+      [...new Map((quotes.data?.pages.flatMap(page => page.items) ?? [])
+        .map(quote => [quote.quote_id, quote])).values()].map((quote) => ({
         quoteId: quote.quote_id,
         startCp: quote.start_cp,
         endCp: quote.end_cp,
@@ -420,7 +426,7 @@ export default function ReaderPage() {
                     data-testid="toggle-candidates"
                   />
                   候选引语 {candidates.length} 条（检测到的引号内容，尚未判定说话人）
-                  {quotes.data?.next_cursor ? '（本章还有更多候选未加载）' : ''}
+                  {quotes.hasNextPage ? '（本章还有更多候选未加载）' : ''}
                 </label>
                 <label>
                   <input
@@ -445,6 +451,25 @@ export default function ReaderPage() {
                   </select>
                 </label>}
               </div>
+              {quotes.isError && (
+                <ReadErrorNotice
+                  label={quotes.isFetchNextPageError ? '后续候选引语读取失败' : '候选引语读取失败'}
+                  error={quotes.error}
+                  retrying={quotes.isFetching}
+                  onRetry={() => void (quotes.isFetchNextPageError ? quotes.fetchNextPage() : quotes.refetch())}
+                  testId="quotes-read-error"
+                />
+              )}
+              {quotes.hasNextPage && !quotes.isFetchNextPageError && (
+                <div>
+                  <button type="button" disabled={quotes.isFetching}
+                    title={quotes.isFetching ? '正在读取候选引语，请等待完成。' : undefined}
+                    onClick={() => void quotes.fetchNextPage()}>
+                    {quotes.isFetching ? '正在读取候选引语…' : '加载更多候选引语'}
+                  </button>
+                  {quotes.isFetching && <p className="hint">正在读取候选引语，请等待完成。</p>}
+                </div>
+              )}
               {readingMode === 'initial' && annotations.data && (
                 <p className="hint" data-testid="reader-horizon">
                   初读：只显示到位置 {annotations.data.visible_horizon_cp ?? '—'} 为止的证据
