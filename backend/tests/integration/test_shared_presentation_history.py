@@ -88,10 +88,14 @@ def test_shared_baseline_keeps_local_revisions_and_detached_reads(migrated_setti
 
         event.listen(engine, "before_cursor_execute", counted)
         with Session(engine) as session:
-            groups = list(session.scalars(select(SpeakerGroup).where(SpeakerGroup.id.in_(group_ids))))
+            groups_by_id = {group.id: group for group in session.scalars(
+                select(SpeakerGroup).where(SpeakerGroup.id.in_(group_ids))
+                .order_by(SpeakerGroup.id.desc()),
+            )}
             session.expunge_all()
         assert len(statements) == 2
-        assert history(groups[1]) == original
+        assert history(groups_by_id[group_ids[1]]) == original
+        assert history(groups_by_id[group_ids[0]])[:-1] == original
         event.remove(engine, "before_cursor_execute", counted)
         with Session(engine) as session:
             group = session.get(SpeakerGroup, group_ids[0])
