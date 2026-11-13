@@ -36,7 +36,7 @@ class ConfirmedCharacter:
     relations: tuple[dict[str, Any], ...] = ()
     identity_records: tuple[dict[str, Any], ...] = ()
 
-    def as_dict(self) -> dict[str, Any]:
+    def as_dict(self, *, include_identity: bool = True) -> dict[str, Any]:
         value = {
             "character_id": self.character_id,
             "canonical_name": self.canonical_name,
@@ -46,9 +46,9 @@ class ConfirmedCharacter:
             "user_confirmed": self.user_confirmed,
             "confirmation_source": self.confirmation_source,
         }
-        if self.relations:
+        if include_identity and self.relations:
             value["relations"] = [dict(item) for item in self.relations]
-        if self.identity_records:
+        if include_identity and self.identity_records:
             value["identity_records"] = deepcopy(list(self.identity_records))
         return value
 
@@ -390,7 +390,10 @@ class SceneState:
 
     # ---------- 序列化 ----------
 
-    def snapshot(self) -> dict[str, Any]:
+    def checkpoint_snapshot(self) -> dict[str, Any]:
+        return self.snapshot(include_identity=not self.projected_identity_input)
+
+    def snapshot(self, *, include_identity: bool = True) -> dict[str, Any]:
         return {
             "state_version": SCENE_STATE_VERSION,
             "scene_id": self.scene_id,
@@ -403,7 +406,8 @@ class SceneState:
             "last_speaker_ref": self.last_speaker_ref,
             "recent_turns": [dict(item) for item in self.recent_turns],
             "participants": [slot.as_dict() for slot in self.participants],
-            "confirmed_characters": [item.as_dict() for item in self.confirmed_characters],
+            "confirmed_characters": [item.as_dict(include_identity=include_identity)
+                                     for item in self.confirmed_characters],
             "pov_character_id": self.pov_character_id,
             "explicit_identity": self.explicit_identity,
             "known_characters": dict(self.known_characters),

@@ -72,7 +72,7 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
     visibility_policy: VisibilityPolicy,
     style: ExportStylePreset,
 ) -> ExportSnapshot:
-    """冻结一次投影；只读实时数据，写入一条不可变快照行。"""
+    """在调用方的一致性读事务中构建尚未持久化的不可变快照。"""
 
     resolved = resolve_range(session, version, chapter_ids)
     reading_mode = (
@@ -213,8 +213,6 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
         snapshot_hash=snapshot_hash,
         warnings_json=_json(warnings),
     )
-    session.add(row)
-    session.flush()
     return row
 
 

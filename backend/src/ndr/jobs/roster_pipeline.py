@@ -28,6 +28,7 @@ from ..llm.sourced_roster import (
     compile_isolated_sourced_roster,
 )
 from ..storage.models import BookVersion, Chapter, InferenceRun, Job
+from ..storage.retention_policy import apply_completed_job_retention
 from ..storage.run_archive import decode_archive, save_run_archive
 from ..storage.transactions import database_error_detail, finish_local_write
 
@@ -501,6 +502,9 @@ class _Pipeline:
                 "completed",
                 candidate_count=len(output.characters),
                 proposal_diagnostics=diagnostic,
+            )
+            apply_completed_job_retention(
+                session, job, keep_call_details=self.settings.retain_completed_call_details,
             )
             return True
 

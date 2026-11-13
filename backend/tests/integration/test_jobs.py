@@ -335,6 +335,7 @@ def test_real_jobs_short_protocol_keeps_stable_owner_visibility_and_replay(
 def test_short_jobs_format_retry_is_metered_and_unknown_usage_stops(
     fake_provider_client, migrated_settings, known_usage,
 ):
+    migrated_settings.retain_completed_call_details = True
     data = _import(fake_provider_client)
     profile = _fake_profile(fake_provider_client)
     engine, factory = _factory(migrated_settings)

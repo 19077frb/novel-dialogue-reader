@@ -11,6 +11,7 @@ from .bookmark import Bookmark
 from .characters import BookCharacter, ChapterCharacterRoster
 from .dialogue import Gap, Participant, Quote, Scene, SceneMembership, SpeakerGroup
 from .exports import ExportArtifact, ExportSnapshot
+from .history import PresentationHistoryBaseline
 from .jobs import InferenceRun, Job, JobRequestKey, JobWindow, ResultCache
 from .labeling import Annotation, AnnotationHistory, IdentityRevision
 from .mapping import TextMapping
@@ -40,6 +41,7 @@ __all__ = [
     "JobWindow",
     "ModelProfile",
     "Participant",
+    "PresentationHistoryBaseline",
     "Quote",
     "QuoteNormalization",
     "Resource",

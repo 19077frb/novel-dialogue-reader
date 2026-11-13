@@ -109,6 +109,7 @@ def prepare(
 
 def test_format_retry_retains_archived_valid_rows_and_charges_each_call(fake_provider_client):
     client = fake_provider_client
+    client.app.state.settings.retain_completed_call_details = True
     create, factory = prepare(client, all_quotes=True, context_policy="context-chapter-3")
     job = create("retain-valid-format-rows")
     with transaction(factory) as session:

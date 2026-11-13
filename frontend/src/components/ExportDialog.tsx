@@ -9,7 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
-import { createExport, exportKeys, previewExport } from '../api/exports'
+import { createExport, exportKeys, fetchExportArtifact, previewExport } from '../api/exports'
 import { fetchChapters, queryKeys } from '../api/books'
 import type {
   ChapterOut,
@@ -69,6 +69,22 @@ export function ExportDialog({
   // 与产物一起记录提交时的来源，后续预览或选项变化不能改写它。
   const [generatedFrom, setGeneratedFrom] = useState<ExportSubmission | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const artifactStatus = useQuery({
+    queryKey: exportKeys.artifact(artifact?.id ?? ''),
+    queryFn: ({ signal }) => fetchExportArtifact(artifact!.id, signal),
+    enabled: open && Boolean(artifact && ['QUEUED', 'RUNNING'].includes(artifact.state)),
+    refetchInterval: (query) => {
+      const state = query.state.data?.state
+      return state === 'COMPLETED' || state === 'FAILED' ? false : 1000
+    },
+  })
+
+  useEffect(() => {
+    const next = artifactStatus.data
+    if (!next) return
+    setArtifact((current) => current?.id === next.id && ['QUEUED', 'RUNNING'].includes(current.state)
+      ? next : current)
+  }, [artifactStatus.data])
 
   // 原生模态提供背景隔离及跨沙箱 iframe 的键盘焦点边界。
   const titleId = useId()
@@ -129,7 +145,8 @@ export function ExportDialog({
         idempotencyKey: `export:${bookId}:${snapshotId}:${format}:${style}`,
       }),
     onSuccess: (data, submission) => {
-      setArtifact(data)
+      setArtifact((current) => current?.id === data.id && ['COMPLETED', 'FAILED'].includes(current.state)
+        ? current : data)
       setGeneratedFrom(submission)
       setError(null)
       void queryClient.invalidateQueries({ queryKey: exportKeys.artifact(data.id) })
@@ -295,6 +312,11 @@ export function ExportDialog({
           </p>
         )}
         <ExportProgress artifact={artifact} busy={generation.isPending} />
+        {artifactStatus.error && (
+          <p className="status-error" role="alert">
+            {artifactStatus.error instanceof Error ? artifactStatus.error.message : '读取导出状态失败'}
+          </p>
+        )}
         {artifact && <ExportDownload artifact={artifact} />}
       </div>
     </dialog>

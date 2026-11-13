@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     # 模型调用：超时与 FakeProvider 开关。FakeProvider 默认关闭，只在测试/演示时显式启用。
     llm_timeout_seconds: float = 30.0
     allow_fake_provider: bool = False
+    retain_completed_call_details: bool = False
 
     # 仅测试：FakeProvider 的标注脚本模式。unknown=全部标为 UNKNOWN（默认）；
     # deterministic=确定性地建一个分组并返回 DIRECT 归属，用于离线验证着色/编号链路。

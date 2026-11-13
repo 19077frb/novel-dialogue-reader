@@ -5,6 +5,7 @@ import json
 from sqlalchemy import select
 
 from ..api.errors import ApiError
+from ..storage.history import append_history, share_history
 from ..storage.models import BookCharacter, Chapter, Quote
 
 
@@ -30,8 +31,7 @@ def capture(row, cp, *, force=False):
              "description": row.description or ""}
     if force or not rows or any(rows[-1].get(key) != value[key] for key in
                        ("identity", "name", "description")):
-        rows.append(value)
-        row.presentation_history_json = json.dumps(rows, ensure_ascii=False)
+        append_history(row, value)
 
 
 def baseline(row):
@@ -41,7 +41,7 @@ def baseline(row):
 
 def initialize(row, cp, character=None):
     if character and history(character):
-        row.presentation_history_json = character.presentation_history_json
+        share_history(row, history(character))
     else:
         capture(row, cp)
 

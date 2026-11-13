@@ -93,7 +93,7 @@ def test_all_fields_have_chinese_definitions_and_no_implicit_write(isolated):
     assert {field.key for field in preferences.DEFINITIONS} == set(Settings.model_fields)
     settings = Settings(_env_file=None)
     result = preferences.describe_settings(settings)
-    assert len(result.fields) == 22
+    assert len(result.fields) == 23
     assert all(field.description and field.label for field in result.fields)
     assert not preferences.settings_path().exists()
 
@@ -336,3 +336,14 @@ def test_restart_refuses_concurrent_write_before_saving(isolated):
         assert "操作正在保存" in response.json()["error"]["message"]
         assert not preferences.settings_path().exists()
         assert app.state.active_writes == 1
+
+
+def test_completed_call_detail_setting_uses_saved_restart_configuration(isolated):
+    original = Settings(_env_file=None)
+    assert original.retain_completed_call_details is False
+    output = preferences.save_settings(original, preferences.ApplicationSettingsPatch(
+        revision="missing", values={"retain_completed_call_details": True},
+    ))
+    assert original.retain_completed_call_details is False
+    assert "retain_completed_call_details" in output.restart_required
+    assert Settings(_env_file=None).retain_completed_call_details is True

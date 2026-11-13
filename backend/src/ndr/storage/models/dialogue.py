@@ -6,11 +6,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ...domain.enums import GapDecision, QuoteKind, SceneStatus
 from ..base import Base, IdMixin, TimestampMixin, VersionMixin, enum_type
+
+if TYPE_CHECKING:
+    from .history import PresentationHistoryBaseline
 
 
 class Quote(IdMixin, TimestampMixin, Base):
@@ -127,7 +132,29 @@ class SpeakerGroup(IdMixin, TimestampMixin, VersionMixin, Base):
         ForeignKey("book_characters.id", ondelete="SET NULL"), nullable=True, index=True
     )
     evidence_refs_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    presentation_history_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    presentation_baseline_id: Mapped[str | None] = mapped_column(
+        ForeignKey("presentation_history_baselines.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    presentation_baseline: Mapped[PresentationHistoryBaseline | None] = relationship(
+        lazy="selectin",
+    )
+    _presentation_history_json: Mapped[str] = mapped_column(
+        "presentation_history_json", Text, nullable=False, default="[]",
+    )
+
+    @property
+    def presentation_history_json(self) -> str:
+        from ..history import materialized_history_json
+
+        return materialized_history_json(self)
+
+    @presentation_history_json.setter
+    def presentation_history_json(self, value: str) -> None:
+        # Full-history assignments are used by import and legacy callers.
+        self.presentation_baseline = None
+        self.presentation_baseline_id = None
+        self._presentation_history_json = value
 
 
 class Participant(IdMixin, TimestampMixin, Base):

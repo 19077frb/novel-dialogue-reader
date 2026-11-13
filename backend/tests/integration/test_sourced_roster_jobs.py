@@ -46,6 +46,7 @@ def run(client, job, payload):
 
 def test_new_job_writes_original_bound_model_facts_and_old_job_stays_legacy(migrated_client):
     client = migrated_client
+    client.app.state.settings.retain_completed_call_details = True
     data, job = prepare(client)
     with client.app.state.session_factory() as session:
         assert json.loads(session.get(Job, job["id"]).range_json)["roster_protocol"] == "sourced-roster-2"
@@ -146,6 +147,10 @@ def test_missing_role_id_reuses_original_request_context_without_duplicate_or_ma
               "allow_overwrite_manual": named},
     )
     assert second.status_code == 202, second.text
+    if not protected:
+        # This fixture retains a receipt before changing COMPLETED to FAILED below.
+        # Production resumption does not permit restoring a completed task.
+        client.app.state.settings.retain_completed_call_details = True
     result, adapter = run(client, second.json()["data"], {
         "schema_version": "1.1", "characters": [deepcopy(manager)], "_usage": {"total_tokens": 7},
     })

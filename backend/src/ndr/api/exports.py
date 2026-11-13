@@ -12,6 +12,7 @@ import json
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..domain.common import DataEnvelope
@@ -27,11 +28,12 @@ from ..exports.service import (
     render_sample,
     run_export,
 )
+from ..exports.settlement import recover_export
 from ..exports.snapshot import freeze_snapshot
 from ..ingest.query import active_version, get_book_or_404
 from ..storage.models import BookVersion, ExportArtifact, ExportSnapshot
 from ..storage.paths import UnsafePathError, resolve_within
-from ..storage.transactions import transaction
+from ..storage.transactions import admission_transaction, finish_local_write
 from .deps import get_session
 from .errors import ApiError, current_request_id
 
@@ -85,6 +87,10 @@ def export_preview_route(
     session: Session = Depends(get_session),
 ) -> DataEnvelope[ExportPreviewOut]:
     settings = request.app.state.settings
+    # sqlite3 legacy mode does not start a physical transaction for SELECT.
+    # Finish this read snapshot before entering a fresh writer transaction.
+    if session.get_bind().dialect.name == "sqlite":
+        session.execute(text("BEGIN"))
     book = get_book_or_404(session, book_id)
     version = (
         session.get(BookVersion, payload.book_version_id)
@@ -106,8 +112,16 @@ def export_preview_route(
         )
     except ValueError as exc:
         raise ApiError.validation(str(exc)) from exc
-    # Release the SQLite writer before canonical reads, coverage scans and HTML rendering.
     session.commit()
+
+    def save_snapshot(writer):
+        get_book_or_404(writer, book.id)
+        if writer.get(BookVersion, version.id) is None:
+            raise ApiError.not_found("书籍版本已被移除", book_version_id=version.id)
+        writer.add(snapshot)
+        writer.flush()
+
+    finish_local_write(request.app.state.session_factory, save_snapshot)
     projection = json.loads(snapshot.annotation_projection_json or "{}")
     chapter_ids = json.loads(snapshot.selected_chapter_ids_json or "[]")
     style = ExportStylePreset(payload.style.preset)
@@ -156,7 +170,7 @@ def create_export_route(
 ) -> DataEnvelope[ExportArtifactOut]:
     settings = request.app.state.settings
     factory = request.app.state.session_factory
-    with transaction(factory) as session:
+    with admission_transaction(factory) as session:
         snapshot = _snapshot_or_404(session, payload.snapshot_id)
         if snapshot.book_id != book_id:
             raise ApiError.validation(
@@ -169,13 +183,15 @@ def create_export_route(
             style=ExportStylePreset(payload.style.preset),
         )
         artifact_id = artifact.id
-        reused = not created
+        needs_execution = created or artifact.state == "QUEUED"
     failure: dict | None = None
-    if not reused:
+    if needs_execution:
         outcome = run_export(factory, settings, artifact_id=artifact_id)
-        if outcome.state != "COMPLETED":
+        if outcome.state == "FAILED":
             failure = outcome.validation or {}
-    with transaction(factory) as session:
+    else:
+        recover_export(factory, settings, artifact_id)
+    with factory() as session:
         artifact = session.get(ExportArtifact, artifact_id)
         assert artifact is not None
         data = _artifact_out(artifact)
@@ -200,6 +216,9 @@ def get_export_route(
     artifact = session.get(ExportArtifact, export_id)
     if artifact is None:
         raise ApiError.not_found("导出产物不存在", export_id=export_id)
+    if artifact.state in {"QUEUED", "RUNNING"}:
+        recover_export(request.app.state.session_factory, request.app.state.settings, export_id)
+        session.refresh(artifact)
     return DataEnvelope(data=_artifact_out(artifact), request_id=current_request_id(request))
 
 
@@ -209,6 +228,9 @@ def download_export_route(
 ) -> FileResponse:
     settings = request.app.state.settings
     artifact = session.get(ExportArtifact, export_id)
+    if artifact is not None and artifact.state in {"QUEUED", "RUNNING"}:
+        recover_export(request.app.state.session_factory, settings, export_id)
+        session.refresh(artifact)
     if artifact is None or not artifact.relative_path:
         raise ApiError.not_found("导出文件不存在", export_id=export_id)
     if artifact.state != "COMPLETED":

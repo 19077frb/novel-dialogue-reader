@@ -42,6 +42,7 @@ vi.mock('../src/api/exports', () => ({
   exportKeys: { artifact: (id: string) => ['export-artifact', id] },
   previewExport: vi.fn(),
   createExport: vi.fn(),
+  fetchExportArtifact: vi.fn(),
   exportDownloadUrl: (id: string) => `/api/exports/${id}/download`,
 }))
 
@@ -102,8 +103,91 @@ describe('ExportDialog', () => {
     vi.mocked(booksApi.fetchChapters).mockReset()
     vi.mocked(exportsApi.previewExport).mockReset()
     vi.mocked(exportsApi.createExport).mockReset()
+    vi.mocked(exportsApi.fetchExportArtifact).mockReset()
     vi.mocked(booksApi.fetchChapters).mockResolvedValue(CHAPTERS)
     vi.mocked(exportsApi.previewExport).mockResolvedValue(preview())
+  })
+
+  it('在途导出自动刷新到完成，并提供下载，不误报校验失败', async () => {
+    const status = deferred<ExportArtifactOut>()
+    vi.mocked(exportsApi.createExport).mockResolvedValue(artifact({
+      state: 'RUNNING', filename: null, download_available: false, validation: {},
+    }))
+    vi.mocked(exportsApi.fetchExportArtifact).mockReturnValue(status.promise)
+    renderWithProviders(<ExportDialog bookId="b1" open onClose={vi.fn()} chapters={CHAPTERS} />)
+    await screen.findByTestId('export-preview')
+    await userEvent.click(screen.getByTestId('export-generate'))
+    await waitFor(() => expect(exportsApi.fetchExportArtifact).toHaveBeenCalledWith('a1', expect.anything()))
+    expect(screen.getByTestId('export-progress')).toHaveTextContent('正在生成或保存')
+    expect(screen.queryByTestId('export-failed')).not.toBeInTheDocument()
+    await act(async () => status.resolve(artifact()))
+    expect(await screen.findByTestId('export-download-link')).toBeInTheDocument()
+    expect(screen.getByTestId('export-state')).toHaveTextContent('已完成')
+    expect(exportsApi.createExport).toHaveBeenCalledTimes(1)
+  })
+
+  it('关闭导出弹窗后停止轮询在途产物', async () => {
+    const pending = artifact({ state: 'RUNNING', filename: null, download_available: false, validation: {} })
+    vi.mocked(exportsApi.createExport).mockResolvedValue(pending)
+    vi.mocked(exportsApi.fetchExportArtifact).mockResolvedValue(pending)
+    function Host() {
+      const [open, setOpen] = useState(true)
+      return <ExportDialog bookId="b1" open={open} onClose={() => setOpen(false)} chapters={CHAPTERS} />
+    }
+    renderWithProviders(<Host />)
+    await screen.findByTestId('export-preview')
+    await userEvent.click(screen.getByTestId('export-generate'))
+    await waitFor(() => expect(exportsApi.fetchExportArtifact).toHaveBeenCalledTimes(1))
+    await userEvent.click(screen.getByTestId('export-close'))
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 1100)))
+    expect(exportsApi.fetchExportArtifact).toHaveBeenCalledTimes(1)
+  })
+
+  it('迟到的在途轮询不能覆盖同产物已经完成的响应', async () => {
+    const status = deferred<ExportArtifactOut>()
+    const pending = artifact({ state: 'RUNNING', filename: null, download_available: false, validation: {} })
+    vi.mocked(exportsApi.createExport).mockResolvedValueOnce(pending).mockResolvedValue(artifact())
+    vi.mocked(exportsApi.fetchExportArtifact).mockReturnValue(status.promise)
+    renderWithProviders(<ExportDialog bookId="b1" open onClose={vi.fn()} chapters={CHAPTERS} />)
+    await screen.findByTestId('export-preview')
+    await userEvent.click(screen.getByTestId('export-generate'))
+    await waitFor(() => expect(exportsApi.fetchExportArtifact).toHaveBeenCalled())
+    await userEvent.click(screen.getByTestId('export-generate'))
+    await screen.findByTestId('export-download-link')
+    await act(async () => status.resolve(pending))
+    expect(screen.getByTestId('export-state')).toHaveTextContent('已完成')
+    expect(screen.getByTestId('export-download-link')).toBeInTheDocument()
+  })
+
+  it('迟到的生成响应不能覆盖轮询已经确认的同产物终态', async () => {
+    const status = deferred<ExportArtifactOut>()
+    const second = deferred<ExportArtifactOut>()
+    const pending = artifact({ state: 'RUNNING', filename: null, download_available: false, validation: {} })
+    vi.mocked(exportsApi.createExport).mockResolvedValueOnce(pending).mockReturnValueOnce(second.promise)
+    vi.mocked(exportsApi.fetchExportArtifact).mockReturnValue(status.promise)
+    renderWithProviders(<ExportDialog bookId="b1" open onClose={vi.fn()} chapters={CHAPTERS} />)
+    await screen.findByTestId('export-preview')
+    await userEvent.click(screen.getByTestId('export-generate'))
+    await waitFor(() => expect(exportsApi.fetchExportArtifact).toHaveBeenCalled())
+    await userEvent.click(screen.getByTestId('export-generate'))
+    await waitFor(() => expect(exportsApi.createExport).toHaveBeenCalledTimes(2))
+    await act(async () => status.resolve(artifact()))
+    await waitFor(() => expect(screen.getByTestId('export-download-link')).toBeInTheDocument())
+    await act(async () => second.resolve(pending))
+    expect(screen.getByTestId('export-state')).toHaveTextContent('已完成')
+    expect(screen.getByTestId('export-download-link')).toBeInTheDocument()
+  })
+
+  it('文件系统收尾失败展示服务端原因', async () => {
+    vi.mocked(exportsApi.createExport).mockResolvedValue(artifact({
+      state: 'FAILED', download_available: false,
+      validation: { ok: false, detail: '无法保存导出收尾记录，请检查数据目录空间和写入权限后重新生成导出' },
+    }))
+    renderWithProviders(<ExportDialog bookId="b1" open onClose={vi.fn()} chapters={CHAPTERS} />)
+    await screen.findByTestId('export-preview')
+    await userEvent.click(screen.getByTestId('export-generate'))
+    expect(await screen.findByTestId('export-failed')).toHaveTextContent('导出失败。无法保存导出收尾记录')
+    expect(screen.getByTestId('export-failed')).toHaveTextContent('检查数据目录空间和写入权限')
   })
 
   it('默认重读并隐藏初读，启用后可选初读，关闭后重新冻结重读快照', async () => {

@@ -94,11 +94,11 @@ def _checkpoint(db: sqlite3.Connection) -> None:
         raise RuntimeError("数据库仍被占用，请停止服务后再维护。")
 
 
-def _backup(settings: Settings) -> Path:
+def _backup(settings: Settings, *, purpose: str = "compact") -> Path:
     """Caller holds an exclusive lock and has checkpointed every committed WAL page."""
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup = resolve_within(
-        settings, f"backups/before-compact-{stamp}-{uuid4().hex[:8]}.sqlite3.gz",
+        settings, f"backups/before-{purpose}-{stamp}-{uuid4().hex[:8]}.sqlite3.gz",
     )
     backup.parent.mkdir(parents=True, exist_ok=True)
     partial = backup.with_suffix(backup.suffix + ".partial")

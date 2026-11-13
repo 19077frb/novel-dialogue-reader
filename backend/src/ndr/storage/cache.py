@@ -116,6 +116,7 @@ class ResultCacheStore:
         result_json: str,
         dependency_hash: str | None = None,
         created_run_id: str | None = None,
+        book_version_id: str | None = None,
         schema_version: str = CACHE_SCHEMA_VERSION,
     ) -> None:
         existing = self.session.execute(
@@ -131,6 +132,7 @@ class ResultCacheStore:
                 result_json=result_json,
                 dependency_hash=dependency_hash,
                 created_run_id=created_run_id,
+                book_version_id=book_version_id,
             )
         )
         self.session.flush()

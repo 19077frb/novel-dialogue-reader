@@ -79,6 +79,7 @@ from ..storage.models import (
     Scene,
     SpeakerGroup,
 )
+from ..storage.retention_policy import apply_completed_job_retention
 from ..storage.transactions import local_write_session
 from ..storage.write_queue import writer_job_scope
 from .expression_pipeline import (
@@ -649,6 +650,7 @@ def _apply_payload(
     retained_rows = raw.get("_retained_format_rows", 0) if isinstance(raw, dict) else 0
     if not validation_warnings and not retained_rows:
         ResultCacheStore(session).put(
+            book_version_id=inputs.book_version_id,
             cache_key=cache_key,
             result_json=json.dumps(
                 cache_payload if compilation else report.output.model_dump(mode="json"),
@@ -1894,7 +1896,7 @@ def _run_job(
                         {
                             **_json_of(job.checkpoint_json),
                             "scheduler_version": SCHEDULER_VERSION,
-                            "scene_state": state.snapshot(),
+                            "scene_state": state.checkpoint_snapshot(),
                             "last_window_id": window.window_id,
                             "windows_done": done,
                             "cached_windows": cached,
@@ -2242,7 +2244,7 @@ def _run_job(
                             {
                                 **_json_of(job.checkpoint_json),
                                 "scheduler_version": SCHEDULER_VERSION,
-                                "scene_state": state.snapshot(),
+                                "scene_state": state.checkpoint_snapshot(),
                                 "last_window_id": window.window_id,
                                 "windows_done": done,
                                 "calls": calls,
@@ -2333,6 +2335,9 @@ def _run_job(
                 job.progress_json = json.dumps(
                     {"stage": "partial", "windows_done": done}, ensure_ascii=False
                 )
+            apply_completed_job_retention(
+                session, job, keep_call_details=settings.retain_completed_call_details,
+            )
             session.commit()
         outcome.state = job.state
     return outcome

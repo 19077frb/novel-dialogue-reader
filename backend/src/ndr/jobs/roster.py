@@ -38,6 +38,7 @@ from ..llm.sourced_roster import (
     compile_sourced_roster,
 )
 from ..storage.models import BookVersion, Chapter, InferenceRun, Job
+from ..storage.retention_policy import apply_completed_job_retention
 from ..storage.transactions import database_error_detail, finish_local_write, sqlite_lock_error
 from ..storage.write_queue import writer_job_scope
 
@@ -541,6 +542,9 @@ def _run_character_roster_job(
                 "proposal_diagnostics": diagnostics,
             },
             ensure_ascii=False,
+        )
+        apply_completed_job_retention(
+            session, job, keep_call_details=settings.retain_completed_call_details,
         )
         outcome.state = JobState.COMPLETED
     finish_local_write(session_factory, finalize)

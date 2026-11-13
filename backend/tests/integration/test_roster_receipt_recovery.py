@@ -18,14 +18,16 @@ from ndr.storage.run_archive import decode_archive
 
 def test_returned_roster_recovers_final_commit_failure_without_recharging(migrated_client, monkeypatch):
     client = migrated_client
+    client.app.state.settings.retain_completed_call_details = True
     data, job = prepare(client)
     factory, settings = client.app.state.session_factory, client.app.state.settings
     original_commit = Session.commit
     failed = []
 
     def fail_final_commit(session):
-        if not failed and any(isinstance(row, Job) and row.state == JobState.COMPLETED
-                              for row in session.dirty):
+        if not failed and session.scalar(select(Job.state).where(
+            Job.id == job["id"],
+        )) is JobState.COMPLETED:
             failed.append(True)
             raise RuntimeError("injected final commit failure")
         return original_commit(session)
@@ -73,6 +75,7 @@ def test_roster_finalization_retries_only_local_locks_atomically(
     import sqlite3
 
     client = migrated_client
+    client.app.state.settings.retain_completed_call_details = True
     _, job = prepare(client)
     if pipeline:
         from tests.integration.test_roster_pipeline import update
@@ -83,8 +86,9 @@ def test_roster_finalization_retries_only_local_locks_atomically(
 
     def fail_final_commit(session):
         nonlocal attempts
-        if any(isinstance(row, Job) and row.state == JobState.COMPLETED
-               for row in session.dirty):
+        if session.scalar(select(Job.state).where(
+            Job.id == job["id"],
+        )) is JobState.COMPLETED:
             attempts += 1
             if failure != "busy_once" or attempts == 1:
                 error = sqlite3.OperationalError("private database detail")
@@ -134,8 +138,9 @@ def test_stop_between_finalization_lock_retries_does_not_save_people(
     failed = []
 
     def fail_once(session):
-        if not failed and any(isinstance(row, Job) and row.state == JobState.COMPLETED
-                              for row in session.dirty):
+        if not failed and session.scalar(select(Job.state).where(
+            Job.id == job["id"],
+        )) is JobState.COMPLETED:
             failed.append(True)
             raise OperationalError(None, None, sqlite3.OperationalError("database is locked"))
         return commit(session)
@@ -213,6 +218,7 @@ def test_returned_roster_rejects_damaged_binding_without_new_call(migrated_clien
     from ndr.storage.run_archive import encode_archive
 
     client = migrated_client
+    client.app.state.settings.retain_completed_call_details = True
     _, job = prepare(client)
     factory, settings = client.app.state.session_factory, client.app.state.settings
     adapter = FakeProviderAdapter(script=[response()])
@@ -247,6 +253,7 @@ def test_only_local_validation_failure_offers_saved_result_revalidation(migrated
     from ndr.storage.run_archive import encode_archive
 
     client = migrated_client
+    client.app.state.settings.retain_completed_call_details = True
     _, job = prepare(client)
     factory, settings = client.app.state.session_factory, client.app.state.settings
     adapter = FakeProviderAdapter(script=[response()])
