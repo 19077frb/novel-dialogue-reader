@@ -32,10 +32,11 @@ from ..domain.documents import (
     ReadingProgressOut,
 )
 from ..domain.enums import ErrorCode, JobState
+from ..exports.annotations import parse_annotations_manifest
 from ..ingest.chapter_repairs import apply_repairs, suggestions
 from ..ingest.deletion import delete_book
 from ..ingest.encoding import DecodeFailure
-from ..ingest.epub import EpubError, EpubLimits
+from ..ingest.epub import EpubError, EpubLimits, parse_epub
 from ..ingest.query import (
     active_version,
     book_out,
@@ -46,7 +47,8 @@ from ..ingest.query import (
     reading_chapter_titles,
 )
 from ..ingest.resources import get_resource_or_404, read_resource_bytes
-from ..ingest.service import import_epub, import_txt, record_failed_import
+from ..ingest.service import persist_parsed, record_failed_import
+from ..ingest.txt import parse_txt
 from ..storage.chapter_status import complete_chapter_automatically
 from ..storage.models import Annotation, BookVersion, Chapter, Job, Quote
 from ..storage.transactions import apply_versioned_update, transaction
@@ -125,25 +127,22 @@ def import_book(
 
     factory = request.app.state.session_factory
     try:
+        # 解码、ZIP/XML/JSON 解析不占共享写队列；去重与写入仍在同一事务内。
+        if suffix == EPUB_SUFFIX:
+            parsed = parse_epub(raw, title=title, limits=_epub_limits(settings))
+            annotations_manifest = parse_annotations_manifest(raw)
+        else:
+            parsed = parse_txt(raw, encoding=encoding, title=title)
+            annotations_manifest = None
         with transaction(factory) as session:
-            if suffix == EPUB_SUFFIX:
-                outcome = import_epub(
-                    session,
-                    settings,
-                    filename=filename,
-                    raw=raw,
-                    title=title,
-                    limits=_epub_limits(settings),
-                )
-            else:
-                outcome = import_txt(
-                    session,
-                    settings,
-                    filename=filename,
-                    raw=raw,
-                    encoding=encoding,
-                    title=title,
-                )
+            outcome = persist_parsed(
+                session,
+                settings,
+                filename=filename,
+                raw=raw,
+                parsed=parsed,
+                annotations_manifest=annotations_manifest,
+            )
             result = ImportResult(
                 book_id=outcome.book.id,
                 book_version_id=outcome.version.id,
