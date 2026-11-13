@@ -2003,6 +2003,47 @@
         }
       }
     },
+    "/api/jobs/preflight": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "只读检查对白目标占用（不创建任务、不预留目标、不调用模型）",
+        "operationId": "dialogue_preflight_route_api_jobs_preflight_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DialoguePreflightIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEnvelope_DialoguePreflightOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs": {
       "post": {
         "tags": [
@@ -6747,6 +6788,25 @@
         ],
         "title": "DataEnvelope[CursorPage[TaskQueueItemOut]]"
       },
+      "DataEnvelope_DialoguePreflightOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DialoguePreflightOut"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "本次请求的追踪 ID，与响应头 X-Request-ID 一致。"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "request_id"
+        ],
+        "title": "DataEnvelope[DialoguePreflightOut]"
+      },
       "DataEnvelope_EstimateOut_": {
         "properties": {
           "data": {
@@ -7399,6 +7459,145 @@
           "request_id"
         ],
         "title": "DataEnvelope[list[QuoteNormalizationOut]]"
+      },
+      "DialoguePreflightIn": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "book_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Version Id"
+          },
+          "range": {
+            "$ref": "#/components/schemas/DialoguePreflightRange"
+          },
+          "selected_window_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Window Ids"
+          },
+          "reading_mode": {
+            "$ref": "#/components/schemas/ReadingMode"
+          },
+          "visible_horizon_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible Horizon Cp"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "range",
+          "reading_mode"
+        ],
+        "title": "DialoguePreflightIn"
+      },
+      "DialoguePreflightOut": {
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "book_version_id": {
+            "type": "string",
+            "title": "Book Version Id"
+          },
+          "window_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Window Count"
+          },
+          "target_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Target Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "book_id",
+          "book_version_id",
+          "window_count",
+          "target_count"
+        ],
+        "title": "DialoguePreflightOut"
+      },
+      "DialoguePreflightRange": {
+        "properties": {
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "start_cp": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start Cp",
+            "default": 0
+          },
+          "end_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Cp"
+          },
+          "context_policy": {
+            "type": "string",
+            "enum": [
+              "context-1",
+              "context-2",
+              "context-chapter-1",
+              "context-chapter-2",
+              "context-chapter-3"
+            ],
+            "title": "Context Policy",
+            "default": "context-1"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DialoguePreflightRange"
       },
       "ErrorBody": {
         "properties": {
@@ -8394,6 +8593,34 @@
               }
             ],
             "title": "Last Error"
+          },
+          "service_error_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "RATE_LIMITED",
+                  "PROVIDER_QUOTA_EXHAUSTED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Error Code",
+            "description": "窗口最新调用仍未解决的限流或额度错误，完成任务也可能保留有效初次结果"
+          },
+          "service_error_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Error Run Id",
+            "description": "对应失败调用标识，用于人工解除服务阻塞后避免重复处理旧故障"
           },
           "windows": {
             "items": {

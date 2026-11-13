@@ -11,7 +11,7 @@ import {
   confirmCharacterRoster,
   fetchCharacterRoster,
 } from '../api/characters'
-import { createJob, estimateRange, freshIdempotencyKey, pauseJob, fetchRecentJobs, dialogueStrategyDisabledReason } from '../api/jobs'
+import { createJob, estimateRange, freshIdempotencyKey, pauseJob, fetchRecentJobs, dialogueStrategyDisabledReason, preflightDialogue } from '../api/jobs'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 import { hasSingleWork } from '../processing/singleWorkflow'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
@@ -31,19 +31,18 @@ import { getGeneralSettings, useGeneralSettings } from '../settings/preferences'
 import { chapterFilterReason, defaultChapterFilter, normalizeChapterFilter } from '../processing/chapterFilter'
 import type { ChapterFilter } from '../processing/chapterFilter'
 import { enqueueWork, getAdmissions } from '../processing/workQueue'
+import { assertServiceAvailable, jobServiceErrorCode, observeServiceJob, ServiceBlockedError, serviceBlockReason, submitServiceJob, useServiceBlocks } from '../processing/serviceGate'
 
 class BatchAbortError extends Error {}
 
 function batchJobError(job: JobDetailOut, fallback: string): Error {
   const message = job.last_error || fallback
-  const serviceBlocked = /^(?:PROVIDER_QUOTA_EXHAUSTED|RATE_LIMITED):/.test(message)
-    || /^人物分析失败：提供方返回 (?:402|429)$/.test(message)
-    || /^INVALID_MODEL_OUTPUT: 提供方返回 402(?:；|$)/.test(message)
+  const serviceBlocked = Boolean(jobServiceErrorCode(job))
   return serviceBlocked ? new BatchAbortError(`${message}；批量已停止继续派发，请先解决模型服务问题，再重试未完成任务。`) : new Error(message)
 }
 
 function isBatchAbortError(reason: unknown): reason is BatchAbortError {
-  return reason instanceof BatchAbortError
+  return reason instanceof BatchAbortError || reason instanceof ServiceBlockedError
 }
 const TASK_STATE_LABELS: Record<BatchTaskState, string> = {
   queued: '排队中',
@@ -194,6 +193,7 @@ export async function restoreBatchProcessing(bookId: string) {
             }
           })
         }
+        await observeServiceJob(latest.execution.preferences.profileId, job)
         // The backend may have finished after the old page last saved its snapshot.
         // Reconcile already-terminal jobs too, not just jobs observed while polling.
         const task = batchSnapshots.get(bookId)?.tasks.find(item => item.id === taskId)
@@ -273,17 +273,34 @@ export function restoreSavedBatches(existingBookIds: ReadonlySet<string>) {
   }
 }
 
-async function submitBatchRequest(bookId: string, taskId: string, type: 'roster' | 'dialogue', input: AnalyzeRosterInput | CreateJobInput): Promise<JobDetailOut> {
+async function submitBatchRequest(bookId: string, taskId: string, type: 'roster' | 'dialogue', input: AnalyzeRosterInput | CreateJobInput,
+  beforeCreate?: () => Promise<void>, assertCanCreate?: () => void): Promise<JobDetailOut> {
   const requests = batchRequests.get(bookId) ?? {}
   batchRequests.set(bookId, requests)
-  const saved = requests[taskId] ?? (requests[taskId] = { type, input })
+  const previous = requests[taskId]
+  const saved = previous ?? (requests[taskId] = { type, input })
   persistBatch(bookId) // Write before POST, including its stable request key and budget.
   if (saved.jobId) return fetchJob(saved.jobId)
-  const job = type === 'roster'
-    ? await analyzeCharacterRoster(bookId, taskId.slice('roster:'.length), saved.input as AnalyzeRosterInput)
-    : await createJob(saved.input as CreateJobInput)
+  if (type === 'roster' && previous) {
+    const existing = (await fetchRecentJobs({ bookId, versionId: saved.input.bookVersionId ?? undefined,
+      chapterId: taskId.slice('roster:'.length), kind: 'CHARACTER_ROSTER',
+      idempotencyKey: saved.input.idempotencyKey, limit: 1 }))[0]
+    if (existing) {
+      saved.jobId = existing.id
+      persistBatch(bookId)
+      return existing
+    }
+  }
+  if (beforeCreate) await beforeCreate()
+  const job = await submitServiceJob(saved.input.profileId ?? '', () => {
+    assertCanCreate?.()
+    return type === 'roster'
+      ? analyzeCharacterRoster(bookId, taskId.slice('roster:'.length), saved.input as AnalyzeRosterInput)
+      : createJob(saved.input as CreateJobInput)
+  })
   saved.jobId = job.id
   persistBatch(bookId)
+  await observeServiceJob(saved.input.profileId ?? '', job)
   return job
 }
 
@@ -472,6 +489,7 @@ async function prepareBatchRetry(bookId: string, taskId: string, wholeChapter: b
   const saved = batchExecutions.get(bookId)
   let task = batchSnapshots.get(bookId)?.tasks.find(item => item.id === taskId)
   if (!saved || !task) throw new Error('此任务不能直接重试，请先查看任务详情并确认后台请求已结束。')
+  assertServiceAvailable(saved.execution.preferences.profileId)
   await refreshChapterRetryState(bookId, task.chapterId)
   task = batchSnapshots.get(bookId)?.tasks.find(item => item.id === taskId)
   if (!task) throw new Error('任务记录已清除，请重新读取。')
@@ -564,19 +582,22 @@ async function prepareBatchRetry(bookId: string, taskId: string, wholeChapter: b
 
 export function BatchRetryControls({ bookId, taskId }: { bookId: string; taskId?: string }) {
   const progress = useBatchProgress(bookId)
+  const serviceBlocks = useServiceBlocks()
+  const serviceBlock = serviceBlocks.find(block => block.profileId === batchExecutions.get(bookId)?.execution.preferences.profileId)
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
   const tasks = progress.tasks.filter(task => task.state === 'failed' && (!taskId || task.id === taskId))
   if (!tasks.length) return null
   return <div className="ndr-form-actions">
-    {tasks.map(task => <button key={task.id} type="button" disabled={busy[task.id] || progress.stopRequested}
-      title={busy[task.id] ? '本窗口正在准备重试，请等待加入队列。' : progress.stopRequested ? '队列正在停止，请等待请求收尾后再重试。' : '加入重试队列，有空闲并发位置时立即处理。'}
+    {tasks.map(task => <button key={task.id} type="button" disabled={busy[task.id] || progress.stopRequested || Boolean(serviceBlock)}
+      title={busy[task.id] ? '本窗口正在准备重试，请等待加入队列。' : progress.stopRequested ? '队列正在停止，请等待请求收尾后再重试。' : serviceBlock ? serviceBlockReason(serviceBlock) : '加入重试队列，有空闲并发位置时立即处理。'}
       onClick={() => { setBusy(current => ({ ...current, [task.id]: true })); setError(null); void retryBatchTask(bookId, task.id)
         .catch(reason => setError(reason instanceof Error ? reason.message : '重试失败'))
         .finally(() => setBusy(current => ({ ...current, [task.id]: false }))) }}>
       {busy[task.id] ? '准备重试…' : `重试${task.type === 'roster' ? '人物识别' : task.windowLabel}`}{!taskId && `（${task.chapterTitle}）`}
     </button>)}
     {error && <p className="status-error" role="alert">{error}</p>}
+    {serviceBlock && <p className="hint">{serviceBlockReason(serviceBlock)} <Link className="ndr-button" to="/tasks">前往任务队列</Link></p>}
     {!taskId && <p className="hint">点击重试先核实原任务状态，再使用原模型配置和剩余额度补齐失败任务，不刷新已用额度。仍在执行或结果未核实时不会重复调用；成功窗口不会重复处理。</p>}
   </div>
 }
@@ -798,7 +819,9 @@ async function waitForChapterJob(bookId: string, plan: ChapterPlan, taskId: stri
       updateChapterProgress(bookId, plan.chapter.id, { error: `暂停请求失败，当前请求将继续收尾：${reason instanceof Error ? reason.message : String(reason)}` })
     }
   }
-  return waitForJob(job)
+  const result = await waitForJob(job)
+  await observeServiceJob(batchExecutions.get(bookId)?.execution.preferences.profileId ?? '', result)
+  return result
 }
 
 export interface ChapterPlan {
@@ -1216,6 +1239,17 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
               maxInputTokens: available,
               idempotencyKey: freshIdempotencyKey('batch-roster', `${bookId}:${chapter.id}:${profileId}`),
               allowOverwriteManual: getGeneralSettings().allowOverwriteManualCharacters,
+            }, async () => {
+              const selectedWindowIds = (plan.estimate.windows ?? []).map(window => String(window.window_id))
+              if (selectedWindowIds.length) await preflightDialogue({
+                bookId, bookVersionId,
+                range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp,
+                  dialogueStrategy: preferences.dialogueStrategy },
+                selectedWindowIds, readingMode: 'reread', visibleHorizonCp: null,
+              })
+            }, () => {
+              if (plan.cancelled) throw new BatchAbortError('本章处理已停止，未调用模型。')
+              if (batchShouldStop(bookId, stopRef.current)) throw new BatchAbortError('批量处理已停止，未调用模型。')
             }),
           )
           retryable = (rosterJob.state === 'FAILED' || rosterJob.state === 'COMPLETED')
@@ -1735,6 +1769,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       {estimatedTokens !== null && (
         <p className="hint" data-testid="batch-estimate">
           整批预计约 {estimatedTokens.toLocaleString()} tokens（包含逐章人物识别预留与对白归属估算）。
+          对白输入已计入当前已知人物资料；尚未分析或确认的章节可能新增人物名册和档案，增加后续每窗用量。实际用量还受复核、重试和模型推理影响，估算不构成消耗上限。
           {forceReprocess ? ' 已包含已处理章节的重做费用估算。' : chapters.slice(startIndex, endIndex + 1).some((chapter) => chapter.dialogue_processed) ? ' 已处理章节不会重复计费或处理。' : ''}
           {positiveIntegerOrNull(tokenLimitText) !== null && estimatedTokens > (positiveIntegerOrNull(tokenLimitText) ?? 0) ? ' 预计会超过当前上限，系统只会在剩余额度允许时派发新任务。' : ''}
         </p>

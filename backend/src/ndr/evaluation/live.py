@@ -162,6 +162,7 @@ def run_live_predictions(
                 )
                 job, _ = create_inference_job(
                     session,
+                    settings=settings,
                     book=session.get(Book, book_id),
                     version=version,
                     profile=session.get(ModelProfile, profile_id),

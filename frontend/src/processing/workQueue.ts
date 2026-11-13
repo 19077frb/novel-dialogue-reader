@@ -9,6 +9,8 @@ import { fetchBook } from '../api/books'
 import { waitForJobCompletion } from './jobCompletion'
 import { inSharedTaskPool } from './concurrency'
 import { getProcessingPreferences } from './preferences'
+import { getServiceBlock, observeServiceJob, submitServiceJob } from './serviceGate'
+import type { ServiceBlock } from './serviceGate'
 
 type Payload = { type: 'single'; work: SingleWorkflow }
   | { type: 'batch'; work: BatchExecution }
@@ -19,6 +21,16 @@ export interface QueueAdmission {
   payload: Payload; error: string | null; jobId?: string; createdAt: number; stopRequested?: boolean
   bookTitle?: string
   waiting?: { reason: string; jobId?: string; title?: string }
+}
+export function admissionServiceBlock(item: QueueAdmission, visibleBlocks?: readonly ServiceBlock[]) {
+  const profiles = item.payload.type === 'batch' ? [item.payload.work.preferences?.profileId]
+    : item.payload.type === 'merge' ? [item.payload.input?.profile_id]
+    : item.payload.work.tasks.map(task => task.input?.profileId)
+  for (const profileId of profiles) {
+    const block = visibleBlocks ? visibleBlocks.find(block => block.profileId === profileId) : getServiceBlock(profileId ?? '')
+    if (block) return block
+  }
+  return null
 }
 const KEY = 'admissions'
 const listeners = new Set<() => void>()
@@ -130,6 +142,7 @@ async function execute(id: string) {
   await withWorkflowLock(`admission:${id}`, async () => {
     const item = getAdmissions().find(item => item.id === id)
     if (!item || !['queued', 'running'].includes(item.phase)) return
+    if (item.phase === 'queued' && admissionServiceBlock(item)) return
     let cancelled = false
     try {
       const book = await fetchBook(item.bookId)
@@ -184,11 +197,13 @@ async function execute(id: string) {
               // Another entry point may have submitted work while this slot waited.
               if (await blocked()) return false
               const initial = item.jobId ? await fetchJob(item.jobId)
-                : await startCharacterAutoMerge(item.bookId, input)
+                : await submitServiceJob(input.profile_id ?? '', () => startCharacterAutoMerge(item.bookId, input))
               await change(id, { jobId: initial.id, waiting: undefined })
+              await observeServiceJob(input.profile_id ?? '', initial)
               const { pauseJob } = await import('../api/jobs')
               const current = stopped() ? await pauseJob(initial.id) : initial
               const job = await waitForJobCompletion(current, () => undefined)
+              await observeServiceJob(input.profile_id ?? '', job)
               if (job.state !== 'COMPLETED') throw new Error(job.last_error || `自动合并结束于${job.state}`)
               return true
             })
@@ -206,8 +221,18 @@ async function execute(id: string) {
 
 export async function pumpQueue(existingBooks?: ReadonlySet<string>) {
   const items = getAdmissions()
+  const waitingBooks = new Set<string>()
   for (const item of items) {
-    if (!['queued', 'running'].includes(item.phase) || executing.has(item.bookId) || blockedBooks.has(item.bookId)) continue
+    if (!['queued', 'running'].includes(item.phase) || executing.has(item.bookId)
+      || blockedBooks.has(item.bookId) || item.phase === 'queued' && waitingBooks.has(item.bookId)) continue
+    try {
+      if (item.phase === 'queued' && admissionServiceBlock(item)) { waitingBooks.add(item.bookId); continue }
+    } catch (error) {
+      waitingBooks.add(item.bookId)
+      runtimeError = `模型服务阻塞记录无法读取，已停止本书的新派发：${error instanceof Error ? error.message : String(error)}。请检查浏览器存储后刷新；现有任务仍可查看或停止。`
+      listeners.forEach(listener => listener())
+      continue
+    }
     if (existingBooks && !existingBooks.has(item.bookId)) {
       await change(item.id, { phase: 'failed', error: '书籍已不存在，未派发任务。' }); continue
     }

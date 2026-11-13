@@ -9,7 +9,7 @@ import { PaginatedItems } from '../components/ListPagination'
 import { FilterableTaskProgressTable, jobTaskTone, TaskProgressSummary, TaskProgressTable } from '../components/TaskProgressTable'
 import type { TaskTone } from '../components/TaskProgressTable'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
-import { useAdmissions, stopAdmission, useQueueError } from '../processing/workQueue'
+import { useAdmissions, stopAdmission, useQueueError, admissionServiceBlock, pumpQueue } from '../processing/workQueue'
 import type { QueueAdmission } from '../processing/workQueue'
 import { readJournal } from '../processing/journal'
 import { requestBatchStop } from '../components/BatchProcessor'
@@ -17,6 +17,8 @@ import type { BatchProgressSnapshot, BatchExecution } from '../components/BatchP
 import type { SingleWorkflow } from '../processing/singleWorkflow'
 import type { TaskQueueItemOut } from '../api/types'
 import { stopSingleWorkflow } from '../processing/singleWorkflow'
+import { clearServiceBlock, serviceBlockReason, useServiceGateStatus } from '../processing/serviceGate'
+import { fetchProfiles, profileKeys } from '../api/profiles'
 
 const LABELS = { queued: '排队中', running: '处理中', completed: '已完成', failed: '失败', cancelled: '已停止' }
 
@@ -156,6 +158,11 @@ export default function TaskQueuePage() {
   const [searchParams] = useSearchParams()
   const admissions = useAdmissions()
   const runtimeError = useQueueError()
+  const serviceGate = useServiceGateStatus()
+  const serviceBlocks = serviceGate.blocks
+  const profiles = useQuery({ queryKey: profileKeys.profiles(), enabled: serviceBlocks.length > 0,
+    queryFn: ({ signal }) => fetchProfiles(signal) })
+  const [continuingProfile, setContinuingProfile] = useState<string | null>(null)
   // Observe the startup inventory without re-requesting it on progress ticks.
   const queryClient = useQueryClient()
   const inventory = useSyncExternalStore(
@@ -216,6 +223,30 @@ export default function TaskQueuePage() {
       <p className="hint">保持应用页面打开，等待范围会继续派发；切换页面和刷新不会丢失已保存的队列。同一本书的处理范围依次执行，不同书籍共享并发额度。停止后已发出的模型请求仍可能计费。</p>
       {error && <p role="alert" className="status-error">{error}</p>}
       {runtimeError && <p role="alert" className="status-error">{runtimeError}</p>}
+      {serviceGate.errors.length > 0 && <div>
+        <p role="alert" className="status-error">有 {serviceGate.errors.length} 份模型服务阻塞记录无法读取，受影响配置的新请求已停止。请检查浏览器存储后刷新；现有任务仍可查看或停止。</p>
+        <details><summary>读取错误详情</summary><p>{serviceGate.errors.join('；')}</p></details>
+      </div>}
+      {serviceBlocks.length > 0 && <section aria-label="模型服务阻塞">
+        <h3>模型服务需要处理</h3>
+        <p className="hint">此浏览器同一地址下，各书籍和标签页中使用相同模型配置的后续请求已暂停，已发出的请求会继续收尾。解决服务问题后可继续等待中的范围，失败或已停止范围需要另行选择重试。</p>
+        {profiles.isError && <ReadErrorNotice label="模型配置名称读取失败" error={profiles.error} retrying={profiles.isFetching} onRetry={() => void profiles.refetch()} />}
+        <PaginatedItems label="受阻模型配置" pageSize={5} scope="service-blocks">
+          {serviceBlocks.map(block => <article className="card" key={block.profileId}>
+            <strong>{profiles.data?.find(profile => profile.id === block.profileId)?.name || block.profileId}</strong>
+            <p role="status" className="status-error">{serviceBlockReason(block)}</p>
+            <button className="ndr-primary" disabled={continuingProfile !== null}
+              title={continuingProfile !== null ? '正在保存继续操作，请稍候。' : undefined}
+              onClick={() => {
+                setContinuingProfile(block.profileId)
+                void clearServiceBlock(block.profileId, block.id).then(() => pumpQueue()).catch(err => setError(err.message))
+                  .finally(() => setContinuingProfile(null))
+              }}>已处理服务问题，继续排队范围</button>
+            {continuingProfile !== null && <p className="hint">正在保存继续操作，请稍候。</p>}
+            {block.jobId && <button onClick={() => select(block.jobId!)}>查看服务失败任务</button>}
+          </article>)}
+        </PaginatedItems>
+      </section>}
       {legacy.errors.length > 0 && <p role="alert" className="status-error">有 {legacy.errors.length} 份旧范围记录无法读取，原记录保留，未从这些记录派发新任务。请先检查保存的任务，不要重复提交。</p>}
       <CollapsibleBlock title="已添加的处理范围" summary={`${ranges.filter(item => ['queued', 'running'].includes(item.phase)).length} 个范围等待或执行中；${ranges.filter(item => item.phase === 'failed').length} 个范围失败（勾选“显示已结束任务”查看）`}>
         {!visible.length && <p>没有{history ? '保存的' : '等待或执行中的'}处理范围。</p>}
@@ -226,6 +257,7 @@ export default function TaskQueuePage() {
             {['queued', 'running'].includes(item.phase) && <button className="ndr-danger" disabled={item.stopRequested} title={item.stopRequested ? '停止请求已提交，请等待在途任务收尾。' : undefined} onClick={() => { void stop(item).catch(err => setError(err.message)) }}>{item.phase === 'queued' ? '取消范围' : '停止范围'}</button>}
           </div>
           {item.error && <p className="status-error">{item.error}</p>}
+          {item.phase === 'queued' && admissionServiceBlock(item, serviceBlocks) && <p className="hint" role="status">{serviceBlockReason(admissionServiceBlock(item, serviceBlocks)!)}</p>}
           {item.waiting && <p className="hint" role="status">{item.waiting.reason}{item.waiting.title && ` 等待任务：${item.waiting.title}`}
             {item.waiting.jobId && <button onClick={() => select(item.waiting!.jobId!)}>查看等待任务</button>}</p>}
           <AdmissionDetails item={item} onSelect={select} onSelectPlanned={selectPlanned} />

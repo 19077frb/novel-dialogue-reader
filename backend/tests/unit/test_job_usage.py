@@ -50,3 +50,18 @@ def test_job_usage_distinguishes_missing_usage_from_zero() -> None:
         "total_tokens": 0,
         "unknown_runs": 4,
     }
+
+
+def test_legacy_unavailable_without_usage_stays_unknown_but_unsent_connection_does_not():
+    rows = [
+        SimpleNamespace(state=InferenceRunState.FAILED, error_code=code, usage_json=usage)
+        for code, usage in [
+            ("PROVIDER_UNAVAILABLE", None),
+            ("PROVIDER_CONNECTION_FAILED", None),
+            ("PROVIDER_UNAVAILABLE", '{"total_tokens":0}'),
+            ("PROVIDER_UNAVAILABLE", '{"total_tokens":19}'),
+        ]
+    ]
+    assert _spent_tokens(rows) == {
+        "input_tokens": 0, "output_tokens": 0, "total_tokens": 19, "unknown_runs": 1,
+    }

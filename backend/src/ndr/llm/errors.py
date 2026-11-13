@@ -18,6 +18,7 @@ class ProviderErrorKind(StrEnum):
     RATE_LIMITED = "RATE_LIMITED"
     TIMEOUT = "TIMEOUT"
     UNAVAILABLE = "UNAVAILABLE"
+    CONNECTION_FAILED = "CONNECTION_FAILED"
     INVALID_OUTPUT = "INVALID_OUTPUT"
     MISSING_CREDENTIAL = "MISSING_CREDENTIAL"
     UNKNOWN_OUTCOME = "UNKNOWN_OUTCOME"
@@ -30,6 +31,7 @@ KIND_TO_CODE: dict[ProviderErrorKind, ErrorCode] = {
     ProviderErrorKind.RATE_LIMITED: ErrorCode.RATE_LIMITED,
     ProviderErrorKind.TIMEOUT: ErrorCode.PROVIDER_TIMEOUT,
     ProviderErrorKind.UNAVAILABLE: ErrorCode.PROVIDER_UNAVAILABLE,
+    ProviderErrorKind.CONNECTION_FAILED: ErrorCode.PROVIDER_CONNECTION_FAILED,
     ProviderErrorKind.INVALID_OUTPUT: ErrorCode.INVALID_MODEL_OUTPUT,
     ProviderErrorKind.MISSING_CREDENTIAL: ErrorCode.PROVIDER_AUTH_FAILED,
     ProviderErrorKind.UNKNOWN_OUTCOME: ErrorCode.PROVIDER_TIMEOUT,
@@ -37,7 +39,7 @@ KIND_TO_CODE: dict[ProviderErrorKind, ErrorCode] = {
 
 # 哪些错误值得让调用方重试
 RETRYABLE_KINDS: frozenset[ProviderErrorKind] = frozenset(
-    {ProviderErrorKind.RATE_LIMITED, ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNAVAILABLE}
+    {ProviderErrorKind.RATE_LIMITED, ProviderErrorKind.TIMEOUT, ProviderErrorKind.CONNECTION_FAILED}
 )
 
 

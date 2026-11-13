@@ -19,6 +19,7 @@ from ..domain.characters import (
     CharacterMergeIn,
 )
 from ..domain.enums import ErrorCode, InferenceRunState, JobKind, JobPurpose, JobState
+from ..jobs.request_keys import bind_request_key, find_request_job
 from ..jobs.roster import _build_adapter
 from ..jobs.service import digest_request, job_detail, profile_snapshot
 from ..llm.adapters import sanitize
@@ -153,10 +154,8 @@ def create_auto_merge_job(session, book, version, profile, payload: CharacterAut
             "kind": JobKind.CHARACTER_MERGE.value,
         }
     )
-    existing = session.scalar(select(Job).where(Job.idempotency_key == payload.idempotency_key))
+    existing = find_request_job(session, payload.idempotency_key, digest)
     if existing:
-        if existing.request_digest != digest:
-            raise ApiError(ErrorCode.IDEMPOTENCY_CONFLICT, "同一请求标识已用于不同的自动合并配置")
         return existing, False
     _guard(session, version)
     entries = _snapshot(session, version)
@@ -187,6 +186,7 @@ def create_auto_merge_job(session, book, version, profile, payload: CharacterAut
     )
     session.add(job)
     session.flush()
+    bind_request_key(session, job, payload.idempotency_key, digest)
     return job, True
 
 

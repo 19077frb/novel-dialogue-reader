@@ -790,11 +790,12 @@ def test_retry_respects_remaining_budget(fake_provider_client: TestClient, migra
     assert len(adapter.calls) == 1
 
 
-def test_retry_count_does_not_retry_unknown_timeout(fake_provider_client: TestClient, migrated_settings: Settings) -> None:
+@pytest.mark.parametrize("kind", [ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME])
+def test_retry_count_does_not_retry_unknown_timeout(fake_provider_client: TestClient, migrated_settings: Settings, kind) -> None:
     data = _import(fake_provider_client)
     job = _create_job(fake_provider_client, data["book_id"], _fake_profile(fake_provider_client),
                       key="no-timeout-retry", budget={"max_format_retries": 5})
-    adapter = FakeProviderAdapter(script=[ProviderError(ProviderErrorKind.TIMEOUT, "结果未知")])
+    adapter = FakeProviderAdapter(script=[ProviderError(kind, "结果未知")])
     assert _run_with_fake(migrated_settings, job["id"], adapter).state is JobState.NEEDS_RECONCILIATION
     assert len(adapter.calls) == 1
 

@@ -134,6 +134,70 @@ it('restores a batch, keeps cumulative usage and does not repeat roster or ackno
   expect(saved.spent).toBe(40); expect(saved.totalSpent).toBe(50)
   expect(saved.snapshot.running).toBe(false)
 })
+
+it('restores a lost service classification from the backend and never posts the next batch window', async () => {
+  await seedBatch()
+  api.fetchJob.mockImplementation(async id => id === 'old' ? { ...completed(id), state: 'FAILED',
+    last_error: '本地旧错误没有机器码', service_error_code: 'PROVIDER_QUOTA_EXHAUSTED',
+    service_error_run_id: 'recovered-quota-run' } : completed(id))
+  const { restoreBatchProcessing } = await import('../src/components/BatchProcessor')
+  const { getServiceBlock } = await import('../src/processing/serviceGate')
+  await restoreBatchProcessing('b1')
+  expect(getServiceBlock('p1')?.code).toBe('PROVIDER_QUOTA_EXHAUSTED')
+  expect(api.createJob).not.toHaveBeenCalled()
+  const saved = JSON.parse(localStorage.getItem('ndr:tasks:v1:batch:b1')!)
+  expect(saved.snapshot.running).toBe(false)
+})
+
+it('keeps a completed primary result while a recovered review service failure blocks the next window', async () => {
+  await seedBatch()
+  api.fetchJob.mockImplementation(async id => id === 'old' ? { ...completed(id),
+    service_error_code: 'RATE_LIMITED', service_error_run_id: 'old-review-run',
+    checkpoint: { review_stopped: { w1: '复核服务限流，首次有效结果保留' } } } : completed(id))
+  const { restoreBatchProcessing } = await import('../src/components/BatchProcessor')
+  const { getServiceBlock } = await import('../src/processing/serviceGate')
+  await restoreBatchProcessing('b1')
+  expect(getServiceBlock('p1')?.code).toBe('RATE_LIMITED')
+  expect(api.createJob).not.toHaveBeenCalled()
+  const saved = JSON.parse(localStorage.getItem('ndr:tasks:v1:batch:b1')!)
+  expect(saved.snapshot.tasks.find((task: { id: string }) => task.id === 'dialogue:c1:w1').state).toBe('completed')
+})
+
+it('drains acknowledged single calls under a service block without submitting untouched windows', async () => {
+  const { runSingleWorkflow } = await import('../src/processing/singleWorkflow')
+  const { observeServiceJob } = await import('../src/processing/serviceGate')
+  await observeServiceJob('p1', { ...completed('other-book'), state: 'FAILED',
+    service_error_code: 'RATE_LIMITED', service_error_run_id: 'other-run' })
+  await expect(runSingleWorkflow(single())).rejects.toThrow()
+  expect(api.fetchJob).toHaveBeenCalledWith('old')
+  expect(api.fetchRecentJobs).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: 'next-key' }))
+  expect(api.createJob).not.toHaveBeenCalled()
+  expect(api.completeChapterProcessing).not.toHaveBeenCalled()
+})
+
+it('still reconciles an acknowledged single job when the service record is unreadable', async () => {
+  localStorage.setItem('ndr:tasks:v1:service-gate:p1', '{broken')
+  const work = single()
+  work.tasks = [work.tasks[0]]
+  work.completeChapter = false
+  const { runSingleWorkflow } = await import('../src/processing/singleWorkflow')
+  await expect(runSingleWorkflow(work)).resolves.toMatchObject({ id: 'old', state: 'COMPLETED' })
+  expect(api.fetchJob).toHaveBeenCalledWith('old')
+  expect(api.createJob).not.toHaveBeenCalled()
+})
+
+it('finds a lost single acknowledgement with its original key before closing dispatch on a corrupt service record', async () => {
+  localStorage.setItem('ndr:tasks:v1:service-gate:p1', '{broken')
+  const work = single()
+  work.tasks = [{ ...work.tasks[0], job: null }]
+  work.completeChapter = false
+  api.fetchRecentJobs.mockResolvedValue([completed('lost-ack')])
+  const { runSingleWorkflow } = await import('../src/processing/singleWorkflow')
+  await expect(runSingleWorkflow(work)).resolves.toMatchObject({ id: 'lost-ack', state: 'COMPLETED' })
+  expect(api.fetchRecentJobs).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: 'old-key' }))
+  expect(api.fetchJob).toHaveBeenCalledWith('lost-ack')
+  expect(api.createJob).not.toHaveBeenCalled()
+})
 it('reconciles stale running rows even when the saved batch has already ended', async () => {
   const saved = await seedBatch()
   saved.snapshot.running = false

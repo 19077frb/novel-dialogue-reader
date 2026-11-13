@@ -171,15 +171,30 @@ class ChatCompletionsAdapter:
                          "timeout_seconds": self._timeout,
                          "elapsed_ms": int((time.perf_counter() - started) * 1000)},
             ) from exc
-        except httpx.TransportError as exc:
+        except httpx.ConnectError as exc:
             raise ProviderError(
-                ProviderErrorKind.UNAVAILABLE,
-                f"无法连接提供方：{type(exc).__name__}",
-                details={"endpoint": self.endpoint},
+                ProviderErrorKind.CONNECTION_FAILED,
+                "未能建立模型服务连接，请求尚未发送；请检查地址与网络后重试",
+                details={"endpoint": self.endpoint, "transport_type": type(exc).__name__},
+            ) from exc
+        except httpx.RequestError as exc:
+            # A broken response or partially sent request may already be billed.
+            # Only ConnectError above proves that no HTTP request was sent.
+            raise ProviderError(
+                ProviderErrorKind.UNKNOWN_OUTCOME,
+                "模型请求或响应中断，结果与用量未知；请先核对原任务，不要直接重复发送",
+                details={"endpoint": self.endpoint, "transport_type": type(exc).__name__},
             ) from exc
         finally:
             if owns_client:
-                await client.aclose()
+                try:
+                    await client.aclose()
+                except Exception as exc:
+                    # Cleanup must never discard a response or obscure the
+                    # original error, otherwise a completed call may be resent.
+                    from ...diagnostics import logger
+
+                    logger.warning("provider_client_close_failed type=%s", type(exc).__name__)
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         if response.status_code >= 400:

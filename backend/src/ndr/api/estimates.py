@@ -60,6 +60,8 @@ def estimate_route(
             version,
             start_cp=int(payload.range.get("start_cp", 0) or 0),
             end_cp=payload.range.get("end_cp"),
+            chapter_id=payload.range.get("chapter_id"),
+            output_protocol=payload.range.get("output_protocol"),
             reading_mode=payload.reading_mode,
             visible_horizon_cp=payload.visible_horizon_cp,
             max_recheck_rounds=payload.budget.max_recheck_rounds or 0,

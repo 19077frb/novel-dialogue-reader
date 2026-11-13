@@ -496,6 +496,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 只读检查对白目标占用（不创建任务、不预留目标、不调用模型） */
+        post: operations["dialogue_preflight_route_api_jobs_preflight_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs": {
         parameters: {
             query?: never;
@@ -2159,6 +2176,15 @@ export interface components {
              */
             request_id: string;
         };
+        /** DataEnvelope[DialoguePreflightOut] */
+        DataEnvelope_DialoguePreflightOut_: {
+            data: components["schemas"]["DialoguePreflightOut"];
+            /**
+             * Request Id
+             * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
+             */
+            request_id: string;
+        };
         /** DataEnvelope[EstimateOut] */
         DataEnvelope_EstimateOut_: {
             data: components["schemas"]["EstimateOut"];
@@ -2460,6 +2486,48 @@ export interface components {
              * @description 本次请求的追踪 ID，与响应头 X-Request-ID 一致。
              */
             request_id: string;
+        };
+        /** DialoguePreflightIn */
+        DialoguePreflightIn: {
+            /** Book Id */
+            book_id: string;
+            /** Book Version Id */
+            book_version_id?: string | null;
+            range: components["schemas"]["DialoguePreflightRange"];
+            /** Selected Window Ids */
+            selected_window_ids?: string[] | null;
+            reading_mode: components["schemas"]["ReadingMode"];
+            /** Visible Horizon Cp */
+            visible_horizon_cp?: number | null;
+        };
+        /** DialoguePreflightOut */
+        DialoguePreflightOut: {
+            /** Book Id */
+            book_id: string;
+            /** Book Version Id */
+            book_version_id: string;
+            /** Window Count */
+            window_count: number;
+            /** Target Count */
+            target_count: number;
+        };
+        /** DialoguePreflightRange */
+        DialoguePreflightRange: {
+            /** Chapter Id */
+            chapter_id?: string | null;
+            /**
+             * Start Cp
+             * @default 0
+             */
+            start_cp: number;
+            /** End Cp */
+            end_cp?: number | null;
+            /**
+             * Context Policy
+             * @default context-1
+             * @enum {string}
+             */
+            context_policy: "context-1" | "context-2" | "context-chapter-1" | "context-chapter-2" | "context-chapter-3";
         };
         /** ErrorBody */
         ErrorBody: {
@@ -2855,6 +2923,16 @@ export interface components {
             } | null;
             /** Last Error */
             last_error?: string | null;
+            /**
+             * Service Error Code
+             * @description 窗口最新调用仍未解决的限流或额度错误，完成任务也可能保留有效初次结果
+             */
+            service_error_code?: ("RATE_LIMITED" | "PROVIDER_QUOTA_EXHAUSTED") | null;
+            /**
+             * Service Error Run Id
+             * @description 对应失败调用标识，用于人工解除服务阻塞后避免重复处理旧故障
+             */
+            service_error_run_id?: string | null;
             /** Windows */
             windows?: components["schemas"]["JobWindowOut"][];
             /**
@@ -5139,6 +5217,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataEnvelope_list_JobDetailOut__"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dialogue_preflight_route_api_jobs_preflight_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DialoguePreflightIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataEnvelope_DialoguePreflightOut_"];
                 };
             };
             /** @description Validation Error */

@@ -23,7 +23,6 @@ from ..domain.enums import (
     CharacterRosterStatus,
     CharacterSource,
     ContentNodeType,
-    ErrorCode,
     InferenceRunState,
     JobKind,
     JobPurpose,
@@ -32,6 +31,7 @@ from ..domain.enums import (
 )
 from ..ingest.document import collapse_whitespace, has_chapter_body_text
 from ..ingest.query import load_canonical_text
+from ..jobs.request_keys import bind_request_key, find_request_job
 from ..jobs.service import digest_request, profile_snapshot
 from ..llm.prompts import build_roster_messages
 from ..llm.schemas import RosterOutput
@@ -712,18 +712,9 @@ def create_roster_job(
         request_payload["roster_repair_protocol"] = repair_range["roster_repair_protocol"]
         request_payload.update(repair_budget)
     digest = digest_request(request_payload)
-    existing = session.execute(
-        select(Job).where(Job.idempotency_key == idempotency_key)
-    ).scalar_one_or_none()
+    existing = find_request_job(session, idempotency_key, digest)
     if existing is not None:
-        if existing.request_digest == digest:
-            return existing, False
-        raise ApiError(
-            ErrorCode.IDEMPOTENCY_CONFLICT,
-            "同一幂等键已被不同的请求使用",
-            details={"idempotency_key": idempotency_key, "job_id": existing.id},
-            status_code=409,
-        )
+        return existing, False
     occupied = (
         session.execute(
             select(Job)
@@ -753,6 +744,7 @@ def create_roster_job(
             retired.append(other)
         else:
             # Adopt the original frozen request, even when new settings differ.
+            bind_request_key(session, other, idempotency_key, digest)
             return other, False
 
     job = Job(
@@ -784,6 +776,7 @@ def create_roster_job(
     )
     session.add(job)
     session.flush()
+    bind_request_key(session, job, idempotency_key, digest)
     for other in retired:
         checkpoint = json.loads(other.checkpoint_json or "{}")
         checkpoint["superseded_by"] = job.id

@@ -96,7 +96,7 @@ class Settings(BaseSettings):
     # 取值：""/"rate_limited_once"/"unavailable_once"/"timeout_once"/"auth_failed_once"。
     fake_provider_script: str = ""
 
-    # 限流/暂时不可用的**有上限**自动重试。超过上限就停下，等用户显式继续。
+    # 限流/明确未建立连接的有上限自动重试；响应中断与服务端错误不自动重发。
     rate_limit_max_retries: int = 2
     rate_limit_backoff_base_seconds: int = 1
     rate_limit_backoff_max_seconds: int = 30

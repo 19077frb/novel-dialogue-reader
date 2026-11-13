@@ -141,3 +141,46 @@ def test_batched_details_preserve_recovery_usage_window_order_and_task_isolation
             assert session.scalar(select(Job.state).where(Job.id == "job-000")) is JobState.RUNNING
     finally:
         local_finalization.forget_settlements(factory)
+
+
+def test_service_errors_report_only_latest_unresolved_window_calls_without_extra_queries(
+    migrated_settings, migrated_engine,
+):
+    with Session(migrated_engine) as session:
+        seed_jobs(session, migrated_settings, 4)
+        base = datetime(2030, 1, 1, tzinfo=UTC)
+        attempts = [
+            ("job-000", "a", "old-limit", "RATE_LIMITED", InferenceRunState.FAILED, 0),
+            ("job-000", "a", "retry-ok", None, InferenceRunState.SUCCEEDED, 1),
+            # A later success in another window leaves this window unresolved.
+            ("job-001", "a", "quota", "PROVIDER_QUOTA_EXHAUSTED", InferenceRunState.FAILED, 0),
+            ("job-001", "b", "other-ok", None, InferenceRunState.SUCCEEDED, 1),
+            # Historical completed jobs can retain a valid primary result.
+            ("job-002", "a", "primary-ok", None, InferenceRunState.SUCCEEDED, 0),
+            ("job-002", "a", "review-limited", "RATE_LIMITED", InferenceRunState.FAILED, 1),
+            # An active newer retry supersedes its previous failed attempt.
+            ("job-003", "a", "earlier", "RATE_LIMITED", InferenceRunState.FAILED, 0),
+            ("job-003", "a", "retry-running", None, InferenceRunState.DISPATCHED, 1),
+        ]
+        for job_id, window_id, run_id, error, state, offset in attempts:
+            session.add(InferenceRun(id=run_id, job_id=job_id, window_id=window_id,
+                state=state, error_code=error, created_at=base + timedelta(seconds=offset),
+                profile_snapshot_json="{}", request_fingerprint="x" * 64))
+        completed = session.get(Job, "job-002")
+        completed.checkpoint_json = '{"review_stopped":{"a":"历史复核提前结束"}}'
+        session.commit()
+    with Session(migrated_engine) as session:
+        jobs = [session.get(Job, f"job-{index:03}") for index in range(4)]
+        expected = [job_detail(session, job).model_dump() for job in jobs]
+        with counted_queries(migrated_engine) as queries:
+            details = job_details(session, jobs)
+        assert len(queries) == 2
+        assert not any("call_archive" in query for query in queries)
+        assert [detail.model_dump() for detail in details] == expected
+        assert [detail.service_error_code for detail in details] == [
+            None, "PROVIDER_QUOTA_EXHAUSTED", "RATE_LIMITED", None,
+        ]
+        assert [detail.service_error_run_id for detail in details] == [
+            None, "quota", "review-limited", None,
+        ]
+        assert details[2].state is JobState.COMPLETED

@@ -86,6 +86,7 @@ vi.mock('../src/api/jobs', async importOriginal => ({
   ...await importOriginal<typeof import('../src/api/jobs')>(),
   jobKeys: { usage: (bookId: string) => ['usage', bookId] },
   estimateRange: vi.fn(),
+  preflightDialogue: vi.fn(),
   createJob: vi.fn(),
   fetchUsage: vi.fn(),
   fetchRecentJobs: vi.fn().mockResolvedValue([]),
@@ -307,6 +308,7 @@ describe('PreviewPage', () => {
     vi.mocked(charactersApi.analyzeCharacterRoster).mockReset()
     vi.mocked(charactersApi.confirmCharacterRoster).mockReset()
     vi.mocked(jobsApi.estimateRange).mockReset()
+    vi.mocked(jobsApi.preflightDialogue).mockReset().mockResolvedValue(undefined)
     vi.mocked(jobsApi.createJob).mockReset()
     vi.mocked(jobsApi.fetchUsage).mockReset()
     vi.mocked(profilesApi.fetchProfiles).mockReset()
@@ -902,9 +904,15 @@ describe('PreviewPage', () => {
 
     await waitFor(() => expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(4))
+    expect(jobsApi.preflightDialogue).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(jobsApi.preflightDialogue).mock.calls[1][0].range.chapterId).toBe('c2')
+    const firstConfirmationOrder = vi.mocked(charactersApi.confirmCharacterRoster).mock.invocationCallOrder[0]
+    const secondPreflightOrder = vi.mocked(jobsApi.preflightDialogue).mock.invocationCallOrder[1]
     const secondRosterOrder = vi.mocked(charactersApi.analyzeCharacterRoster).mock.invocationCallOrder[1]
     const firstWindowOrder = vi.mocked(jobsApi.createJob).mock.invocationCallOrder[0]
-    expect(secondRosterOrder).toBeLessThan(firstWindowOrder)
+    expect(firstConfirmationOrder).toBeLessThan(secondPreflightOrder)
+    expect(secondPreflightOrder).toBeLessThan(secondRosterOrder)
+    expect(secondPreflightOrder).toBeLessThan(firstWindowOrder)
     await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理完成'))
   })
 
@@ -968,14 +976,15 @@ describe('PreviewPage', () => {
   })
 
   it.each([
-    'RATE_LIMITED: 人物分析失败：模型服务限制请求频率（429）',
-    'PROVIDER_QUOTA_EXHAUSTED: 人物分析失败：模型服务余额或额度不足（402）',
-    '人物分析失败：提供方返回 429',
-  ])('批量人物遇到服务拒绝后不连续派发后续章节：%s', async message => {
+    { message: 'RATE_LIMITED: 人物分析失败：模型服务限制请求频率（429）', code: 'RATE_LIMITED' as const },
+    { message: 'PROVIDER_QUOTA_EXHAUSTED: 人物分析失败：模型服务余额或额度不足（402）', code: 'PROVIDER_QUOTA_EXHAUSTED' as const },
+    { message: '人物分析失败：提供方返回 429', code: 'RATE_LIMITED' as const },
+  ])('批量人物遇到服务拒绝后不连续派发后续章节：$message', async ({ message, code }) => {
     const chapters = Array.from({ length: 3 }, (_, i) => ({ ...CHAPTERS[0], id: `c${i + 1}`, ordinal: i,
       title: `第${i + 1}章`, start_cp: i * 20, end_cp: (i + 1) * 20, dialogue_processed: false })) as ChapterOut[]
     vi.mocked(booksApi.fetchChapters).mockResolvedValue(chapters)
     vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue({ ...JOB, state: 'FAILED', last_error: message,
+      service_error_code: code, service_error_run_id: 'failed-roster-run',
       unknown_usage_runs: 0, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, unknown_runs: 0 } } as JobDetailOut)
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await userEvent.click(await screen.findByTestId('processing-mode-batch'))
@@ -1001,6 +1010,7 @@ describe('PreviewPage', () => {
     vi.mocked(booksApi.fetchChapters).mockResolvedValue(chapters)
     vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(metered)
     vi.mocked(jobsApi.createJob).mockResolvedValue({ ...metered, state: 'FAILED',
+      service_error_code: 'PROVIDER_QUOTA_EXHAUSTED', service_error_run_id: 'failed-dialogue-run',
       last_error: 'PROVIDER_QUOTA_EXHAUSTED: 模型服务余额或额度不足（402）' })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await userEvent.click(await screen.findByTestId('processing-mode-batch'))

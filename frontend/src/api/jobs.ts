@@ -161,6 +161,26 @@ export interface CreateJobInput {
   runNow?: boolean
 }
 
+export async function preflightDialogue(input: Pick<CreateJobInput,
+  'bookId' | 'bookVersionId' | 'range' | 'selectedWindowIds' | 'readingMode' | 'visibleHorizonCp'>,
+  signal?: AbortSignal): Promise<void> {
+  const strategy = dialogueStrategyPayload(input.range.dialogueStrategy)
+  await apiData('/api/jobs/preflight', {
+    method: 'POST', signal,
+    body: {
+      book_id: input.bookId,
+      book_version_id: input.bookVersionId ?? null,
+      range: {
+        chapter_id: input.range.chapterId, start_cp: input.range.startCp, end_cp: input.range.endCp,
+        context_policy: 'context_policy' in strategy ? strategy.context_policy : 'context-1',
+      },
+      selected_window_ids: input.selectedWindowIds ?? null,
+      reading_mode: input.readingMode,
+      visible_horizon_cp: input.visibleHorizonCp ?? null,
+    },
+  })
+}
+
 export function createJob(input: CreateJobInput, signal?: AbortSignal): Promise<JobDetailOut> {
   const reason = dialogueStrategyDisabledReason(input.range.dialogueStrategy, input.budget.maxRecheckRounds ?? 0)
   if (reason) return Promise.reject(new Error(reason))

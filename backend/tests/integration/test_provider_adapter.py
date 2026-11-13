@@ -17,6 +17,7 @@ from sqlalchemy import select
 from ndr.config import Settings
 from ndr.domain.enums import CredentialMode, ErrorCode, InferenceRunState  # noqa: F401
 from ndr.llm.adapters import ChatCompletionsAdapter
+from ndr.llm.adapters.anthropic_messages import AnthropicMessagesAdapter
 from ndr.llm.errors import KIND_TO_CODE, ProviderError, ProviderErrorKind
 from ndr.llm.prompts.connection import ECHO_OBJECT
 from ndr.storage.engine import create_db_engine, create_session_factory
@@ -88,6 +89,76 @@ def test_timeout_receipt_has_actual_request_but_no_invented_response_or_usage():
     assert caught.value.receipt["request"]["model"] == "example-model"
     assert caught.value.receipt["response"] is None
     assert "usage" not in caught.value.details
+
+
+@pytest.mark.parametrize("adapter_class", [ChatCompletionsAdapter, AnthropicMessagesAdapter])
+@pytest.mark.parametrize("error_class", [
+    httpx.ReadError, httpx.WriteError, httpx.CloseError, httpx.RemoteProtocolError,
+    httpx.LocalProtocolError, httpx.ProxyError, httpx.UnsupportedProtocol,
+    httpx.DecodingError, httpx.TransportError, httpx.RequestError,
+])
+def test_request_interruptions_keep_unknown_receipt_and_are_not_retryable(adapter_class, error_class):
+    def handler(request):
+        raise error_class("private-credential original fixture", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = adapter_class(base_url="https://example.com", model="fixture-model", client=client)
+    with pytest.raises(ProviderError) as caught:
+        _run(adapter.generate_labels({"messages": [{"role": "user", "content": "test"}]}))
+    error = caught.value
+    assert error.kind is ProviderErrorKind.UNKNOWN_OUTCOME
+    assert error.code is ErrorCode.PROVIDER_TIMEOUT and error.retryable is False
+    assert "中断" in error.message and "用量未知" in error.message
+    assert error.details["transport_type"] == error_class.__name__
+    assert "usage" not in error.details
+    assert error.receipt["request"]["model"] == "fixture-model"
+    assert error.receipt["response"] is None
+    assert "private-credential" not in json.dumps(error.as_dict)
+
+
+@pytest.mark.parametrize("adapter_class", [ChatCompletionsAdapter, AnthropicMessagesAdapter])
+def test_connection_failure_has_distinct_unsent_classification_without_invented_usage(adapter_class):
+    def handler(request):
+        raise httpx.ConnectError("private-credential", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = adapter_class(base_url="https://example.com", model="fixture-model", client=client)
+    with pytest.raises(ProviderError) as caught:
+        _run(adapter.generate_labels({"messages": [{"role": "user", "content": "test"}]}))
+    error = caught.value
+    assert error.kind is ProviderErrorKind.CONNECTION_FAILED
+    assert error.code is ErrorCode.PROVIDER_CONNECTION_FAILED and error.retryable is True
+    assert "尚未发送" in error.message and "usage" not in error.details
+    assert error.receipt["response"] is None
+    assert "private-credential" not in json.dumps(error.as_dict)
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_owned_client_cleanup_failure_never_discards_received_result_or_original_error(
+    monkeypatch, caplog, interrupted,
+):
+    class ClosingClient:
+        async def post(self, *args, **kwargs):
+            if interrupted:
+                raise httpx.ReadError("private transport evidence")
+            return httpx.Response(200, json=VALID_BODY)
+
+        async def aclose(self):
+            raise RuntimeError("private cleanup details")
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: ClosingClient())
+    adapter = ChatCompletionsAdapter(base_url="https://example.com", model="fixture-model")
+    if interrupted:
+        with pytest.raises(ProviderError) as caught:
+            _run(adapter.generate_labels({"messages": [{"role": "user", "content": "test"}]}))
+        assert caught.value.kind is ProviderErrorKind.UNKNOWN_OUTCOME
+        assert caught.value.receipt["response"] is None
+    else:
+        result = _run(adapter.generate_labels({"messages": [{"role": "user", "content": "test"}]}))
+        assert result["_usage"]["total_tokens"] == 20
+        assert result.receipt["response"] == VALID_BODY
+    assert "provider_client_close_failed type=RuntimeError" in caplog.text
+    assert "private" not in caplog.text
 
 
 @pytest.mark.parametrize("timeout_class, stage", [
@@ -619,11 +690,20 @@ def test_connection_endpoint_requires_profile_or_draft(fake_provider_client: Tes
     assert both.status_code == 422
 
 
-def test_connection_endpoint_reports_failure_without_fake_success(tmp_path) -> None:
+def test_connection_endpoint_reports_failure_without_fake_success(tmp_path, monkeypatch) -> None:
     """真实适配器连不上时必须是失败：错误码 + 推理尝试 FAILED + usage 为 NULL。"""
 
     from ndr.app import create_app
     from ndr.storage.migrate import run_migrations
+
+    original_client = httpx.AsyncClient
+
+    def disconnected(request):
+        raise httpx.ConnectError("isolated connection failure", request=request)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(
+        transport=httpx.MockTransport(disconnected), **kwargs,
+    ))
 
     settings = Settings(
         data_dir=tmp_path / "data",
@@ -650,7 +730,7 @@ def test_connection_endpoint_reports_failure_without_fake_success(tmp_path) -> N
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["ok"] is False
-    assert data["error_code"] in {"PROVIDER_UNAVAILABLE", "PROVIDER_TIMEOUT"}
+    assert data["error_code"] == "PROVIDER_CONNECTION_FAILED"
     assert data["usage"] is None and data["usage_unknown"] is True
 
     engine = create_db_engine(settings)
@@ -661,6 +741,6 @@ def test_connection_endpoint_reports_failure_without_fake_success(tmp_path) -> N
             assert len(runs) == 1
             assert runs[0].state is InferenceRunState.FAILED
             assert runs[0].usage_json is None
-            assert runs[0].error_code in {"PROVIDER_UNAVAILABLE", "PROVIDER_TIMEOUT"}
+            assert runs[0].error_code == "PROVIDER_CONNECTION_FAILED"
     finally:
         engine.dispose()

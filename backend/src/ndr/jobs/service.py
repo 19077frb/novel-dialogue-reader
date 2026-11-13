@@ -20,11 +20,11 @@ from ..api.errors import ApiError
 from ..characters.input_view import IDENTITY_INPUT_VERSION
 from ..characters.prompt_catalog import IDENTITY_PROMPT_VERSION
 from ..config import Settings
-from ..context.budget import DEFAULT_POLICY, BudgetPolicy
+from ..context.budget import DEFAULT_POLICY, BudgetPolicy, estimate_tokens
 from ..context.service import plan_range
+from ..context.window_builder import ProcessingWindow
 from ..domain.enums import (
     CredentialMode,
-    ErrorCode,
     JobKind,
     JobPurpose,
     JobState,
@@ -37,12 +37,14 @@ from ..storage.models import (
     Annotation,
     Book,
     BookVersion,
+    Chapter,
     InferenceRun,
     Job,
     JobWindow,
     ModelProfile,
     Quote,
 )
+from .request_keys import bind_request_key, find_request_job
 
 
 @dataclass(frozen=True)
@@ -118,6 +120,8 @@ def estimate_inference(
     *,
     start_cp: int = 0,
     end_cp: int | None = None,
+    chapter_id: str | None = None,
+    output_protocol: str | None = None,
     reading_mode: ReadingMode = ReadingMode.INITIAL,
     visible_horizon_cp: int | None = None,
     policy: BudgetPolicy | None = None,
@@ -145,7 +149,23 @@ def estimate_inference(
         policy=resolved_policy,
     )
     targets = sum(len(window.target_quote_ids) for window in plan.windows)
-    input_tokens = sum(window.budget["total_tokens"] for window in plan.windows)
+    window_inputs, roster_unknown = _estimate_request_inputs(
+        session,
+        version,
+        plan.windows,
+        {
+            "chapter_id": chapter_id,
+            "end_cp": end_cp,
+            "reading_mode": reading_mode.value,
+            "visible_horizon_cp": visible_horizon_cp,
+            "output_protocol": output_protocol,
+            "auxiliary_protocol": auxiliary_protocol,
+            "identity_input_version": IDENTITY_INPUT_VERSION,
+            "identity_prompt_version": IDENTITY_PROMPT_VERSION,
+            "nonperson_policy_version": "nonperson-2",
+        },
+    )
+    input_tokens = sum(window_inputs.values())
     output_tokens = targets * output_tokens_per_target
     from ..llm.expression_review import REVIEW_VERSION
 
@@ -167,8 +187,15 @@ def estimate_inference(
     output_tokens *= multiplier
     notes = [
         "估算来自本地启发式 token 口径，不是真实计费依据；实际用量以提供方 usage 为准。",
-        "输出预留按每条目标对白 20 token 粗估（可在预算里调整）。",
+        "输入计入当前可见人物档案、已确认名册和实际请求提示，并与窗口规划预留取较大值。",
+        "输出按每条目标对白 20 token 粗估，与任务派发时的安全输出预留口径不同。",
+        "后续窗口的场景状态、复核证据、格式纠错、重试和模型推理可增加用量，估算不构成消耗上限。",
     ]
+    if roster_unknown:
+        notes.append(
+            "本章尚无有效的已确认人物名册，当前只计入已知全书人物资料。"
+            "人物分析与确认后，新增名册和人物档案会增加每个对白请求的输入，需重新估算。"
+        )
     if evidence_review:
         notes.append(
             f"证据复核按首次处理加每轮最多三个阶段（独立复核、分歧裁决、挑战核验）估算：每窗最多{multiplier}个规划阶段。"
@@ -237,7 +264,7 @@ def estimate_inference(
                 "end_cp": window_end,
                 "target_count": len(window.target_quote_ids),
                 "estimated_tokens": (
-                    int(window.budget["total_tokens"])
+                    window_inputs[window.window_id]
                     + len(window.target_quote_ids) * output_tokens_per_target
                 )
                 * multiplier,
@@ -268,6 +295,48 @@ def estimate_inference(
         notes=notes,
         windows=windows,
     )
+
+
+def _estimate_request_inputs(
+    session: Session,
+    version: BookVersion,
+    windows: Sequence[ProcessingWindow],
+    request_range: dict[str, Any],
+) -> tuple[dict[str, int], bool]:
+    """Read current identities and reuse dispatch assembly without creating a task."""
+    from ..characters.service import confirmed_roster_context
+    from ..domain.enums import CharacterRosterStatus
+    from ..scenes.state import SceneState
+    from .scheduler import _apply_confirmed_roster, _request_payload_for
+
+    chapter_id = request_range.get("chapter_id")
+    roster_unknown = False
+    if chapter_id:
+        chapter = session.get(Chapter, chapter_id)
+        if chapter is None or chapter.book_version_id != version.id:
+            raise ApiError.validation("章节不存在或不属于该书籍版本", chapter_id=chapter_id)
+        roster, characters = confirmed_roster_context(session, version, chapter_id)
+        roster_unknown = (
+            roster is None
+            or roster.status is not CharacterRosterStatus.CONFIRMED
+            or not characters
+            or roster.pov_character_id not in {person.id for person in characters}
+        )
+        if roster_unknown:
+            request_range = {**request_range, "chapter_id": None}
+    # This object is never added to the session. Assembly only reads range_json
+    # and storage identities, then mutates the fresh in-memory SceneState.
+    request = Job(range_json=json.dumps(request_range, ensure_ascii=False))
+    inputs: dict[str, int] = {}
+    for window in windows:
+        state = SceneState()
+        ready, error = _apply_confirmed_roster(session, request, version, state, window)
+        if not ready:
+            raise ApiError.validation(error or "人物资料无法安全读取")
+        payload = _request_payload_for(window=window, state=state)
+        prompt_tokens = sum(estimate_tokens(message["content"]) for message in payload["messages"])
+        inputs[window.window_id] = max(int(window.budget["total_tokens"]), prompt_tokens)
+    return inputs, roster_unknown
 
 
 def profile_snapshot(
@@ -314,6 +383,7 @@ def create_inference_job(
     visible_horizon_cp: int | None,
     kind: JobKind = JobKind.INFERENCE,
     inference_options: dict[str, Any] | None = None,
+    settings: Settings | None = None,
 ) -> tuple[Job, bool]:
     """幂等创建任务；返回 ``(job, created)``。"""
 
@@ -373,23 +443,9 @@ def create_inference_job(
     }
     digest = digest_request(request_payload)
 
-    existing = session.execute(
-        select(Job).where(Job.idempotency_key == idempotency_key)
-    ).scalar_one_or_none()
+    existing = find_request_job(session, idempotency_key, digest)
     if existing is not None:
-        if existing.request_digest == digest:
-            return existing, False
-        raise ApiError(
-            ErrorCode.IDEMPOTENCY_CONFLICT,
-            "同一幂等键已被不同的请求使用",
-            details={
-                "idempotency_key": idempotency_key,
-                "job_id": existing.id,
-                "existing_digest": existing.request_digest,
-                "request_digest": digest,
-            },
-            status_code=409,
-        )
+        return existing, False
 
     # Different UI events may arrive before React has disabled the button, or
     # from two tabs. Reuse an equivalent active job even when each event has a
@@ -408,11 +464,16 @@ def create_inference_job(
         .first()
     )
     if active_duplicate is not None:
+        bind_request_key(session, active_duplicate, idempotency_key, digest)
         return active_duplicate, False
 
     from .occupancy import guard_active_target
 
-    guard_active_target(session, version.id, kind, range_payload)
+    guard_active_target(session, version.id, kind, {
+        **range_payload,
+        "reading_mode": reading_mode.value,
+        "visible_horizon_cp": visible_horizon_cp,
+    }, settings=settings)
 
     job = Job(
         kind=kind,
@@ -439,6 +500,7 @@ def create_inference_job(
     )
     session.add(job)
     session.flush()
+    bind_request_key(session, job, idempotency_key, digest)
     return job, True
 
 
@@ -463,11 +525,14 @@ def job_detail(session: Session, job: Job) -> JobDetailOut:
     runs = list(
         session.execute(
             select(
+                InferenceRun.id,
+                InferenceRun.created_at,
                 InferenceRun.window_id,
                 InferenceRun.usage_json,
                 InferenceRun.state,
                 InferenceRun.error_code,
             ).where(InferenceRun.job_id == job.id)
+            .order_by(InferenceRun.created_at, InferenceRun.id)
         )
     )
     return _job_detail(job, rows, runs)
@@ -489,12 +554,15 @@ def job_details(session: Session, jobs: Sequence[Job]) -> list[JobDetailOut]:
     runs_by_job: dict[str, list[Any]] = {}
     for run in session.execute(
         select(
+            InferenceRun.id,
+            InferenceRun.created_at,
             InferenceRun.job_id,
             InferenceRun.window_id,
             InferenceRun.usage_json,
             InferenceRun.state,
             InferenceRun.error_code,
         ).where(InferenceRun.job_id.in_(job_ids))
+        .order_by(InferenceRun.created_at, InferenceRun.id)
     ):
         runs_by_job.setdefault(run.job_id, []).append(run)
     return [
@@ -514,6 +582,19 @@ def _job_detail(job: Job, rows: list[JobWindow], runs: list[Any]) -> JobDetailOu
     progress = json.loads(job.progress_json) if job.progress_json else None
     from .local_finalization import settlement_progress
     progress = settlement_progress(job.id, progress)
+    # Primary, format retries and review stages share their window_id. Only the
+    # latest attempt for each window can leave an unresolved service failure.
+    # A COMPLETED job can retain its valid primary result after review fails.
+    latest_by_window = {run.window_id: run for run in runs}
+    service_failure = next(
+        (
+            run for run in reversed(runs)
+            if latest_by_window[run.window_id] is run
+            and run.state.value == "FAILED"
+            and run.error_code in {"RATE_LIMITED", "PROVIDER_QUOTA_EXHAUSTED"}
+        ),
+        None,
+    )
     return JobDetailOut(
         range=json.loads(job.range_json or "{}"),
         id=job.id,
@@ -525,6 +606,8 @@ def _job_detail(job: Job, rows: list[JobWindow], runs: list[Any]) -> JobDetailOu
         progress=progress,
         checkpoint=json.loads(job.checkpoint_json) if job.checkpoint_json else None,
         last_error=job.last_error,
+        service_error_code=service_failure.error_code if service_failure else None,
+        service_error_run_id=service_failure.id if service_failure else None,
         windows=windows,
         remaining_windows=sum(
             1 for row in rows if row.state in {JobState.QUEUED, JobState.NEEDS_RECONCILIATION}
@@ -633,9 +716,11 @@ def _spent_tokens(rows) -> dict[str, int]:  # noqa: ANN001
     for run in rows:
         if not run.usage_json:
             # INVALID_MODEL_OUTPUT 表示提供方通常已经生成过内容；缺 usage 不能按零费用处理。
+            # 历史 UNAVAILABLE 也可能是已发送后的响应中断；只有独立的
+            # PROVIDER_CONNECTION_FAILED 能证明尚未发送，且不伪造零 usage。
             if run.state.value in {"DISPATCHED", "UNKNOWN_OUTCOME", "SUCCEEDED"} or (
                 run.state.value == "FAILED" and run.error_code in {
-                    "INVALID_MODEL_OUTPUT", "LOCAL_FINALIZATION_FAILED",
+                    "INVALID_MODEL_OUTPUT", "LOCAL_FINALIZATION_FAILED", "PROVIDER_UNAVAILABLE",
                 }
             ):
                 unknown_runs += 1

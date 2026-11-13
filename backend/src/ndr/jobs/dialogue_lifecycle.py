@@ -23,6 +23,13 @@ class ReceiptRecoveryError(ValueError):
     """Only fixed, safe local recovery diagnostics, never provider content."""
 
 
+def dialogue_job_is_active(job_id: str) -> bool:
+    """Persisted pause/failure can precede the worker's final local release."""
+    from .local_finalization import settlement_pending
+    with _guard:
+        return job_id in _active or settlement_pending(job_id)
+
+
 def acquire(job_id: str) -> bool:
     from .local_finalization import settlement_pending
     with _guard:
