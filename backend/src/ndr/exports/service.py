@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -32,11 +32,13 @@ from ..storage.models import (
     Job,
     Resource,
 )
-from ..storage.paths import resolve_within, to_relative
+from ..storage.paths import resolve_within
+from ..storage.transactions import finish_local_write
 from .annotations import build_annotations_manifest
 from .epub import build_epub
 from .html import render_html
 from .render import EXPORTER_VERSION, RenderedBook, export_filename, render_book, usable_items
+from .settlement import fail_receipt_write, recover_export, write_receipt
 from .validation import validate_export
 
 
@@ -74,14 +76,16 @@ def create_artifact(
     fmt: ExportFormat,
     style: ExportStylePreset,
 ) -> tuple[ExportArtifact, bool]:
-    """幂等创建：相同 fingerprint 且已完成的产物直接复用。"""
+    """复用相同指纹的完成或在途产物；失败产物允许重新生成。"""
 
     digest = artifact_fingerprint(snapshot.snapshot_hash, fmt, style)
     existing = session.execute(
         select(ExportArtifact).where(
             ExportArtifact.fingerprint == digest,
-            ExportArtifact.state == JobState.COMPLETED.value,
+            ExportArtifact.state.in_({"QUEUED", "RUNNING", "COMPLETED"}),
         )
+        .order_by((ExportArtifact.state == "COMPLETED").desc(),
+                  ExportArtifact.created_at, ExportArtifact.id).limit(1)
     ).scalar_one_or_none()
     if existing is not None:
         return existing, False
@@ -150,7 +154,58 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
     artifact_id: str,
     epubcheck_jar: str | Path | None = None,
 ) -> ExportOutcome:
-    """执行一次导出：渲染（读事务）→ 写文件 + 校验（无事务）→ 落状态（写事务）。"""
+    """Generate once, durably retain the result, and retry only local settlement."""
+
+    def start(session):
+        artifact = session.get(ExportArtifact, artifact_id)
+        if artifact is None:
+            return None
+        snapshot = session.get(ExportSnapshot, artifact.snapshot_id)
+        if artifact.state != "QUEUED":
+            return artifact, snapshot, False
+        artifact.state = "RUNNING"
+        job = session.get(Job, artifact.job_id) if artifact.job_id else None
+        if job is not None:
+            job.state = JobState.RUNNING
+            job.progress_json = '{"stage": "running"}'
+        return artifact, snapshot, True
+
+    started = finish_local_write(session_factory, start)
+    if started is None:
+        return ExportOutcome(artifact_id=artifact_id, state="FAILED", format="",
+                             validation={"detail": "产物不存在"})
+    artifact, snapshot, claimed = started
+    if not claimed:
+        recover_export(session_factory, settings, artifact_id)
+        with session_factory() as session:
+            current = session.get(ExportArtifact, artifact_id)
+            return ExportOutcome(artifact_id=artifact_id, state=current.state,
+                                 format=current.format.value, reused=True)
+    assert snapshot is not None
+    try:
+        outcome = _generate_export(session_factory, settings, artifact_id=artifact_id,
+                                   epubcheck_jar=epubcheck_jar)
+    except Exception as exc:  # noqa: BLE001 - rendering failures also need durable terminal state
+        outcome = ExportOutcome(
+            artifact_id=artifact_id, state="FAILED", format=artifact.format.value,
+            validation={"ok": False, "detail": f"{type(exc).__name__}: {exc}"},
+        )
+    try:
+        write_receipt(settings, artifact, snapshot, asdict(outcome))
+    except OSError:
+        fail_receipt_write(session_factory, artifact, snapshot)
+    else:
+        recover_export(session_factory, settings, artifact_id)
+    with session_factory() as session:
+        current = session.get(ExportArtifact, artifact_id)
+        if current is not None:
+            outcome.state = current.state
+            outcome.validation = json.loads(current.validation_json or "{}")
+    return outcome
+
+
+def _generate_export(session_factory, settings, *, artifact_id, epubcheck_jar):
+    """Render/read resources without a writer, then generate and validate local bytes."""
 
     with session_factory() as session:
         artifact = session.get(ExportArtifact, artifact_id)
@@ -173,8 +228,6 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
         )
         payload = json.loads(snapshot.annotation_projection_json or "{}")
         chapter_ids = json.loads(snapshot.selected_chapter_ids_json or "[]")
-        artifact.state = JobState.RUNNING.value
-        session.commit()
         rendered = render_book(
             session,
             settings,
@@ -191,7 +244,6 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
             version=version,
             resource_ids=rendered.referenced_resource_ids(),
         )
-        book_title = book.title
         selected = bool(chapter_ids)
         fmt = artifact.format
         annotations_manifest = None
@@ -275,26 +327,6 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
             validation={"ok": False, "detail": f"{type(exc).__name__}: {exc}"},
         )
 
-    with session_factory() as session:
-        artifact = session.get(ExportArtifact, artifact_id)
-        if artifact is not None:
-            artifact.state = outcome.state
-            artifact.relative_path = to_relative(settings, path) if outcome.filename else None
-            artifact.file_sha256 = outcome.file_sha256
-            artifact.byte_size = outcome.byte_size
-            artifact.validation_json = json.dumps(outcome.validation or {}, ensure_ascii=False)
-            job = session.get(Job, artifact.job_id) if artifact.job_id else None
-            if job is not None:
-                job.state = JobState(outcome.state)
-                job.last_error = None if outcome.state == JobState.COMPLETED.value else str(
-                    (outcome.validation or {}).get("detail") or "导出未通过校验"
-                )
-                job.progress_json = json.dumps(
-                    {"stage": "completed" if outcome.state == "COMPLETED" else "failed"},
-                    ensure_ascii=False,
-                )
-        session.commit()
-    _ = book_title
     return outcome
 
 

@@ -74,6 +74,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app.state.recovery = recover_on_startup(
                     session_factory, lease_seconds=resolved.stale_run_lease_seconds
                 ).as_dict()
+                from .exports.settlement import recover_exports
+
+                recover_exports(session_factory, resolved)
             except Exception as exc:  # noqa: BLE001 - 恢复失败不能阻止服务启动
                 app.state.recovery = {"error": type(exc).__name__}
                 logger.warning("启动恢复扫描失败：%s", type(exc).__name__)

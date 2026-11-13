@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from copy import deepcopy
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import select, update
+from sqlalchemy.exc import SQLAlchemyError
 
 from ..api.errors import ApiError
 from ..context.budget import estimate_tokens
@@ -25,7 +27,9 @@ from ..jobs.service import digest_request, job_detail, profile_snapshot
 from ..llm.adapters import sanitize
 from ..llm.errors import ProviderError, ProviderErrorKind
 from ..storage.models import Book, BookCharacter, BookVersion, InferenceRun, Job
-from ..storage.transactions import transaction
+from ..storage.retention_policy import apply_completed_job_retention
+from ..storage.run_archive import decode_archive, save_run_archive
+from ..storage.transactions import finish_local_write, transaction
 from ..storage.write_queue import writer_job_scope
 from .directory import _guard, _sync, directory, edit, merge
 from .facts import IdentityProfileUpdate, prepare_profile_updates
@@ -567,110 +571,99 @@ def confirm_auto_merge(session, job, selected_ids, visible_from_cp=None, *, sett
     return auto_merge_result(session, job)
 
 
-@writer_job_scope
-def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_factory=None):
-    """Returns (state, calls). A job is claimed once; no implicit paid retries."""
-    run_id = None
-    started = time.monotonic()
+def _merge_request(entries, snapshot, limit):
+    messages = _messages(entries)
+    estimated = sum(estimate_tokens(message["content"]) for message in messages)
+    output_tokens = int((snapshot.get("params") or {}).get("max_tokens", MAX_OUTPUT_TOKENS))
+    if output_tokens <= 0:
+        raise ValueError("模型配置的 max_tokens 必须为正整数")
+    if limit is not None:
+        output_tokens = min(output_tokens, limit - estimated)
+    return estimated, {
+        "task": "character_merge", "messages": messages,
+        "max_tokens": output_tokens, "max_tokens_override": output_tokens,
+        "json_object": True, "target_quote_ids": [], "profile_snapshot": snapshot,
+    }
+
+
+def returned_merge_receipt(session, job):
+    """Validate a complete frozen return before any purely local recovery."""
+    run = session.scalar(select(InferenceRun).where(
+        InferenceRun.job_id == job.id,
+    ).order_by(InferenceRun.created_at.desc(), InferenceRun.id.desc()).limit(1))
+    if run is None:
+        return None
     try:
-        with transaction(factory) as session:
-            job = session.get(Job, job_id)
-            if not job or job.kind is not JobKind.CHARACTER_MERGE:
-                return JobState.FAILED, 0
-            if job.state is not JobState.QUEUED:
-                return job.state, 0
-            # Even an explicit recovery action cannot replay a dispatched one-shot job.
-            if session.scalar(
-                select(InferenceRun.id).where(InferenceRun.job_id == job.id).limit(1)
-            ):
-                job.state = JobState.FAILED
-                job.last_error = (
-                    "本次自动合并已经调用过模型，请查看结果；需要再分析时请新建一次自动合并"
-                )
-                return job.state, 0
-            claimed = session.execute(
-                update(Job)
-                .where(Job.id == job_id, Job.state == JobState.QUEUED)
-                .values(state=JobState.RUNNING),
-                execution_options={"synchronize_session": False},
-            )
-            if claimed.rowcount != 1:
-                session.refresh(job)
-                return job.state, 0
-            session.refresh(job)
-            entries = json.loads(job.range_json)["entries"]
-            if not entries:
-                job.state = JobState.COMPLETED
-                job.checkpoint_json = json.dumps(
-                    {"merge_result": {"merged_count": 0, "merges": [], "skipped_groups": 0}}
-                )
-                return job.state, 0
-            _guard(session, session.get(BookVersion, job.book_version_id), job.id)
-            messages = _messages(entries)
-            estimated = sum(estimate_tokens(message["content"]) for message in messages)
-            limit = json.loads(job.budget_json).get("max_total_tokens")
-            snapshot = json.loads(job.profile_snapshot_json)
-            output_tokens = int((snapshot.get("params") or {}).get("max_tokens", MAX_OUTPUT_TOKENS))
-            if output_tokens <= 0:
-                raise ValueError("模型配置的 max_tokens 必须为正整数")
-            if limit is not None and estimated >= limit:
-                job.state = JobState.BUDGET_EXHAUSTED
-                job.last_error = "Token 上限不足以容纳人物资料和合并方案，未调用模型"
-                return job.state, 0
-            if limit is not None:
-                output_tokens = min(output_tokens, limit - estimated)
-            adapter = (
-                adapter_factory(job, snapshot)
-                if adapter_factory
-                else _build_adapter(settings, credentials, snapshot)
-            )
-            job.progress_json = json.dumps(
-                {
-                    "stage": "analyzing",
-                    "estimated_input_tokens": estimated,
-                    "requested_output_tokens": output_tokens,
-                }
-            )
-            run = InferenceRun(
-                job_id=job.id,
-                window_id=f"character-merge:{job.id}",
-                profile_snapshot_json=job.profile_snapshot_json,
-                request_fingerprint=digest_request({"messages": messages}),
-                state=InferenceRunState.DISPATCHED,
-            )
-            session.add(run)
-            session.flush()
-            run_id = run.id
-        raw = asyncio.run(
-            adapter.generate_labels(
-                {
-                    "task": "character_merge",
-                    "messages": messages,
-                    "max_tokens": output_tokens,
-                    "max_tokens_override": output_tokens,
-                    "json_object": True,
-                    "target_quote_ids": [],
-                }
-            )
-        )
+        archive = decode_archive(run.call_archive)
+        request = archive["request"]
+        entries = json.loads(job.range_json)["entries"]
+        limit = json.loads(job.budget_json).get("max_total_tokens")
+        _, expected_request = _merge_request(entries, json.loads(job.profile_snapshot_json), limit)
+        if (job.state is JobState.BUDGET_EXHAUSTED
+                or run.error_code not in {None, "MERGE_FINALIZATION_FAILED"}
+                or archive.get("error") is not None
+                or request != expected_request
+                or archive.get("phase") != "returned"
+                or not isinstance(archive.get("adapter_result"), dict)
+                or request.get("task") != "character_merge"
+                or request.get("messages") != _messages(entries)
+                or run.window_id != f"character-merge:{job.id}"
+                or request.get("profile_snapshot") != json.loads(job.profile_snapshot_json)
+                or run.profile_snapshot_json != job.profile_snapshot_json
+                or run.request_fingerprint != digest_request(request)):
+            return None
+        raw = archive["adapter_result"]
+        payload = {key: value for key, value in raw.items() if not key.startswith("_")}
+        _validated_groups(payload, entries)
+        return run.id, request, raw, archive.get("elapsed_ms")
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
+
+
+def has_returned_merge_result(session, job):
+    return returned_merge_receipt(session, job) is not None
+
+
+def _local_merge_settlement(factory, job_id, settle, *, calls):
+    from ..diagnostics import log_failure
+    from ..jobs.local_finalization import defer_settlement
+
+    try:
+        state, _ = settle()
+        return state, calls
+    except SQLAlchemyError as error:
+        log_failure("merge_local_write", job_id, error)
+        defer_settlement(factory, job_id, settle)
+        return JobState.RUNNING, calls
+
+
+def _finish_returned_merge(
+    factory, job_id, run_id, request, raw, entries, limit, elapsed_ms, settings,
+):
+    try:
         usage = raw.get("_usage") if isinstance(raw, dict) else None
-        payload = {key: value for key, value in dict(raw).items() if not key.startswith("_")}
-        with transaction(factory) as session:
+        def persist_returned(session):
             run = session.get(InferenceRun, run_id)
             if run is None:
                 return JobState.FAILED, 1
-            run.elapsed_ms = int((time.monotonic() - started) * 1000)
+            save_run_archive(
+                run, {**request, "profile_snapshot": json.loads(run.profile_snapshot_json)},
+                raw=raw, elapsed_ms=elapsed_ms, phase="returned",
+            )
+            run.elapsed_ms = elapsed_ms
             run.state = InferenceRunState.SUCCEEDED
+            run.error_code = None
             if isinstance(usage, dict) and not usage.get("unknown"):
                 run.usage_json = json.dumps(usage, ensure_ascii=False)
             job = session.get(Job, job_id)
-            if job is not None:
+            if job is not None and isinstance(raw, dict):
                 checkpoint = json.loads(job.checkpoint_json or "{}")
-                checkpoint.update(saved_model_groups(payload),
-                                  character_refs=character_refs(entries))
+                checkpoint.update(saved_model_groups(raw), character_refs=character_refs(entries))
                 job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+        finish_local_write(factory, persist_returned, job_id=job_id)
+        payload = {key: value for key, value in dict(raw).items() if not key.startswith("_")}
         output, invalid_groups, validation_issues = _validated_groups(payload, entries)
-        with transaction(factory) as session:
+        def finalize(session):
             job = session.get(Job, job_id)
             if job is None:
                 return JobState.FAILED, 1
@@ -690,9 +683,10 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
                     return job.state, 1
             _check_current(session, job, entries)
             analysis_groups = output.model_dump()["groups"]
-            output, unnamed_groups = _named_targets(output, entries)
-            accepted = [group.model_dump() for group in output.groups if group.confidence >= 0.95]
-            skipped = invalid_groups + unnamed_groups + len(output.groups) - len(accepted)
+            named_output, unnamed_groups = _named_targets(output.model_copy(deep=True), entries)
+            accepted = [group.model_dump() for group in named_output.groups
+                        if group.confidence >= 0.95]
+            skipped = invalid_groups + unnamed_groups + len(named_output.groups) - len(accepted)
             checkpoint = json.loads(job.checkpoint_json or "{}")
             phase = "awaiting_confirmation" if accepted else "no_suggestions"
             checkpoint.update(
@@ -707,65 +701,179 @@ def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_f
             )
             job.state = JobState.COMPLETED
             job.last_error = None
-        return JobState.COMPLETED, 1
-    except Exception as exc:
-        unknown = isinstance(exc, ProviderError) and exc.kind in {
-            ProviderErrorKind.TIMEOUT,
-            ProviderErrorKind.UNKNOWN_OUTCOME,
-        }
-        error = (
-            exc.message
-            if isinstance(exc, (ProviderError, ApiError))
-            else (
-                "模型未提供有效的整理后人物说明（需为1–512字），未执行任何合并，请重新分析"
-                if isinstance(exc, ValidationError) and any(
-                    "merged_description" in error["loc"] for error in exc.errors()
-                ) else str(exc)
-                if isinstance(exc, ValueError) and not isinstance(exc, ValidationError)
-                else "模型合并方案未通过校验，未执行任何合并"
+            apply_completed_job_retention(
+                session, job, keep_call_details=settings.retain_completed_call_details,
             )
+            return JobState.COMPLETED, 1
+        return finish_local_write(factory, finalize, job_id=job_id)
+    except SQLAlchemyError:
+        raise
+    except Exception as error:
+        return _finish_merge_failure(factory, job_id, run_id, error, elapsed_ms)
+
+
+def _finish_merge_failure(factory, job_id, run_id, exc, elapsed_ms, request=None):
+    unknown = isinstance(exc, ProviderError) and exc.kind in {
+        ProviderErrorKind.TIMEOUT,
+        ProviderErrorKind.UNKNOWN_OUTCOME,
+    }
+    error = (
+        exc.message
+        if isinstance(exc, (ProviderError, ApiError))
+        else (
+            "模型未提供有效的整理后人物说明（需为1–512字），未执行任何合并，请重新分析"
+            if isinstance(exc, ValidationError) and any(
+                "merged_description" in error["loc"] for error in exc.errors()
+            ) else str(exc)
+            if isinstance(exc, ValueError) and not isinstance(exc, ValidationError)
+            else "模型合并方案未通过校验，未执行任何合并"
+            if isinstance(exc, (MergePlanError, ValidationError))
+            else f"自动合并本地收尾失败（{type(exc).__name__}），未执行任何合并"
         )
-        with transaction(factory) as session:
-            job = session.get(Job, job_id)
-            if job:
-                job.state = JobState.NEEDS_RECONCILIATION if unknown else JobState.FAILED
-                job.last_error = error[:1024]
-                job.progress_json = json.dumps({"stage": "failed"})
-                if isinstance(exc, (MergePlanError, ValidationError)):
-                    checkpoint = json.loads(job.checkpoint_json or "{}")
-                    if isinstance(exc, MergePlanError):
-                        issues = exc.issues
-                    else:
-                        issues = []
-                        for item in exc.errors()[:50]:
-                            location = item["loc"]
-                            group_index = location[1] + 1 if len(location) > 1 and isinstance(
-                                location[1], int,
-                            ) else None
-                            field = ".".join(str(part) for part in location[2:])
-                            field = sanitize(field, limit=160)
-                            message = (f"第{group_index}组的 {field} 字段缺失或格式不符合要求"
-                                       if group_index else "合并方案格式不符合要求")
-                            issues.append({"code": "invalid_group_schema",
-                                           "group_index": group_index, "field": field,
-                                           "character_ref": None, "related_group_index": None,
-                                           "message": message})
-                    checkpoint["validation_issues"] = issues
-                    job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
-            if run_id:
-                run = session.get(InferenceRun, run_id)
-                if run is None:
-                    return JobState.FAILED, 1
-                run.state = (
-                    InferenceRunState.UNKNOWN_OUTCOME if unknown else InferenceRunState.FAILED
+    )
+    def settle(session):
+        job = session.get(Job, job_id)
+        if job:
+            job.state = JobState.NEEDS_RECONCILIATION if unknown else JobState.FAILED
+            job.last_error = error[:1024]
+            job.progress_json = json.dumps({"stage": "failed"})
+            if isinstance(exc, (MergePlanError, ValidationError)):
+                checkpoint = json.loads(job.checkpoint_json or "{}")
+                if isinstance(exc, MergePlanError):
+                    issues = exc.issues
+                else:
+                    issues = []
+                    for item in exc.errors()[:50]:
+                        location = item["loc"]
+                        group_index = location[1] + 1 if len(location) > 1 and isinstance(
+                            location[1], int,
+                        ) else None
+                        field = ".".join(str(part) for part in location[2:])
+                        field = sanitize(field, limit=160)
+                        message = (f"第{group_index}组的 {field} 字段缺失或格式不符合要求"
+                                   if group_index else "合并方案格式不符合要求")
+                        issues.append({"code": "invalid_group_schema",
+                                       "group_index": group_index, "field": field,
+                                       "character_ref": None, "related_group_index": None,
+                                       "message": message})
+                checkpoint["validation_issues"] = issues
+                job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+        if run_id:
+            run = session.get(InferenceRun, run_id)
+            if run is None:
+                return JobState.FAILED, 1
+            if isinstance(exc, ProviderError) and request is not None:
+                save_run_archive(
+                    run, request, error=exc, elapsed_ms=elapsed_ms,
+                    phase="returned" if exc.receipt is not None else "failed",
                 )
-                run.error_code = (
-                    exc.code.value if isinstance(exc, ProviderError) else "INVALID_MODEL_OUTPUT"
-                )
-                run.elapsed_ms = int((time.monotonic() - started) * 1000)
-                error_usage = exc.details.get("usage") if isinstance(exc, ProviderError) else None
-                if isinstance(error_usage, dict) and not error_usage.get("unknown"):
-                    run.usage_json = json.dumps(error_usage)
+            run.state = (
+                InferenceRunState.UNKNOWN_OUTCOME if unknown else InferenceRunState.FAILED
+            )
+            run.error_code = (
+                exc.code.value if isinstance(exc, ProviderError) else "INVALID_MODEL_OUTPUT"
+                if isinstance(exc, (ValueError, ValidationError, MergePlanError))
+                else "MERGE_STATE_CHANGED" if isinstance(exc, ApiError)
+                else "MERGE_FINALIZATION_FAILED"
+            )
+            run.elapsed_ms = elapsed_ms
+            error_usage = exc.details.get("usage") if isinstance(exc, ProviderError) else None
+            if isinstance(error_usage, dict) and not error_usage.get("unknown"):
+                run.usage_json = json.dumps(error_usage)
         return JobState.NEEDS_RECONCILIATION if unknown else JobState.FAILED, int(
             run_id is not None
+        )
+    return finish_local_write(factory, settle, job_id=job_id)
+
+
+@writer_job_scope
+def run_auto_merge_job(factory, settings, *, job_id, credentials=None, adapter_factory=None):
+    """Returns (state, calls). A job is claimed once; no implicit paid retries."""
+    run_id = None
+    request = None
+    started = time.monotonic()
+    try:
+        with transaction(factory) as session:
+            job = session.get(Job, job_id)
+            if not job or job.kind is not JobKind.CHARACTER_MERGE:
+                return JobState.FAILED, 0
+            if job.state is not JobState.QUEUED:
+                return job.state, 0
+            previous_run = session.scalar(
+                select(InferenceRun.id).where(InferenceRun.job_id == job.id).limit(1)
+            )
+            restored = returned_merge_receipt(session, job) if previous_run else None
+            if previous_run and restored is None:
+                job.state = JobState.FAILED
+                job.last_error = "本次自动合并缺少完整且匹配的返回，无法本地恢复；未重新调用模型"
+                return job.state, 0
+            claimed = session.execute(
+                update(Job)
+                .where(Job.id == job_id, Job.state == JobState.QUEUED)
+                .values(state=JobState.RUNNING),
+                execution_options={"synchronize_session": False},
+            )
+            if claimed.rowcount != 1:
+                session.refresh(job)
+                return job.state, 0
+            session.refresh(job)
+            entries = json.loads(job.range_json)["entries"]
+            if not entries:
+                job.state = JobState.COMPLETED
+                job.checkpoint_json = json.dumps(
+                    {"merge_result": {"merged_count": 0, "merges": [], "skipped_groups": 0}}
+                )
+                return job.state, 0
+            limit = json.loads(job.budget_json).get("max_total_tokens")
+            if restored:
+                run_id, request, raw, elapsed_ms = restored
+            else:
+                _guard(session, session.get(BookVersion, job.book_version_id), job.id)
+                snapshot = json.loads(job.profile_snapshot_json)
+                estimated, request = _merge_request(entries, snapshot, limit)
+                output_tokens = request["max_tokens"]
+                if limit is not None and estimated >= limit:
+                    job.state = JobState.BUDGET_EXHAUSTED
+                    job.last_error = "Token 上限不足以容纳人物资料和合并方案，未调用模型"
+                    return job.state, 0
+                adapter = (
+                    adapter_factory(job, snapshot)
+                    if adapter_factory
+                    else _build_adapter(settings, credentials, snapshot)
+                )
+                job.progress_json = json.dumps(
+                    {
+                        "stage": "analyzing",
+                        "estimated_input_tokens": estimated,
+                        "requested_output_tokens": output_tokens,
+                    }
+                )
+                run = InferenceRun(
+                    job_id=job.id,
+                    window_id=f"character-merge:{job.id}",
+                    profile_snapshot_json=job.profile_snapshot_json,
+                    request_fingerprint=digest_request(request),
+                    state=InferenceRunState.DISPATCHED,
+                )
+                save_run_archive(run, request)
+                session.add(run)
+                session.flush()
+                run_id = run.id
+        if not restored:
+            provider_request = {key: value for key, value in request.items()
+                                if key != "profile_snapshot"}
+            raw = asyncio.run(adapter.generate_labels(deepcopy(provider_request)))
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+        return _local_merge_settlement(
+            factory, job_id,
+            lambda: _finish_returned_merge(
+                factory, job_id, run_id, request, raw, entries, limit, elapsed_ms, settings,
+            ), calls=0 if restored else 1,
+        )
+    except Exception as exc:
+        return _local_merge_settlement(
+            factory, job_id,
+            lambda error=exc: _finish_merge_failure(
+                factory, job_id, run_id, error, int((time.monotonic() - started) * 1000), request,
+            ), calls=int(run_id is not None),
         )

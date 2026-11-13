@@ -65,10 +65,19 @@ def admit_job_resume(session: Session, settings: Settings, job: Job) -> bool:
             not json.loads(job.range_json or "{}").get("roster_repair_protocol")
             and has_returned_result(session, job)
         )
+    recover_merge_receipt = False
+    if job.kind is JobKind.CHARACTER_MERGE:
+        from ..characters.auto_merge import has_returned_merge_result
+
+        recover_merge_receipt = job.state in {
+            JobState.FAILED, JobState.PAUSED, JobState.PARTIAL,
+            JobState.NEEDS_RECONCILIATION, JobState.BUDGET_EXHAUSTED,
+        } and has_returned_merge_result(session, job)
     recover_dialogue_receipt = (
         job.state is JobState.FAILED and bool(checkpoint.get("dialogue_receipts"))
     )
-    if not (recover_roster_receipt or recover_dialogue_receipt or job.state in {
+    if not (recover_roster_receipt or recover_merge_receipt or recover_dialogue_receipt
+            or job.state in {
         JobState.PAUSED, JobState.PARTIAL, JobState.BUDGET_EXHAUSTED,
     }):
         return False

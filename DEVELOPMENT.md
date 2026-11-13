@@ -76,11 +76,11 @@ pwsh -File scripts/verify.ps1
 
 ## 5. API 和模块边界
 
-推理尝试的内部证据由`ndr.storage.run_archive`压缩保存，适配器通过`ProviderResult.receipt`/`ProviderError.receipt`私有属性传递实际请求和已接收响应，不添加模型JSON字段或公开错误正文。归档包含已发送小说文本和提供方响应，应与书库同等保护，禁止上传仓库。迁移0022仅新增可空、按需加载的列，不回填历史证据、不自动压缩整库；8MiB上限、不完整标记和使用边界见[契约](docs/CONTRACTS.md#模型配置任务和恢复)。当前归档覆盖调度器对白及章节人物分析，读取成功不等于结果通过校验，也不等于已实现自动重放恢复。
+推理尝试的内部证据由`ndr.storage.run_archive`压缩保存，适配器通过`ProviderResult.receipt`/`ProviderError.receipt`私有属性传递实际请求和已接收响应，不添加模型JSON字段或公开错误正文。归档包含已发送小说文本和提供方响应，应与书库同等保护，禁止上传仓库。归档覆盖调度器对白、章节人物分析和自动人物合并；读取成功不等于结果通过校验，恢复仍须经过流程绑定校验。8MiB上限、不完整标记、完成后留存与恢复边界见[契约](docs/CONTRACTS.md#模型配置任务和恢复)。
 
 迁移0023新增任务请求键登记表，回填原请求键，并保存活动任务复用时接受的其他请求键及各自摘要；旧任务内容不变。登记与任务创建处于同一事务，SQLite触发器防止原键夺用已登记的键。降级至0022会删除新登记的别名关联，原任务及原键保留；重新升级只能回填原键，不能找回降级丢失的别名。因此需要保留这些回执时应恢复完整备份，不应以降级再升级代替回滚。升级前备份、维护及数据目录说明见下文。
 
-`ndr.jobs.expression_pipeline`为显式短表达任务提供正式多阶段复核。`ReviewedExpression`将完整短提案、任务绑定和接受上限一起传给领域编译，不能用普通模型JSON伪造该类型。缓存使用独立版本并恢复上限；检查点只存调用引用，原始输出读内部压缩归档。阶段恢复不增加用量、不推断未收到的响应；实际产品选择及模型质量另验收。离线回归可运行`uv run --project backend python -m pytest backend/tests/integration/test_expression_pipeline.py`，仅用原创文本和隔离库。
+`ndr.jobs.expression_pipeline`为显式短表达任务提供正式多阶段复核。`ReviewedExpression`将完整短提案、任务绑定和接受上限一起传给领域编译，不能用普通模型JSON伪造该类型。缓存使用独立版本并恢复上限；恢复阶段的检查点保存调用引用，原始输出读取内部压缩归档；任务完成后按调用留存规则精简成功全文。阶段恢复不增加用量、不推断未收到的响应；实际产品选择及模型质量另验收。离线回归可运行`uv run --project backend python -m pytest backend/tests/integration/test_expression_pipeline.py`，仅用原创文本和隔离库。
 
 模型输出默认仍为1.0。显式1.1领域契约允许心声和引用保留人物，必须由调用方在解析及应用时指定版本；结构生成使用`expression_output_json_schema()`，不得直接把评测模块的内部speech视图提交书库。版本和缓存边界见[契约](docs/CONTRACTS.md#模型配置任务和恢复)。正式Jobs API可显式选择`range.output_protocol=expression-production-1`，由短协议编译为1.1；页面提供完整对白策略试验选项，默认未切换。人物反馈试验选择、前置条件及任务展示见[用户指南](docs/USER_GUIDE.md)。相关回归可运行`uv run --project backend python -m pytest backend/tests/unit/test_expression_contract.py backend/tests/integration/test_attribution_engine.py`，仅使用原创文本和隔离数据库，不调用模型。
 
@@ -196,6 +196,22 @@ uv run --project backend python -m ndr.storage.maintenance --apply
 ```
 
 可用 `--data-dir "实际书库目录"` 指定其他书库。维护会先生成校验过的 `backups/before-compact-*.sqlite3.gz` 备份，再升级数据库并压缩。升级事务提交前核对原有全部业务表与字段，缺失或内容变化则拒绝并回滚；压缩前后另核对升级后的完整业务数据，包括新增字段，避免将合法新增列误报为数据变化。数据库被占用、存在未结束任务或空间不足时拒绝执行。不会清理旧备份、回收文件或模型缓存，完成前不要启动服务。
+
+已完成任务的留存整理是独立操作，先预览：
+
+```powershell
+uv run --project backend python -m ndr.storage.retention
+```
+
+确认使用当前数据库版本、停止任务并停服后，执行：
+
+```powershell
+uv run --project backend python -m ndr.storage.retention --apply
+```
+
+同样支持 `--data-dir`。命令要求书库锁、SQLite 独占访问和足够备份空间，先创建并校验 `backups/before-retention-*.sqlite3.gz`，再在单个事务中精简已完成执行材料、共享旧人物展示历史并移除无引用共享基线。正文、标注、人物事实、撤销记录、书签、阅读位置、任务状态和用量均核对不变，异常回滚。未知归属缓存保留，未完成任务的恢复材料保留；具体留存条件见[契约](docs/CONTRACTS.md#模型配置任务和恢复)。此命令不自动升级或压缩数据库，报告中的逻辑字节变化不等于文件立即缩小，腾出的页可复用。需要缩小文件时另运行上面的离线压缩命令。
+
+排查需要成功调用全文时，在复现前将应用配置“保留已完成调用详情”打开并保存、重启，或设置 `NDR_RETAIN_COMPLETED_CALL_DETAILS=1`。默认关闭；离线整理也遵守该设置。已经精简的调用全文只能从整理前备份找回，开启选项不会重建历史响应。
 
 免安装版没有维护按钮；维护其书库前，须准备与当前迁移版本匹配的 EXE，旧 EXE 可能无法打开升级后的书库。恢复备份时先停服，解压为独立文件并检查后再替换，不能在服务运行中覆盖数据库或手改迁移版本。
 

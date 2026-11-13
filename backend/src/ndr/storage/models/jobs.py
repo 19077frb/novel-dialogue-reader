@@ -113,3 +113,6 @@ class ResultCache(IdMixin, TimestampMixin, Base):
     result_json: Mapped[str] = mapped_column(Text, nullable=False)
     dependency_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    book_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("book_versions.id", ondelete="CASCADE"), nullable=True, index=True,
+    )

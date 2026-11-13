@@ -1,5 +1,7 @@
 """Program-only identity colors shared by the directory, reader and exports."""
 
+from types import SimpleNamespace
+
 from sqlalchemy import select
 
 from ..storage.models import BookCharacter, Quote, Scene, SpeakerGroup
@@ -46,15 +48,20 @@ def allocate_colors(entries):
 
 def color_projection(session, version_id, horizon=None, *, characters=None):
     """Batch queries only; no annotation scan or per-character lookup."""
-    groups = list(session.execute(select(
-        SpeakerGroup.id, SpeakerGroup.version, SpeakerGroup.scene_id, SpeakerGroup.first_quote_id,
-        SpeakerGroup.character_id, SpeakerGroup.canonical_name, SpeakerGroup.description,
-        SpeakerGroup.presentation_history_json, Quote.start_cp.label("first_start_cp"),
+    rows = session.execute(select(
+        SpeakerGroup, Quote.start_cp,
         BookCharacter.preferred_color_index,
     ).join(Scene, SpeakerGroup.scene_id == Scene.id)
         .outerjoin(Quote, SpeakerGroup.first_quote_id == Quote.id)
         .outerjoin(BookCharacter, SpeakerGroup.character_id == BookCharacter.id)
-        .where(Scene.book_version_id == version_id)))
+        .where(Scene.book_version_id == version_id))
+    groups = [SimpleNamespace(
+        id=group.id, version=group.version, scene_id=group.scene_id,
+        first_quote_id=group.first_quote_id, character_id=group.character_id,
+        canonical_name=group.canonical_name, description=group.description,
+        presentation_history_json=group.presentation_history_json,
+        first_start_cp=first_start_cp, preferred_color_index=preferred_color_index,
+    ) for group, first_start_cp, preferred_color_index in rows]
     groups.sort(key=lambda group: (
         group.first_start_cp if group.first_start_cp is not None else 2**63 - 1, group.id,
     ))

@@ -117,7 +117,7 @@ def run(client, job, adapter):
     )
 
 
-def saved(client, job):
+def saved(client, job, *, include_archives=False):
     with client.app.state.session_factory() as session:
         row = session.get(Job, job["id"])
         runs = list(
@@ -135,7 +135,7 @@ def saved(client, job):
                     "id": r.id,
                     "state": r.state,
                     "usage": json.loads(r.usage_json or "{}"),
-                    "archive": decode_archive(r.call_archive),
+                    **({"archive": decode_archive(r.call_archive)} if include_archives else {}),
                 }
                 for r in runs
             ],
@@ -207,6 +207,7 @@ def test_public_api_zero_repairs_keeps_valid_people_without_second_call(migrated
 
 def test_isolated_policy_keeps_valid_repair_and_only_retries_remaining_group(migrated_client):
     client = migrated_client
+    client.app.state.settings.retain_completed_call_details = True
     data, job = prepare(client, api_options={
         "roster_repair_enabled": True, "max_roster_repairs": 2, "max_format_retries": 0,
     })
@@ -219,7 +220,7 @@ def test_isolated_policy_keeps_valid_repair_and_only_retries_remaining_group(mig
     adapter = FakeProviderAdapter(script=[primary(all_bad=True), partial, last])
     result = run(client, job, adapter)
     assert result.state is JobState.COMPLETED and result.calls == 3
-    _, progress, runs = saved(client, job)
+    _, progress, runs = saved(client, job, include_archives=True)
     diagnostics = progress["proposal_diagnostics"]
     assert diagnostics["repair_policy"] == "identity-blocks-2"
     assert diagnostics["repair_succeeded"] and diagnostics["unresolved_groups"] == []
@@ -258,6 +259,7 @@ def test_isolated_policy_exhausted_partial_repair_is_not_reported_as_whole_succe
 
 def test_isolated_policy_pause_restores_partial_receipt_without_resending_valid_group(migrated_client):
     client = migrated_client
+    client.app.state.settings.retain_completed_call_details = True
     data, job = prepare(client, api_options={"roster_repair_enabled": True, "max_roster_repairs": 2})
     partial = fixed()
     partial["repairs"].insert(0, {"indices": [1], "characters": [person("c1", "林舟", "L999")]})
@@ -267,14 +269,14 @@ def test_isolated_policy_pause_restores_partial_receipt_without_resending_valid_
     with client.app.state.session_factory() as session:
         assert not list(session.scalars(select(BookCharacter).where(
             BookCharacter.book_version_id == data["book_version_id"])))
-    original_runs = saved(client, job)[2]
+    original_runs = saved(client, job, include_archives=True)[2]
     update(client, job, state=JobState.QUEUED)
     last = fixed(indices=[1])
     last["repairs"][0]["characters"] = [person("c1", "林舟", "L2")]
     resumed_adapter = FakeProviderAdapter(script=[last])
     result = run(client, job, resumed_adapter)
     assert result.state is JobState.COMPLETED and result.calls == 1
-    runs = saved(client, job)[2]
+    runs = saved(client, job, include_archives=True)[2]
     assert [r["id"] for r in runs[:2]] == [r["id"] for r in original_runs]
     assert [r["archive"] for r in runs[:2]] == [r["archive"] for r in original_runs]
     with client.app.state.session_factory() as session:
@@ -304,11 +306,12 @@ def test_enabled_idempotency_key_returns_frozen_legacy_policy_job(migrated_clien
 
 def test_actual_partial_repair_keeps_separate_receipts_and_identity_sources(migrated_client):
     client = migrated_client
+    client.app.state.settings.retain_completed_call_details = True
     data, job = prepare(client)
     adapter = FakeProviderAdapter(script=[primary(), fixed()])
     result = run(client, job, adapter)
     assert result.state is JobState.COMPLETED and result.calls == 2
-    state, progress, runs = saved(client, job)
+    state, progress, runs = saved(client, job, include_archives=True)
     assert state is JobState.COMPLETED and progress["calls"] == 2
     assert [r["usage"]["total_tokens"] for r in runs] == [5, 7]
     assert progress["proposal_diagnostics"]["unresolved_groups"] == []
@@ -609,7 +612,7 @@ def test_finite_budget_retains_unknown_attempt_reserves_on_explicit_retry(migrat
     _, job = prepare(client)
     adapter = FakeProviderAdapter(script=[primary(), ProviderError(ProviderErrorKind.TIMEOUT, "timeout")])
     assert run(client, job, adapter).state is JobState.NEEDS_RECONCILIATION
-    unknown_reserve = saved(client, job)[2][1]["archive"]["request"]["reserve_tokens"]
+    unknown_reserve = saved(client, job, include_archives=True)[2][1]["archive"]["request"]["reserve_tokens"]
     update(client, job, budget={"max_input_tokens": unknown_reserve + 5})
     with client.app.state.session_factory() as session:
         reconcile_job(session, session.get(Job, job["id"]), action="retry")

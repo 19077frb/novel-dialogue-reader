@@ -232,6 +232,20 @@ def job_recovery(
     }:
         result.actions = []
         result.summary = "请在全书人物页查看合并结果；再次分析需新建一次自动合并，可能再次计费。"
+    if job.kind is JobKind.CHARACTER_MERGE and job.state in {
+        JobState.FAILED, JobState.PAUSED, JobState.PARTIAL,
+        JobState.NEEDS_RECONCILIATION, JobState.BUDGET_EXHAUSTED,
+    }:
+        from ..characters.auto_merge import has_returned_merge_result
+
+        if has_returned_merge_result(session, job):
+            result.actions = [RecoveryActionOut(
+                action="resume", label="恢复已返回的合并建议",
+                detail="校验并保存已有合并分析，无需模型凭据。",
+                paid=False, endpoint="POST /api/jobs/{id}/resume",
+            )]
+            result.requires_credential = False
+            result.summary = "模型已返回，可以继续保存本次合并建议。"
     if job.kind is JobKind.CHARACTER_ROSTER and job.state in {
         JobState.FAILED, JobState.NEEDS_RECONCILIATION, JobState.PAUSED, JobState.PARTIAL,
     } and not json.loads(job.range_json or "{}").get("roster_repair_protocol"):

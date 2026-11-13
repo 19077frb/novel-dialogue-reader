@@ -30,6 +30,13 @@ export function ExportProgress({ artifact, busy }: ExportProgressProps) {
     )
   }
   if (!artifact) return null
+  if (artifact.state === 'QUEUED' || artifact.state === 'RUNNING') {
+    return (
+      <p className="hint" role="status" aria-live="polite" data-testid="export-progress">
+        正在生成或保存导出结果…（不调用模型）
+      </p>
+    )
+  }
 
   const internal = (artifact.validation?.internal ?? {}) as {
     ok?: boolean
@@ -78,9 +85,10 @@ export function ExportProgress({ artifact, busy }: ExportProgressProps) {
           正文和已导出的对白标注不受影响；若需迁移完整人物资料，请导出整本。
         </p>
       )}
-      {artifact.state !== 'COMPLETED' && (
+      {artifact.state === 'FAILED' && (
         <p className="status-error" data-testid="export-failed">
-          导出未通过校验，文件不会提供下载。
+          导出失败。{typeof artifact.validation?.detail === 'string'
+            ? artifact.validation.detail : '请查看校验结果，文件不会提供下载。'}
         </p>
       )}
     </div>

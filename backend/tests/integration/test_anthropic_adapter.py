@@ -265,8 +265,9 @@ def test_roster_finalization_recovery_does_not_resend_anthropic(migrated_client,
     commit, failed, calls = Session.commit, [], []
 
     def fail_once(session):
-        if not failed and any(isinstance(row, Job) and row.state == JobState.COMPLETED
-                              for row in session.dirty):
+        if not failed and session.scalar(select(Job.state).where(
+            Job.id == job_id,
+        )) is JobState.COMPLETED:
             failed.append(True)
             raise RuntimeError("isolated finalization failure")
         return commit(session)

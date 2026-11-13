@@ -46,6 +46,7 @@ from ..llm.validation import LabelingTargets, parse_and_validate
 from ..speakers.groups import SpeakerRegistry
 from ..speakers.revisions import IdentityProposalView, evaluate_identity_proposal
 from ..storage.base import new_id
+from ..storage.history import share_history
 from ..storage.models import (
     Annotation,
     AnnotationHistory,
@@ -202,7 +203,7 @@ def _ensure_group(
             row.description = slot.description or None
             row.character_id = slot.character_id
             if projected and not history(row) and display_history:
-                row.presentation_history_json = json.dumps(display_history, ensure_ascii=False)
+                share_history(row, display_history)
             capture(row, cp)
             if projected and character is not None:
                 row.canonical_name = (display_history[-1]["name"] if display_history
@@ -222,7 +223,7 @@ def _ensure_group(
     session.add(row)
     session.flush()
     if display_history:
-        row.presentation_history_json = json.dumps(display_history, ensure_ascii=False)
+        share_history(row, display_history)
     else:
         initialize(row, cp, character if not projected else None)
     capture(row, cp)
