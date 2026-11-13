@@ -272,7 +272,9 @@ def test_semantic_rejection_records_program_code_without_model_text(
     assert rejected["stage"] == "schema_validation"
 
 
-def test_local_settlement_deduplicates_without_changing_retry_schedule(caplog, monkeypatch):
+def test_local_settlement_deduplicates_without_changing_retry_schedule(
+    caplog, monkeypatch, tmp_path,
+):
     caplog.set_level(logging.INFO, logger="ndr.diagnostics")
     factory = object()
     clock, attempts = [0.0], []
@@ -283,22 +285,25 @@ def test_local_settlement_deduplicates_without_changing_retry_schedule(caplog, m
         if len(attempts) < 4:
             raise RuntimeError("private database payload")
 
-    local_finalization.defer_settlement(factory, "settlement-test", settle)
-    try:
-        for now in [0, 0.5, 1, 2, 3, 6, 7]:
-            clock[0] = now
-            local_finalization.retry_settlements(factory)
-        assert attempts == [0, 1, 3, 7]
-        assert not local_finalization.settlement_pending("settlement-test")
-        rows = events(caplog, "settlement-test")
-        failures = [row for row in rows if row["event"] == "task_failure"]
-        assert len(failures) == 1
-        repeated = next(row for row in rows if row["event"] == "diagnostic_repeated")
-        assert repeated["repeat_count"] == 2
-        assert rows[-1]["event"] == "settlement_recovered" and rows[-1]["attempt"] == 4
-    finally:
-        local_finalization.forget_settlements(factory)
-        diagnostics.flush_repeats(job_id="settlement-test")
+    handler = diagnostics.start_diagnostics(tmp_path)
+    with diagnostics.diagnostic_scope(tmp_path):
+        local_finalization.defer_settlement(factory, "settlement-test", settle)
+        try:
+            for now in [0, 0.5, 1, 2, 3, 6, 7]:
+                clock[0] = now
+                local_finalization.retry_settlements(factory)
+            assert attempts == [0, 1, 3, 7]
+            assert not local_finalization.settlement_pending("settlement-test")
+            rows = events(caplog, "settlement-test")
+            failures = [row for row in rows if row["event"] == "task_failure"]
+            assert len(failures) == 1
+            repeated = next(row for row in rows if row["event"] == "diagnostic_repeated")
+            assert repeated["repeat_count"] == 2
+            assert rows[-1]["event"] == "settlement_recovered" and rows[-1]["attempt"] == 4
+        finally:
+            local_finalization.forget_settlements(factory)
+            diagnostics.flush_repeats(job_id="settlement-test")
+            diagnostics.stop_diagnostics(handler)
 
 
 def test_startup_recovery_logs_committed_state(fake_provider_client, caplog):
