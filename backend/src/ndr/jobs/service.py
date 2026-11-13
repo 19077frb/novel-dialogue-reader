@@ -20,7 +20,7 @@ from ..api.errors import ApiError
 from ..characters.input_view import IDENTITY_INPUT_VERSION
 from ..characters.prompt_catalog import IDENTITY_PROMPT_VERSION
 from ..config import Settings
-from ..context.budget import DEFAULT_POLICY, BudgetPolicy
+from ..context.budget import DEFAULT_POLICY, BudgetPolicy, estimate_tokens
 from ..context.service import plan_range
 from ..domain.enums import (
     CredentialMode,
@@ -36,6 +36,7 @@ from ..storage.models import (
     Annotation,
     Book,
     BookVersion,
+    Chapter,
     InferenceRun,
     Job,
     JobWindow,
@@ -118,6 +119,8 @@ def estimate_inference(
     *,
     start_cp: int = 0,
     end_cp: int | None = None,
+    chapter_id: str | None = None,
+    output_protocol: str | None = None,
     reading_mode: ReadingMode = ReadingMode.INITIAL,
     visible_horizon_cp: int | None = None,
     policy: BudgetPolicy | None = None,
@@ -145,7 +148,23 @@ def estimate_inference(
         policy=resolved_policy,
     )
     targets = sum(len(window.target_quote_ids) for window in plan.windows)
-    input_tokens = sum(window.budget["total_tokens"] for window in plan.windows)
+    window_inputs, roster_unknown = _estimate_request_inputs(
+        session,
+        version,
+        plan.windows,
+        {
+            "chapter_id": chapter_id,
+            "end_cp": end_cp,
+            "reading_mode": reading_mode.value,
+            "visible_horizon_cp": visible_horizon_cp,
+            "output_protocol": output_protocol,
+            "auxiliary_protocol": auxiliary_protocol,
+            "identity_input_version": IDENTITY_INPUT_VERSION,
+            "identity_prompt_version": IDENTITY_PROMPT_VERSION,
+            "nonperson_policy_version": "nonperson-2",
+        },
+    )
+    input_tokens = sum(window_inputs.values())
     output_tokens = targets * output_tokens_per_target
     from ..llm.expression_review import REVIEW_VERSION
 
@@ -167,8 +186,15 @@ def estimate_inference(
     output_tokens *= multiplier
     notes = [
         "估算来自本地启发式 token 口径，不是真实计费依据；实际用量以提供方 usage 为准。",
-        "输出预留按每条目标对白 20 token 粗估（可在预算里调整）。",
+        "输入计入当前可见人物档案、已确认名册和实际请求提示，并与窗口规划预留取较大值。",
+        "输出按每条目标对白 20 token 粗估，与任务派发时的安全输出预留口径不同。",
+        "后续窗口的场景状态、复核证据、格式纠错、重试和模型推理可增加用量，估算不构成消耗上限。",
     ]
+    if roster_unknown:
+        notes.append(
+            "本章尚无有效的已确认人物名册，当前只计入已知全书人物资料。"
+            "人物分析与确认后，新增名册和人物档案会增加每个对白请求的输入，需重新估算。"
+        )
     if evidence_review:
         notes.append(
             f"证据复核按首次处理加每轮最多三个阶段（独立复核、分歧裁决、挑战核验）估算：每窗最多{multiplier}个规划阶段。"
@@ -237,7 +263,7 @@ def estimate_inference(
                 "end_cp": window_end,
                 "target_count": len(window.target_quote_ids),
                 "estimated_tokens": (
-                    int(window.budget["total_tokens"])
+                    window_inputs[window.window_id]
                     + len(window.target_quote_ids) * output_tokens_per_target
                 )
                 * multiplier,
@@ -268,6 +294,48 @@ def estimate_inference(
         notes=notes,
         windows=windows,
     )
+
+
+def _estimate_request_inputs(
+    session: Session,
+    version: BookVersion,
+    windows: Sequence[ProcessingWindow],
+    request_range: dict[str, Any],
+) -> tuple[dict[str, int], bool]:
+    """Read current identities and reuse dispatch assembly without creating a task."""
+    from ..characters.service import confirmed_roster_context
+    from ..domain.enums import CharacterRosterStatus
+    from ..scenes.state import SceneState
+    from .scheduler import _apply_confirmed_roster, _request_payload_for
+
+    chapter_id = request_range.get("chapter_id")
+    roster_unknown = False
+    if chapter_id:
+        chapter = session.get(Chapter, chapter_id)
+        if chapter is None or chapter.book_version_id != version.id:
+            raise ApiError.validation("章节不存在或不属于该书籍版本", chapter_id=chapter_id)
+        roster, characters = confirmed_roster_context(session, version, chapter_id)
+        roster_unknown = (
+            roster is None
+            or roster.status is not CharacterRosterStatus.CONFIRMED
+            or not characters
+            or roster.pov_character_id not in {person.id for person in characters}
+        )
+        if roster_unknown:
+            request_range = {**request_range, "chapter_id": None}
+    # This object is never added to the session. Assembly only reads range_json
+    # and storage identities, then mutates the fresh in-memory SceneState.
+    request = Job(range_json=json.dumps(request_range, ensure_ascii=False))
+    inputs: dict[str, int] = {}
+    for window in windows:
+        state = SceneState()
+        ready, error = _apply_confirmed_roster(session, request, version, state, window)
+        if not ready:
+            raise ApiError.validation(error or "人物资料无法安全读取")
+        payload = _request_payload_for(window=window, state=state)
+        prompt_tokens = sum(estimate_tokens(message["content"]) for message in payload["messages"])
+        inputs[window.window_id] = max(int(window.budget["total_tokens"]), prompt_tokens)
+    return inputs, roster_unknown
 
 
 def profile_snapshot(

@@ -1735,6 +1735,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       {estimatedTokens !== null && (
         <p className="hint" data-testid="batch-estimate">
           整批预计约 {estimatedTokens.toLocaleString()} tokens（包含逐章人物识别预留与对白归属估算）。
+          对白输入已计入当前已知人物资料；尚未分析或确认的章节可能新增人物名册和档案，增加后续每窗用量。实际用量还受复核、重试和模型推理影响，估算不构成消耗上限。
           {forceReprocess ? ' 已包含已处理章节的重做费用估算。' : chapters.slice(startIndex, endIndex + 1).some((chapter) => chapter.dialogue_processed) ? ' 已处理章节不会重复计费或处理。' : ''}
           {positiveIntegerOrNull(tokenLimitText) !== null && estimatedTokens > (positiveIntegerOrNull(tokenLimitText) ?? 0) ? ' 预计会超过当前上限，系统只会在剩余额度允许时派发新任务。' : ''}
         </p>
