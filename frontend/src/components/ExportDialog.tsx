@@ -35,6 +35,20 @@ export interface ExportDialogProps {
   readPositionCp?: number
 }
 
+interface ExportSubmission {
+  bookId: string
+  snapshotId: string
+  snapshotHash: string
+  format: ExportFormat
+  style: ExportStylePreset
+}
+
+const STYLE_LABELS: Record<ExportStylePreset, string> = {
+  color_and_label: '颜色 + 编号',
+  color_only: '仅颜色',
+  label_only: '仅编号',
+}
+
 export function ExportDialog({
   bookId,
   open,
@@ -52,8 +66,8 @@ export function ExportDialog({
   const visibilityPolicy: VisibilityPolicy = settings.enableExperimentalFeatures ? selectedPolicy : 'reread'
   const [format, setFormat] = useState<ExportFormat>('epub')
   const [artifact, setArtifact] = useState<ExportArtifactOut | null>(null)
-  // 记录「生成时用的快照指纹」：用来判断标注是否在生成之后又变了（内容哈希，不是行 ID）
-  const [generatedSnapshotHash, setGeneratedSnapshotHash] = useState<string | null>(null)
+  // 与产物一起记录提交时的来源，后续预览或选项变化不能改写它。
+  const [generatedFrom, setGeneratedFrom] = useState<ExportSubmission | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // 可访问性：对话框要有 role/aria-modal/标题关联，打开时把焦点移进来，
@@ -116,7 +130,7 @@ export function ExportDialog({
   const generation = useMutation({
     onMutate: exportClock.start,
     onSettled: exportClock.finish,
-    mutationFn: (snapshotId: string) =>
+    mutationFn: ({ bookId, snapshotId, format, style }: ExportSubmission) =>
       createExport(bookId, {
         snapshotId,
         format,
@@ -124,9 +138,9 @@ export function ExportDialog({
         // 同一快照 + 格式 + 样式 → 后端复用已有产物；键只用于避免重复点击
         idempotencyKey: `export:${bookId}:${snapshotId}:${format}:${style}`,
       }),
-    onSuccess: (data) => {
+    onSuccess: (data, submission) => {
       setArtifact(data)
-      setGeneratedSnapshotHash(preview.data?.snapshot_hash ?? null)
+      setGeneratedFrom(submission)
       setError(null)
       void queryClient.invalidateQueries({ queryKey: exportKeys.artifact(data.id) })
     },
@@ -138,12 +152,14 @@ export function ExportDialog({
   const staleSnapshot = useMemo(
     () =>
       Boolean(
-        generatedSnapshotHash &&
+        generatedFrom &&
           preview.data &&
-          preview.data.snapshot_hash !== generatedSnapshotHash,
+          preview.data.snapshot_hash !== generatedFrom.snapshotHash,
       ),
-    [generatedSnapshotHash, preview.data],
+    [generatedFrom, preview.data],
   )
+  const changedOptions = generatedFrom &&
+    (generatedFrom.format !== format || generatedFrom.style !== style)
 
   if (!open) return null
 
@@ -253,7 +269,13 @@ export function ExportDialog({
               type="button"
               className="ndr-primary"
               disabled={generation.isPending}
-              onClick={() => preview.data && generation.mutate(preview.data.snapshot_id)}
+              onClick={() => preview.data && generation.mutate({
+                bookId,
+                snapshotId: preview.data.snapshot_id,
+                snapshotHash: preview.data.snapshot_hash,
+                format,
+                style,
+              })}
               data-testid="export-generate"
               title={generation.isPending ? '正在生成导出文件，请等待生成完成。' : undefined}
             >
@@ -269,7 +291,13 @@ export function ExportDialog({
         )}
         {staleSnapshot && (
           <p className="hint" data-testid="export-stale-snapshot">
-            标注已经更新：下面是新快照的样张，已生成的文件仍使用旧快照。需要最新内容请重新生成。
+            导出内容或设置已经变化：下面是新快照的样张，已生成的文件仍使用旧快照。需要最新内容请重新生成。
+          </p>
+        )}
+        {changedOptions && generatedFrom && (
+          <p className="hint" data-testid="export-changed-options">
+            已生成的文件使用 {generatedFrom.format.toUpperCase()}、{STYLE_LABELS[generatedFrom.style]}，
+            与当前选择的格式或样式不同，仍可下载原文件。需要当前选择的文件请重新生成。
           </p>
         )}
         <ExportProgress artifact={artifact} busy={generation.isPending} />
