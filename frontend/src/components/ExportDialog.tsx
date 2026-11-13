@@ -70,29 +70,19 @@ export function ExportDialog({
   const [generatedFrom, setGeneratedFrom] = useState<ExportSubmission | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // 可访问性：对话框要有 role/aria-modal/标题关联，打开时把焦点移进来，
-  // Escape 关闭，关闭后把焦点还给触发它的按钮（键盘用户不会「丢失焦点」）。
+  // 原生模态提供背景隔离及跨沙箱 iframe 的键盘焦点边界。
   const titleId = useId()
-  const dialogRef = useRef<HTMLDivElement | null>(null)
-  const closeRef = useRef(onClose)
-  closeRef.current = onClose
+  const dialogRef = useRef<HTMLDialogElement | null>(null)
 
   useEffect(() => {
     if (!open) return
     const previous = document.activeElement as HTMLElement | null
-    dialogRef.current?.focus()
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        closeRef.current()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
+    const dialog = dialogRef.current
+    dialog?.showModal()
+    dialog?.focus()
     return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      if (previous && typeof previous.focus === 'function' && document.contains(previous)) {
-        previous.focus()
-      }
+      dialog?.close()
+      if (previous?.isConnected) previous.focus()
     }
   }, [open])
 
@@ -164,15 +154,19 @@ export function ExportDialog({
   if (!open) return null
 
   return (
-    <div className="ndr-dialog-backdrop" data-testid="export-dialog">
-      <div
-        className="ndr-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        ref={dialogRef}
-        tabIndex={-1}
-      >
+    <dialog
+      className="ndr-dialog-backdrop"
+      data-testid="export-dialog"
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
+      aria-modal="true"
+      aria-labelledby={titleId}
+      ref={dialogRef}
+      tabIndex={-1}
+    >
+      <div className="ndr-dialog">
         <header className="ndr-dialog-header">
           <h2 id={titleId}>导出</h2>
           <button type="button" onClick={onClose} data-testid="export-close">
@@ -303,6 +297,6 @@ export function ExportDialog({
         <ExportProgress artifact={artifact} busy={generation.isPending} />
         {artifact && <ExportDownload artifact={artifact} />}
       </div>
-    </div>
+    </dialog>
   )
 }

@@ -1,8 +1,8 @@
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as booksApi from '../src/api/books'
 import * as exportsApi from '../src/api/exports'
@@ -10,6 +10,26 @@ import type { ExportArtifactOut, ExportPreviewOut } from '../src/api/types'
 import { ExportDialog } from '../src/components/ExportDialog'
 import { renderWithProviders } from './helpers'
 import { updateGeneralSettings } from '../src/settings/preferences'
+
+// jsdom 没有顶层模态；这里只替代生命周期，焦点边界由真实浏览器E2E验证。
+const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal')
+const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close')
+beforeAll(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) { this.open = true },
+  })
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) { this.open = false },
+  })
+})
+afterAll(() => {
+  if (originalShowModal) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal)
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal')
+  if (originalClose) Object.defineProperty(HTMLDialogElement.prototype, 'close', originalClose)
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close')
+})
 
 vi.mock('../src/api/books', () => ({
   queryKeys: {
@@ -320,7 +340,7 @@ describe('ExportDialog 可访问性', () => {
     vi.mocked(exportsApi.previewExport).mockResolvedValue(preview())
   })
 
-  it('有 role/aria-modal 与标题关联，Escape 关闭并把焦点还给打开按钮', async () => {
+  it('原生模态有标题关联，cancel关闭并把焦点还给打开按钮', async () => {
     const onClose = vi.fn()
     function Host() {
       const [open, setOpen] = useState(false)
@@ -354,9 +374,22 @@ describe('ExportDialog 可访问性', () => {
     expect(document.getElementById(labelledBy as string)).toHaveTextContent('导出')
     await waitFor(() => expect(dialog).toHaveFocus())
 
-    await userEvent.keyboard('{Escape}')
+    fireEvent(dialog, new Event('cancel', { cancelable: true }))
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
     expect(screen.queryByRole('dialog')).toBeNull()
     await waitFor(() => expect(opener).toHaveFocus())
   })
+
+  it('卸载仍打开的窗口时恢复触发器焦点', async () => {
+    const trigger = document.createElement('button')
+    document.body.append(trigger)
+    trigger.focus()
+    const view = renderWithProviders(<ExportDialog bookId="b1" open chapters={CHAPTERS} onClose={vi.fn()} />)
+    await screen.findByTestId('export-preview')
+    expect(screen.getByRole('dialog', { name: '导出' })).toHaveAttribute('open')
+    view.unmount()
+    expect(trigger).toHaveFocus()
+    trigger.remove()
+  })
+
 })
