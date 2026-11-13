@@ -136,7 +136,7 @@
         "tags": [
           "books"
         ],
-        "summary": "删除书籍与关联记录，文件移入回收区",
+        "summary": "永久删除书籍、关联记录与独占文件",
         "operationId": "delete_book_route_api_books__book_id__delete",
         "parameters": [
           {

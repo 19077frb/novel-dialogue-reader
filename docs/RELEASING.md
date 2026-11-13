@@ -59,7 +59,9 @@ pwsh -File scripts/build-portable.ps1
 pwsh -File scripts/test-portable.ps1 -ZipPath "构建输出的ZIP路径"
 ```
 
-每次输出到独立的 `dist/portable-随机标识/`，不覆盖旧产物。验收覆盖图标、启动、导入、重启持久化、重复实例与端口冲突；打包包含第三方及 Python 许可。新依赖需检查许可和打包钩子。
+每次输出到独立的 `dist/portable-随机标识/`，保留 ZIP 和 SHA256 校验文件。ZIP 与校验文件生成成功后，默认清理本次 `app/`、`work/` 中间目录；调试时可运行 `pwsh -File scripts/build-portable.ps1 -KeepBuildFiles` 保留它们。失败构建保留现场，历史 ZIP 须维护者按需清理。
+
+验收覆盖图标、启动、导入、重启持久化、重复实例与端口冲突；验收子进程退出并全部通过后，删除本次隔离解压目录。失败时保留目录并输出位置，便于查看日志。清理遇到重解析点或越界路径时拒绝执行。打包包含第三方及 Python 许可，新依赖需检查许可和打包钩子。
 
 EXE 图标来自 `assets/icons/app.ico`，包含七种尺寸；源图为 `assets/icons/app.png`。替换方形源 PNG 后可重新转换：
 

@@ -100,10 +100,12 @@ describe('LibraryPage', () => {
     mockedFetchBooks.mockResolvedValue({ items: [duplicateBooks[1]], next_cursor: null })
     await userEvent.click(screen.getByTestId('delete-book-b1'))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('书籍 ID：b1'))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('将永久删除本书的阅读进度'))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('并删除书籍及导出文件，此操作无法撤销'))
     expect(books.deleteBook).toHaveBeenCalledWith('b1')
     await waitFor(() => expect(screen.queryByTestId('delete-book-b1')).not.toBeInTheDocument())
     expect(screen.getByTestId('delete-book-b2')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('已删除《义妹人生》')
+    expect(screen.getByRole('status')).toHaveTextContent('已永久删除《义妹人生》，此操作无法撤销。')
   })
 
   it('取消确认不删除，删除失败保留书籍并显示具体原因', async () => {

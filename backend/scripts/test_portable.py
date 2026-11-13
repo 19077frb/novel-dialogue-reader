@@ -6,7 +6,9 @@ import argparse
 import json
 import os
 import re
+import shutil
 import socket
+import stat
 import struct
 import subprocess
 import tempfile
@@ -58,8 +60,34 @@ def check_exe_icon(exe: Path) -> None:
 def check(zip_path: Path) -> None:
     if os.name != "nt":
         raise RuntimeError("The Windows EXE smoke test requires Windows.")
-    # Retain isolated logs under ignored dist for diagnosis. No recursive cleanup of user paths.
     destination = Path(tempfile.mkdtemp(prefix="免安装 验收 ", dir=zip_path.parent))
+    try:
+        check_extracted(zip_path, destination)
+        remove_acceptance_directory(destination, zip_path.parent)
+    except BaseException:
+        print(f"EXE smoke checks failed (isolated files retained: {destination})", flush=True)
+        raise
+    print("EXE smoke checks passed (isolated files removed)")
+
+
+def remove_acceptance_directory(destination: Path, parent: Path) -> None:
+    """Remove only this invocation's direct child, rejecting redirected trees."""
+    destination = destination.absolute()
+    parent = parent.absolute()
+    if destination.parent != parent or not destination.name.startswith("免安装 验收 "):
+        raise RuntimeError(f"Unsafe acceptance cleanup path: {destination}")
+    for ancestor in (destination, *destination.parents):
+        if ancestor.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise RuntimeError(f"Refusing cleanup through a reparse point: {ancestor}")
+    for root, directories, files in os.walk(destination, followlinks=False):
+        for name in (*directories, *files):
+            path = Path(root) / name
+            if path.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                raise RuntimeError(f"Refusing cleanup of a reparse point: {path}")
+    shutil.rmtree(destination)
+
+
+def check_extracted(zip_path: Path, destination: Path) -> None:
     with zipfile.ZipFile(zip_path) as archive:
         for name in archive.namelist():
             path = Path(name)
@@ -151,7 +179,11 @@ def check(zip_path: Path) -> None:
             finally:
                 if process.poll() is None:
                     process.terminate()  # Only this isolated acceptance child; never real servers.
-                    process.wait(timeout=10)
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=10)
 
     run_round(1)
     run_round(2)
@@ -167,7 +199,6 @@ def check(zip_path: Path) -> None:
         assert blocked.returncode != 0
         assert not (other / "ndr.sqlite3").exists(), "Port conflict modified another library"
     assert not (destination / "NovelDialogueReader" / "data").exists()
-    print(f"EXE smoke checks passed (isolated logs: {destination})")
 
 
 if __name__ == "__main__":

@@ -87,7 +87,7 @@ export default function LibraryPage() {
       queryClient.removeQueries({ predicate: (query) => query.queryKey.includes(book.id) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.books() })
       setDeleteError(null)
-      setDeleteNotice(`已删除《${book.title}》；书籍文件已移入数据目录回收区，应用内无法撤销。`)
+      setDeleteNotice(`已永久删除《${book.title}》，此操作无法撤销。`)
     },
     onError: (reason) => {
       setDeleteError(reason instanceof Error ? reason.message : '删除失败')
@@ -103,8 +103,8 @@ export default function LibraryPage() {
     }
     if (!window.confirm(
       `确定删除《${book.title}》吗？\n导入时间：${new Date(book.created_at).toLocaleString('zh-CN')}\n` +
-      `书籍 ID：${book.id}\n\n将删除本书的阅读进度、人物、标注和任务记录，应用内无法撤销。` +
-      '书籍及导出文件移入数据目录回收区。同名的其他书籍不会受影响。',
+      `书籍 ID：${book.id}\n\n将永久删除本书的阅读进度、人物、标注和任务记录，` +
+      '并删除书籍及导出文件，此操作无法撤销。同名的其他书籍不会受影响。',
     )) return
     deleteMutation.mutate(book)
   }
