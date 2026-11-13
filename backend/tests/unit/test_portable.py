@@ -162,3 +162,90 @@ def test_application_icon_contains_seven_rgba_png_frames():
     script = (REPO_ROOT / "scripts/build-portable.ps1").read_text(encoding="utf-8")
     assert "'--icon', $appIcon" in script
     assert "assets/icons/app.ico" in script
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_duplicate_main_never_opens_or_changes_running_instance_logs(
+    tmp_settings, monkeypatch, capsys, running,
+):
+    from ndr import portable
+
+    tmp_settings.log_dir.mkdir(parents=True)
+    log_path = tmp_settings.log_dir / "tasks.log"
+    original = b"existing-running-instance-diagnostics\n"
+    log_path.write_bytes(original)
+    installed = []
+    monkeypatch.setattr(sys, "argv", ["ndr-portable", "--no-browser"])
+    monkeypatch.setattr(portable, "portable_settings", lambda **kwargs: tmp_settings)
+    monkeypatch.setattr(portable, "start_diagnostics", lambda path: installed.append(path))
+    monkeypatch.setattr(portable, "running_url",
+                        lambda _: "http://127.0.0.1:8765" if running else None)
+    monkeypatch.setattr(portable.time, "sleep", lambda _: None)
+    with LibraryLock(tmp_settings.data_dir):
+        result = portable.main()
+    assert result == (0 if running else 1)
+    assert installed == []
+    assert log_path.read_bytes() == original
+    output = capsys.readouterr()
+    if running:
+        assert "阅读器已经启动" in output.out
+    else:
+        assert "这份书库正在运行" in output.err
+        assert "本次未初始化诊断日志" in output.err
+        assert "tasks.log" not in output.err
+
+
+@pytest.mark.parametrize(("code", "hint"), [
+    ("missing_pages", "页面文件缺失"),
+    ("port_in_use", "端口被占用"),
+])
+def test_main_keeps_controlled_startup_error_hints(tmp_settings, monkeypatch, capsys, code, hint):
+    from ndr import portable
+    from ndr.runtime_logging import StartupError
+
+    def fail(*args, **kwargs):
+        raise StartupError(code)
+
+    monkeypatch.setattr(sys, "argv", ["ndr-portable", "--no-browser"])
+    monkeypatch.setattr(portable, "portable_settings", lambda **kwargs: tmp_settings)
+    monkeypatch.setattr(portable, "launch", fail)
+    assert portable.main() == 1
+    output = capsys.readouterr().err
+    assert hint in output
+    assert "logs/tasks.log" in output
+
+
+def test_invalid_runtime_argument_does_not_claim_a_log_was_written(monkeypatch, capsys):
+    from ndr import portable
+
+    installed = []
+    monkeypatch.setattr(sys, "argv", ["ndr-portable", "--no-browser", "--run-seconds", "0"])
+    monkeypatch.setattr(portable, "start_diagnostics", lambda path: installed.append(path))
+    assert portable.main() == 1
+    output = capsys.readouterr().err
+    assert "限时运行秒数必须大于 0" in output
+    assert "本次未初始化诊断日志" in output
+    assert "tasks.log" not in output
+    assert installed == []
+
+
+def test_configuration_failure_is_safe_and_does_not_claim_a_log(monkeypatch, capsys):
+    from ndr import __main__ as server_main
+    from ndr import portable
+
+    def fail(*args, **kwargs):
+        raise ValueError("private-configuration-text secret-key")
+
+    monkeypatch.setattr(sys, "argv", ["ndr-portable", "--no-browser"])
+    monkeypatch.setattr(portable, "portable_settings", fail)
+    assert portable.main() == 1
+    monkeypatch.setattr(server_main, "get_settings", fail)
+    with pytest.raises(SystemExit) as stopped:
+        server_main.main()
+    assert stopped.value.code == 1
+    output = capsys.readouterr().err
+    assert output.count("配置读取失败") == 2
+    assert output.count("本次未初始化诊断日志") == 2
+    assert "tasks.log" not in output
+    assert "private-configuration-text" not in output
+    assert "secret-key" not in output

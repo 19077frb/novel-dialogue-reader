@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import threading
 import time
 from contextlib import suppress
@@ -12,6 +13,7 @@ from sqlalchemy.exc import OperationalError
 
 from ..characters.service import complete_textless_chapter, store_roster_candidates
 from ..context.budget import estimate_tokens
+from ..diagnostics import log_event, log_failure
 from ..domain.enums import InferenceRunState, JobKind, JobState
 from ..llm.errors import ProviderError, ProviderErrorKind
 from ..llm.isolated_roster_repair import (
@@ -61,6 +63,7 @@ class _Pipeline:
     def __init__(self, session_factory, settings, outcome):
         self.sessions, self.settings, self.outcome = session_factory, settings, outcome
         self.job_id = outcome.job_id
+        self.current_stage = "preparing"
 
     def _progress(self, session, job, stage, **extra):
         calls = len(
@@ -76,7 +79,7 @@ class _Pipeline:
             {"stage": stage, "calls": calls, **extra}, ensure_ascii=False
         )
 
-    def halt(self, state, message, stage=None):
+    def halt(self, state, message, stage=None, *, reason_code="roster_pipeline_failed", error=None):
         def persist_halt(session):
             job = session.get(Job, self.job_id)
             checkpoint = json.loads(job.checkpoint_json or "{}")
@@ -86,6 +89,9 @@ class _Pipeline:
             job.state, job.last_error = state, message
             self._progress(session, job, state.value.lower())
         finish_local_write(self.sessions, persist_halt)
+        log_event("roster_pipeline_stopped", level=logging.WARNING, job_id=self.job_id,
+                  stage=stage or self.current_stage, state=state.value,
+                  reason_code=reason_code, calls=self.outcome.calls, error=error)
         self.outcome.state = state
         if message:
             self.outcome.errors.append(message)
@@ -100,7 +106,7 @@ class _Pipeline:
                 raise _Halt
             state = job.state
         if state is JobState.PAUSING:
-            self.halt(JobState.PAUSED, None)
+            self.halt(JobState.PAUSED, None, reason_code="pause_requested")
         if state not in {JobState.QUEUED, JobState.RUNNING}:
             self.outcome.state = state
             raise _Halt
@@ -134,11 +140,12 @@ class _Pipeline:
                 lambda: finish_local_write(self.sessions, persist_returned),
             ) from write_error
 
-    def attempt(self, stage, request, validator):
+    def attempt(self, stage, request, validator, *, attempt=0, retry_limit=0, retry_type="format"):
         """Reuse one exact stage receipt; never resend an unaccounted attempt."""
         from .scheduler import _request_fingerprint
 
         self.check_stop()
+        self.current_stage = stage
         with self.sessions() as session:
             job = session.get(Job, self.job_id)
             checkpoint = json.loads(job.checkpoint_json or "{}")
@@ -155,7 +162,8 @@ class _Pipeline:
             matching = [run for run in runs if run.request_fingerprint == fp]
             if len(matching) > 1:
                 session.close()
-                self.halt(JobState.FAILED, "同一人物阶段存在重复调用记录，已停止恢复", stage)
+                self.halt(JobState.FAILED, "同一人物阶段存在重复调用记录，已停止恢复", stage,
+                          reason_code="duplicate_stage_receipts")
             if matching:
                 run = matching[0]
                 try:
@@ -164,7 +172,8 @@ class _Pipeline:
                         raise ValueError("人物调用尚无完整返回凭据")
                 except ValueError as exc:
                     session.close()
-                    self.halt(JobState.NEEDS_RECONCILIATION, str(exc), stage)
+                    self.halt(JobState.NEEDS_RECONCILIATION, str(exc), stage,
+                              reason_code="invalid_stage_receipt", error=exc)
                 raw, run_id = record.get("adapter_result"), run.id
                 error_data = record.get("error")
                 error = None
@@ -181,6 +190,7 @@ class _Pipeline:
                             JobState.NEEDS_RECONCILIATION,
                             "人物失败调用缺少完整凭据，不能自动重发",
                             stage,
+                            reason_code="invalid_error_receipt",
                         )
                 restored = True
             else:
@@ -199,6 +209,7 @@ class _Pipeline:
                                 JobState.NEEDS_RECONCILIATION,
                                 "历史人物调用消耗与预留不完整，请先核对",
                                 stage,
+                                reason_code="unknown_historical_usage",
                             )
                 if unknown and not generation:
                     session.close()
@@ -206,11 +217,13 @@ class _Pipeline:
                         JobState.NEEDS_RECONCILIATION,
                         "人物调用消耗未知，不能自动追加修复调用",
                         stage,
+                        reason_code="unknown_usage_prevents_repair",
                     )
                 limit = json.loads(job.budget_json or "{}").get("max_input_tokens")
                 if limit is not None and spent + request["reserve_tokens"] > limit:
                     session.close()
-                    self.halt(JobState.BUDGET_EXHAUSTED, "剩余Token额度不足以执行人物阶段", stage)
+                    self.halt(JobState.BUDGET_EXHAUSTED, "剩余Token额度不足以执行人物阶段", stage,
+                              reason_code="input_budget_exhausted")
                 entry["failed_stage"] = stage
                 job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
                 job.state = JobState.RUNNING
@@ -228,6 +241,14 @@ class _Pipeline:
                 self._progress(session, job, stage)
                 session.commit()
                 restored = False
+        if not restored and attempt:
+            log_event("roster_call_retry", level=logging.WARNING, job_id=self.job_id,
+                      run_id=run_id, stage=stage, attempt=attempt, limit=retry_limit,
+                      retry_type=retry_type, reason_code="invalid_model_output", delay_ms=0)
+        log_event("roster_call_restored" if restored else "roster_call_start",
+                  job_id=self.job_id, run_id=run_id, window_id=f"roster:{self.chapter_id}",
+                  stage=stage, generation=generation, restored=restored,
+                  calls=0 if restored else 1, attempt=attempt + 1, limit=retry_limit + 1)
         if not restored:
             started = time.monotonic()
             raw, error = None, None
@@ -236,21 +257,31 @@ class _Pipeline:
                 raw = asyncio.run(self.adapter.generate_labels(deepcopy(request)))
             except Exception as exc:  # noqa: BLE001 - preserve dispatched unknown calls
                 error = exc
-            self._settle(run_id, request, raw, error, int((time.monotonic() - started) * 1000))
+            elapsed = int((time.monotonic() - started) * 1000)
+            from .roster import _attempt_usage_json
+
+            log_event("roster_call_returned", job_id=self.job_id, run_id=run_id,
+                      window_id=f"roster:{self.chapter_id}", stage=stage, elapsed_ms=elapsed,
+                      error=error, usage_unknown=_attempt_usage_json(raw, error) is None)
+            self._settle(run_id, request, raw, error, elapsed)
         self.check_stop()
         if error is not None:
             if not isinstance(error, ProviderError) or error.kind in {
                 ProviderErrorKind.TIMEOUT,
                 ProviderErrorKind.UNKNOWN_OUTCOME,
             }:
-                self.halt(JobState.NEEDS_RECONCILIATION, str(error), stage)
+                self.halt(JobState.NEEDS_RECONCILIATION, str(error), stage,
+                          reason_code="unknown_outcome", error=error)
             if error.kind is not ProviderErrorKind.INVALID_OUTPUT:
-                self.halt(JobState.FAILED, f"{error.code.value}: {error.message}", stage)
+                self.halt(JobState.FAILED, f"{error.code.value}: {error.message}", stage,
+                          reason_code="provider_error", error=error)
             failure = error.message
         else:
             try:
                 value = validator(_clean(raw), run_id)
             except ValueError as exc:
+                log_event("roster_output_rejected", level=logging.WARNING, job_id=self.job_id,
+                          run_id=run_id, stage=stage, reason_code="invalid_model_output", error=exc)
                 failure = str(exc)
             else:
                 with self.sessions() as session:
@@ -266,7 +297,8 @@ class _Pipeline:
             session.commit()
         if not known:
             self.halt(
-                JobState.NEEDS_RECONCILIATION, "人物输出校验失败且消耗未知，不能自动重试", stage
+                JobState.NEEDS_RECONCILIATION, "人物输出校验失败且消耗未知，不能自动重试", stage,
+                reason_code="invalid_output_unknown_usage",
             )
         raise _Invalid(failure)
 
@@ -314,10 +346,12 @@ class _Pipeline:
                 or chapter.book_version_id != version.id
             ):
                 session.close()
-                self.halt(JobState.FAILED, "人物分析任务缺少有效章节")
+                self.halt(JobState.FAILED, "人物分析任务缺少有效章节",
+                          reason_code="invalid_chapter")
             if scope.get("roster_protocol") != SOURCED_ROSTER_VERSION:
                 session.close()
-                self.halt(JobState.FAILED, "定向人物修复必须使用sourced-roster-2")
+                self.halt(JobState.FAILED, "定向人物修复必须使用sourced-roster-2",
+                          reason_code="unsupported_roster_protocol")
             if not chapter_has_body_text(session, self.settings, version, chapter):
                 roster = complete_textless_chapter(session, chapter)
                 roster.analysis_job_id = job.id
@@ -354,7 +388,8 @@ class _Pipeline:
             entry = checkpoint.setdefault("roster_pipeline", {"binding": self.binding})
             if entry.get("binding") != self.binding:
                 session.close()
-                self.halt(JobState.FAILED, "人物、原文或模型输入已改变，不能恢复旧提案")
+                self.halt(JobState.FAILED, "人物、原文或模型输入已改变，不能恢复旧提案",
+                          reason_code="roster_binding_changed")
             job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
             session.commit()
             self.adapter = (
@@ -397,13 +432,15 @@ class _Pipeline:
             )
             try:
                 (output, facts, diagnostic, plan), primary_id = self.attempt(
-                    f"primary:{index}", self.request(current_messages), initial
+                    f"primary:{index}", self.request(current_messages), initial,
+                    attempt=index, retry_limit=format_limit,
                 )
                 break
             except _Invalid as exc:
                 feedback = str(exc)
         else:
-            self.halt(JobState.FAILED, "人物主协议格式重试已耗尽：" + feedback[:400])
+            self.halt(JobState.FAILED, "人物主协议格式重试已耗尽：" + feedback[:400],
+                      reason_code="format_retries_exhausted")
 
         repair_error = None
         repaired = False
@@ -430,6 +467,7 @@ class _Pipeline:
                         )(
                             plan, raw, original=original, source_ref=run_id
                         ),
+                        attempt=index, retry_limit=max(0, repair_limit - 1), retry_type="repair",
                     )
                 except _Invalid as exc:
                     repair_error = str(exc)
@@ -455,9 +493,11 @@ class _Pipeline:
         }
         if not output.characters and plan.groups:
             self.halt(
-                JobState.FAILED, "人物修复后仍无有效身份：" + (repair_error or "修复次数已耗尽")
+                JobState.FAILED, "人物修复后仍无有效身份：" + (repair_error or "修复次数已耗尽"),
+                reason_code="no_valid_roster_after_repair",
             )
         self.check_stop()
+        self.current_stage = "candidate_save"
 
         def finalize(session):  # noqa: ANN001 - local transaction callback
             job = session.get(Job, self.job_id)
@@ -531,10 +571,13 @@ def run_repaired_roster_job(
         from .local_finalization import PendingLocalWrite
         if isinstance(exc, PendingLocalWrite):
             raise
+        log_failure("roster_pipeline", job_id, exc, stage=pipeline.current_stage,
+                    reason_code="roster_pipeline_exception")
         with suppress(_Halt):
             detail = (database_error_detail(exc) if isinstance(exc, OperationalError)
                       else str(exc)[:400])
-            pipeline.halt(JobState.FAILED, f"人物修复任务失败：{detail}")
+            pipeline.halt(JobState.FAILED, f"人物修复任务失败：{detail}",
+                          reason_code="roster_pipeline_exception")
     finally:
         with _GUARD:
             _ACTIVE.discard(job_id)

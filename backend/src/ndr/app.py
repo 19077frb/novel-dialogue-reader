@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
@@ -46,13 +45,18 @@ from .api.quotes import quote_router
 from .api.quotes import router as quotes_router
 from .characters.service import complete_existing_textless_chapters
 from .config import Settings, get_settings
+from .diagnostics import (
+    diagnostic_scope,
+    log_event,
+    log_failure,
+    start_diagnostics,
+    stop_diagnostics,
+)
 from .llm.credentials import CredentialService, SystemCredentialStore
 from .recovery.service import recover_on_startup
 from .storage.engine import create_db_engine, create_session_factory
 from .storage.migrate import run_migrations
 from .storage.transactions import transaction
-
-logger = logging.getLogger("ndr.app")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -62,52 +66,85 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.started_at = datetime.now(tz=UTC)
-        app.state.started_monotonic = time.monotonic()
-        resolved.ensure_data_dir()
-        if resolved.auto_migrate:
-            # 显式 opt-in（NDR_AUTO_MIGRATE=1）才会在启动时迁移；默认由用户/脚本显式执行。
-            run_migrations(resolved)
-        if resolved.recover_on_startup:
-            # 进程重启后修复任务可见状态（超租约的尝试 → 未知结果；不留 RUNNING 孤儿）。
-            try:
-                app.state.recovery = recover_on_startup(
-                    session_factory, lease_seconds=resolved.stale_run_lease_seconds
-                ).as_dict()
-                from .exports.settlement import recover_exports
-
-                recover_exports(session_factory, resolved)
-            except Exception as exc:  # noqa: BLE001 - 恢复失败不能阻止服务启动
-                app.state.recovery = {"error": type(exc).__name__}
-                logger.warning("启动恢复扫描失败：%s", type(exc).__name__)
-        try:
-            with transaction(session_factory) as session:
-                completed = complete_existing_textless_chapters(session, resolved)
-            if completed:
-                logger.info("已补齐 %s 个无正文章节的完成状态", completed)
-        except Exception as exc:  # noqa: BLE001 - do not prevent startup with an unmigrated DB
-            logger.warning("无正文章节完成状态检查失败：%s", type(exc).__name__)
-        from .diagnostics import start_diagnostics, stop_diagnostics
         from .jobs.local_finalization import forget_settlements, retry_settlements
 
-        diagnostic_handler = start_diagnostics(resolved.log_dir)
-        stopping = asyncio.Event()
+        with diagnostic_scope(resolved.log_dir):
+            diagnostic_handler = start_diagnostics(resolved.log_dir)
+            stopping = asyncio.Event()
+            monitor = None
+            stage = "startup"
+            try:
+                app.state.started_at = datetime.now(tz=UTC)
+                app.state.started_monotonic = time.monotonic()
+                log_event("application_starting")
+                resolved.ensure_data_dir()
+                if resolved.auto_migrate:
+                    stage = "migration"
+                    run_migrations(resolved)
+                if resolved.recover_on_startup:
+                    try:
+                        app.state.recovery = recover_on_startup(
+                            session_factory, lease_seconds=resolved.stale_run_lease_seconds
+                        ).as_dict()
+                        from .exports.settlement import recover_exports
 
-        async def monitor_settlements():
-            while not stopping.is_set():
-                await asyncio.to_thread(retry_settlements, session_factory)
-                with suppress(TimeoutError):
-                    await asyncio.wait_for(stopping.wait(), timeout=2)
+                        recover_exports(session_factory, resolved)
+                    except Exception as exc:  # recovery failure must not prevent startup
+                        app.state.recovery = {"error": type(exc).__name__}
+                        log_failure("startup_recovery", None, exc)
+                try:
+                    with transaction(session_factory) as session:
+                        completed = complete_existing_textless_chapters(session, resolved)
+                    if completed:
+                        log_event("textless_chapters_completed", count=completed)
+                except Exception as exc:  # allow startup with an unmigrated DB
+                    log_failure("textless_chapter_check", None, exc)
 
-        monitor = asyncio.create_task(monitor_settlements())
-        try:
-            yield
-        finally:
-            stopping.set()
-            await monitor
-            forget_settlements(session_factory)
-            stop_diagnostics(diagnostic_handler)
-            engine.dispose()
+                async def monitor_settlements():
+                    while not stopping.is_set():
+                        try:
+                            await asyncio.to_thread(retry_settlements, session_factory)
+                        except Exception as exc:
+                            log_failure("settlement_monitor", None, exc, deduplicate=True)
+                        with suppress(TimeoutError):
+                            await asyncio.wait_for(stopping.wait(), timeout=2)
+
+                monitor = asyncio.create_task(monitor_settlements())
+                stage = "serving"
+                log_event("application_started")
+                yield
+            except Exception as exc:
+                log_failure("application_lifespan", None, exc, stage=stage)
+                raise
+            finally:
+                cleanup_failed = False
+                log_event("application_stopping")
+                stopping.set()
+                try:
+                    if monitor is not None:
+                        await monitor
+                except BaseException as exc:
+                    cleanup_failed = True
+                    log_failure("settlement_monitor_shutdown", None, exc)
+                    raise
+                finally:
+                    try:
+                        forget_settlements(session_factory)
+                    except BaseException as exc:
+                        cleanup_failed = True
+                        log_failure("settlement_cleanup", None, exc)
+                        raise
+                    finally:
+                        try:
+                            engine.dispose()
+                        except BaseException as exc:
+                            cleanup_failed = True
+                            log_failure("engine_dispose", None, exc)
+                            raise
+                        finally:
+                            log_event("application_stop_failed" if cleanup_failed
+                                      else "application_stopped")
+                            stop_diagnostics(diagnostic_handler)
 
     app = FastAPI(
         title="Novel Dialogue Reader API",

@@ -17,6 +17,8 @@ def build_alembic_config(settings: Settings) -> Config:
     config = Config(str(settings.alembic_ini_path))
     # 注入 URL：alembic.ini 中该项留空，避免出现第二份数据库路径真相。
     config.attributes["sqlalchemy_url"] = settings.database_url
+    # The embedding process owns logging, including active diagnostic handlers.
+    config.attributes["configure_logging"] = False
     return config
 
 

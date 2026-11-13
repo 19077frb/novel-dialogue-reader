@@ -13,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from ..api.errors import ApiError
 from ..context.budget import estimate_tokens
+from ..diagnostics import log_failure
 from ..domain.characters import (
     AppliedCharacterMergeOut,
     CharacterAutoMergeIn,
@@ -713,6 +714,8 @@ def _finish_returned_merge(
 
 
 def _finish_merge_failure(factory, job_id, run_id, exc, elapsed_ms, request=None):
+    log_failure("character_merge", job_id, exc, run_id=run_id, elapsed_ms=elapsed_ms,
+                deduplicate=True)
     unknown = isinstance(exc, ProviderError) and exc.kind in {
         ProviderErrorKind.TIMEOUT,
         ProviderErrorKind.UNKNOWN_OUTCOME,

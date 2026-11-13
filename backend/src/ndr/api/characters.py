@@ -17,6 +17,7 @@ from ..characters.service import (
     get_roster,
     list_book_characters_out,
 )
+from ..diagnostics import log_event
 from ..domain.characters import (
     BookCharacterOut,
     ChapterRosterOut,
@@ -115,6 +116,9 @@ def auto_merge_characters_route(
             job_id=job.id,
             credentials=request.app.state.credentials,
         )
+    log_event("job_admitted", job_id=detail.id, kind=detail.kind.value, state=detail.state.value,
+              request_id=current_request_id(request), created=created,
+              dispatched=bool(created and payload.run_now))
     return DataEnvelope(data=detail, request_id=current_request_id(request))
 
 
@@ -304,6 +308,9 @@ def analyze_character_roster_route(
             job_id=detail.id,
             credentials=credentials,
         )
+    log_event("job_admitted", job_id=detail.id, kind=detail.kind.value, state=detail.state.value,
+              request_id=current_request_id(request), created=created,
+              dispatched=bool(payload.run_now and (created or detail.state is JobState.QUEUED)))
     return DataEnvelope(data=detail, request_id=current_request_id(request))
 
 

@@ -18,11 +18,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from ..diagnostics import diagnostic_scope, log_event, log_failure
 from ..domain.common import ErrorBody, ErrorEnvelope
 from ..domain.enums import ErrorCode
 from ..storage.transactions import VersionConflict
-
-logger = logging.getLogger("ndr.api")
 
 STATUS_BY_CODE: dict[ErrorCode, int] = {
     ErrorCode.VALIDATION_ERROR: 422,
@@ -120,7 +119,8 @@ def install_request_id_middleware(app: FastAPI) -> None:
         if writing:
             request.app.state.active_writes = getattr(request.app.state, "active_writes", 0) + 1
         try:
-            response = await call_next(request)
+            with diagnostic_scope(request.app.state.settings.log_dir):
+                response = await call_next(request)
         finally:
             if writing:
                 request.app.state.active_writes -= 1
@@ -133,7 +133,10 @@ def install_error_handlers(app: FastAPI) -> None:
     async def _handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
         rid = current_request_id(request)
         if exc.status_code >= 500:
-            logger.warning("API 错误 %s (request_id=%s): %s", exc.code, rid, exc.message)
+            with diagnostic_scope(request.app.state.settings.log_dir):
+                log_event("api_error", level=logging.WARNING, error=exc, request_id=rid,
+                          method=request.method, route=_route_template(request),
+                          code=exc.code.value, status_code=exc.status_code)
         return JSONResponse(
             status_code=exc.status_code,
             content=error_payload(exc.code, exc.message, details=exc.details, request_id=rid),
@@ -177,6 +180,11 @@ def install_error_handlers(app: FastAPI) -> None:
         rid = current_request_id(request)
         code = CODE_BY_STATUS.get(exc.status_code, ErrorCode.INTERNAL_ERROR)
         message = exc.detail if isinstance(exc.detail, str) else "请求失败"
+        if exc.status_code >= 500:
+            with diagnostic_scope(request.app.state.settings.log_dir):
+                log_event("api_error", level=logging.WARNING, error=exc, request_id=rid,
+                          method=request.method, route=_route_template(request),
+                          code=code.value, status_code=exc.status_code)
         return JSONResponse(
             status_code=exc.status_code,
             content=error_payload(code, message, request_id=rid),
@@ -185,9 +193,15 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def _handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
         rid = current_request_id(request)
-        # 只记录类型与请求 ID，避免把小说正文或密钥写进日志。
-        logger.exception("未处理异常 %s (request_id=%s)", type(exc).__name__, rid)
+        with diagnostic_scope(request.app.state.settings.log_dir):
+            log_failure("api_unhandled", None, exc, request_id=rid, method=request.method,
+                        route=_route_template(request), status_code=500)
         return JSONResponse(
             status_code=500,
             content=error_payload(ErrorCode.INTERNAL_ERROR, "服务器内部错误", request_id=rid),
         )
+
+
+def _route_template(request: Request) -> str:
+    """Route declarations contain no user path parameters or query values."""
+    return getattr(request.scope.get("route"), "path", "unmatched")

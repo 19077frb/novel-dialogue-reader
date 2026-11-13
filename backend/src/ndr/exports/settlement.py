@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from ..diagnostics import logger
+from ..diagnostics import log_failure
 from ..domain.enums import JobState
 from ..jobs.local_finalization import defer_settlement
 from ..storage.models import ExportArtifact, ExportSnapshot, Job
@@ -24,7 +24,8 @@ def _remove_receipt(path):
     try:
         path.unlink(missing_ok=True)
     except OSError as error:
-        logger.warning("export_receipt_cleanup_failed error=%s", type(error).__name__)
+        log_failure("export_receipt_cleanup", None, error, artifact_id=path.parent.name,
+                    deduplicate=True)
 
 
 def _finish_or_defer(factory, job_id, persist):

@@ -6,6 +6,7 @@ Offline maintenance and other processes still require SQLite's own locking.
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -22,7 +23,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import TextClause
 
-from ..diagnostics import logger
+from ..diagnostics import log_event
 
 _job_context = ContextVar("writer_job", default=None)
 _registry_guard = threading.Lock()
@@ -59,7 +60,7 @@ class WriteQueue:
         with self._condition:
             # A second session on the same thread cannot wait for itself to commit.
             if self._active and self._active.thread_id == turn.thread_id:
-                logger.warning("write_queue_nested_session job=%s", job_id)
+                log_event("write_queue_nested_session", level=logging.WARNING, job_id=job_id)
                 raise _busy()
             self._waiting.append(turn)
             with _progress_guard:
@@ -68,8 +69,8 @@ class WriteQueue:
                 while self._active is not None or self._waiting[0] is not turn:
                     remaining = timeout - (monotonic() - turn.queued_at)
                     if remaining <= 0:
-                        logger.warning("write_queue_timeout job=%s wait_ms=%s depth=%s",
-                                       job_id, int(timeout * 1000), len(self._waiting))
+                        log_event("write_queue_timeout", level=logging.WARNING, job_id=job_id,
+                                  wait_ms=int(timeout * 1000), depth=len(self._waiting))
                         raise _busy()
                     self._condition.wait(remaining)
                 self._waiting.popleft()
@@ -78,9 +79,9 @@ class WriteQueue:
                 with _progress_guard:
                     _progress[turn] = "write_queue_active"
                 wait_ms = int((turn.acquired_at - turn.queued_at) * 1000)
-                log = logger.info if wait_ms >= 100 else logger.debug
-                log("write_queue_acquired job=%s wait_ms=%s depth=%s", job_id,
-                    wait_ms, len(self._waiting))
+                log_event("write_queue_acquired",
+                          level=logging.INFO if wait_ms >= 100 else logging.DEBUG,
+                          job_id=job_id, wait_ms=wait_ms, depth=len(self._waiting))
                 return turn
             except BaseException:
                 if self._active is turn:
@@ -100,9 +101,9 @@ class WriteQueue:
             with _progress_guard:
                 _progress.pop(turn, None)
             hold_ms = int((monotonic() - turn.acquired_at) * 1000)
-            log = logger.info if hold_ms >= 1000 else logger.debug
-            log("write_queue_released job=%s hold_ms=%s depth=%s", turn.job_id,
-                hold_ms, len(self._waiting))
+            log_event("write_queue_released",
+                      level=logging.INFO if hold_ms >= 1000 else logging.DEBUG,
+                      job_id=turn.job_id, hold_ms=hold_ms, depth=len(self._waiting))
             self._condition.notify_all()
 
 

@@ -138,8 +138,8 @@ def test_queue_timeout_removes_ticket_and_next_writer_runs(monkeypatch):
     queue = WriteQueue()
     holder = queue.acquire("holder")
     logs = []
-    monkeypatch.setattr("ndr.storage.write_queue.logger.warning",
-                        lambda message, *args: logs.append(message % args))
+    monkeypatch.setattr("ndr.storage.write_queue.log_event",
+                        lambda event, **fields: logs.append({"event": event, **fields}))
     with ThreadPoolExecutor(max_workers=1) as pool:
         expired = pool.submit(queue.acquire, "expired", timeout=0.02)
         with pytest.raises(OperationalError) as error:
@@ -151,7 +151,7 @@ def test_queue_timeout_removes_ticket_and_next_writer_runs(monkeypatch):
         queue.release(holder)
         queue.release(next_writer.result(timeout=5))
     assert writer_progress("next") is None
-    assert "write_queue_timeout job=expired" in logs[0]
+    assert logs[0]["event"] == "write_queue_timeout" and logs[0]["job_id"] == "expired"
     assert "SQL" not in logs[0] and "queue_test" not in logs[0]
 
 

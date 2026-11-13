@@ -19,10 +19,18 @@ from urllib.request import ProxyHandler, build_opener
 
 from . import __version__
 from .config import REPO_ROOT, Settings, get_settings
+from .diagnostics import diagnostic_scope, log_failure, start_diagnostics, stop_diagnostics
+from .runtime_logging import (
+    StartupArgumentError,
+    StartupError,
+    configure_server_logging,
+    startup_failure_message,
+)
 
 
-class LibraryInUseError(RuntimeError):
-    pass
+class LibraryInUseError(StartupError):
+    def __init__(self) -> None:
+        super().__init__("library_in_use")
 
 
 class LibraryLock:
@@ -50,7 +58,7 @@ class LibraryLock:
                 fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             self.file.close()
-            raise LibraryInUseError("这份书库正在运行，请使用已打开的阅读器。") from exc
+            raise LibraryInUseError() from exc
         self.locked = True
         return self
 
@@ -86,7 +94,7 @@ def portable_settings(*, data_dir: Path | None, port: int | None) -> Settings:
     if port is not None:
         settings._startup_locks["port"] = "由启动参数 --port 指定；移除参数并重启后可修改。"
     if not 1 <= settings.port <= 65535:
-        raise ValueError("端口必须在 1 到 65535 之间。")
+        raise StartupArgumentError("invalid_port")
     return settings
 
 
@@ -114,9 +122,9 @@ def backup_before_upgrade(settings: Settings) -> Path | None:
             try:
                 known = scripts.get_revision(revision)
             except CommandError as exc:
-                raise RuntimeError("书库版本比当前程序更新，请使用新版程序，不要降级。") from exc
+                raise StartupError("newer_library") from exc
             if known is None:
-                raise RuntimeError("书库版本比当前程序更新，请使用新版程序，不要降级。")
+                raise StartupError("newer_library")
         destination = settings.data_dir / "backups"
         destination.mkdir(exist_ok=True)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -151,7 +159,7 @@ def launch(settings: Settings, *, no_browser: bool, run_seconds: float | None) -
     from .storage.migrate import run_migrations
 
     if settings.static_dir is None or not (settings.static_dir / "index.html").is_file():
-        raise RuntimeError("程序的页面文件缺失，请重新下载并完整解压免安装包。")
+        raise StartupError("missing_pages")
     status_file = settings.data_dir / "portable-server.json"
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     done = threading.Event()
@@ -166,9 +174,7 @@ def launch(settings: Settings, *, no_browser: bool, run_seconds: float | None) -
         try:
             listener.bind((settings.host, settings.port))
         except OSError as exc:
-            raise RuntimeError(
-                f"端口 {settings.port} 被占用。请先关闭原服务，或使用 --port 8800。"
-            ) from exc
+            raise StartupError("port_in_use") from exc
         backup = backup_before_upgrade(settings)
         if backup:
             print(f"升级前数据库备份：{backup}")
@@ -188,7 +194,10 @@ def launch(settings: Settings, *, no_browser: bool, run_seconds: float | None) -
         from .app import create_app
 
         app = create_app(settings)
-        server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port))
+        configure_server_logging()
+        server = uvicorn.Server(uvicorn.Config(
+            app, host=settings.host, port=settings.port, log_config=None, access_log=False,
+        ))
 
         def request_restart() -> None:
             nonlocal restart
@@ -204,7 +213,7 @@ def launch(settings: Settings, *, no_browser: bool, run_seconds: float | None) -
                     if done.wait(0.1):
                         return
                     if time.monotonic() >= deadline:
-                        raise RuntimeError("启动超时，请查看控制台的错误信息。")
+                        raise StartupError("startup_timeout")
                 status_file.write_text(json.dumps({"port": settings.port}), encoding="utf-8")
                 url = f"http://127.0.0.1:{settings.port}"
                 print(f"阅读器已启动：{url}\n数据目录：{settings.data_dir}\n按 Ctrl+C 停止服务。")
@@ -222,7 +231,7 @@ def launch(settings: Settings, *, no_browser: bool, run_seconds: float | None) -
         if errors:
             raise errors[0]
         if not server.started:
-            raise RuntimeError("服务未能启动，请查看控制台的错误信息。")
+            raise StartupError("server_not_started")
         return restart
     finally:
         done.set()
@@ -247,6 +256,8 @@ def main() -> int:
     parser.add_argument("--check-runtime", action="store_true", help="验收用：检查内置运行环境")
     parser.add_argument("--run-seconds", type=float, help="验收用：就绪后限时运行并正常退出")
     args = parser.parse_args()
+    diagnostics_available = False
+    stage = "configuration"
     try:
         if args.check_runtime:
             from .llm.credentials import SystemCredentialStore
@@ -262,16 +273,30 @@ def main() -> int:
             )
             return 0
         if args.run_seconds is not None and args.run_seconds <= 0:
-            raise ValueError("限时运行秒数必须大于 0。")
+            raise StartupArgumentError("invalid_run_seconds")
         while True:
+            diagnostics_available = False
+            stage = "configuration"
             settings = portable_settings(data_dir=args.data_dir, port=args.port)
+            stage = "library_lock"
             try:
-                with LibraryLock(settings.data_dir):
-                    restart = launch(
-                        settings,
-                        no_browser=args.no_browser,
-                        run_seconds=args.run_seconds,
-                    )
+                with LibraryLock(settings.data_dir), diagnostic_scope(settings.log_dir):
+                    handler = start_diagnostics(settings.log_dir)
+                    diagnostics_available = handler is not None
+                    stage = "launch"
+                    try:
+                        restart = launch(
+                            settings,
+                            no_browser=args.no_browser,
+                            run_seconds=args.run_seconds,
+                        )
+                    except Exception as exc:
+                        log_failure("portable_startup", None, exc,
+                                    code=exc.code if isinstance(exc, StartupError)
+                                    else "STARTUP_FAILED")
+                        raise
+                    finally:
+                        stop_diagnostics(handler)
             except LibraryInUseError:
                 for _ in range(20):
                     url = running_url(settings.data_dir)
@@ -288,7 +313,8 @@ def main() -> int:
     except KeyboardInterrupt:
         return 0
     except Exception as exc:
-        print(f"启动失败：{exc}", file=sys.stderr)
+        print(startup_failure_message(exc, diagnostics_available=diagnostics_available,
+                                      stage=stage), file=sys.stderr)
         if not args.no_browser and sys.stdin.isatty():
             input("按回车关闭窗口…")
         return 1
