@@ -28,6 +28,7 @@ from ..domain.jobs import (
 )
 from ..domain.recovery import JobRecoveryOut
 from ..jobs.local_finalization import settlement_progress
+from ..jobs.resumption import admit_job_resume, guard_job_resumption
 from ..jobs.scheduler import reconcile_job, run_job
 from ..jobs.service import (
     create_inference_job,
@@ -266,37 +267,11 @@ def resume_job_route(
     factory = request.app.state.session_factory
     settings = request.app.state.settings
     credentials = request.app.state.credentials
-    with transaction(factory) as session:
+    with admission_transaction(factory) as session:
         job = session.get(Job, job_id)
         if job is None:
             raise ApiError.not_found("任务不存在", job_id=job_id)
-        replacement = json.loads(job.checkpoint_json or "{}").get("superseded_by")
-        if replacement:
-            raise ApiError(ErrorCode.RESOURCE_CONFLICT,
-                           "该人物任务已由新的本章任务接替，请查看新任务",
-                           details={"job_id": replacement})
-        if job.kind is JobKind.CHARACTER_ROSTER and job.state in {
-            JobState.FAILED, JobState.NEEDS_RECONCILIATION, JobState.PAUSED,
-            JobState.PARTIAL, JobState.BUDGET_EXHAUSTED,
-        }:
-            from ..jobs.roster_receipts import has_returned_result
-
-            if (not json.loads(job.range_json or "{}").get("roster_repair_protocol")
-                    and has_returned_result(session, job)):
-                checkpoint = json.loads(job.checkpoint_json or "{}")
-                checkpoint.pop("roster_retry_after_run_id", None)
-                job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
-                job.state = JobState.QUEUED
-        if job.state in {JobState.PAUSED, JobState.PARTIAL, JobState.BUDGET_EXHAUSTED}:
-            job.state = JobState.QUEUED
-        if (job.state is JobState.FAILED
-                and json.loads(job.checkpoint_json or "{}").get("dialogue_receipts")):
-            job.state = JobState.QUEUED
-    # 后台继续跑；这里只返回当前快照，真实进度由 GET /api/jobs/{id} 轮询
-    background.add_task(run_job, factory, settings, job_id=job_id, credentials=credentials)
-    with transaction(factory) as session:
-        job = session.get(Job, job_id)
-        assert job is not None
+        resumed = admit_job_resume(session, settings, job)
         rows = job_windows(session, job_id)
         snapshot = JobRunOut(
             job_id=job_id,
@@ -307,6 +282,9 @@ def resume_job_route(
             calls=0,
             unknown_runs=0,
         )
+    # Only the transaction that changed the state owns the background dispatch.
+    if resumed:
+        background.add_task(run_job, factory, settings, job_id=job_id, credentials=credentials)
     return DataEnvelope(data=snapshot, request_id=current_request_id(request))
 
 
@@ -320,7 +298,10 @@ def run_job_route(request: Request, job_id: str) -> DataEnvelope[JobRunOut]:
     settings = request.app.state.settings
     credentials = request.app.state.credentials
     outcome = run_job(factory, settings, job_id=job_id, credentials=credentials)
-    return DataEnvelope(data=JobRunOut(**outcome.as_dict()), request_id=current_request_id(request))
+    return DataEnvelope(
+        data=JobRunOut.model_validate(outcome, from_attributes=True),
+        request_id=current_request_id(request),
+    )
 
 
 @router.post("/{job_id}/reconcile", response_model=DataEnvelope[dict])
@@ -340,6 +321,8 @@ def reconcile_job_route(
         if job.state is not JobState.NEEDS_RECONCILIATION:
             raise ApiError(ErrorCode.RESOURCE_CONFLICT,
                            "任务已不处于结果待核对状态，请重新读取任务详情")
+        if payload.action == "retry":
+            guard_job_resumption(session, request.app.state.settings, job)
         result = reconcile_job(session, job, action=payload.action)
     if payload.action == "retry":
         background.add_task(run_job, factory, request.app.state.settings,
