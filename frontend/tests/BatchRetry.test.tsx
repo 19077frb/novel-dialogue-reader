@@ -16,7 +16,7 @@ import type { ChapterOut, EstimateOut, JobDetailOut } from '../src/api/types'
 
 vi.mock('../src/api/books', () => ({ fetchJob: vi.fn(), completeChapterProcessing: vi.fn(), fetchBook: vi.fn(), fetchChapters: vi.fn(), fetchProcessingStatus: vi.fn(), setChapterProcessingStatus: vi.fn() }))
 vi.mock('../src/api/characters', () => ({ analyzeCharacterRoster: vi.fn(), confirmCharacterRoster: vi.fn(), fetchCharacterRoster: vi.fn() }))
-vi.mock('../src/api/jobs', async importOriginal => ({ ...await importOriginal<typeof import('../src/api/jobs')>(), fetchRecentJobs: vi.fn(), pauseJob: vi.fn(), createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
+vi.mock('../src/api/jobs', async importOriginal => ({ ...await importOriginal<typeof import('../src/api/jobs')>(), preflightDialogue: vi.fn(), fetchRecentJobs: vi.fn(), pauseJob: vi.fn(), createJob: vi.fn(), estimateRange: vi.fn(), freshIdempotencyKey: vi.fn(() => crypto.randomUUID()) }))
 vi.mock('../src/processing/jobCompletion', async importOriginal => ({ ...await importOriginal<typeof import('../src/processing/jobCompletion')>(), waitForJobCompletion: vi.fn(async job => job) }))
 
 const chapter = { id: 'c1', title: '第一章', ordinal: 0, start_cp: 0, end_cp: 100, dialogue_processed: false } as ChapterOut
@@ -45,6 +45,7 @@ beforeEach(() => {
   vi.mocked(jobs.freshIdempotencyKey).mockImplementation(() => crypto.randomUUID())
   vi.mocked(books.fetchJob).mockImplementation(async id => receipts.get(id)!)
   vi.mocked(jobs.fetchRecentJobs).mockResolvedValue([])
+  vi.mocked(jobs.preflightDialogue).mockResolvedValue(undefined)
   vi.mocked(waitForJobCompletion).mockImplementation(async job => job)
   vi.mocked(books.fetchBook).mockResolvedValue({ active_version_id: 'v1' } as never)
   vi.mocked(books.fetchChapters).mockResolvedValue([chapter])

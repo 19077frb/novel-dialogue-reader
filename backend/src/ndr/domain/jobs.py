@@ -50,6 +50,31 @@ class JobCreate(ApiModel):
     run_now: bool = Field(default=True, description="是否立即在后台执行（测试/E2E 可显式触发）")
 
 
+class DialoguePreflightRange(ApiModel):
+    chapter_id: str | None = None
+    start_cp: int = Field(default=0, ge=0, strict=True)
+    end_cp: int | None = Field(default=None, ge=0, strict=True)
+    context_policy: Literal[
+        "context-1", "context-2", "context-chapter-1", "context-chapter-2", "context-chapter-3",
+    ] = "context-1"
+
+
+class DialoguePreflightIn(ApiModel):
+    book_id: str
+    book_version_id: str | None = None
+    range: DialoguePreflightRange
+    selected_window_ids: list[str] | None = Field(default=None, min_length=1)
+    reading_mode: ReadingMode
+    visible_horizon_cp: int | None = Field(default=None, ge=0, strict=True)
+
+
+class DialoguePreflightOut(ApiModel):
+    book_id: str
+    book_version_id: str
+    window_count: int = Field(ge=0)
+    target_count: int = Field(ge=0)
+
+
 class JobWindowOut(ApiModel):
     window_id: str
     state: JobState

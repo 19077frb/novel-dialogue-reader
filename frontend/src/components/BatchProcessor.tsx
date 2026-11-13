@@ -11,7 +11,7 @@ import {
   confirmCharacterRoster,
   fetchCharacterRoster,
 } from '../api/characters'
-import { createJob, estimateRange, freshIdempotencyKey, pauseJob, fetchRecentJobs, dialogueStrategyDisabledReason } from '../api/jobs'
+import { createJob, estimateRange, freshIdempotencyKey, pauseJob, fetchRecentJobs, dialogueStrategyDisabledReason, preflightDialogue } from '../api/jobs'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
 import { hasSingleWork } from '../processing/singleWorkflow'
 import type { ChapterOut, EstimateOut, JobDetailOut, ModelProfileOut } from '../api/types'
@@ -273,15 +273,31 @@ export function restoreSavedBatches(existingBookIds: ReadonlySet<string>) {
   }
 }
 
-async function submitBatchRequest(bookId: string, taskId: string, type: 'roster' | 'dialogue', input: AnalyzeRosterInput | CreateJobInput): Promise<JobDetailOut> {
+async function submitBatchRequest(bookId: string, taskId: string, type: 'roster' | 'dialogue', input: AnalyzeRosterInput | CreateJobInput,
+  beforeCreate?: () => Promise<void>, assertCanCreate?: () => void): Promise<JobDetailOut> {
   const requests = batchRequests.get(bookId) ?? {}
   batchRequests.set(bookId, requests)
-  const saved = requests[taskId] ?? (requests[taskId] = { type, input })
+  const previous = requests[taskId]
+  const saved = previous ?? (requests[taskId] = { type, input })
   persistBatch(bookId) // Write before POST, including its stable request key and budget.
   if (saved.jobId) return fetchJob(saved.jobId)
-  const job = await submitServiceJob(saved.input.profileId ?? '', () => type === 'roster'
-    ? analyzeCharacterRoster(bookId, taskId.slice('roster:'.length), saved.input as AnalyzeRosterInput)
-    : createJob(saved.input as CreateJobInput))
+  if (type === 'roster' && previous) {
+    const existing = (await fetchRecentJobs({ bookId, versionId: saved.input.bookVersionId ?? undefined,
+      chapterId: taskId.slice('roster:'.length), kind: 'CHARACTER_ROSTER',
+      idempotencyKey: saved.input.idempotencyKey, limit: 1 }))[0]
+    if (existing) {
+      saved.jobId = existing.id
+      persistBatch(bookId)
+      return existing
+    }
+  }
+  if (beforeCreate) await beforeCreate()
+  const job = await submitServiceJob(saved.input.profileId ?? '', () => {
+    assertCanCreate?.()
+    return type === 'roster'
+      ? analyzeCharacterRoster(bookId, taskId.slice('roster:'.length), saved.input as AnalyzeRosterInput)
+      : createJob(saved.input as CreateJobInput)
+  })
   saved.jobId = job.id
   persistBatch(bookId)
   await observeServiceJob(saved.input.profileId ?? '', job)
@@ -1223,6 +1239,17 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
               maxInputTokens: available,
               idempotencyKey: freshIdempotencyKey('batch-roster', `${bookId}:${chapter.id}:${profileId}`),
               allowOverwriteManual: getGeneralSettings().allowOverwriteManualCharacters,
+            }, async () => {
+              const selectedWindowIds = (plan.estimate.windows ?? []).map(window => String(window.window_id))
+              if (selectedWindowIds.length) await preflightDialogue({
+                bookId, bookVersionId,
+                range: { chapterId: chapter.id, startCp: chapter.start_cp, endCp: chapter.end_cp,
+                  dialogueStrategy: preferences.dialogueStrategy },
+                selectedWindowIds, readingMode: 'reread', visibleHorizonCp: null,
+              })
+            }, () => {
+              if (plan.cancelled) throw new BatchAbortError('本章处理已停止，未调用模型。')
+              if (batchShouldStop(bookId, stopRef.current)) throw new BatchAbortError('批量处理已停止，未调用模型。')
             }),
           )
           retryable = (rosterJob.state === 'FAILED' || rosterJob.state === 'COMPLETED')

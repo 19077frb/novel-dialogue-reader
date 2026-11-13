@@ -17,9 +17,14 @@ from sqlalchemy import Integer, func, select, tuple_
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from ..context.budget import policy_for_version
+from ..context.full_source import FullContextError
+from ..context.service import plan_range
 from ..domain.common import CursorPage, DataEnvelope, ErrorEnvelope
 from ..domain.enums import CredentialMode, ErrorCode, JobKind, JobState
 from ..domain.jobs import (
+    DialoguePreflightIn,
+    DialoguePreflightOut,
     JobCreate,
     JobDetailOut,
     JobRunOut,
@@ -28,6 +33,7 @@ from ..domain.jobs import (
 )
 from ..domain.recovery import JobRecoveryOut
 from ..jobs.local_finalization import settlement_progress
+from ..jobs.occupancy import guard_active_target
 from ..jobs.resumption import admit_job_resume, guard_job_resumption
 from ..jobs.scheduler import reconcile_job, run_job
 from ..jobs.service import (
@@ -170,6 +176,51 @@ def recent_jobs_route(
     return DataEnvelope(
         data=job_details(session, jobs), request_id=current_request_id(request)
     )
+
+
+@router.post(
+    "/preflight", response_model=DataEnvelope[DialoguePreflightOut],
+    summary="只读检查对白目标占用（不创建任务、不预留目标、不调用模型）",
+)
+def dialogue_preflight_route(
+    request: Request, payload: DialoguePreflightIn, session: Session = Depends(get_session),
+) -> DataEnvelope[DialoguePreflightOut]:
+    book = session.get(Book, payload.book_id)
+    if book is None:
+        raise ApiError.not_found("书籍不存在", book_id=payload.book_id)
+    version = session.get(BookVersion, payload.book_version_id or book.active_version_id)
+    if version is None or version.book_id != book.id:
+        raise ApiError.validation("书籍版本不存在或不属于该书籍")
+    target = payload.range.model_dump()
+    end = version.canonical_length_cp if target["end_cp"] is None else target["end_cp"]
+    if not 0 <= target["start_cp"] <= end <= version.canonical_length_cp:
+        raise ApiError.validation("处理范围超出本书正文，请重新读取窗口计划")
+    if target["chapter_id"]:
+        chapter = session.get(Chapter, target["chapter_id"])
+        if chapter is None or chapter.book_version_id != version.id:
+            raise ApiError.validation("章节不存在或不属于该版本")
+    settings = request.app.state.settings
+    try:
+        plan = plan_range(
+            session, settings, version, start_cp=target["start_cp"], end_cp=end,
+            reading_mode=payload.reading_mode, visible_horizon_cp=payload.visible_horizon_cp,
+            policy=policy_for_version(target["context_policy"]),
+        )
+    except FullContextError as exc:
+        raise ApiError.validation(str(exc)) from exc
+    selected = payload.selected_window_ids
+    if selected is not None and not set(selected) <= {w.window_id for w in plan.windows}:
+        raise ApiError.validation("窗口计划已变化，请重新读取后再处理")
+    guard_active_target(session, version.id, JobKind.INFERENCE, {
+        **target, "selected_window_ids": selected,
+        "reading_mode": payload.reading_mode.value,
+        "visible_horizon_cp": payload.visible_horizon_cp,
+    }, settings=settings)
+    windows = [w for w in plan.windows if selected is None or w.window_id in selected]
+    return DataEnvelope(data=DialoguePreflightOut(
+        book_id=book.id, book_version_id=version.id, window_count=len(windows),
+        target_count=sum(len(w.target_quote_ids) for w in windows),
+    ), request_id=current_request_id(request))
 
 
 @router.post("", status_code=202, response_model=DataEnvelope[JobDetailOut], summary="创建任务",
