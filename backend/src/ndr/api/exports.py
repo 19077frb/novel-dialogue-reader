@@ -106,7 +106,10 @@ def export_preview_route(
         )
     except ValueError as exc:
         raise ApiError.validation(str(exc)) from exc
+    # Release the SQLite writer before canonical reads, coverage scans and HTML rendering.
+    session.commit()
     projection = json.loads(snapshot.annotation_projection_json or "{}")
+    chapter_ids = json.loads(snapshot.selected_chapter_ids_json or "[]")
     style = ExportStylePreset(payload.style.preset)
     sample_html, fragments, coverage = render_sample(
         session,
@@ -115,7 +118,12 @@ def export_preview_route(
         version=version,
         projection_payload=projection,
         style=style,
+        chapter_ids=chapter_ids or None,
     )
+    # A delete committed between freezing and the first read must not produce a
+    # successful empty preview from the still-present ORM identity-map objects.
+    if session.get(BookVersion, version.id, populate_existing=True) is None:
+        raise ApiError.not_found("书籍版本已被移除", book_version_id=version.id)
 
     data = ExportPreviewOut(
         snapshot_id=snapshot.id,
@@ -124,7 +132,7 @@ def export_preview_route(
         snapshot_hash=snapshot.snapshot_hash,
         source_revision=snapshot.source_revision,
         visibility_policy=payload.visibility_policy,
-        selected_chapter_ids=json.loads(snapshot.selected_chapter_ids_json or "[]"),
+        selected_chapter_ids=chapter_ids,
         counts=projection.get("counts", {}),
         coverage={**coverage, "sample_fragments": len(fragments)},
         warnings=json.loads(snapshot.warnings_json or "[]"),
@@ -132,7 +140,6 @@ def export_preview_route(
         sample_fragments=fragments,
         created_at=snapshot.created_at.isoformat(),
     )
-    session.commit()
     return DataEnvelope(data=data, request_id=current_request_id(request))
 
 
