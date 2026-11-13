@@ -10,6 +10,7 @@ import { fetchTaskQueue } from '../src/api/jobs'
 import { startCharacterAutoMerge } from '../src/api/characters'
 import { waitForJobCompletion } from '../src/processing/jobCompletion'
 import { fetchJob } from '../src/api/books'
+import { clearServiceBlock, getServiceBlock, observeServiceJob } from '../src/processing/serviceGate'
 
 vi.mock('../src/api/books', () => ({ fetchBook: vi.fn(), fetchJob: vi.fn() }))
 vi.mock('../src/api/jobs', () => ({ fetchTaskQueue: vi.fn(), pauseJob: vi.fn() }))
@@ -163,4 +164,80 @@ it('releases completed windows rather than blocking them until the whole range f
   await expect(enqueueWork(input('b1', 'w1'))).resolves.toBeTypeOf('string')
   finish({ id: 'done', state: 'COMPLETED' } as never)
   await waitFor(() => expect(getAdmissions().every(item => item.phase === 'completed')).toBe(true))
+})
+
+it('keeps subsequent ranges across books blocked after a service failure and continues only queued ranges manually', async () => {
+  vi.mocked(runSingleWorkflow).mockImplementationOnce(async () => {
+    await observeServiceJob('p1', { id: 'limited-job', state: 'FAILED',
+      service_error_code: 'RATE_LIMITED', service_error_run_id: 'limited-run' } as never)
+    throw new Error('模型服务限流')
+  })
+  const first = await enqueueWork(input('b1', 'failed'))
+  await waitFor(() => expect(getAdmissions().find(item => item.id === first)?.phase).toBe('failed'))
+  const sameBook = await enqueueWork(input('b1', 'next'))
+  const otherBook = await enqueueWork({ ...mergeInput, bookId: 'b2' })
+  const normal = input('b3', 'normal')
+  normal.payload.work.tasks[0].input.profileId = 'p2'
+  await enqueueWork(normal)
+  await waitFor(() => expect(runSingleWorkflow).toHaveBeenCalledTimes(2))
+  await pumpQueue()
+  expect(getAdmissions().find(item => item.id === sameBook)?.phase).toBe('queued')
+  expect(getAdmissions().find(item => item.id === otherBook)?.phase).toBe('queued')
+  const block = getServiceBlock('p1')!
+  await clearServiceBlock('p1', block.id)
+  await pumpQueue()
+  await waitFor(() => expect(getAdmissions().filter(item => item.id !== first).map(item => ({ phase: item.phase, error: item.error })))
+    .toEqual(Array.from({ length: 3 }, () => ({ phase: 'completed', error: null }))))
+  expect(getAdmissions().find(item => item.id === first)?.phase).toBe('failed')
+  expect(runSingleWorkflow).toHaveBeenCalledTimes(3)
+  expect(startCharacterAutoMerge).toHaveBeenCalledTimes(1)
+})
+
+it('preserves book FIFO behind a blocked configuration while another book with a healthy configuration proceeds', async () => {
+  await observeServiceJob('p1', { id: 'service-failure', state: 'FAILED', service_error_code: 'RATE_LIMITED',
+    service_error_run_id: 'fifo-run' } as never)
+  const first = await enqueueWork(input('fifo-book', 'first'))
+  const later = { ...mergeInput, bookId: 'fifo-book', payload: { ...mergeInput.payload,
+    input: { ...mergeInput.payload.input, profile_id: 'p2' } } }
+  const second = await enqueueWork(later)
+  const healthy = input('healthy-book', 'healthy')
+  healthy.payload.work.tasks[0].input.profileId = 'p2'
+  const other = await enqueueWork(healthy)
+  await waitFor(() => expect(getAdmissions().find(item => item.id === other)?.phase).toBe('completed'))
+  expect(getAdmissions().find(item => item.id === first)?.phase).toBe('queued')
+  expect(getAdmissions().find(item => item.id === second)?.phase).toBe('queued')
+  expect(startCharacterAutoMerge).not.toHaveBeenCalled()
+  const block = getServiceBlock('p1')!
+  await clearServiceBlock('p1', block.id)
+  await pumpQueue()
+  await waitFor(() => expect(getAdmissions().every(item => item.phase === 'completed')).toBe(true))
+  expect(startCharacterAutoMerge).toHaveBeenCalledTimes(1)
+})
+
+it('keeps damaged-profile ranges queued and processes another book without dispatching the damaged range', async () => {
+  localStorage.setItem('ndr:tasks:v1:service-gate:p1', '{invalid')
+  const damaged = await enqueueWork(input('damaged-book', 'first'))
+  const healthy = input('undamaged-book', 'next')
+  healthy.payload.work.tasks[0].input.profileId = 'p2'
+  const other = await enqueueWork(healthy)
+  await waitFor(() => expect(getAdmissions().find(item => item.id === other)?.phase).toBe('completed'))
+  expect(getAdmissions().find(item => item.id === damaged)?.phase).toBe('queued')
+  expect(runSingleWorkflow).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(runSingleWorkflow).mock.calls[0][0].bookId).toBe('undamaged-book')
+})
+
+it('reconciles an already-running saved range even when an earlier queued range of that book is blocked', async () => {
+  await observeServiceJob('p1', { id: 'service-failure', state: 'FAILED', service_error_code: 'RATE_LIMITED',
+    service_error_run_id: 'drain-run' } as never)
+  writeJournal('admissions', [
+    { ...input('drain-book', 'first'), id: 'waiting', phase: 'queued', error: null, createdAt: 1 },
+    { ...mergeInput, bookId: 'drain-book', id: 'already-running', jobId: 'known-job',
+      phase: 'running', error: null, createdAt: 2 },
+  ])
+  vi.mocked(fetchJob).mockResolvedValue({ id: 'known-job', state: 'COMPLETED' } as never)
+  await pumpQueue()
+  await waitFor(() => expect(getAdmissions().find(item => item.id === 'already-running')?.phase).toBe('completed'))
+  expect(getAdmissions().find(item => item.id === 'waiting')?.phase).toBe('queued')
+  expect(fetchJob).toHaveBeenCalledWith('known-job')
+  expect(startCharacterAutoMerge).not.toHaveBeenCalled()
 })

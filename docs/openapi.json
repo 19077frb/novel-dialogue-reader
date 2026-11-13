@@ -8395,6 +8395,34 @@
             ],
             "title": "Last Error"
           },
+          "service_error_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "RATE_LIMITED",
+                  "PROVIDER_QUOTA_EXHAUSTED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Error Code",
+            "description": "窗口最新调用仍未解决的限流或额度错误，完成任务也可能保留有效初次结果"
+          },
+          "service_error_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Error Run Id",
+            "description": "对应失败调用标识，用于人工解除服务阻塞后避免重复处理旧故障"
+          },
           "windows": {
             "items": {
               "$ref": "#/components/schemas/JobWindowOut"

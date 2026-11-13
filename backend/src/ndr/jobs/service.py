@@ -22,6 +22,7 @@ from ..characters.prompt_catalog import IDENTITY_PROMPT_VERSION
 from ..config import Settings
 from ..context.budget import DEFAULT_POLICY, BudgetPolicy, estimate_tokens
 from ..context.service import plan_range
+from ..context.window_builder import ProcessingWindow
 from ..domain.enums import (
     CredentialMode,
     JobKind,
@@ -524,11 +525,14 @@ def job_detail(session: Session, job: Job) -> JobDetailOut:
     runs = list(
         session.execute(
             select(
+                InferenceRun.id,
+                InferenceRun.created_at,
                 InferenceRun.window_id,
                 InferenceRun.usage_json,
                 InferenceRun.state,
                 InferenceRun.error_code,
             ).where(InferenceRun.job_id == job.id)
+            .order_by(InferenceRun.created_at, InferenceRun.id)
         )
     )
     return _job_detail(job, rows, runs)
@@ -550,12 +554,15 @@ def job_details(session: Session, jobs: Sequence[Job]) -> list[JobDetailOut]:
     runs_by_job: dict[str, list[Any]] = {}
     for run in session.execute(
         select(
+            InferenceRun.id,
+            InferenceRun.created_at,
             InferenceRun.job_id,
             InferenceRun.window_id,
             InferenceRun.usage_json,
             InferenceRun.state,
             InferenceRun.error_code,
         ).where(InferenceRun.job_id.in_(job_ids))
+        .order_by(InferenceRun.created_at, InferenceRun.id)
     ):
         runs_by_job.setdefault(run.job_id, []).append(run)
     return [
@@ -575,6 +582,19 @@ def _job_detail(job: Job, rows: list[JobWindow], runs: list[Any]) -> JobDetailOu
     progress = json.loads(job.progress_json) if job.progress_json else None
     from .local_finalization import settlement_progress
     progress = settlement_progress(job.id, progress)
+    # Primary, format retries and review stages share their window_id. Only the
+    # latest attempt for each window can leave an unresolved service failure.
+    # A COMPLETED job can retain its valid primary result after review fails.
+    latest_by_window = {run.window_id: run for run in runs}
+    service_failure = next(
+        (
+            run for run in reversed(runs)
+            if latest_by_window[run.window_id] is run
+            and run.state.value == "FAILED"
+            and run.error_code in {"RATE_LIMITED", "PROVIDER_QUOTA_EXHAUSTED"}
+        ),
+        None,
+    )
     return JobDetailOut(
         range=json.loads(job.range_json or "{}"),
         id=job.id,
@@ -586,6 +606,8 @@ def _job_detail(job: Job, rows: list[JobWindow], runs: list[Any]) -> JobDetailOu
         progress=progress,
         checkpoint=json.loads(job.checkpoint_json) if job.checkpoint_json else None,
         last_error=job.last_error,
+        service_error_code=service_failure.error_code if service_failure else None,
+        service_error_run_id=service_failure.id if service_failure else None,
         windows=windows,
         remaining_windows=sum(
             1 for row in rows if row.state in {JobState.QUEUED, JobState.NEEDS_RECONCILIATION}
@@ -694,6 +716,8 @@ def _spent_tokens(rows) -> dict[str, int]:  # noqa: ANN001
     for run in rows:
         if not run.usage_json:
             # INVALID_MODEL_OUTPUT 表示提供方通常已经生成过内容；缺 usage 不能按零费用处理。
+            # 历史 UNAVAILABLE 也可能是已发送后的响应中断；只有独立的
+            # PROVIDER_CONNECTION_FAILED 能证明尚未发送，且不伪造零 usage。
             if run.state.value in {"DISPATCHED", "UNKNOWN_OUTCOME", "SUCCEEDED"} or (
                 run.state.value == "FAILED" and run.error_code in {
                     "INVALID_MODEL_OUTPUT", "LOCAL_FINALIZATION_FAILED", "PROVIDER_UNAVAILABLE",

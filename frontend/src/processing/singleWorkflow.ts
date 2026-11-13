@@ -7,6 +7,7 @@ import { mapWithConcurrency, inSharedTaskPool } from './concurrency'
 import { waitForJobCompletion } from './jobCompletion'
 import { readJournal, writeJournal, withWorkflowLock, assertWorkflowOwnership } from './journal'
 import { getAdmissions } from './workQueue'
+import { getServiceBlock, observeServiceJob, serviceBlockReason, submitServiceJob } from './serviceGate'
 
 export interface SingleWorkflow {
   queueId?: string
@@ -106,22 +107,35 @@ export function runSingleWorkflow(work: SingleWorkflow): Promise<JobDetailOut> {
       let stopDispatch = false
       const jobs = await mapWithConcurrency(work.tasks, work.concurrency, task => inSharedTaskPool(work.concurrency, async () => {
         try {
-          if (stopped() && !task.job) {
+          let serviceBlock: ReturnType<typeof getServiceBlock> = null
+          let serviceReadError: unknown = null
+          if (!task.job) {
+            try { serviceBlock = getServiceBlock(task.input.profileId ?? '') }
+            catch (error) { serviceReadError = error }
+          }
+          if ((stopped() || serviceBlock || serviceReadError) && !task.job) {
             // Resolve lost acknowledgements without issuing another POST.
             task.job = (await fetchRecentJobs({ bookId: work.bookId, versionId: work.versionId,
               idempotencyKey: task.input.idempotencyKey, limit: 1 }))[0] ?? null
-            if (!task.job) { task.error = '已取消，本窗口未派发'; publish(work); return null }
+            if (!task.job) {
+              if (serviceReadError) throw serviceReadError
+              task.error = serviceBlock && !stopped() ? serviceBlockReason(serviceBlock) : '已取消，本窗口未派发'
+              publish(work); return null
+            }
           }
           if (stopDispatch && !task.job) { task.error = '前序任务结果尚不明确，本窗口未派发'; publish(work); return null }
           // No asynchronous gap between the last stop check and the POST.
-          const initial = task.job ? await fetchJob(task.job.id) : await createJob(task.input)
+          const initial = task.job ? await fetchJob(task.job.id)
+            : await submitServiceJob(task.input.profileId ?? '', () => createJob(task.input))
           task.job = initial
+          await observeServiceJob(task.input.profileId ?? '', initial)
           if (stopped()) pauseKnownJobs()
           const result = await waitForJobCompletion(initial, job => {
             task.job = job
             if (stopped()) pauseKnownJobs()
             publish(work)
           })
+          await observeServiceJob(task.input.profileId ?? '', result)
           window.dispatchEvent(new CustomEvent('ndr:window-completed', { detail: {
             bookId: work.bookId, startCp: work.startCp, endCp: work.endCp,
           } }))

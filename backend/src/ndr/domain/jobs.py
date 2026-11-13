@@ -69,6 +69,13 @@ class JobDetailOut(ApiModel):
     progress: dict[str, Any] | None = None
     checkpoint: dict[str, Any] | None = None
     last_error: str | None = None
+    service_error_code: Literal['RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED'] | None = Field(
+        default=None,
+        description="窗口最新调用仍未解决的限流或额度错误，完成任务也可能保留有效初次结果",
+    )
+    service_error_run_id: str | None = Field(
+        default=None, description="对应失败调用标识，用于人工解除服务阻塞后避免重复处理旧故障"
+    )
     windows: list[JobWindowOut] = Field(default_factory=list)
     remaining_windows: int = Field(default=0, ge=0)
     windows_total: int = Field(default=0, ge=0)

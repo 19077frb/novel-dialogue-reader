@@ -6,8 +6,11 @@ import { fetchTaskQueue, fetchRecentJobs } from '../src/api/jobs'
 import { renderWithProviders } from './helpers'
 import { writeJournal } from '../src/processing/journal'
 import { saveBatchHistory } from '../src/processing/batchHistory'
+import { getServiceBlock, observeServiceJob } from '../src/processing/serviceGate'
+import { fetchProfiles } from '../src/api/profiles'
 
 vi.mock('../src/api/jobs', () => ({ fetchTaskQueue: vi.fn(), fetchRecentJobs: vi.fn() }))
+vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['model-profiles'] } }))
 vi.mock('../src/components/JobPanel', async (importOriginal) => ({
   ...await importOriginal<typeof import('../src/components/JobPanel')>(),
   JOB_KIND_LABELS: { INFERENCE: '对白归属', CHARACTER_ROSTER: '人物识别' },
@@ -15,6 +18,40 @@ vi.mock('../src/components/JobPanel', async (importOriginal) => ({
   JobPanel: ({ jobId }: { jobId: string }) => <p>详情 {jobId}</p>,
 }))
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks() })
+
+it('shows persistent service blocks with a configuration name outside hidden task history and clears only on explicit action', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  vi.mocked(fetchProfiles).mockResolvedValue([{ id: 'p1', name: '测试模型配置' }] as never)
+  await observeServiceJob('p1', { id: 'failed-job', state: 'FAILED', service_error_code: 'RATE_LIMITED',
+    service_error_run_id: 'failed-run' } as never)
+  const firstView = renderWithProviders(<TaskQueuePage />)
+  expect(await screen.findByText('测试模型配置')).toBeVisible()
+  expect(screen.getByRole('checkbox', { name: '显示已结束任务' })).not.toBeChecked()
+  firstView.unmount()
+  renderWithProviders(<TaskQueuePage />)
+  expect(await screen.findByText('测试模型配置')).toBeVisible()
+  expect(getServiceBlock('p1')).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: '已处理服务问题，继续排队范围' }))
+  await waitFor(() => expect(screen.queryByRole('region', { name: '模型服务阻塞' })).not.toBeInTheDocument())
+  expect(getServiceBlock('p1')).toBeNull()
+})
+
+it('keeps task details and cancellation available when service records contain invalid JSON or URI keys', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  localStorage.setItem('ndr:tasks:v1:service-gate:p1', '{broken')
+  localStorage.setItem('ndr:tasks:v1:service-gate:%', '{}')
+  writeJournal('admissions', [{ id: 'damaged-range', bookId: 'b1', versionId: 'v1',
+    title: '可取消范围', phase: 'queued', error: null, createdAt: 1, keys: ['merge'],
+    payload: { type: 'merge', input: { profile_id: 'p1' } } }])
+  renderWithProviders(<TaskQueuePage />)
+  expect(screen.getByRole('alert')).toHaveTextContent('2 份模型服务阻塞记录无法读取')
+  await userEvent.click(screen.getByRole('button', { name: '展开范围内任务' }))
+  await userEvent.click(screen.getByRole('button', { name: '查看任务' }))
+  expect(screen.getByRole('table', { name: '当前任务' })).toHaveTextContent('自动合并人物')
+  await userEvent.click(screen.getByRole('button', { name: '取消范围' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: '取消范围' })).not.toBeInTheDocument())
+  expect(screen.getByRole('alert')).toHaveTextContent('阻塞记录无法读取')
+})
 
 it('reuses the exact batch window label after reload and receipt updates without fetching details', async () => {
   vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [{ id: 'job-3', kind: 'INFERENCE', state: 'RUNNING',

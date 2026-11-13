@@ -10,6 +10,7 @@ import { getProcessingPreferences, updateProcessingPreferences } from '../src/pr
 import { updateGeneralSettings } from '../src/settings/preferences'
 import { restoreBatchProcessing } from '../src/components/BatchProcessor'
 import { readJournal, writeJournal } from '../src/processing/journal'
+import { clearServiceBlock, getServiceBlock } from '../src/processing/serviceGate'
 import { waitForJobCompletion } from '../src/processing/jobCompletion'
 import type { ChapterOut, EstimateOut, JobDetailOut } from '../src/api/types'
 
@@ -123,6 +124,9 @@ it('retries a finished 429 without treating missing usage as an unknown outcome 
     preferences: { ...getProcessingPreferences(), profileId: 'p1', concurrency: 1, tokenLimit: null } })
   // The rejected first window stops dispatch; the second window was never sent.
   expect(jobs.createJob).toHaveBeenCalledTimes(1)
+  await expect(retryChapterProcessing('b1', 'c1')).rejects.toThrow('模型服务限流')
+  const block = getServiceBlock('p1')!
+  await clearServiceBlock('p1', block.id)
   vi.mocked(jobs.estimateRange).mockResolvedValue({ ...estimate, windows: estimate.windows!.map(window => ({
     ...window, processing_status: window.window_id === 'w1' ? 'failed' : 'unprocessed',
   })) } as EstimateOut)
