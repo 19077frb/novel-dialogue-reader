@@ -48,6 +48,18 @@ class Job(IdMixin, TimestampMixin, VersionMixin, Base):
     last_error: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
 
+class JobRequestKey(Base):
+    """Every accepted request keeps its own digest, including coalesced requests."""
+
+    __tablename__ = "job_request_keys"
+
+    idempotency_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    request_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 class JobWindow(IdMixin, TimestampMixin, Base):
     """处理窗口；同一窗口只允许一次有效提交。"""
 

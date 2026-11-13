@@ -38,7 +38,16 @@ from ..jobs.service import (
     job_windows,
 )
 from ..recovery.service import job_recovery, profile_snapshot_of
-from ..storage.models import Book, BookVersion, Chapter, Job, JobWindow, ModelProfile, Quote
+from ..storage.models import (
+    Book,
+    BookVersion,
+    Chapter,
+    Job,
+    JobRequestKey,
+    JobWindow,
+    ModelProfile,
+    Quote,
+)
 from ..storage.transactions import (
     admission_transaction,
     database_error_detail,
@@ -145,7 +154,10 @@ def recent_jobs_route(
     if kind:
         statement = statement.where(Job.kind == kind)
     if idempotency_key:
-        statement = statement.where(Job.idempotency_key == idempotency_key)
+        receipt_jobs = select(JobRequestKey.job_id).where(
+            JobRequestKey.idempotency_key == idempotency_key
+        ).union(select(Job.id).where(Job.idempotency_key == idempotency_key))
+        statement = statement.where(Job.id.in_(receipt_jobs))
     if chapter_id:
         statement = statement.where(func.json_extract(Job.range_json, "$.chapter_id") == chapter_id)
     if quote_id:

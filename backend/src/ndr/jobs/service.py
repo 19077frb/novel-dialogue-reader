@@ -24,7 +24,6 @@ from ..context.budget import DEFAULT_POLICY, BudgetPolicy
 from ..context.service import plan_range
 from ..domain.enums import (
     CredentialMode,
-    ErrorCode,
     JobKind,
     JobPurpose,
     JobState,
@@ -43,6 +42,7 @@ from ..storage.models import (
     ModelProfile,
     Quote,
 )
+from .request_keys import bind_request_key, find_request_job
 
 
 @dataclass(frozen=True)
@@ -374,23 +374,9 @@ def create_inference_job(
     }
     digest = digest_request(request_payload)
 
-    existing = session.execute(
-        select(Job).where(Job.idempotency_key == idempotency_key)
-    ).scalar_one_or_none()
+    existing = find_request_job(session, idempotency_key, digest)
     if existing is not None:
-        if existing.request_digest == digest:
-            return existing, False
-        raise ApiError(
-            ErrorCode.IDEMPOTENCY_CONFLICT,
-            "同一幂等键已被不同的请求使用",
-            details={
-                "idempotency_key": idempotency_key,
-                "job_id": existing.id,
-                "existing_digest": existing.request_digest,
-                "request_digest": digest,
-            },
-            status_code=409,
-        )
+        return existing, False
 
     # Different UI events may arrive before React has disabled the button, or
     # from two tabs. Reuse an equivalent active job even when each event has a
@@ -409,6 +395,7 @@ def create_inference_job(
         .first()
     )
     if active_duplicate is not None:
+        bind_request_key(session, active_duplicate, idempotency_key, digest)
         return active_duplicate, False
 
     from .occupancy import guard_active_target
@@ -444,6 +431,7 @@ def create_inference_job(
     )
     session.add(job)
     session.flush()
+    bind_request_key(session, job, idempotency_key, digest)
     return job, True
 
 

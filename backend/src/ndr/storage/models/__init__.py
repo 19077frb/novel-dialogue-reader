@@ -11,7 +11,7 @@ from .bookmark import Bookmark
 from .characters import BookCharacter, ChapterCharacterRoster
 from .dialogue import Gap, Participant, Quote, Scene, SceneMembership, SpeakerGroup
 from .exports import ExportArtifact, ExportSnapshot
-from .jobs import InferenceRun, Job, JobWindow, ResultCache
+from .jobs import InferenceRun, Job, JobRequestKey, JobWindow, ResultCache
 from .labeling import Annotation, AnnotationHistory, IdentityRevision
 from .mapping import TextMapping
 from .modeling import ModelProfile
@@ -36,6 +36,7 @@ __all__ = [
     "IdentityRevision",
     "InferenceRun",
     "Job",
+    "JobRequestKey",
     "JobWindow",
     "ModelProfile",
     "Participant",
