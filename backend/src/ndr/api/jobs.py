@@ -33,6 +33,7 @@ from ..jobs.service import (
     create_inference_job,
     credential_reference,
     job_detail,
+    job_details,
     job_windows,
 )
 from ..recovery.service import job_recovery, profile_snapshot_of
@@ -150,9 +151,11 @@ def recent_jobs_route(
         statement = statement.where(
             func.json_extract(Job.range_json, "$.target_quote_id") == quote_id
         )
-    jobs = session.scalars(statement.order_by(Job.created_at.desc(), Job.id.desc()).limit(limit))
+    jobs = list(
+        session.scalars(statement.order_by(Job.created_at.desc(), Job.id.desc()).limit(limit))
+    )
     return DataEnvelope(
-        data=[job_detail(session, job) for job in jobs], request_id=current_request_id(request)
+        data=job_details(session, jobs), request_id=current_request_id(request)
     )
 
 
