@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/styles/global.css'), 'utf8')
+const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/styles/global.css'), 'utf8').replace(/\r\n/g, '\n')
 
 describe('shared UI design rules', () => {
   it('keeps shared task tables readable with horizontal scrolling on narrow screens', () => {

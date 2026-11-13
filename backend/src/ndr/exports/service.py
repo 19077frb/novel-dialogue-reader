@@ -17,14 +17,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..api.errors import ApiError
-from ..domain.enums import ExportFormat, ExportStylePreset, JobKind, JobState
+from ..domain.enums import ContentNodeType, ExportFormat, ExportStylePreset, JobKind, JobState
 from ..ingest.query import load_canonical_text, processed_chapter_ids
 from ..ingest.resources import read_resource_bytes
+from ..intervals import SpanIndex
 from ..storage.cache import fingerprint
 from ..storage.models import (
     Book,
     BookVersion,
     Chapter,
+    ContentNode,
     ExportArtifact,
     ExportSnapshot,
     Job,
@@ -34,7 +36,7 @@ from ..storage.paths import resolve_within, to_relative
 from .annotations import build_annotations_manifest
 from .epub import build_epub
 from .html import render_html
-from .render import EXPORTER_VERSION, RenderedBook, export_filename, render_book
+from .render import EXPORTER_VERSION, RenderedBook, export_filename, render_book, usable_items
 from .validation import validate_export
 
 
@@ -314,6 +316,7 @@ def render_sample(
     version: BookVersion,
     projection_payload: dict,
     style: ExportStylePreset,
+    chapter_ids: list[str] | None = None,
     max_chapters: int = 1,
     max_blocks: int = 12,
 ) -> tuple[str, list[str], dict]:
@@ -326,34 +329,58 @@ def render_sample(
         version=version,
         projection_payload=projection_payload,
         style=style,
-        chapter_ids=None,
-    )
-    trimmed = RenderedBook(
-        book_id=rendered.book_id,
-        title=rendered.title,
-        language=rendered.language,
-        style=rendered.style,
-        chapters=[
-            chapter.__class__(
-                chapter_id=chapter.chapter_id,
-                ordinal=chapter.ordinal,
-                title=chapter.title,
-                blocks=chapter.blocks[:max_blocks],
-            )
-            for chapter in rendered.chapters[:max_chapters]
-        ],
-        legend=rendered.legend,
-        warnings=rendered.warnings,
-        visible_horizon_cp=rendered.visible_horizon_cp,
+        chapter_ids=chapter_ids,
+        max_chapters=max_chapters,
+        max_blocks=max_blocks,
     )
     fragments = [
         block.plain_text
-        for chapter in trimmed.chapters
+        for chapter in rendered.chapters
         for block in chapter.blocks
         if block.plain_text
     ]
-    document = render_html(trimmed, images={}, generated_at="sample")
-    return document, fragments, coverage_of(rendered)
+    document = render_html(rendered, images={}, generated_at="sample")
+    coverage = coverage_for_range(
+        session, version=version, projection_payload=projection_payload,
+        chapter_ids=chapter_ids,
+    )
+    return document, fragments, coverage
+
+
+def coverage_for_range(
+    session: Session,
+    *,
+    version: BookVersion,
+    projection_payload: dict,
+    chapter_ids: list[str] | None = None,
+) -> dict:
+    """Count the full selected range without building text slices or rendered runs."""
+    items = list(usable_items(projection_payload).values())
+    index = SpanIndex(
+        items, start=lambda item: int(item["start_cp"]), end=lambda item: int(item["end_cp"]),
+    )
+    stmt = select(ContentNode.node_type, ContentNode.start_cp, ContentNode.end_cp).join(
+        Chapter,
+    ).where(Chapter.book_version_id == version.id)
+    if chapter_ids:
+        stmt = stmt.where(Chapter.id.in_(chapter_ids))
+    paragraphs = annotated = 0
+    for node_type, start_cp, end_cp in session.execute(stmt.execution_options(yield_per=500)):
+        if node_type in {ContentNodeType.IMAGE, ContentNodeType.SEPARATOR}:
+            continue
+        start = int(start_cp or 0)
+        end = min(int(end_cp or start), version.canonical_length_cp)
+        if end <= start:
+            continue
+        paragraphs += 1
+        if node_type is not ContentNodeType.HEADING and index.overlapping(start, end):
+            annotated += 1
+    return {
+        "paragraphs": paragraphs,
+        "paragraphs_with_annotations": annotated,
+        "legend_entries": sum(bool(row.get("label"))
+                              for row in projection_payload.get("legend", []) or []),
+    }
 
 
 def coverage_of(rendered: RenderedBook) -> dict:

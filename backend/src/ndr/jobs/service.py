@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -469,6 +470,40 @@ def job_detail(session: Session, job: Job) -> JobDetailOut:
             ).where(InferenceRun.job_id == job.id)
         )
     )
+    return _job_detail(job, rows, runs)
+
+
+def job_details(session: Session, jobs: Sequence[Job]) -> list[JobDetailOut]:
+    """Read complete details for a bounded task list with two batched queries."""
+
+    if not jobs:
+        return []
+    job_ids = [job.id for job in jobs]
+    windows_by_job: dict[str, list[JobWindow]] = {}
+    for row in session.scalars(
+        select(JobWindow)
+        .where(JobWindow.job_id.in_(job_ids))
+        .order_by(JobWindow.job_id, JobWindow.window_id)
+    ):
+        windows_by_job.setdefault(row.job_id, []).append(row)
+    runs_by_job: dict[str, list[Any]] = {}
+    for run in session.execute(
+        select(
+            InferenceRun.job_id,
+            InferenceRun.window_id,
+            InferenceRun.usage_json,
+            InferenceRun.state,
+            InferenceRun.error_code,
+        ).where(InferenceRun.job_id.in_(job_ids))
+    ):
+        runs_by_job.setdefault(run.job_id, []).append(run)
+    return [
+        _job_detail(job, windows_by_job.get(job.id, []), runs_by_job.get(job.id, []))
+        for job in jobs
+    ]
+
+
+def _job_detail(job: Job, rows: list[JobWindow], runs: list[Any]) -> JobDetailOut:
     attempts_by_window: dict[str, int] = {}
     for run in runs:
         if run.window_id:

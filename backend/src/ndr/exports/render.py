@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from itertools import groupby
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 
 from ..characters.colors import BASE_COLORS, color_css
 from ..domain.enums import ContentNodeType, ExportStylePreset
@@ -244,6 +244,8 @@ def render_book(
     projection_payload: dict[str, Any],
     style: ExportStylePreset,
     chapter_ids: list[str] | None = None,
+    max_chapters: int | None = None,
+    max_blocks: int | None = None,
 ) -> RenderedBook:
     """渲染选中的章节；标注只来自 `projection_payload`（冻结投影），不读实时标注表。"""
 
@@ -253,7 +255,10 @@ def render_book(
     chapter_stmt = select(Chapter).where(Chapter.book_version_id == version.id)
     if selected:
         chapter_stmt = chapter_stmt.where(Chapter.id.in_(selected))
-    chapters = list(session.scalars(chapter_stmt.order_by(Chapter.ordinal)))
+    chapter_stmt = chapter_stmt.order_by(Chapter.ordinal)
+    if max_chapters is not None:
+        chapter_stmt = chapter_stmt.limit(max_chapters)
+    chapters = list(session.scalars(chapter_stmt))
     usable = usable_items(projection_payload)
     items = list(usable.values())
     item_index = SpanIndex(
@@ -269,7 +274,12 @@ def render_book(
     )
     if selected:
         node_stmt = node_stmt.where(Chapter.id.in_(selected))
-    node_stream = session.scalars(node_stmt.execution_options(yield_per=500))
+    if max_chapters is not None:
+        node_stmt = node_stmt.where(Chapter.id.in_([chapter.id for chapter in chapters]))
+    node_stream = (
+        session.scalars(node_stmt.execution_options(yield_per=500))
+        if max_blocks is None else ()
+    )
     node_groups = iter(groupby(node_stream, key=lambda node: node.chapter_id))
     next_nodes = next(node_groups, None)
 
@@ -277,6 +287,21 @@ def render_book(
     for chapter in chapters:
         blocks: list[RenderedBlock] = []
         nodes = next_nodes[1] if next_nodes and next_nodes[0] == chapter.id else ()
+        if max_blocks is not None:
+            # Filter out empty textual nodes before LIMIT, matching the full renderer's
+            # block semantics; images and separators always occupy a sample block.
+            nodes = session.scalars(node_stmt.where(
+                ContentNode.chapter_id == chapter.id,
+                or_(
+                    ContentNode.node_type.in_([
+                        ContentNodeType.IMAGE, ContentNodeType.SEPARATOR,
+                    ]),
+                    and_(
+                        ContentNode.end_cp > func.coalesce(ContentNode.start_cp, 0),
+                        func.coalesce(ContentNode.start_cp, 0) < len(canonical),
+                    ),
+                ),
+            ).limit(max_blocks))
         for node in nodes:
             payload = _load_payload(node.tree_json)
             if node.node_type is ContentNodeType.IMAGE:

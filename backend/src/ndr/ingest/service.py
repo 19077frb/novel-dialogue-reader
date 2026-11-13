@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -52,6 +53,10 @@ from .txt import parse_txt
 
 DEFAULT_TITLE_FALLBACK = "未命名"
 XML_ENCODING_SENTINEL = "xml"
+
+
+class _ManifestState(Enum):
+    UNPARSED = "unparsed"
 
 
 @dataclass
@@ -134,7 +139,9 @@ def persist_parsed(
     filename: str,
     raw: bytes,
     parsed: ParsedBook,
+    annotations_manifest: dict | None | _ManifestState = _ManifestState.UNPARSED,
 ) -> ImportOutcome:
+    """持久化已解析正文；API 可传入预解析清单，None 表示没有有效清单。"""
     resolved_title = (parsed.metadata.get("title") or Path(filename).stem).strip()
     if not resolved_title:
         resolved_title = DEFAULT_TITLE_FALLBACK
@@ -205,7 +212,13 @@ def persist_parsed(
                 if warning.startswith("章节自动修复：")
                 and (match := re.search(r"(\d+) 处", warning))
             )
-            manifest = parse_annotations_manifest(raw) if parsed.format == "EPUB" else None
+            manifest = None
+            if parsed.format == "EPUB":
+                manifest = (
+                    parse_annotations_manifest(raw)
+                    if annotations_manifest is _ManifestState.UNPARSED
+                    else annotations_manifest
+                )
             # 导出再导入时保留原章节身份，以便恢复标注与已处理状态。
             if not reused_book and manifest is None:
                 chapters = list(
