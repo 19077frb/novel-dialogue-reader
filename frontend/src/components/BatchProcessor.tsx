@@ -597,7 +597,7 @@ export function BatchRetryControls({ bookId, taskId }: { bookId: string; taskId?
       {busy[task.id] ? '准备重试…' : `重试${task.type === 'roster' ? '人物识别' : task.windowLabel}`}{!taskId && `（${task.chapterTitle}）`}
     </button>)}
     {error && <p className="status-error" role="alert">{error}</p>}
-    {serviceBlock && <p className="hint">{serviceBlockReason(serviceBlock)} <Link to="/tasks">前往任务队列</Link></p>}
+    {serviceBlock && <p className="hint">{serviceBlockReason(serviceBlock)} <Link className="ndr-button" to="/tasks">前往任务队列</Link></p>}
     {!taskId && <p className="hint">点击重试先核实原任务状态，再使用原模型配置和剩余额度补齐失败任务，不刷新已用额度。仍在执行或结果未核实时不会重复调用；成功窗口不会重复处理。</p>}
   </div>
 }
