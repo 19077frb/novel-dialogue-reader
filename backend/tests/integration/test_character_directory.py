@@ -1266,8 +1266,9 @@ def test_auto_merge_budget_prevents_call_and_low_confidence_is_not_merged(
     assert result["skipped_groups"] == 1 and result["merged_count"] == 0
 
 
+@pytest.mark.parametrize("kind", [ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME])
 def test_auto_merge_can_link_unassociated_speakers_and_never_replays_unknown(
-    migrated_client, populated
+    migrated_client, populated, kind,
 ):
     client, ids = migrated_client, populated
     job, _ = _auto_job(client, ids)
@@ -1277,7 +1278,7 @@ def test_auto_merge_can_link_unassociated_speakers_and_never_replays_unknown(
     with transaction(client.app.state.session_factory) as session:
         assert session.get(SpeakerGroup, ids["unlinked"]).character_id == ids["target"]
     job, _ = _auto_job(client, ids, idempotency_key="timeout-merge")
-    adapter = FakeProviderAdapter(script=[ProviderError(ProviderErrorKind.TIMEOUT, "请求超时")])
+    adapter = FakeProviderAdapter(script=[ProviderError(kind, "请求结果未知")])
     outcome, _ = _run_merge(client, job, [], adapter)
     assert outcome.state is JobState.NEEDS_RECONCILIATION
     with transaction(client.app.state.session_factory) as session:

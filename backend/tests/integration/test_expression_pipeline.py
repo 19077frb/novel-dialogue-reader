@@ -695,7 +695,8 @@ def test_actual_manual_expression_correction_during_review_preserves_entire_answ
             assert session.get(SpeakerGroup, annotation.speaker_id).canonical_name == "林舟"
 
 
-def test_review_timeout_stops_without_applying_or_automatically_repeating(fake_provider_client):
+@pytest.mark.parametrize("kind", [ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME])
+def test_review_timeout_stops_without_applying_or_automatically_repeating(fake_provider_client, kind):
     client = fake_provider_client
     create, factory = prepare(client)
     job = create("stage-timeout")
@@ -704,7 +705,7 @@ def test_review_timeout_stops_without_applying_or_automatically_repeating(fake_p
         async def generate_labels(self, payload):
             result = await super().generate_labels(payload)
             if payload.get("review_stage"):
-                raise ProviderError(ProviderErrorKind.TIMEOUT, "isolated timeout")
+                raise ProviderError(kind, "isolated unknown outcome")
             return result
 
     adapter = TimeoutStage(["林舟", "林舟"])

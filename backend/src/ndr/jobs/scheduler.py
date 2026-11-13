@@ -99,8 +99,8 @@ from .service import (
 
 SCHEDULER_VERSION = "scheduler-1"
 
-# 只有「确定没有被处理」的错误才允许自动重试；超时属于结果未知，必须人工对账。
-AUTO_RETRY_KINDS = {ProviderErrorKind.RATE_LIMITED, ProviderErrorKind.UNAVAILABLE}
+# 只有限流或连接尚未建立才允许自动重试；超时/网络中断不能自动重发。
+AUTO_RETRY_KINDS = {ProviderErrorKind.RATE_LIMITED, ProviderErrorKind.CONNECTION_FAILED}
 DEFAULT_LEASE_SECONDS = 900
 LABELING_MAX_TOKENS = 800
 OUTPUT_BASE_TOKENS = 256
@@ -786,7 +786,7 @@ def _run_recheck_pass(
     """有限局部复核：只复核未解决的目标，并用保守策略把压缩丢掉的行文补回。
 
     复核是**额外**一次尝试：单独写 `inference_runs` 并计入用量（不是只统计最后一次调用）。
-    复核失败不改变首次结果；只有超时（结果未知、可能已计费）才升级为人工对账。
+    复核失败不改变首次结果；超时/网络中断（结果未知、可能已计费）升级为人工核对。
     """
 
     stats = {
@@ -1048,7 +1048,9 @@ def _run_recheck_pass(
                 )
                 stats["calls"] += 1
                 if error is not None:
-                    timeout = error.kind is ProviderErrorKind.TIMEOUT
+                    unknown = error.kind in {
+                        ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME,
+                    }
                     with session_factory() as session:
                         run = session.get(InferenceRun, run_id)
                         assert run is not None
@@ -1056,17 +1058,17 @@ def _run_recheck_pass(
                         run.error_code = error.code.value
                         run.state = (
                             InferenceRunState.UNKNOWN_OUTCOME
-                            if timeout
+                            if unknown
                             else InferenceRunState.FAILED
                         )
                         run.usage_json = _usage_json_from_error(error)
-                        if timeout:
+                        if unknown:
                             failed_job = session.get(Job, job_id)
                             assert failed_job is not None
                             failed_job.state = JobState.NEEDS_RECONCILIATION
-                            failed_job.last_error = f"复核超时，结果未知：{error.message}"
+                            failed_job.last_error = f"复核请求结果未知：{error.message}"
                         session.commit()
-                    if timeout:
+                    if unknown:
                         stats["unknown_outcome"] = 1
                         return stats
                     if (
@@ -1232,13 +1234,13 @@ def _dispatch_with_bounded_retry(
     max_tokens_override: int | None = None,
     request_payload_override: dict[str, Any] | None = None,
 ) -> tuple[Any, ProviderError | None, str, int]:
-    """调用适配器；限流/暂时不可用按**有上限**的退避重试。
+    """调用适配器；限流/连接未建立按**有上限**的退避重试。
 
     返回最后一次尝试的 ``(raw, error, run_id, elapsed_ms)``。最后一条 `inference_runs`
     保持 DISPATCHED，由调用方按原有逻辑置为 SUCCEEDED/FAILED/UNKNOWN_OUTCOME；
     中间被退避重试的失败尝试在这里就写成 FAILED，保证每次尝试都可追溯。
 
-    超时**不**自动重试：结果未知必须交人工对账。
+    超时、请求/响应中断及服务端错误不自动重试；未知结果必须交人工核对。
     """
 
     allowed = max(1, int(settings.rate_limit_max_retries) + 1)
@@ -2115,8 +2117,10 @@ def _run_job(
 
                 if error is not None:
                     run.usage_json = _usage_json_from_error(error)
-                    if error.kind is ProviderErrorKind.TIMEOUT:
-                        # 超时可能已经计费且结果未知：不自动重发，交人工对账
+                    if error.kind in {
+                        ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME,
+                    }:
+                        # 超时或网络中断可能已经计费：不自动重发，交人工核对。
                         outcome.errors.append(f"{window.window_id}:{error.code.value}")
                         run.state = InferenceRunState.UNKNOWN_OUTCOME
                         run.error_code = error.code.value

@@ -340,12 +340,16 @@ def run_review_pipeline(
                     if error
                     else "INVALID_MODEL_OUTPUT"
                 )
-                if error and error.kind is ProviderErrorKind.TIMEOUT:
+                if error and error.kind in {
+                    ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME,
+                }:
                     run.state = InferenceRunState.UNKNOWN_OUTCOME
                 active = session.get(Job, job_id)
                 halt = active.state in STOP_STATES or active.state is JobState.PAUSING
-            if error and error.kind is ProviderErrorKind.TIMEOUT:
-                stopped("复核超时，结果未知，需人工核对", unknown=True, failed_stage=stage_name)
+            if error and error.kind in {
+                ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME,
+            }:
+                stopped("复核请求结果未知，需人工核对", unknown=True, failed_stage=stage_name)
                 return None
             if halt:
                 result.stopped = True

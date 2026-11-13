@@ -640,7 +640,7 @@ def _spent_tokens(rows) -> dict[str, int]:  # noqa: ANN001
             # INVALID_MODEL_OUTPUT 表示提供方通常已经生成过内容；缺 usage 不能按零费用处理。
             if run.state.value in {"DISPATCHED", "UNKNOWN_OUTCOME", "SUCCEEDED"} or (
                 run.state.value == "FAILED" and run.error_code in {
-                    "INVALID_MODEL_OUTPUT", "LOCAL_FINALIZATION_FAILED",
+                    "INVALID_MODEL_OUTPUT", "LOCAL_FINALIZATION_FAILED", "PROVIDER_UNAVAILABLE",
                 }
             ):
                 unknown_runs += 1

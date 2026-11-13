@@ -395,11 +395,12 @@ def test_pause_after_received_result_restores_without_duplicate_calls(migrated_c
     assert len(saved(client, job)[2]) == 2
 
 
-def test_timeout_requires_explicit_retry_of_only_the_failed_stage(migrated_client):
+@pytest.mark.parametrize("kind", [ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME])
+def test_timeout_requires_explicit_retry_of_only_the_failed_stage(migrated_client, kind):
     client = migrated_client
     _, job = prepare(client)
     adapter = FakeProviderAdapter(
-        script=[primary(), ProviderError(ProviderErrorKind.TIMEOUT, "timeout")]
+        script=[primary(), ProviderError(kind, "unknown outcome")]
     )
     assert run(client, job, adapter).state is JobState.NEEDS_RECONCILIATION
     assert run(client, job, adapter).calls == 0 and len(adapter.calls) == 2
