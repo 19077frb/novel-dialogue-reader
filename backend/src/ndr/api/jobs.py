@@ -192,6 +192,7 @@ def create_job_route(
 
         job, created = create_inference_job(
             session,
+            settings=settings,
             book=book,
             version=version,
             profile=profile,

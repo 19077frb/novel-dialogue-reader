@@ -9,24 +9,30 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client(migrated_client: TestClient) -> TestClient:
-    return migrated_client
+def client(fake_provider_client: TestClient) -> TestClient:
+    return fake_provider_client
 
 
-def setup_book(client: TestClient) -> tuple[str, str, str]:
+def setup_book(client: TestClient) -> tuple[str, str, str, list[str], int]:
+    text = '第一章\n' + ''.join(f'「{letter * 1000}」\n' for letter in '甲乙丙丁戊己') + str(uuid4())
     imported = client.post('/api/books/import', files={
-        'file': ('queue.txt', f'第一章\n「早上好。」\n「再见。」\n{uuid4()}'.encode(), 'text/plain')})
+        'file': ('queue.txt', text.encode(), 'text/plain')})
     assert imported.status_code == 202, imported.text
     book_id = imported.json()['data']['book_id']
     book = client.get(f'/api/books/{book_id}').json()['data']
     chapter = client.get(f'/api/books/{book_id}/chapters').json()['data'][0]
-    return book_id, book['active_version_id'], chapter['id']
+    estimate = client.post(f'/api/books/{book_id}/estimates', json={
+        'range': {'start_cp': 0, 'end_cp': len(text)}}).json()['data']
+    windows = [row['window_id'] for row in estimate['windows']]
+    assert len(windows) >= 2
+    return book_id, book['active_version_id'], chapter['id'], windows, len(text)
 
 
-def payload(book: tuple[str, str, str], key: str, window: str = 'w1') -> dict:
+def payload(book: tuple[str, str, str, list[str], int], key: str,
+            window: str | None = None) -> dict:
     return {'book_id': book[0], 'book_version_id': book[1],
-            'range': {'chapter_id': book[2], 'start_cp': 0, 'end_cp': 20},
-            'selected_window_ids': [window], 'idempotency_key': key,
+            'range': {'chapter_id': book[2], 'start_cp': 0, 'end_cp': book[4]},
+            'selected_window_ids': [window or book[3][0]], 'idempotency_key': key,
             'budget': {'max_input_tokens': 1000}, 'run_now': False}
 
 
@@ -41,7 +47,7 @@ def test_cross_book_queue_pagination_and_no_archives(client: TestClient):
     assert page['items'][0]['id'] == ids[1]
     assert page['items'][0]['book_title']
     assert page['items'][0]['chapter_title']
-    assert page['items'][0]['selected_window_ids'] == ['w1']
+    assert page['items'][0]['selected_window_ids'] == [books[1][3][0]]
     assert 'range' not in page['items'][0]
     assert 'profile_snapshot' not in page['items'][0]
     next_page = client.get('/api/jobs/queue', params={'limit': 1, 'cursor': page['next_cursor']})
@@ -66,7 +72,7 @@ def test_same_window_different_settings_conflicts_but_other_window_allowed(clien
     duplicate = client.post('/api/jobs', json=other_settings)
     assert duplicate.status_code == 409, duplicate.text
     assert '已有任务' in duplicate.json()['error']['message']
-    assert client.post('/api/jobs', json=payload(book, 'other-window', 'w2')).status_code == 202
+    assert client.post('/api/jobs', json=payload(book, 'other-window', book[3][1])).status_code == 202
     client.post(f"/api/jobs/{first.json()['data']['id']}/pause")
     assert client.post('/api/jobs', json=other_settings).status_code == 202
 

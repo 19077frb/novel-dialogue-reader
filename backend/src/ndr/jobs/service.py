@@ -314,6 +314,7 @@ def create_inference_job(
     visible_horizon_cp: int | None,
     kind: JobKind = JobKind.INFERENCE,
     inference_options: dict[str, Any] | None = None,
+    settings: Settings | None = None,
 ) -> tuple[Job, bool]:
     """幂等创建任务；返回 ``(job, created)``。"""
 
@@ -412,7 +413,11 @@ def create_inference_job(
 
     from .occupancy import guard_active_target
 
-    guard_active_target(session, version.id, kind, range_payload)
+    guard_active_target(session, version.id, kind, {
+        **range_payload,
+        "reading_mode": reading_mode.value,
+        "visible_horizon_cp": visible_horizon_cp,
+    }, settings=settings)
 
     job = Job(
         kind=kind,

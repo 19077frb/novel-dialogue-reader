@@ -341,6 +341,7 @@ def recheck_quote_route(
         range_payload.update(dialogue_strategy_range(payload.dialogue_strategy))
         job, created = create_inference_job(
             session,
+            settings=settings,
             book=book,
             version=version,
             profile=profile,
