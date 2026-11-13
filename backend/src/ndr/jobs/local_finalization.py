@@ -3,7 +3,7 @@
 import threading
 import time
 
-from ..diagnostics import log_failure, logger
+from ..diagnostics import flush_repeats, log_event, log_failure
 
 _guard = threading.Lock()
 _pending = {}
@@ -20,7 +20,8 @@ class PendingLocalWrite(Exception):
 def defer_settlement(factory, job_id, settle):
     with _guard:
         _pending[(factory, job_id)] = (settle, 0, time.monotonic())
-    logger.warning("settlement_deferred job=%s", job_id)
+    log_event("settlement_deferred", job_id=job_id, stage="local_finalization",
+              reason_code="local_write_pending")
 
 
 def settlement_pending(job_id):
@@ -49,7 +50,9 @@ def retry_settlements(factory):
         try:
             settle()
         except Exception as error:  # local recovery must not terminate the monitor
-            log_failure("settlement_retry", key[1], error)
+            log_failure("settlement_retry", key[1], error, stage="local_finalization",
+                        reason_code="local_settlement_failed", attempt=attempts + 1,
+                        deduplicate=True)
             with _guard:
                 if _pending.get(key) is value:
                     _pending[key] = (settle, attempts + 1,
@@ -58,7 +61,9 @@ def retry_settlements(factory):
             with _guard:
                 if _pending.get(key) is value:
                     del _pending[key]
-            logger.info("settlement_recovered job=%s attempts=%s", key[1], attempts + 1)
+            flush_repeats(job_id=key[1])
+            log_event("settlement_recovered", job_id=key[1], stage="local_finalization",
+                      attempt=attempts + 1, reason_code="local_write_recovered")
 
 
 def forget_settlements(factory):

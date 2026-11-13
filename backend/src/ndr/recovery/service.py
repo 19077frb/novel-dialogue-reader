@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..diagnostics import log_event
 from ..domain.enums import CredentialMode, InferenceRunState, JobKind, JobState
 from ..domain.recovery import JobRecoveryOut, RecoveryActionOut
 from ..jobs.scheduler import reconcile_stale_runs
@@ -301,6 +302,8 @@ def recover_on_startup(
         state = settle_interrupted(
             session_factory, job_id, RuntimeError("process restarted"), startup=True,
         )
+        log_event("job_startup_recovered", job_id=job_id, state=state.value,
+                  reason_code="interrupted_dialogue", dispatched=False)
         if state is JobState.PAUSED:
             summary.paused_jobs.append(job_id)
         else:
@@ -323,6 +326,15 @@ def recover_on_startup(
             job.state = JobState.PARTIAL
             job.last_error = "进程重启：上一次执行被中断；已完成窗口保留，未完成窗口需显式继续"
             summary.interrupted_jobs.append(job.id)
+        # Capture identifiers before commit so even expiring sessions need no extra reads.
+        recovered = [(job.id, JobState.PAUSED.value) for job in pausing]
+        recovered.extend((job.id, JobState.PARTIAL.value) for job in running)
         if pausing or running:
             session.commit()
+    for job_id, state in recovered:
+        log_event("job_startup_recovered", job_id=job_id, state=state,
+                  reason_code="process_restarted", dispatched=False)
+    log_event("startup_recovery_finished", stage="startup_recovery",
+              paused_jobs=len(summary.paused_jobs), interrupted_jobs=len(summary.interrupted_jobs),
+              stale_runs=len(summary.stale_runs), dispatched=False)
     return summary

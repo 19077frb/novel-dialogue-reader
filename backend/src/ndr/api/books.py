@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from urllib.parse import quote
 
@@ -17,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import Settings
+from ..diagnostics import log_event
 from ..domain.common import CursorPage, DataEnvelope
 from ..domain.documents import (
     BookOut,
@@ -181,6 +183,9 @@ def import_book(
                 stage="decode",
             )
             job_id = job.id
+        log_event("import_failed", level=logging.WARNING,
+                  job_id=job_id, stage="decode", code="DECODE_FAILED",
+                  request_id=current_request_id(request))
         raise ApiError(
             ErrorCode.VALIDATION_ERROR,
             str(exc),
@@ -197,6 +202,9 @@ def import_book(
                 stage="epub_structure",
             )
             job_id = job.id
+        log_event("import_failed", level=logging.WARNING,
+                  job_id=job_id, stage="epub_structure", code=exc.code,
+                  request_id=current_request_id(request))
         raise ApiError(
             ErrorCode.VALIDATION_ERROR,
             str(exc),

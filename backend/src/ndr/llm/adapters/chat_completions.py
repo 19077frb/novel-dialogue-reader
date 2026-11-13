@@ -167,7 +167,8 @@ class ChatCompletionsAdapter:
                 ProviderErrorKind.TIMEOUT,
                 f"{stage}超时（{self._timeout} 秒）；结果未知，请先核对原任务。"
                 "若模型思考耗时较长，可在模型配置中增加请求超时，用于后续新任务",
-                details={"endpoint": self.endpoint, "timeout_type": type(exc).__name__,
+                details={"stage": "http_request", "endpoint": self.endpoint,
+                         "timeout_type": type(exc).__name__,
                          "timeout_seconds": self._timeout,
                          "elapsed_ms": int((time.perf_counter() - started) * 1000)},
             ) from exc
@@ -175,7 +176,8 @@ class ChatCompletionsAdapter:
             raise ProviderError(
                 ProviderErrorKind.CONNECTION_FAILED,
                 "未能建立模型服务连接，请求尚未发送；请检查地址与网络后重试",
-                details={"endpoint": self.endpoint, "transport_type": type(exc).__name__},
+                details={"stage": "http_request", "endpoint": self.endpoint,
+                         "transport_type": type(exc).__name__},
             ) from exc
         except httpx.RequestError as exc:
             # A broken response or partially sent request may already be billed.
@@ -183,7 +185,8 @@ class ChatCompletionsAdapter:
             raise ProviderError(
                 ProviderErrorKind.UNKNOWN_OUTCOME,
                 "模型请求或响应中断，结果与用量未知；请先核对原任务，不要直接重复发送",
-                details={"endpoint": self.endpoint, "transport_type": type(exc).__name__},
+                details={"stage": "http_request", "endpoint": self.endpoint,
+                         "transport_type": type(exc).__name__},
             ) from exc
         finally:
             if owns_client:
@@ -207,7 +210,8 @@ class ChatCompletionsAdapter:
                  "模型服务限制请求频率（429），请降低并发并稍后重试"
                  if kind is ProviderErrorKind.RATE_LIMITED else
                  f"提供方返回 {response.status_code}"),
-                details={"status_code": response.status_code, "body": snippet},
+                details={"stage": "http_response", "status_code": response.status_code,
+                         "body": snippet},
                 receipt={"http_status": response.status_code, "body": response.text},
             )
         try:
@@ -216,11 +220,15 @@ class ChatCompletionsAdapter:
             raise ProviderError(
                 ProviderErrorKind.INVALID_OUTPUT,
                 "提供方响应不是 JSON",
-                details={"body": sanitize(response.text)},
+                details={"stage": "http_response_json", "status_code": response.status_code,
+                         "reason_code": "invalid_response_json", "body": sanitize(response.text)},
                 receipt={"http_status": response.status_code, "body": response.text},
             ) from exc
         if not isinstance(data, dict):
             raise ProviderError(ProviderErrorKind.INVALID_OUTPUT, "提供方响应顶层不是对象",
+                                details={"stage": "http_response_shape",
+                                         "status_code": response.status_code,
+                                         "reason_code": "invalid_response_object"},
                                 receipt={"http_status": response.status_code, "body": data})
         return data, elapsed_ms
 
@@ -249,21 +257,25 @@ class ChatCompletionsAdapter:
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
             raise ProviderError(
-                ProviderErrorKind.INVALID_OUTPUT, "响应缺少 choices", details={"body": snippet}
+                ProviderErrorKind.INVALID_OUTPUT, "响应缺少 choices",
+                details={"stage": "model_content", "reason_code": "missing_choices",
+                         "body": snippet},
             )
         first = choices[0]
         if not isinstance(first, Mapping):
             raise ProviderError(
                 ProviderErrorKind.INVALID_OUTPUT,
                 "choices[0] 结构异常",
-                details={"body": snippet},
+                details={"stage": "model_content", "reason_code": "invalid_choice",
+                         "body": snippet},
             )
         message = first.get("message")
         if not isinstance(message, Mapping):
             raise ProviderError(
                 ProviderErrorKind.INVALID_OUTPUT,
                 "choices[0].message 缺失",
-                details={"body": snippet},
+                details={"stage": "model_content", "reason_code": "missing_message",
+                         "body": snippet},
             )
         content = message.get("content")
         if isinstance(content, list):
@@ -277,7 +289,9 @@ class ChatCompletionsAdapter:
             # 空内容的真实原因要写在错误里：finish_reason / reasoning_content 都是常见线索
             finish_reason = first.get("finish_reason")
             reasoning = message.get("reasoning_content")
-            details: dict[str, Any] = {"body": snippet}
+            details: dict[str, Any] = {
+                "stage": "model_content", "reason_code": "empty_content", "body": snippet,
+            }
             hint = "模型返回空内容"
             if isinstance(finish_reason, str) and finish_reason:
                 details["finish_reason"] = finish_reason
@@ -417,6 +431,8 @@ class ChatCompletionsAdapter:
                 ProviderErrorKind.INVALID_OUTPUT,
                 message,
                 details={
+                    "stage": "model_json",
+                    "reason_code": "invalid_model_json",
                     "body": sanitize(text),
                     "usage": usage,
                     "finish_reason": finish_reason,

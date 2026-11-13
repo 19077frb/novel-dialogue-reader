@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -90,7 +91,7 @@ def database_error_detail(error: Exception) -> str:
 @contextmanager
 def local_write_session(session_factory: sessionmaker[Session], *, job_id=None):
     """Acquire a writer with bounded retries before any reads; never replay the body."""
-    from ..diagnostics import logger
+    from ..diagnostics import log_event
 
     session = None
     started = time.monotonic()
@@ -105,9 +106,8 @@ def local_write_session(session_factory: sessionmaker[Session], *, job_id=None):
         except OperationalError as error:
             candidate.rollback()
             candidate.close()
-            logger.warning("writer_wait job=%s attempt=%s elapsed_ms=%s error=%s",
-                           job_id, attempt + 1, int((time.monotonic() - started) * 1000),
-                           database_error_detail(error))
+            log_event("writer_wait", level=logging.WARNING, error=error, job_id=job_id,
+                      attempt=attempt + 1, elapsed_ms=int((time.monotonic() - started) * 1000))
             if not sqlite_lock_error(error) or attempt == 2:
                 raise
             time.sleep(0.1 * (attempt + 1))
@@ -149,13 +149,13 @@ def local_write_session(session_factory: sessionmaker[Session], *, job_id=None):
         elapsed = time.monotonic() - started
         if elapsed >= 1:
             held = time.monotonic() - acquired
-            logger.info("writer_released job=%s elapsed_ms=%s wait_ms=%s "
-                        "initial_hold_ms=%s write_context_ms=%s work_ms=%s commit_ms=%s",
-                        job_id, int(elapsed * 1000), int((acquired - started) * 1000),
-                        int(((first_release - acquired) if first_release is not None
-                             else held) * 1000),
-                        int(held * 1000), int(max(0, held - commit_seconds) * 1000),
-                        int(commit_seconds * 1000))
+            log_event("writer_released", job_id=job_id, elapsed_ms=int(elapsed * 1000),
+                      wait_ms=int((acquired - started) * 1000),
+                      initial_hold_ms=int(((first_release - acquired) if first_release is not None
+                                           else held) * 1000),
+                      write_context_ms=int(held * 1000),
+                      work_ms=int(max(0, held - commit_seconds) * 1000),
+                      commit_ms=int(commit_seconds * 1000))
 
 
 @writer_job_scope
@@ -167,7 +167,7 @@ def finish_local_write(session_factory: sessionmaker[Session], action: Callable[
     candidate savepoint separately or upgrade a stale read snapshot to a writer.
     Each lock wait uses the engine's busy_timeout; three attempts at most.
     """
-    from ..diagnostics import logger
+    from ..diagnostics import log_event
 
     started = time.monotonic()
     for attempt in range(3):
@@ -176,14 +176,13 @@ def finish_local_write(session_factory: sessionmaker[Session], action: Callable[
                 result = action(session)
             elapsed = time.monotonic() - started
             if attempt or elapsed >= 1:
-                logger.info("local_write_done job=%s operation=%s attempts=%s elapsed_ms=%s",
-                            job_id, action.__name__, attempt + 1, int(elapsed * 1000))
+                log_event("local_write_done", job_id=job_id, operation=action.__name__,
+                          attempts=attempt + 1, elapsed_ms=int(elapsed * 1000))
             return result
         except OperationalError as exc:
-            logger.warning("local_write_error job=%s operation=%s attempt=%s "
-                           "elapsed_ms=%s error=%s",
-                           job_id, action.__name__, attempt + 1,
-                           int((time.monotonic() - started) * 1000), database_error_detail(exc))
+            log_event("local_write_error", level=logging.WARNING, error=exc, job_id=job_id,
+                      operation=action.__name__, attempt=attempt + 1,
+                      elapsed_ms=int((time.monotonic() - started) * 1000))
             if not sqlite_lock_error(exc) or attempt == 2:
                 raise
             time.sleep(0.1 * (attempt + 1))

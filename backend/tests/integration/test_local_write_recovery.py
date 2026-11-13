@@ -1,7 +1,6 @@
 """Content-free local settlement; real file locks and fake providers only."""
 
 import json
-import re
 import sqlite3
 import time
 
@@ -30,18 +29,17 @@ def busy():
 
 def test_writer_metrics_distinguish_wait_work_and_commit(migrated_client, monkeypatch):
     records = []
-    monkeypatch.setattr("ndr.diagnostics.logger.info",
-                        lambda pattern, *args: records.append(pattern % args))
+    monkeypatch.setattr("ndr.diagnostics.log_event",
+                        lambda event, **fields: records.append({"event": event, **fields}))
     # Deterministic clock avoids a slow timing-sensitive regression.
     ticks = iter([0.0, 2.0, 5.0, 6.0, 7.0, 7.0])
     monkeypatch.setattr("ndr.storage.transactions.time.monotonic", lambda: next(ticks))
     with local_write_session(migrated_client.app.state.session_factory, job_id="safe-id"):
         pass
-    record = next(r for r in records if r.startswith("writer_released"))
-    values = dict(re.findall(r"(\w+_ms)=(\d+)", record))
-    assert values == {"elapsed_ms": "7000", "wait_ms": "2000",
-                      "initial_hold_ms": "4000",
-                      "write_context_ms": "5000", "work_ms": "4000", "commit_ms": "1000"}
+    record = next(record for record in records if record["event"] == "writer_released")
+    values = {key: value for key, value in record.items() if key.endswith("_ms")}
+    assert values == {"elapsed_ms": 7000, "wait_ms": 2000, "initial_hold_ms": 4000,
+                      "write_context_ms": 5000, "work_ms": 4000, "commit_ms": 1000}
 
 
 @pytest.mark.parametrize("method", ["callback", "session"])

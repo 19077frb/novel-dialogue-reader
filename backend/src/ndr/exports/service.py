@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..api.errors import ApiError
+from ..diagnostics import log_event, log_failure
 from ..domain.enums import ContentNodeType, ExportFormat, ExportStylePreset, JobKind, JobState
 from ..ingest.query import load_canonical_text, processed_chapter_ids
 from ..ingest.resources import read_resource_bytes
@@ -186,13 +188,15 @@ def run_export(  # noqa: PLR0913 - 需要 settings / 会话工厂 / 产物与可
         outcome = _generate_export(session_factory, settings, artifact_id=artifact_id,
                                    epubcheck_jar=epubcheck_jar)
     except Exception as exc:  # noqa: BLE001 - rendering failures also need durable terminal state
+        log_failure("export_render", artifact.job_id, exc, artifact_id=artifact_id)
         outcome = ExportOutcome(
             artifact_id=artifact_id, state="FAILED", format=artifact.format.value,
             validation={"ok": False, "detail": f"{type(exc).__name__}: {exc}"},
         )
     try:
         write_receipt(settings, artifact, snapshot, asdict(outcome))
-    except OSError:
+    except OSError as exc:
+        log_failure("export_receipt_write", artifact.job_id, exc, artifact_id=artifact_id)
         fail_receipt_write(session_factory, artifact, snapshot)
     else:
         recover_export(session_factory, settings, artifact_id)
@@ -310,6 +314,9 @@ def _generate_export(session_factory, settings, *, artifact_id, epubcheck_jar):
                 "omitted": ledger["omitted_characters"],
             }
         ok = bool(validation.get("ok"))
+        if not ok:
+            log_event("export_validation_failed", level=logging.WARNING, job_id=artifact.job_id,
+                      artifact_id=artifact_id, code="EXPORT_VALIDATION_FAILED")
         outcome = ExportOutcome(
             artifact_id=artifact_id,
             state=JobState.COMPLETED.value if ok else JobState.FAILED.value,
@@ -320,6 +327,7 @@ def _generate_export(session_factory, settings, *, artifact_id, epubcheck_jar):
             validation=validation,
         )
     except Exception as exc:  # noqa: BLE001 - 导出失败必须落在产物状态里
+        log_failure("export_generate", artifact.job_id, exc, artifact_id=artifact_id)
         outcome = ExportOutcome(
             artifact_id=artifact_id,
             state=JobState.FAILED.value,

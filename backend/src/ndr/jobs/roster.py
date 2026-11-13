@@ -26,6 +26,7 @@ from ..characters.service import (
 )
 from ..config import Settings
 from ..context.budget import estimate_tokens
+from ..diagnostics import log_event, log_failure
 from ..domain.enums import CredentialMode, InferenceRunState, JobKind, JobState
 from ..ingest.query import load_canonical_text
 from ..llm.adapters import AdapterSpec, build_adapter
@@ -154,17 +155,26 @@ def run_character_roster_job(
     """Always settle unexpected worker failures; serialize re-entry for one job."""
     from .local_finalization import settlement_pending
     if settlement_pending(job_id):
+        log_event("job_worker_skipped", job_id=job_id, kind="CHARACTER_ROSTER",
+                  reason_code="local_finalization_pending")
         return RosterJobOutcome(job_id, JobState.RUNNING)
     with _GUARD:
         if job_id in _ACTIVE:
             with session_factory() as session:
                 job = session.get(Job, job_id)
+                log_event("job_worker_skipped", job_id=job_id, kind="CHARACTER_ROSTER",
+                          reason_code="worker_already_active")
                 return RosterJobOutcome(job_id, job.state if job else JobState.FAILED)
         _ACTIVE.add(job_id)
     previous_runs = set()
+    started = time.monotonic()
+    result = None
     try:
         with session_factory() as session:
             job = session.get(Job, job_id)
+            log_event("job_worker_start", job_id=job_id, kind="CHARACTER_ROSTER",
+                      operation="roster", state=job.state.value if job else JobState.FAILED.value,
+                      stage="preparing")
             previous_runs = set(session.scalars(select(InferenceRun.id).where(
                 InferenceRun.job_id == job_id,
             )))
@@ -173,17 +183,19 @@ def run_character_roster_job(
                 session.commit()
             if job is not None and (job.state in {JobState.COMPLETED, JobState.PAUSED}
                                    or json.loads(job.checkpoint_json or "{}").get("superseded_by")):
-                return RosterJobOutcome(job_id, job.state)
-        return _run_character_roster_job(
+                result = RosterJobOutcome(job_id, job.state)
+                return result
+        result = _run_character_roster_job(
             session_factory, settings, job_id=job_id, credentials=credentials,
             adapter_factory=adapter_factory,
         )
+        return result
     except Exception as exc:  # noqa: BLE001 - background exceptions must not leave RUNNING
-        from ..diagnostics import log_failure
         from .local_finalization import defer_settlement
         from .roster_receipts import RosterReceiptError
 
-        log_failure("roster_worker_exit", job_id, exc)
+        log_failure("roster_worker_exit", job_id, exc, stage="worker",
+                    reason_code="unexpected_worker_error")
         state = (JobState.NEEDS_RECONCILIATION if isinstance(exc, RosterReceiptError)
                  else JobState.FAILED)
         new_calls = 0
@@ -243,13 +255,20 @@ def run_character_roster_job(
             return finish_local_write(session_factory, settle, job_id=job_id)
 
         try:
-            return persist_exit()
+            result = persist_exit()
+            return result
         except Exception as settlement_error:
             log_failure("roster_exit_write", job_id, settlement_error)
             defer_settlement(session_factory, job_id, persist_exit)
-            return RosterJobOutcome(job_id, JobState.RUNNING, calls=new_calls,
-                                    errors=["本地状态保存等待中，不会重新调用模型"])
+            result = RosterJobOutcome(job_id, JobState.RUNNING, calls=new_calls,
+                                      errors=["本地状态保存等待中，不会重新调用模型"])
+            return result
     finally:
+        if result is not None:
+            log_event("job_worker_finished", job_id=job_id, kind="CHARACTER_ROSTER",
+                      operation="roster", state=result.state.value, calls=result.calls,
+                      reason_code="worker_returned",
+                      elapsed_ms=int((time.monotonic() - started) * 1000))
         with _GUARD:
             _ACTIVE.discard(job_id)
 
@@ -282,6 +301,8 @@ def _run_character_roster_job(
         if job is None or job.kind is not JobKind.CHARACTER_ROSTER:
             outcome.state = JobState.FAILED
             outcome.errors.append("job_not_found")
+            log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                      stage="preparing", reason_code="job_not_found")
             return outcome
         version = session.get(BookVersion, job.book_version_id)
         chapter_id = str(_job_range(job).get("chapter_id", ""))
@@ -292,6 +313,8 @@ def _run_character_roster_job(
             session.commit()
             outcome.state = JobState.FAILED
             outcome.errors.append("invalid_chapter")
+            log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                      stage="preparing", reason_code="invalid_chapter")
             return outcome
 
         if not chapter_has_body_text(session, settings, version, chapter):
@@ -314,6 +337,8 @@ def _run_character_roster_job(
                 session, settings, job, version, chapter,
             )
         except Exception as exc:  # noqa: BLE001 - no call or partial candidate writes
+            log_failure("roster_input", job_id, exc, stage="preparing",
+                        reason_code="invalid_roster_input")
             job.state = JobState.FAILED
             job.last_error = f"人物分析输入准备失败：{exc}"
             job.progress_json = json.dumps({"stage": "failed", "calls": 0}, ensure_ascii=False)
@@ -332,6 +357,8 @@ def _run_character_roster_job(
                 try:
                     adapter = _build_adapter(settings, credentials, snapshot)
                 except ProviderError as exc:
+                    log_failure("roster_adapter", job_id, exc, stage="preparing",
+                                reason_code="adapter_unavailable")
                     job.state = JobState.FAILED
                     job.last_error = f"{exc.code.value}: {exc.message}"
                     session.commit()
@@ -348,6 +375,8 @@ def _run_character_roster_job(
             job.progress_json = json.dumps({"stage": "budget_exhausted"}, ensure_ascii=False)
             session.commit()
             outcome.state = JobState.BUDGET_EXHAUSTED
+            log_event("job_blocked", job_id=job_id, stage="budget",
+                      reason_code="input_budget_exhausted")
             return outcome
         fingerprint = hashlib.sha256(
             json.dumps(messages, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -386,15 +415,19 @@ def _run_character_roster_job(
     known_character_names = _catalog_names(request_payload["messages"])
     raw = None
     outcome.calls = 0 if restored else 1
-    from ..diagnostics import logger as diagnostic_logger
-    diagnostic_logger.info("roster_call_start job=%s run=%s restored=%s",
-                           job_id, run_id, bool(restored))
+    log_event("roster_call_restored" if restored else "roster_call_start",
+              job_id=job_id, run_id=run_id, window_id=f"roster:{chapter_id_value}",
+              stage="primary", restored=bool(restored), calls=outcome.calls, attempt=1)
+    call_stage = "provider_call"
     try:
         raw = (archive["adapter_result"] if restored else
                asyncio.run(adapter.generate_labels(deepcopy(request_payload))))
         elapsed_ms = elapsed_ms if restored else int((time.monotonic() - started) * 1000)
-        diagnostic_logger.info("roster_call_returned job=%s run=%s elapsed_ms=%s",
-                               job_id, run_id, elapsed_ms)
+        log_event("roster_call_returned", job_id=job_id, run_id=run_id,
+                  window_id=f"roster:{chapter_id_value}", stage="primary", restored=bool(restored),
+                  elapsed_ms=elapsed_ms,
+                  usage_unknown=_attempt_usage_json(raw) is None)
+        call_stage = "receipt_save"
         def persist_returned(session):
             run = session.get(InferenceRun, run_id)
             if not restored:
@@ -411,6 +444,7 @@ def _run_character_roster_job(
             raise PendingLocalWrite(
                 lambda: finish_local_write(session_factory, persist_returned, job_id=job_id),
             ) from write_error
+        call_stage = "validation"
         payload = {
             key: value
             for key, value in dict(raw).items()
@@ -444,10 +478,10 @@ def _run_character_roster_job(
                for person in output.characters):
             raise ValueError("真实姓名必须有原文证据且为简短姓名")
     except Exception as exc:  # noqa: BLE001
-        diagnostic_logger.warning("roster_call_failed job=%s run=%s elapsed_ms=%s error=%s",
-                                  job_id, run_id, int((time.monotonic() - started) * 1000),
-                                  exc.kind.value if isinstance(exc, ProviderError)
-                                  else type(exc).__name__)
+        log_failure("roster_call", job_id, exc, run_id=run_id,
+                    window_id=f"roster:{chapter_id_value}", stage=call_stage,
+                    reason_code="roster_call_failed", restored=bool(restored),
+                    elapsed_ms=int((time.monotonic() - started) * 1000))
         from .local_finalization import PendingLocalWrite
         if isinstance(exc, PendingLocalWrite):
             raise
@@ -486,6 +520,8 @@ def _run_character_roster_job(
         if job is None or version is None or chapter is None:
             outcome.state = JobState.FAILED
             outcome.errors.append("job_not_found")
+            log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                      stage="preparing", reason_code="job_not_found")
             return outcome
         if job.state in {JobState.PAUSING, JobState.PAUSED, JobState.PARTIAL}:
             job.state = JobState.PAUSED
@@ -504,6 +540,9 @@ def _run_character_roster_job(
         except Exception as exc:  # noqa: BLE001 - persist charged storage failures
             if sqlite_lock_error(exc):
                 raise
+            log_failure("roster_storage", job_id, exc, run_id=run_id,
+                        window_id=f"roster:{chapter_id_value}", stage="candidate_save",
+                        reason_code="roster_storage_failed")
             run = session.get(InferenceRun, run_id)
             if run is not None:
                 run.state = InferenceRunState.FAILED

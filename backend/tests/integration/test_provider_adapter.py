@@ -157,7 +157,10 @@ def test_owned_client_cleanup_failure_never_discards_received_result_or_original
         result = _run(adapter.generate_labels({"messages": [{"role": "user", "content": "test"}]}))
         assert result["_usage"]["total_tokens"] == 20
         assert result.receipt["response"] == VALID_BODY
-    assert "provider_client_close_failed type=RuntimeError" in caplog.text
+    event = next(json.loads(record.message) for record in caplog.records
+                 if record.name == "ndr.diagnostics")
+    assert event["event"] == "provider_client_close_failed"
+    assert event["error_type"] == "RuntimeError"
     assert "private" not in caplog.text
 
 

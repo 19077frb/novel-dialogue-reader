@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from ..context.budget import policy_for_version
 from ..context.full_source import FullContextError
 from ..context.service import plan_range
+from ..diagnostics import log_event
 from ..domain.common import CursorPage, DataEnvelope, ErrorEnvelope
 from ..domain.enums import CredentialMode, ErrorCode, JobKind, JobState
 from ..domain.jobs import (
@@ -293,6 +294,9 @@ def create_job_route(
 
     if payload.run_now and created:
         background.add_task(run_job, factory, settings, job_id=detail.id, credentials=credentials)
+    log_event("job_admitted", job_id=detail.id, kind=detail.kind.value, state=detail.state.value,
+              request_id=current_request_id(request), created=created,
+              dispatched=bool(payload.run_now and created))
     return DataEnvelope(data=detail, request_id=current_request_id(request))
 
 
@@ -320,6 +324,8 @@ def pause_job_route(request: Request, job_id: str) -> DataEnvelope[JobDetailOut]
         elif job.state in {JobState.QUEUED, JobState.PARTIAL}:
             job.state = JobState.PAUSED
         detail = job_detail(session, job)
+    log_event("job_control", job_id=job_id, action="pause", state=detail.state.value,
+              request_id=current_request_id(request), dispatched=False)
     return DataEnvelope(data=detail, request_id=current_request_id(request))
 
 
@@ -348,6 +354,8 @@ def resume_job_route(
     # Only the transaction that changed the state owns the background dispatch.
     if resumed:
         background.add_task(run_job, factory, settings, job_id=job_id, credentials=credentials)
+    log_event("job_control", job_id=job_id, action="resume", state=snapshot.state.value,
+              request_id=current_request_id(request), dispatched=resumed)
     return DataEnvelope(data=snapshot, request_id=current_request_id(request))
 
 
@@ -387,9 +395,12 @@ def reconcile_job_route(
         if payload.action == "retry":
             guard_job_resumption(session, request.app.state.settings, job)
         result = reconcile_job(session, job, action=payload.action)
+        state = job.state.value
     if payload.action == "retry":
         background.add_task(run_job, factory, request.app.state.settings,
                             job_id=job_id, credentials=request.app.state.credentials)
+    log_event("job_control", job_id=job_id, action=payload.action, state=state,
+              request_id=current_request_id(request), dispatched=payload.action == "retry")
     return DataEnvelope(data=result, request_id=current_request_id(request))
 
 

@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 from collections.abc import Callable
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -33,6 +35,7 @@ from ..context.full_source import FullContextError
 from ..context.recheck import plan_recheck, route_window
 from ..context.service import load_window_inputs, plan_range
 from ..context.window_builder import WindowPlan, plan_windows
+from ..diagnostics import log_event, log_failure
 from ..domain.enums import (
     AnnotationSource,
     AnnotationStatus,
@@ -106,6 +109,8 @@ DEFAULT_LEASE_SECONDS = 900
 LABELING_MAX_TOKENS = 800
 OUTPUT_BASE_TOKENS = 256
 OUTPUT_TOKENS_PER_TARGET = 128
+# Count adapter dispatches within one worker, including transport retries and unknown outcomes.
+_diagnostic_dispatches: ContextVar[int | None] = ContextVar("dialogue_dispatches", default=None)
 
 
 def _json_list(raw: str | None) -> list[str]:
@@ -513,6 +518,7 @@ def _apply_payload(
     raw: Any,
     run_id: str | None,
     cache_key: str,
+    job_id: str | None = None,
     preserve_existing_candidates: bool = False,
     attribution_only: bool = False,
     allow_partial: bool = False,
@@ -549,6 +555,9 @@ def _apply_payload(
             bind_sent_identity_profiles(state.production_expression_task, state)
             _validate_expression_task(state.production_expression_task, window, state, None)
         except ValueError as exc:
+            log_event("dialogue_output_rejected", level=logging.WARNING, job_id=job_id,
+                      run_id=run_id, window_id=window.window_id, stage="input_validation",
+                      reason_code="invalid_expression_input", error=exc)
             return False, ["invalid_expression_input"], [str(exc)], []
         try:
             if (
@@ -570,12 +579,18 @@ def _apply_payload(
                 cache_payload = raw.cache_payload()
         except (ValueError, InvalidModelOutput, ValidationError) as exc:
             if not allow_partial or isinstance(raw, ReviewedExpression):
+                log_event("dialogue_output_rejected", level=logging.WARNING, job_id=job_id,
+                          run_id=run_id, window_id=window.window_id, stage="output_compilation",
+                          reason_code="invalid_expression_output", error=exc)
                 return False, ["invalid_expression_output"], [str(exc)], []
             from ..llm.expression_recovery import recover_expression_output
 
             try:
                 recovery = recover_expression_output(payload, state.production_expression_task)
-            except (ValueError, InvalidModelOutput, ValidationError):
+            except (ValueError, InvalidModelOutput, ValidationError) as recovery_error:
+                log_event("dialogue_output_rejected", level=logging.WARNING, job_id=job_id,
+                          run_id=run_id, window_id=window.window_id, stage="output_recovery",
+                          reason_code="invalid_expression_output", error=recovery_error)
                 return False, ["invalid_expression_output"], [str(exc)], []
             compilation, validation_warnings = recovery.compilation, recovery.warnings
         payload = compilation.output
@@ -590,12 +605,19 @@ def _apply_payload(
         payload, _targets_for(window, state), expected_schema_version=expected_version
     )
     if not report.ok or report.output is None:
+        log_event("dialogue_output_rejected", level=logging.WARNING, job_id=job_id,
+                  run_id=run_id, window_id=window.window_id, stage="schema_validation",
+                  reason_code="invalid_model_output", count=len(report.error_codes),
+                  error_code=next(iter(report.error_codes), "invalid_output"))
         return False, report.error_codes, report.messages, list(report.warnings)
     if attribution_only and (
         report.output.scene_updates
         or report.output.gap_decisions
         or report.output.identity_proposals
     ):
+        log_event("dialogue_output_rejected", level=logging.WARNING, job_id=job_id,
+                  run_id=run_id, window_id=window.window_id, stage="review_validation",
+                  reason_code="review_structure_changed")
         return (
             False,
             ["review_structure_changed"],
@@ -646,6 +668,10 @@ def _apply_payload(
         validation_warnings=validation_warnings,
     )
     if not result.validation_ok:
+        log_event("dialogue_output_rejected", level=logging.WARNING, job_id=job_id,
+                  run_id=run_id, window_id=window.window_id, stage="application_validation",
+                  reason_code="invalid_model_output", count=len(result.validation_codes),
+                  error_code=next(iter(result.validation_codes), "invalid_output"))
         return False, result.validation_codes, result.warnings, list(report.warnings)
     retained_rows = raw.get("_retained_format_rows", 0) if isinstance(raw, dict) else 0
     if not validation_warnings and not retained_rows:
@@ -1086,7 +1112,15 @@ def _run_recheck_pass(
                             if expression_task is None
                             else None
                         )
+                        log_event("dialogue_call_retry", level=logging.WARNING, job_id=job_id,
+                                  run_id=run_id, window_id=recheck_window.window_id,
+                                  stage="recheck", retry_type="format",
+                                  reason_code="invalid_model_output", attempt=attempt + 1,
+                                  limit=retry_limit, delay_ms=0, error=error)
                         continue
+                    log_event("dialogue_review_stopped", level=logging.WARNING, job_id=job_id,
+                              run_id=run_id, window_id=recheck_window.window_id, stage="recheck",
+                              reason_code="provider_error", error=error)
                     stats["aborted"] = 1
                     stats["stop_reason"] = f"复核调用失败，已保留结果：{error.message[:200]}"
                     break
@@ -1105,6 +1139,7 @@ def _run_recheck_pass(
                 if safe:
                     ok, codes, messages, _repair_warnings = _apply_payload(
                         session,
+                        job_id=job_id,
                         window=recheck_window,
                         inputs=inputs,
                         state=state,
@@ -1134,6 +1169,10 @@ def _run_recheck_pass(
                 session.commit()
             if ok:
                 break
+            log_event("dialogue_review_rejected", level=logging.WARNING, job_id=job_id,
+                      run_id=run_id, window_id=recheck_window.window_id, stage="recheck",
+                      reason_code="invalid_model_output" if safe else "invalid_identity_input",
+                      attempt=attempt + 1, limit=retry_limit + 1)
             if not safe:
                 stats["aborted"], stats["stop_reason"] = 1, reason
                 return stats
@@ -1260,6 +1299,7 @@ def _dispatch_with_bounded_retry(
             max_tokens_override=max_tokens_override,
         )
     )
+    call_stage = request_payload.get("review_stage") or "dialogue"
     request_fingerprint = _request_fingerprint(request_payload, snapshot)
     from ..storage.run_archive import save_run_archive
     from .dialogue_lifecycle import restore_dispatch
@@ -1271,6 +1311,9 @@ def _dispatch_with_bounded_retry(
         )
     if restored is not None:
         saved_raw, saved_error, saved_id, saved_elapsed = restored
+        log_event("dialogue_call_restored", job_id=job_id, run_id=saved_id,
+                  window_id=window.window_id, stage="receipt_recovery", restored=True,
+                  calls=0, elapsed_ms=saved_elapsed, error=saved_error)
         if saved_raw is not None and state.production_expression_task is None:
             from ..llm.receipt import ProviderResult
 
@@ -1313,13 +1356,16 @@ def _dispatch_with_bounded_retry(
 
         from ..storage.transactions import finish_local_write
         run_id = finish_local_write(session_factory, prepare_call, job_id=job_id)
-        from ..diagnostics import logger as diagnostic_logger
-        diagnostic_logger.info("dialogue_call_start job=%s run=%s window=%s",
-                               job_id, run_id, window.window_id)
+        log_event("dialogue_call_start", job_id=job_id, run_id=run_id,
+                  window_id=window.window_id, stage=call_stage, attempt=index + 1,
+                  limit=allowed, restored=False)
 
         started = time.perf_counter()
         raw = None
         error = None
+        dispatches = _diagnostic_dispatches.get()
+        if dispatches is not None:
+            _diagnostic_dispatches.set(dispatches + 1)
         try:
             raw = _dispatch(
                 adapter,
@@ -1332,9 +1378,13 @@ def _dispatch_with_bounded_retry(
         except ProviderError as exc:
             error = exc
         elapsed_ms = int((time.perf_counter() - started) * 1000)
-        diagnostic_logger.info("dialogue_call_returned job=%s run=%s elapsed_ms=%s error=%s",
-                               job_id, run_id, elapsed_ms,
-                               error.kind.value if error is not None else None)
+        log_event("dialogue_call_returned", job_id=job_id, run_id=run_id,
+                  window_id=window.window_id, stage=call_stage, attempt=index + 1,
+                  elapsed_ms=elapsed_ms, error=error,
+                  reason_code="provider_error" if error is not None else "returned",
+                  usage_unknown=not _known_call_usage(
+                      error.details.get("usage") if error is not None
+                      else raw.get("_usage") if isinstance(raw, dict) else None))
 
         # Commit transport evidence before semantic validation or application.
         # A received invalid proposal must not vanish when those steps fail.
@@ -1394,6 +1444,10 @@ def _dispatch_with_bounded_retry(
                     ensure_ascii=False,
                 )
             session.commit()
+        log_event("dialogue_call_retry", level=logging.WARNING, job_id=job_id,
+                  run_id=run_id, window_id=window.window_id, stage="rate_limit_backoff",
+                  retry_type="transport", attempt=index + 1, limit=allowed,
+                  delay_ms=int(backoff * 1000), reason_code=error.kind.value, error=error)
         if backoff > 0:
             time.sleep(backoff)
     return raw, error, run_id, elapsed_ms
@@ -1417,19 +1471,28 @@ def run_job(
         job = session.get(Job, job_id)
         dialogue = job is not None and job.kind in DIALOGUE_KINDS
         current = job.state if job is not None else JobState.FAILED
+        kind = job.kind.value if job is not None else None
     if dialogue and not acquire(job_id):
+        log_event("job_worker_skipped", job_id=job_id, kind=kind, state=current.value,
+                  reason_code="worker_already_active")
         return JobRunOutcome(job_id=job_id, state=current)
+    started = time.monotonic()
+    result = None
+    dispatch_token = _diagnostic_dispatches.set(0) if dialogue else None
+    log_event("job_worker_start", job_id=job_id, kind=kind, state=current.value,
+              operation="dispatch")
     try:
-        return _run_job(
+        result = _run_job(
             session_factory, settings, job_id=job_id, credentials=credentials,
             adapter_factory=adapter_factory, max_windows=max_windows, policy=policy,
         )
+        return result
     except Exception as exc:
+        log_failure("job_worker_exit", job_id, exc, kind=kind, stage="worker",
+                    reason_code="unexpected_worker_error")
         if not dialogue:
             raise
         # Never log SQL statements, parameters or model/novel contents.
-        from ..diagnostics import log_failure
-        log_failure("dialogue_worker_exit", job_id, exc)
         from .local_finalization import defer_settlement
 
         def persist_exit(error=exc):
@@ -1441,11 +1504,11 @@ def run_job(
         try:
             state = persist_exit()
         except Exception as settlement_error:
-            from ..diagnostics import log_failure
             log_failure("dialogue_exit_write", job_id, settlement_error)
             defer_settlement(session_factory, job_id, persist_exit)
-            return JobRunOutcome(job_id=job_id, state=JobState.RUNNING,
-                                 errors=["本地状态保存等待中，不会重新调用模型"])
+            result = JobRunOutcome(job_id=job_id, state=JobState.RUNNING,
+                                   errors=["本地状态保存等待中，不会重新调用模型"])
+            return result
         with session_factory() as session:
             rows = list(session.scalars(select(JobWindow).where(JobWindow.job_id == job_id)))
             failed_job = session.get(Job, job_id)
@@ -1453,15 +1516,26 @@ def run_job(
                 failed_job.last_error if failed_job is not None else None
             ) or database_error_detail(exc)
             usage = spent_tokens(session, job_id)
-        return JobRunOutcome(
+        result = JobRunOutcome(
             job_id=job_id, state=state, windows_total=len(rows),
             windows_done=sum(row.state is JobState.COMPLETED for row in rows),
             unknown_runs=sum(row.state is JobState.NEEDS_RECONCILIATION for row in rows),
             errors=[detail], usage=usage,
         )
+        return result
     finally:
+        if result is not None:
+            log_event("job_worker_finished", job_id=job_id, kind=kind,
+                      operation="dispatch", state=result.state.value,
+                      calls=_diagnostic_dispatches.get() if dialogue else result.calls,
+                      windows_total=result.windows_total, windows_done=result.windows_done,
+                      cached_windows=result.cached_windows, unknown_runs=result.unknown_runs,
+                      reason_code="worker_returned",
+                      elapsed_ms=int((time.monotonic() - started) * 1000))
         if dialogue:
             release(job_id)
+        if dispatch_token is not None:
+            _diagnostic_dispatches.reset(dispatch_token)
 
 
 def _run_job(
@@ -1491,6 +1565,8 @@ def _run_job(
         job = session.get(Job, job_id)
         if job is None:
             outcome.errors.append("job_not_found")
+            log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                      stage="job_not_found", reason_code="job_not_found")
             outcome.state = JobState.FAILED
             return outcome
         if job.state in STOP_STATES:
@@ -1526,6 +1602,8 @@ def _run_job(
             )
         if not job.book_version_id:
             job.state = JobState.FAILED
+            log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                      stage="preparing", reason_code="missing_book_version")
             job.last_error = "任务缺少书籍版本"
             session.commit()
             outcome.state = JobState.FAILED
@@ -1533,6 +1611,8 @@ def _run_job(
         version = session.get(BookVersion, job.book_version_id)
         if version is None:
             job.state = JobState.FAILED
+            log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                      stage="preparing", reason_code="book_version_not_found")
             job.last_error = "书籍版本不存在"
             session.commit()
             outcome.state = JobState.FAILED
@@ -1564,6 +1644,8 @@ def _run_job(
                 session.commit()
                 outcome.state = JobState.FAILED
                 outcome.errors.append("roster_not_confirmed")
+                log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                          stage="roster_not_confirmed", reason_code="roster_not_confirmed")
                 return outcome
         # 不要覆盖 PAUSING：让窗口之间的暂停检查有机会生效
         if job.state is not JobState.PAUSING:
@@ -1580,6 +1662,8 @@ def _run_job(
             session.commit()
             outcome.state = JobState.FAILED
             outcome.errors.append("invalid_full_context")
+            log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                      stage="invalid_full_context", reason_code="invalid_full_context", error=exc)
             return outcome
         inputs = load_window_inputs(
             session,
@@ -1598,6 +1682,8 @@ def _run_job(
             session.commit()
             outcome.state = JobState.FAILED
             outcome.errors.append("roster_not_confirmed")
+            log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                      stage="roster_not_confirmed", reason_code="roster_not_confirmed")
             return outcome
         snapshot = _json_of(job.profile_snapshot_json) or None
         profile = profile_for_job(session, job)
@@ -1656,6 +1742,8 @@ def _run_job(
                     session.commit()
             outcome.state = JobState.FAILED
             outcome.errors.append(exc.code.value)
+            log_failure("adapter_preparation", job_id, exc, stage="preparing",
+                        reason_code="adapter_unavailable")
             return outcome
 
     # 成本路由：只有策略开启、且任务里指定了强模型配置时才可能升级
@@ -1676,6 +1764,8 @@ def _run_job(
                 # 强模型不可用不是致命错误：如实退回基础模型，并把原因记进结果
                 strong_adapter = None
                 outcome.errors.append(f"strong_route_unavailable:{exc.code.value}")
+                log_event("job_route_fallback", level=logging.WARNING, job_id=job_id,
+                          stage="preparing", reason_code="strong_adapter_unavailable", error=exc)
 
     def _maybe_recheck(window_, window_adapter_, window_snapshot_) -> bool:  # noqa: ANN001, ANN202
         """首次结果落地后的有限复核（默认关闭）；返回 False 表示任务需要人工对账。"""
@@ -1743,6 +1833,8 @@ def _run_job(
                 job.state = JobState.NEEDS_RECONCILIATION
                 session.commit()
                 outcome.state = JobState.NEEDS_RECONCILIATION
+                log_event("job_blocked", job_id=job_id, window_id=window.window_id,
+                          stage="preparing", reason_code="unreconciled_call_exists")
                 return outcome
             spent = spent_tokens(session, job_id)
             job_snapshot = job
@@ -1757,6 +1849,8 @@ def _run_job(
                 session.commit()
                 outcome.state = JobState.FAILED
                 outcome.errors.append("roster_not_confirmed")
+                log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                          stage="roster_not_confirmed", reason_code="roster_not_confirmed")
                 return outcome
             session.commit()
 
@@ -1798,6 +1892,8 @@ def _run_job(
                 session.commit()
             outcome.state = JobState.BUDGET_EXHAUSTED
             outcome.budget_exhausted = True
+            log_event("job_blocked", job_id=job_id, window_id=window.window_id,
+                      stage="budget", reason_code="input_budget_exhausted")
             break
 
         # 成本路由：默认关闭；开启时也只升级困难窗口，且不超过 share 上限
@@ -1851,6 +1947,9 @@ def _run_job(
                     session.commit()
                 outcome.state = JobState.FAILED
                 outcome.errors.append("invalid_review_cache")
+                log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                          stage="invalid_review_cache", reason_code="invalid_review_cache",
+                          error=exc)
                 return outcome
             with session_factory() as session:
                 job = session.get(Job, job_id)
@@ -1869,11 +1968,14 @@ def _run_job(
                     session.commit()
                     outcome.state = JobState.FAILED
                     outcome.errors.append("invalid_identity_input")
+                    log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                              stage="invalid_identity_input", reason_code="invalid_identity_input")
                     return outcome
                 if expression_task is not None:
                     state.production_expression_task = expression_task
                 ok, codes, messages, repair_warnings = _apply_payload(
                     session,
+                    job_id=job_id,
                     window=window,
                     inputs=inputs,
                     state=state,
@@ -1927,6 +2029,8 @@ def _run_job(
                     session.commit()
                     outcome.state = failed_job.state
                 outcome.errors.append("invalid_expression_input")
+                log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                          stage="invalid_expression_input", reason_code="invalid_expression_input")
                 return outcome
             if ok:
                 # 首次结果落地后按策略做有限局部复核（默认关闭）
@@ -1936,6 +2040,8 @@ def _run_job(
 
         if window_adapter is None:
             outcome.errors.append("adapter_unavailable")
+            log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                      stage="adapter_unavailable", reason_code="adapter_unavailable")
             with session_factory() as session:
                 job = session.get(Job, job_id)
                 assert job is not None
@@ -1997,6 +2103,8 @@ def _run_job(
                         session.commit()
                         outcome.state = JobState.BUDGET_EXHAUSTED
                         outcome.budget_exhausted = True
+                        log_event("job_blocked", job_id=job_id, window_id=window.window_id,
+                                  stage="validation_retry", reason_code="retry_budget_exhausted")
                         return outcome
                     job.progress_json = json.dumps(
                         {
@@ -2008,6 +2116,11 @@ def _run_job(
                         ensure_ascii=False,
                     )
                     session.commit()
+                if not restoring_retry:
+                    log_event("dialogue_call_retry", level=logging.WARNING, job_id=job_id,
+                              window_id=window.window_id, stage="validation_retry",
+                              retry_type="format", reason_code="invalid_model_output",
+                              attempt=attempt, limit=format_retry_limit, delay_ms=0)
             restored = None
             if expression_task is not None and selected(job_snapshot):
                 with session_factory() as session:
@@ -2021,7 +2134,15 @@ def _run_job(
                         session.commit()
                         outcome.state = JobState.FAILED
                         outcome.errors.append("invalid_review_restore")
+                        log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                                  stage="invalid_review_restore",
+                                  reason_code="invalid_review_restore",
+                                  error=exc)
                         return outcome
+            if restored is not None:
+                log_event("dialogue_call_restored", job_id=job_id, run_id=restored[2],
+                          window_id=window.window_id, stage="review_primary", restored=True,
+                          calls=0)
             raw, error, run_id, elapsed_ms = restored or _dispatch_with_bounded_retry(
                 session_factory,
                 window_adapter,
@@ -2133,6 +2254,10 @@ def _run_job(
                         session.commit()
                         outcome.state = JobState.NEEDS_RECONCILIATION
                         outcome.unknown_runs += 1
+                        log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                                  run_id=run_id, window_id=window.window_id, stage="provider_call",
+                                  reason_code="unknown_outcome", state=job.state.value, error=error,
+                                  usage_unknown=not _known_call_usage(error.details.get("usage")))
                         return outcome
 
                     # 格式/契约类错误按用户配置有限纠错重发。
@@ -2168,6 +2293,9 @@ def _run_job(
                         job.last_error = f"{error.code.value}: {error.message}{snippet}"
                         session.commit()
                         outcome.state = job.state
+                        log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                                  run_id=run_id, window_id=window.window_id, stage="provider_call",
+                                  reason_code="provider_error", error=error, state=job.state.value)
                         window_failed = True
                         break
                 else:
@@ -2189,9 +2317,13 @@ def _run_job(
                         session.commit()
                         outcome.state, outcome.calls = job.state, calls
                         outcome.errors.append("invalid_identity_input")
+                        log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                                  stage="invalid_identity_input",
+                                  reason_code="invalid_identity_input")
                         return outcome
                     ok, codes, messages, repair_warnings = _apply_payload(
                         session,
+                        job_id=job_id,
                         window=window,
                         inputs=inputs,
                         state=state,
@@ -2226,6 +2358,10 @@ def _run_job(
                             job.last_error = f"模型输出未通过校验：{codes}；问题：{problems}"
                             session.commit()
                             outcome.state = job.state
+                            log_event("job_blocked", level=logging.WARNING, job_id=job_id,
+                                      run_id=run_id, window_id=window.window_id, stage="validation",
+                                      reason_code="invalid_model_output", state=job.state.value,
+                                      usage_unknown=not _known_call_usage(usage))
                             window_failed = True
                             break
                     else:
@@ -2513,6 +2649,7 @@ def reconcile_stale_runs(
     moment = now or datetime.now(tz=UTC)
     cutoff = moment - timedelta(seconds=lease_seconds)
     reconciled: list[str] = []
+    recovered = []
     with session_factory() as session:
         runs = list(
             session.execute(
@@ -2541,7 +2678,12 @@ def reconcile_stale_runs(
                     if row is not None:
                         row.state = JobState.NEEDS_RECONCILIATION
             reconciled.append(run.id)
+            recovered.append((run.id, run.job_id, run.window_id))
         session.commit()
+    for run_id, job_id, window_id in recovered:
+        log_event("call_startup_recovered", level=logging.WARNING, job_id=job_id, run_id=run_id,
+                  window_id=window_id, state=InferenceRunState.UNKNOWN_OUTCOME.value,
+                  reason_code="stale_unreturned_call", dispatched=False)
     return reconciled
 
 

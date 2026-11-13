@@ -1,12 +1,14 @@
 """Opt-in staged expression proposals; network calls never hold a transaction."""
 
 import json
+import logging
 from copy import deepcopy
 from dataclasses import dataclass, replace
 
 from sqlalchemy import select
 
 from ..context.budget import estimate_tokens
+from ..diagnostics import log_event
 from ..domain.enums import InferenceRunState, JobState
 from ..llm.errors import ProviderError, ProviderErrorKind
 from ..llm.expression_compiler import compile_expression_output
@@ -178,7 +180,8 @@ def run_review_pipeline(
         usage = primary_raw.get("_usage")
         primary.usage_json = json.dumps(usage) if _known_call_usage(usage) else None
 
-    def stopped(reason, *, unknown=False, pause=False, failed_stage=None):
+    def stopped(reason, *, unknown=False, pause=False, failed_stage=None,
+                reason_code="review_failed"):
         with local_write_session(session_factory, job_id=job_id) as session:
             job = session.get(Job, job_id)
             checkpoint = json.loads(job.checkpoint_json or "{}")
@@ -196,6 +199,9 @@ def run_review_pipeline(
                 )
                 if row is not None:
                     row.state = JobState.NEEDS_RECONCILIATION
+        log_event("dialogue_review_stopped", level=logging.WARNING, job_id=job_id,
+                  window_id=window.window_id, stage=failed_stage or "review",
+                  reason_code=reason_code, usage_unknown=unknown)
         result.unknown, result.stopped = unknown, pause or unknown
 
     def stage(stage_name, messages, validate, *, binding=None):
@@ -250,6 +256,7 @@ def run_review_pipeline(
                             "复核阶段归档缺失或损坏，不能自动重发",
                             unknown=True,
                             failed_stage=stage_name,
+                            reason_code="invalid_review_receipt",
                         )
                         return None
                     if record.get("phase") != "returned":
@@ -257,6 +264,7 @@ def run_review_pipeline(
                             "复核阶段远程结果未知，不能自动重发",
                             unknown=True,
                             failed_stage=stage_name,
+                            reason_code="unreturned_review_receipt",
                         )
                         return None
                     raw, run_id, elapsed = (
@@ -267,7 +275,8 @@ def run_review_pipeline(
                     failed = record.get("error")
                     if failed:
                         if not isinstance(failed.get("message"), str):
-                            stopped("旧失败归档缺少原始错误，不能自动重发修复请求")
+                            stopped("旧失败归档缺少原始错误，不能自动重发修复请求",
+                                    failed_stage=stage_name, reason_code="invalid_error_receipt")
                             return None
                         error = ProviderError(
                             ProviderErrorKind(failed["kind"]),
@@ -291,7 +300,8 @@ def run_review_pipeline(
                     and spent["output_tokens"] + output_reserve * (spent["unknown_runs"] + 1)
                     > int(budget["max_output_tokens"])
                 ):
-                    stopped("用量未知或剩余额度不足，保留已有有效提案")
+                    stopped("用量未知或剩余额度不足，保留已有有效提案",
+                            failed_stage=stage_name, reason_code="review_usage_or_budget_limit")
                     return None
                 job.progress_json = json.dumps(
                     {
@@ -301,6 +311,11 @@ def run_review_pipeline(
                     }
                 )
             if not reused:
+                if attempt:
+                    log_event("dialogue_call_retry", level=logging.WARNING, job_id=job_id,
+                              window_id=window.window_id, stage=stage_name, retry_type="format",
+                              reason_code="invalid_model_output", attempt=attempt,
+                              limit=retry_limit, delay_ms=0)
                 raw, error, run_id, elapsed = _dispatch_with_bounded_retry(
                     session_factory,
                     adapter,
@@ -312,6 +327,10 @@ def run_review_pipeline(
                     request_payload_override=request,
                 )
                 result.calls += getattr(error if error else raw, "dispatch_attempts", 1)
+            else:
+                log_event("dialogue_call_restored", job_id=job_id, run_id=run_id,
+                          window_id=window.window_id, stage=stage_name, generation=generation,
+                          restored=True, calls=0)
             usage = (
                 error.details.get("usage")
                 if error
@@ -326,6 +345,10 @@ def run_review_pipeline(
                     valid = validate(_clean(raw), run_id)
                 except (ValueError, ProviderError, TypeError, KeyError) as exc:
                     problem = str(exc)[:800]
+                    log_event("dialogue_review_rejected", level=logging.WARNING, job_id=job_id,
+                              run_id=run_id, window_id=window.window_id, stage=stage_name,
+                              reason_code="invalid_model_output", attempt=attempt + 1,
+                              limit=retry_limit + 1, error=exc)
             with local_write_session(session_factory, job_id=job_id) as session:
                 run = session.get(InferenceRun, run_id)
                 run.state = (
@@ -349,7 +372,8 @@ def run_review_pipeline(
             if error and error.kind in {
                 ProviderErrorKind.TIMEOUT, ProviderErrorKind.UNKNOWN_OUTCOME,
             }:
-                stopped("复核请求结果未知，需人工核对", unknown=True, failed_stage=stage_name)
+                stopped("复核请求结果未知，需人工核对", unknown=True, failed_stage=stage_name,
+                        reason_code="unknown_outcome")
                 return None
             if halt:
                 result.stopped = True
@@ -362,7 +386,8 @@ def run_review_pipeline(
                 or error
                 and error.kind is not ProviderErrorKind.INVALID_OUTPUT
             ):
-                stopped("复核失败，保留已有有效提案：" + problem)
+                stopped("复核失败，保留已有有效提案：" + problem, failed_stage=stage_name,
+                        reason_code="review_not_accepted")
                 return None
             correction = problem
         return None
