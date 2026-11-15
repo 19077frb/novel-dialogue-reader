@@ -1,5 +1,9 @@
 import { Children, cloneElement, isValidElement, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { ChevronLeft, ChevronRight, LoaderCircle } from 'lucide-react'
+import { motion, useReducedMotion } from 'motion/react'
+import { Button } from './ui/button'
+import '../styles/components.css'
 
 /** Display-only paging: never change the collection used for selection or submission. */
 export function useListPagination(count: number, pageSize = 20, scope = '') {
@@ -24,6 +28,7 @@ export function ListPagination({ pagination: p, label, hasMore = false, loading 
 } & RemotePage) {
   const [error, setError] = useState('')
   const [requesting, setRequesting] = useState(false)
+  const reducedMotion = useReducedMotion()
   const busy = loading || requesting
   const last = p.page === p.pageCount - 1
   const next = async () => {
@@ -40,10 +45,13 @@ export function ListPagination({ pagination: p, label, hasMore = false, loading 
   if (p.count <= p.pageSize && !hasMore && !error) return null
   return <nav className="ndr-list-pagination" aria-label={`${label}分页`}>
     <span className="hint" aria-live="polite">第 {p.page + 1} 页 · {p.count ? p.page * p.pageSize + 1 : 0}–{Math.min((p.page + 1) * p.pageSize, p.count)} / {hasMore ? '已加载 ' : '共 '}{p.count} 项{hasMore ? '（还有更多）' : ''}</span>
-    <button type="button" disabled={busy || p.page === 0} title={busy ? '正在读取列表，请稍候。' : p.page === 0 ? '已是第一页。' : undefined}
-      onClick={() => { setError(''); p.setPage(p.page - 1) }}>上一页</button>
-    <button type="button" disabled={busy || (last && !hasMore)} title={busy ? '正在读取列表，请稍候。' : last && !hasMore ? '已是最后一页。' : undefined}
-      onClick={() => void next()}>{busy ? '正在读取…' : '下一页'}</button>
+    <Button type="button" size="sm" disabled={busy || p.page === 0} title={busy ? '正在读取列表，请稍候。' : p.page === 0 ? '已是第一页。' : undefined}
+      onClick={() => { setError(''); p.setPage(p.page - 1) }}><ChevronLeft size={15} aria-hidden="true" />上一页</Button>
+    <Button type="button" size="sm" disabled={busy || (last && !hasMore)} title={busy ? '正在读取列表，请稍候。' : last && !hasMore ? '已是最后一页。' : undefined}
+      onClick={() => void next()}>{busy ? <motion.span className="ndr-icon" aria-hidden="true"
+        animate={{ rotate: reducedMotion ? 0 : 360 }}
+        transition={{ duration: reducedMotion ? 0 : 1, repeat: reducedMotion ? 0 : Infinity, ease: 'linear' }}>
+        <LoaderCircle size={15} aria-hidden="true" /></motion.span> : <ChevronRight size={15} aria-hidden="true" />}{busy ? '正在读取…' : '下一页'}</Button>
     {error && <p role="alert" className="status-error">下一页读取失败：{error}；请点击“下一页”重试。</p>}
   </nav>
 }

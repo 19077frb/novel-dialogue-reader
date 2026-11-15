@@ -19,7 +19,7 @@ function classes(node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): string[
 function hasStyledNavigationParent(node: ts.Node): boolean {
   for (let parent = node.parent; parent; parent = parent.parent) {
     if (ts.isJsxElement(parent) && parent.openingElement.tagName.getText() === 'nav'
-      && classes(parent.openingElement).some(name => ['ndr-book-nav', 'ndr-app-nav'].includes(name))) return true
+      && classes(parent.openingElement).some(name => ['ndr-book-nav', 'ndr-app-nav', 'ndr-shell-nav'].includes(name))) return true
   }
   return false
 }

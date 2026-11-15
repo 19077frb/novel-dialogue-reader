@@ -151,7 +151,7 @@ test.describe('可访问性与布局检查', () => {
       .click()
     await page.getByRole('link', { name: '预览与处理' }).click()
     await page.getByTestId('preview-profile').selectOption({
-      label: `${profileName} · fake-provider · fake-model-a11y`,
+      label: `${profileName} · fake-model-a11y`,
     })
     await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()

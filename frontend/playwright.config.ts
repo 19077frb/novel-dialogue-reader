@@ -1,4 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
+import { validateE2eDataDirectory } from './e2e/global-setup'
 
 /**
  * E2E 使用独立端口与**每次运行独立的数据目录**，绝不接触用户书库，
@@ -8,8 +10,11 @@ const E2E_API_PORT = Number(process.env.NDR_E2E_API_PORT ?? 8795)
 const E2E_UI_PORT = Number(process.env.NDR_E2E_UI_PORT ?? 5273)
 
 // 每次运行一个全新的数据目录，避免上一轮残留的 SQLite 句柄导致清理失败。
-const E2E_RUN_ID = process.env.NDR_E2E_RUN_ID ?? String(Date.now())
+const E2E_RUN_ID = process.env.NDR_E2E_RUN_ID ?? `${Date.now()}-${randomUUID()}`
 const E2E_DATA_DIR = process.env.NDR_E2E_DATA_DIR ?? `.e2e/data-${E2E_RUN_ID}`
+// Workers load this config after webServer has populated the directory. Only the
+// runner validates emptiness, before it launches any backend process.
+if (process.env.TEST_WORKER_INDEX === undefined) validateE2eDataDirectory(E2E_DATA_DIR)
 process.env.NDR_E2E_DATA_DIR = E2E_DATA_DIR
 
 // 受限环境中 uv 缓存可能不可访问，可用该变量回退到 backend\.venv 的解释器。

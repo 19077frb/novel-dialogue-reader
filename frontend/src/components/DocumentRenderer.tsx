@@ -1,3 +1,4 @@
+import { BookmarkPlus, TriangleAlert } from 'lucide-react'
 import { useMemo, type ReactNode } from 'react'
 
 import { resourceUrl } from '../api/books'
@@ -144,7 +145,7 @@ function renderAnnotatedText(
           ? '这句对白在待确认队列中，点击可查看并确认。'
           : '这句对白在待确认队列中，可前往待确认队列查看并确认。'}
         data-quote-id={quote.quote_id}
-        onClick={onQuoteClick ? event => { event.stopPropagation(); onQuoteClick(quote.quote_id) } : undefined}>⚠</span>)
+        onClick={onQuoteClick ? event => { event.stopPropagation(); onQuoteClick(quote.quote_id) } : undefined}><TriangleAlert size="1em" style={{ display: 'inline-block', verticalAlign: 'middle' }} aria-hidden="true" /></span>)
       cursor = quote.start_cp
     }
     inner.push(renderTextWithRuby(sliceByCodepoints(text, baseCp, cursor, slice.end), cursor, ruby))
@@ -371,7 +372,7 @@ function NodeView({
         {renderRange(node.start_cp, nodeEnd)}
         {node.text.trim() && <button type="button" className="ndr-paragraph-bookmark" disabled={bookmarkPending}
           aria-label={`保存书签：${node.text.trim().slice(0, 40)}`} title={bookmarkPending ? '正在保存书签，请等待本次保存完成。' : '保存这段话为书签'}
-          onClick={event => { event.stopPropagation(); onBookmark(node.start_cp, node.text) }} />}
+          onClick={event => { event.stopPropagation(); onBookmark(node.start_cp, node.text) }}><BookmarkPlus size="1em" aria-hidden="true" /></button>}
       </span>
     : renderRange(node.start_cp, nodeEnd)
 

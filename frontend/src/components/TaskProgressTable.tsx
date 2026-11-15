@@ -1,6 +1,17 @@
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { ListPagination, useListPagination } from './ListPagination'
+import { CircleCheck, CircleAlert, CirclePause, CircleHelp, Clock3, LoaderCircle } from 'lucide-react'
+import { Badge } from './ui/badge'
+
+const TONE_ICON = { queued: Clock3, running: LoaderCircle, completed: CircleCheck,
+  failed: CircleAlert, cancelled: CirclePause, unknown: CircleHelp }
+
+export function TaskStateBadge({ tone, children }: { tone: TaskTone; children: ReactNode }) {
+  const safeTone = Object.hasOwn(TONE_ICON, tone) ? tone : 'unknown'
+  const Icon = TONE_ICON[safeTone]
+  return <Badge className={`ndr-task-state ndr-task-${safeTone}`}><Icon size={13} aria-hidden="true" />{children}</Badge>
+}
 
 export type TaskTone = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
 export function jobTaskTone(state: string): TaskTone {
@@ -61,7 +72,7 @@ export function TaskProgressTable({ rows, label, scope = '', showBook = false, p
       <table className="ndr-batch-task-table" aria-label={label}>
         <thead><tr><th>状态</th><th>处理类型</th>{showBook && <th>书籍</th>}<th>章节</th><th>窗口</th><th>原因 / 错误详情</th><th>操作</th></tr></thead>
         <tbody>{rows.map((row, index) => <tr key={row.id} hidden={!pages.isVisible(index)} data-task-state={row.state} data-testid={rowTestId}>
-          <td><span className={`ndr-task-state ndr-task-${row.state}`}>{row.stateLabel}</span></td>
+          <td><TaskStateBadge tone={row.state}>{row.stateLabel}</TaskStateBadge></td>
           <td>{row.type}</td>{showBook && <td>{row.book || '书籍已删除'}</td>}
           <td>{row.chapter}</td><td title={row.windowTitle}>{row.window || '—'}</td>
           <td className={row.error ? 'status-error' : undefined}>{row.error || '—'}</td>

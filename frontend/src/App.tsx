@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { queryKeys } from './api/books'
 import { fetchHealth } from './api/client'
@@ -16,6 +16,7 @@ import SettingsPage from './pages/SettingsPage'
 import TaskQueuePage from './pages/TaskQueuePage'
 import { useGeneralSettings } from './settings/preferences'
 import { stopAutomaticProcessing } from './processing/autoProcessing'
+import { AppShell } from './components/AppShell'
 import { SavedTaskRecovery } from './components/SavedTaskRecovery'
 
 /** 后端连接状态：显示真实 /api/health 结果（不调用模型）。 */
@@ -59,29 +60,7 @@ export default function App() {
     document.documentElement.style.setProperty('--ndr-reading-line-height', String(settings.lineHeight))
   }, [settings.fontSize, settings.lineHeight])
   return (
-    <div className="app-shell">
-      <a className="ndr-skip-link" href="#ndr-main">
-        跳到主要内容
-      </a>
-      <header className="ndr-app-header">
-        <div className="ndr-brand">
-          <h1>轻小说对话辅助阅读器</h1>
-          <p className="subtitle">
-            导入 TXT/EPUB 后即可阅读原文；识别说话人后按人物着色并编号，不确定的内容进入待确认队列。
-          </p>
-        </div>
-        <nav className="ndr-app-nav" aria-label="主导航">
-          {/* NavLink 会在当前页给出 aria-current="page"，键盘/读屏用户能知道自己在哪一页 */}
-          <NavLink to="/library">书架</NavLink>
-          <NavLink to="/tasks">任务队列</NavLink>
-          <NavLink to="/settings/models">模型配置</NavLink>
-          <NavLink to="/settings/general">通用设置</NavLink>
-        </nav>
-        <HealthBadge />
-        <SavedTaskRecovery />
-      </header>
-
-      <main className="ndr-main" id="ndr-main" tabIndex={-1}>
+    <AppShell status={<HealthBadge />} recovery={<SavedTaskRecovery />}>
         <Routes>
           <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/library" element={<LibraryPage />} />
@@ -96,7 +75,6 @@ export default function App() {
           <Route path="/settings/general" element={<SettingsPage />} />
           <Route path="*" element={<p className="status-error">页面不存在。</p>} />
         </Routes>
-      </main>
-    </div>
+    </AppShell>
   )
 }

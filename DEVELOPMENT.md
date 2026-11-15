@@ -15,6 +15,20 @@ Windows 免安装包由 GitHub Actions 手动构建和发布，流程与本地�
 - 修改公共 API 时同步更新后端 schema、`docs/openapi.json`、前端生成类型和测试。
 - 页面内导航、设置和任务查看入口保留链接语义，使用 `ndr-button` 复用统一按钮外观；本书导航、顶栏页签和跳至正文入口沿用各自的统一样式。新增入口需通过前端链接样式审计，不能以全局覆盖所有链接代替。
 
+### 前端设计与依赖
+
+界面以 [shadcn/ui Nova](https://ui.shadcn.com/docs/changelog/2025-12-shadcn-create) 的紧凑规格为基础，`frontend/components.json` 固定 `radix-nova` 与 Lucide。`src/components/ui/` 中的组件源码在仓库内维护，来源和许可随组件保留；升级时审查差异，不用生成器全量覆盖已有业务控件。
+
+- `global.css` 的 `--ndr-*` 是唯一颜色、圆角和阴影来源，`nova.css` 将其映射到 shadcn/Tailwind 语义令牌。保留系统暗色与原生表单统一外观；Tailwind 不加载 preflight，避免改变正文和导出预览的默认排版。
+- 图标从 `lucide-react` 按名称导入；Motion 从 `motion/react` 使用并遵循减少动态效果设置。不要引入第二套图标或动画库。
+- `react-resizable-panels` 负责阅读侧栏尺寸；dnd-kit 负责书架内部排序。外部 TXT/EPUB 文件拖入仍是原生文件上传，不能用内部排序传感器替代。
+- Zustand 只管理界面状态：书架排序保存于当前浏览器，阅读导航与宽度仅在当前页面会话保留。React Query 继续管理服务端缓存；设置草稿、任务 journal、执行锁及阅读位置沿用各自现有流程，不复制进全局 UI store。
+- 默认、主要、危险三种按钮保持操作层级；`Button asChild` 可保留链接语义。折叠与分页保持子内容挂载，不能用动效卸载仍在轮询的任务或未保存表单。
+
+安装使用锁文件。新增依赖先说明实际用途，检查是否已有同职能库；dnd-kit 的内部包和 Motion 的传递依赖不另作第二套入口。运行 `npm --prefix frontend run check:dependencies` 检查受控依赖与重复安装，依赖升级后再验证类型、接口、测试、生产构建和响应式布局。
+
+浏览器回归使用 `frontend/playwright.config.ts` 的独立端口、原创夹具和临时书库；模型测试仅用显式 FakeProvider。默认每轮生成唯一目录；显式 `NDR_E2E_DATA_DIR` 必须位于 `frontend/.e2e/` 内且在启动前为空，不能指向实际书库。测试启动不删除当前或其他运行目录。创建者记录本轮目录，测试服务退出后核对归属并清理数据库，需保留的失败截图/trace单独保存；不要持续积累测试书库。Windows 需要明确传入额外参数时，可在 `frontend` 下使用 `node node_modules/@playwright/test/cli.js test --config=playwright.config.ts`。
+
 ## 2. 本地开发
 
 ```powershell

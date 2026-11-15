@@ -14,7 +14,7 @@ it('every explicitly disabled button provides a hover explanation', () => {
         if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
           const attributes = node.attributes.properties.filter(ts.isJsxAttribute)
             .map(attribute => attribute.name.getText(source))
-          if (node.tagName.getText(source) === 'button' && attributes.includes('disabled')
+          if (['button', 'Button'].includes(node.tagName.getText(source)) && attributes.includes('disabled')
               && !attributes.includes('title')) {
             missing.push(`${directory}/${filename}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}`)
           }

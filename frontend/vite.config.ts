@@ -1,3 +1,5 @@
+import tailwindcss from '@tailwindcss/vite'
+import { fileURLToPath, URL } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
@@ -6,7 +8,8 @@ import { defineConfig } from 'vitest/config'
 const apiTarget = process.env.NDR_DEV_API_TARGET ?? 'http://127.0.0.1:8765'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   server: {
     host: '127.0.0.1',
     port: 5173,

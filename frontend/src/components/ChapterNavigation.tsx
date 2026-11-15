@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { RotateCcw, X } from 'lucide-react'
 import { useGeneralSettings } from '../settings/preferences'
 import type { ChapterOut } from '../api/types'
 import { cancelChapterProcessing, retryChapterProcessing } from './BatchProcessor'
@@ -147,9 +148,7 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
                   title={progress.cancelRequested ? '正在取消本章，请等待在途请求收尾。' : busy[chapter.id] ? '正在提交本章操作，请等待完成后再重试或取消。' : label}
                   aria-label={label} disabled={busy[chapter.id] || progress.cancelRequested}
                   onClick={() => act(chapter, Boolean(cancellable))}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    {cancellable ? <path d="M6 6l12 12M18 6L6 18" /> : <><path d="M20 7v5h-5" /><path d="M20 12a8 8 0 1 0-2 5M20 7l-4 4" /></>}
-                  </svg>
+                  {cancellable ? <X size={16} aria-hidden="true" /> : <RotateCcw size={16} aria-hidden="true" />}
                 </button>}
               </li>
             )

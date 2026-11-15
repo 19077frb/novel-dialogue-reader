@@ -1,4 +1,9 @@
 import { Link } from 'react-router-dom'
+import { BookOpen, ArrowUpRight, Trash2 } from 'lucide-react'
+import { Button } from './ui/button'
+import { Badge } from './ui/badge'
+import { Card, CardHeader, CardContent, CardFooter } from './ui/card'
+import '../styles/library.css'
 
 import type { BookOut } from '../api/types'
 
@@ -23,12 +28,18 @@ export function BookCard({ book, onDelete, deleting = false }: {
   const version = book.active_version
   const warnings = version?.warnings ?? []
   return (
-    <article className="card ndr-book-card" data-testid="book-card">
-      <header>
+    <Card asChild><article className="card ndr-book-card" data-testid="book-card">
+      <CardContent>
+      <div className="ndr-book-cover" aria-hidden="true"><BookOpen size={24} strokeWidth={1.2} /></div>
+      </CardContent>
+      <CardHeader>
         <h3>{book.title}</h3>
-        <span className={`ndr-badge ndr-badge-${book.format.toLowerCase()}`}>{book.format}</span>
-        <span className="ndr-badge">{statusLabel(book)}</span>
-      </header>
+        <Badge className={`ndr-badge ndr-badge-${book.format.toLowerCase()}`}>{book.format}</Badge>
+        <Badge>{statusLabel(book)}</Badge>
+      </CardHeader>
+      <CardContent>
+      <p className="ndr-book-position">最后读到 · {book.last_read_chapter_title ?? '尚未记录'}</p>
+      <details className="ndr-book-details"><summary>书籍信息</summary>
       <dl>
         <dt>正文长度</dt>
         <dd>{version ? `${version.canonical_length_cp} 字符` : '—'}</dd>
@@ -41,6 +52,7 @@ export function BookCard({ book, onDelete, deleting = false }: {
         <dt>导入时间</dt>
         <dd>{new Date(book.created_at).toLocaleString('zh-CN')}</dd>
       </dl>
+      </details>
       {warnings.length > 0 && (
         <details>
           <summary>导入警告（{warnings.length}）</summary>
@@ -51,19 +63,22 @@ export function BookCard({ book, onDelete, deleting = false }: {
           </ul>
         </details>
       )}
-      <div className="ndr-book-actions">
+      </CardContent>
+      <CardFooter className="ndr-book-actions">
         {deleting ? <p role="status">正在清理书籍记录，请等待；暂不能阅读。</p> : <Link className="ndr-button ndr-primary" to={`/books/${book.id}/read`}>
           开始阅读
+          <ArrowUpRight size={15} aria-hidden="true" />
         </Link>}
-        {onDelete && <button
+        {onDelete && <Button
           type="button"
           className="ndr-danger"
+          variant="danger"
           disabled={deleting}
           title={deleting ? '删除正在进行，请等待书籍清理完成，不要重复删除。' : undefined}
           onClick={() => onDelete(book)}
           data-testid={`delete-book-${book.id}`}
-        >{deleting ? '正在删除…' : '删除'}</button>}
-      </div>
-    </article>
+        ><Trash2 size={14} aria-hidden="true" />{deleting ? '正在删除…' : '删除'}</Button>}
+      </CardFooter>
+    </article></Card>
   )
 }

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -38,10 +38,14 @@ describe('shared UI design rules', () => {
     expect(css).toMatch(/\.ndr-merge-text\s*\{[^}]*white-space:\s*pre-wrap[^}]*overflow-wrap:\s*anywhere/)
   })
   it('keeps literal colors, shadows and corner values inside design tokens only', () => {
-    const rules = css.replace(/:root\s*\{[^}]*\}/g, '')
-    expect(rules).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(/i)
-    for (const value of rules.matchAll(/(?:border-radius|box-shadow)\s*:\s*([^;]+);/g)) {
-      expect(value[1]).toMatch(/^var\(--ndr-/)
+    const stylesDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/styles')
+    for (const filename of readdirSync(stylesDirectory).filter(name => name.endsWith('.css'))) {
+      const source = readFileSync(path.join(stylesDirectory, filename), 'utf8')
+      const rules = source.replace(/:root\s*\{[^}]*\}/g, '')
+      expect(rules, filename).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(/i)
+      for (const value of rules.matchAll(/(?:border-radius|box-shadow)\s*:\s*([^;]+);/g)) {
+        expect(value[1], `${filename}: ${value[0]}`).toMatch(/^var\(--ndr-/)
+      }
     }
     expect(css).toContain('color-scheme: light;')
     expect(css).toContain('color-scheme: dark;')

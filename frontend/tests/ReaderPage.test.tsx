@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useQueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import type { BookOut, ChapterOut, ContentNodeOut } from '../src/api/types'
 import ReaderPage, { findCurrentStartCp } from '../src/pages/ReaderPage'
 import { renderRoute } from './helpers'
 import { updateGeneralSettings } from '../src/settings/preferences'
+import { useReaderLayoutStore } from '../src/stores/readerLayoutStore'
 
 vi.mock('../src/api/annotations', () => ({
   annotationKeys: {
@@ -334,6 +335,7 @@ describe('ReaderPage', () => {
     expect(screen.getByRole('button', { name: '下一章' })).toBeDisabled()
   })
   beforeEach(() => {
+    useReaderLayoutStore.setState({ sidebarOpen: true, sidebarSize: 25, tabs: {} })
     act(() => updateGeneralSettings({ showReviewMarkers: false, enableExperimentalFeatures: true }))
     act(() => batch.clearBatchProgress('b1'))
     vi.mocked(booksApi.fetchBook).mockReset()
@@ -542,6 +544,34 @@ describe('ReaderPage', () => {
       if (descriptor) Object.defineProperty(Element.prototype, 'scrollIntoView', descriptor)
       else Reflect.deleteProperty(Element.prototype, 'scrollIntoView')
     }
+  })
+
+  it('切换目录和隐藏导航保留未保存备注，不重新读取正文或写位置', async () => {
+    const fetchMarks = vi.spyOn(bookmarksApi, 'fetchBookmarks').mockResolvedValue({ items: [{
+      id: 'draft-mark', version: 1, book_id: 'b1', book_version_id: 'v1', chapter_id: 'c2',
+      chapter_title: '第二章', position_cp: 21, excerpt: '书签正文', note: '', created_at: '2026-09-28T00:00:00Z',
+    }], next_cursor: null } as never)
+    const view = renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c2')
+    try {
+      const document = await screen.findByTestId('document-renderer')
+      expect(fetchMarks).not.toHaveBeenCalled()
+      await userEvent.click(screen.getByRole('tab', { name: '书签' }))
+      await userEvent.click(await screen.findByText('编辑备注'))
+      const note = screen.getByLabelText('书签备注')
+      fireEvent.change(note, { target: { value: '尚未保存' } })
+      const fetchCount = vi.mocked(booksApi.fetchContent).mock.calls.length
+      const saveCount = vi.mocked(booksApi.saveReadingProgress).mock.calls.length
+      await userEvent.click(screen.getByRole('tab', { name: '目录' }))
+      await userEvent.click(screen.getByRole('tab', { name: '书签' }))
+      expect(screen.getByLabelText('书签备注')).toBe(note)
+      expect(note).toHaveValue('尚未保存')
+      await userEvent.click(screen.getByRole('button', { name: '隐藏阅读导航' }))
+      await userEvent.click(screen.getByRole('button', { name: '显示阅读导航' }))
+      expect(note).toHaveValue('尚未保存')
+      expect(screen.getByTestId('document-renderer')).toBe(document)
+      expect(booksApi.fetchContent).toHaveBeenCalledTimes(fetchCount)
+      expect(booksApi.saveReadingProgress).toHaveBeenCalledTimes(saveCount)
+    } finally { view.unmount(); fetchMarks.mockRestore() }
   })
 
   it('按书签位置打开对应章节并渲染正文', async () => {

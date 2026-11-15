@@ -19,7 +19,7 @@ afterEach(() => { localStorage.clear(); vi.restoreAllMocks() })
 it('待确认标记默认关闭，保存后记忆，恢复默认仅修改草稿', async () => {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ showAnnotations: true, showReviewMarkers: 'true' }))
   const page = renderWithProviders(<SettingsPage />)
-  const label = '显示待确认对白标记（⚠）'
+  const label = '显示待确认对白标记'
   expect(screen.getByLabelText(label)).not.toBeChecked()
   await userEvent.click(screen.getByLabelText(label))
   expect(getGeneralSettings().showReviewMarkers).toBe(false)
