@@ -1,6 +1,10 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
+import { ArrowLeft, ArrowRight, Bookmark, List, Download } from 'lucide-react'
+
+import { ReaderWorkspace } from '../components/ReaderWorkspace'
+import { useReaderLayoutStore } from '../stores/readerLayoutStore'
 
 import { annotationKeys, fetchAnnotations } from '../api/annotations'
 import { fetchReviewQueue } from '../api/review'
@@ -84,7 +88,13 @@ export default function ReaderPage() {
   const [readingModeOverride, setReadingModeOverride] = useState<ReadingMode | null>(null)
   const [selectedQuote, setSelectedQuote] = useState<{ quoteId: string; reviewItemId: string | null } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
-  const [sidebarTab, setSidebarTab] = useState<'chapters' | 'bookmarks'>('chapters')
+  const sidebarTab = useReaderLayoutStore(state => state.tabs[bookId ?? ''] ?? 'chapters')
+  const changeSidebarTab = useReaderLayoutStore(state => state.setTab)
+  const setSidebarTab = (tab: 'chapters' | 'bookmarks') => changeSidebarTab(bookId ?? '', tab)
+  const [visitedBookmarks, setVisitedBookmarks] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    if (bookId && sidebarTab === 'bookmarks') setVisitedBookmarks(previous => previous[bookId] ? previous : { ...previous, [bookId]: true })
+  }, [bookId, sidebarTab])
 
   const book = useQuery({
     queryKey: queryKeys.book(bookId ?? ''),
@@ -325,7 +335,7 @@ export default function ReaderPage() {
             待确认 {pending.data?.counts.targets_by_status?.PENDING ?? 0} 项
           </Link>
           <button type="button" onClick={() => setExportOpen(true)} data-testid="open-export">
-            导出
+            <Download size={15} aria-hidden="true" /> 导出
           </button>
           <Link to="/library">返回书架</Link>
         </nav>
@@ -346,7 +356,7 @@ export default function ReaderPage() {
         />
       )}
 
-      <div className="ndr-reader-body">
+      <ReaderWorkspace chapterTitle={activeChapter?.title} navigation={
         <aside className="card ndr-reader-sidebar">
           <div className="ndr-sidebar-tabs" role="tablist" aria-label="阅读导航" onKeyDown={event => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -357,10 +367,10 @@ export default function ReaderPage() {
           }}>
             <button role="tab" id="chapter-tab" aria-selected={sidebarTab === 'chapters'} aria-controls="chapter-panel"
               tabIndex={sidebarTab === 'chapters' ? 0 : -1}
-              className={sidebarTab === 'chapters' ? 'ndr-primary' : ''} onClick={() => setSidebarTab('chapters')}>目录</button>
+              className={sidebarTab === 'chapters' ? 'ndr-primary' : ''} onClick={() => setSidebarTab('chapters')}><List size={16} aria-hidden="true" />目录</button>
             <button role="tab" id="bookmark-tab" aria-selected={sidebarTab === 'bookmarks'} aria-controls="bookmark-panel"
               tabIndex={sidebarTab === 'bookmarks' ? 0 : -1}
-              className={sidebarTab === 'bookmarks' ? 'ndr-primary' : ''} onClick={() => setSidebarTab('bookmarks')}>书签</button>
+              className={sidebarTab === 'bookmarks' ? 'ndr-primary' : ''} onClick={() => setSidebarTab('bookmarks')}><Bookmark size={16} aria-hidden="true" />书签</button>
           </div>
           <div id="chapter-panel" role="tabpanel" aria-labelledby="chapter-tab" hidden={sidebarTab !== 'chapters'}>
           {chapters.isSuccess && (
@@ -395,13 +405,13 @@ export default function ReaderPage() {
           <AutomaticProcessing bookId={bookId} bookVersionId={book.data?.active_version_id} chapterId={chapterId} />
           {chapters.isPending && <p className="hint">正在读取目录…</p>}
           </div>
-          {sidebarTab === 'bookmarks' && <div id="bookmark-panel" role="tabpanel" aria-labelledby="bookmark-tab">
-            <p className="hint">点击正文段落旁的 ☆ 保存书签。</p>
+          {(sidebarTab === 'bookmarks' || visitedBookmarks[bookId]) && <div key={bookId} id="bookmark-panel" role="tabpanel" aria-labelledby="bookmark-tab" hidden={sidebarTab !== 'bookmarks'}>
+            <p className="hint">点击正文段落旁的书签按钮保存书签。</p>
             <BookmarkList bookId={bookId} activeVersionId={book.data?.active_version_id} />
             <Link className="ndr-button" to={`/books/${bookId}/bookmarks`}>打开独立书签页</Link>
           </div>}
         </aside>
-
+      }>
         <div className="card ndr-reader-main">
         <section className="ndr-reader-content" ref={documentRef} onScroll={handleScroll}>
           {chapterId === null && <p className="hint">这本书没有可显示的章节。</p>}
@@ -521,13 +531,13 @@ export default function ReaderPage() {
         <nav className="ndr-chapter-navigation" aria-label="章节切换">
           <button type="button" disabled={Boolean(previousReason)}
             title={previousReason ?? `上一章：${previousChapter?.title || '未命名章节'}`}
-            onClick={() => { if (previousChapter) handleChapterSelect(previousChapter) }}>上一章</button>
+            onClick={() => { if (previousChapter) handleChapterSelect(previousChapter) }}><ArrowLeft size={16} aria-hidden="true" />上一章</button>
           <button type="button" disabled={Boolean(nextReason)}
             title={nextReason ?? `下一章：${nextChapter?.title || '未命名章节'}`}
-            onClick={() => { if (nextChapter) handleChapterSelect(nextChapter) }}>下一章</button>
+            onClick={() => { if (nextChapter) handleChapterSelect(nextChapter) }}>下一章<ArrowRight size={16} aria-hidden="true" /></button>
         </nav>
         </div>
-      </div>
+      </ReaderWorkspace>
 
       <ExportDialog
         bookId={bookId}

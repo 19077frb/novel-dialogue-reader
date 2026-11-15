@@ -1,3 +1,4 @@
+import { TriangleAlert } from 'lucide-react'
 /**
  * 确认抽屉：普通对白与待确认项共用同一个抽屉。
  *
@@ -218,7 +219,7 @@ export function QuoteDetailDrawer({
             </p>
           )}
           {itemDetail.data?.item.reason === 'MODEL_OUTPUT_WARNING' && (
-            <p className="status-warning" role="status">⚠ 模型结果未通过逐句校验，显示的人物仅是候选，请核对后确认。</p>
+            <p className="status-warning" role="status"><TriangleAlert size="1em" style={{ display: 'inline-block', verticalAlign: 'middle' }} aria-hidden="true" /> 模型结果未通过逐句校验，显示的人物仅是候选，请核对后确认。</p>
           )}
           {typeof itemDetail.data?.item.candidates?.warning === 'string' && (
             <p className="hint">{itemDetail.data.item.candidates.warning}</p>

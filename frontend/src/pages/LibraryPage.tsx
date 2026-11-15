@@ -5,7 +5,9 @@ import { Link } from 'react-router-dom'
 import { deleteBook, fetchBooks, importBook, queryKeys } from '../api/books'
 import { ApiError } from '../api/client'
 import type { BookOut, ImportResult } from '../api/types'
-import { BookCard } from '../components/BookCard'
+import { SortableBookShelf } from '../components/SortableBookShelf'
+import { Button } from '../components/ui/button'
+import { Library, Upload } from 'lucide-react'
 import { ImportDropzone } from '../components/ImportDropzone'
 import { JobPanel } from '../components/JobPanel'
 import { clearBatchProgress, isBatchRunning } from '../components/BatchProcessor'
@@ -117,7 +119,7 @@ export default function LibraryPage() {
     <div className="ndr-page ndr-library">
       <header className="card ndr-page-header">
         <div>
-          <h2>书架</h2>
+          <h2><Library size={22} aria-hidden="true" /> 书架</h2>
           <p className="hint">
             导入 TXT/EPUB 书籍后即可阅读原文；识别说话人后按人物着色，可随时导出。
           </p>
@@ -132,7 +134,7 @@ export default function LibraryPage() {
         <ImportDropzone onFile={setFile} disabled={importMutation.isPending} />
 
         <div className="ndr-import-controls">
-          <label>
+          <label className="ndr-field">
             书名（可选）
             <input
               type="text"
@@ -142,7 +144,7 @@ export default function LibraryPage() {
               data-testid="import-title"
             />
           </label>
-          <label>
+          <label className="ndr-field">
             TXT 编码
             <select
               value={encoding}
@@ -156,16 +158,17 @@ export default function LibraryPage() {
               ))}
             </select>
           </label>
-          <button
+          <Button
             type="button"
             className="ndr-primary"
+            variant="primary"
             disabled={!file || importMutation.isPending}
             title={importMutation.isPending ? '文件正在导入，请等待解析完成。' : !file ? '请先选择 TXT 或 EPUB 文件。' : undefined}
             onClick={() => file && importMutation.mutate({ file, encoding })}
             data-testid="import-submit"
           >
-            {importMutation.isPending ? '正在导入…' : '开始导入'}
-          </button>
+            <Upload size={16} aria-hidden="true" />{importMutation.isPending ? '正在导入…' : '开始导入'}
+          </Button>
         </div>
 
         {file && <p className="hint">已选择：{file.name}</p>}
@@ -241,8 +244,7 @@ export default function LibraryPage() {
         )}
       </section>
 
-      <section className="card">
-        <h2>全部书籍</h2>
+      <section className="card ndr-library-books" aria-label="全部书籍">
         {deleteError && <p className="status-error" role="alert" data-testid="delete-book-error">{deleteError}</p>}
         {deleteNotice && <p className="status-ok" role="status">{deleteNotice}</p>}
         {books.isPending && <p className="hint">正在读取书架…</p>}
@@ -254,12 +256,8 @@ export default function LibraryPage() {
           </p>
         )}
         {books.isSuccess && books.data.items.length > 0 && (
-          <div className="ndr-book-grid">
-            {books.data.items.map((book) => (
-              <BookCard key={book.id} book={book} onDelete={handleDelete}
-                deleting={deleteMutation.isPending && deleteMutation.variables?.id === book.id} />
-            ))}
-          </div>
+          <SortableBookShelf books={books.data.items} onDelete={handleDelete}
+            deletingId={deleteMutation.isPending ? deleteMutation.variables?.id : undefined} />
         )}
       </section>
     </div>

@@ -1,5 +1,6 @@
 /** 导出进度与校验报告：状态、内部检查逐项、标准检查状态。 */
 import type { ExportArtifactOut } from '../api/types'
+import { CircleCheck, CircleX } from 'lucide-react'
 
 const STATE_LABEL: Record<string, string> = {
   QUEUED: '排队中',
@@ -60,7 +61,7 @@ export function ExportProgress({ artifact, busy }: ExportProgressProps) {
       <ul className="hint" data-testid="export-checks">
         {Object.entries(internal.checks ?? {}).map(([name, ok]) => (
           <li key={name} data-testid={`export-check-${name}`}>
-            {ok ? '✓' : '✗'} {CHECK_LABEL[name] ?? name}
+            {ok ? <CircleCheck size={14} aria-hidden="true" /> : <CircleX size={14} aria-hidden="true" />} {ok ? '通过' : '未通过'} · {CHECK_LABEL[name] ?? name}
           </li>
         ))}
       </ul>

@@ -16,6 +16,8 @@ import { OperationTimer } from './OperationTimer'
 import { ReadErrorNotice } from './ReadErrorNotice'
 import { ProposalDiagnostics } from './ProposalDiagnostics'
 import { IdentityFeedbackSummary } from './IdentityFeedbackSummary'
+import { TaskStateBadge, jobTaskTone } from './TaskProgressTable'
+import { Button } from './ui/button'
 
 export const JOB_STATE_LABELS: Record<string, string> = {
   QUEUED: '排队中', RUNNING: '处理中', PAUSING: '正在停止', PAUSED: '已暂停',
@@ -110,10 +112,10 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
   const recoveryActions = info?.actions ?? []
   return (
     <div className="ndr-job-panel" data-testid="job-panel">
-      <p role="status" aria-live="polite">
+      <p className="ndr-job-status" role="status" aria-live="polite">
         {JOB_KIND_LABELS[job.data.kind] ?? job.data.kind}任务
         {job.data.purpose === 'preview' ? ' · 试运行' : ''} ·{' '}
-        <strong data-testid="job-state" title={state}>{jobStateLabel(job.data)}</strong>
+        <TaskStateBadge tone={jobTaskTone(job.data.state)}><strong data-testid="job-state" title={state}>{jobStateLabel(job.data)}</strong></TaskStateBadge>
       </p>
       {job.data.progress?.stage === 'rechecking' && (
         <p className="hint">{reviewProgress(job.data.progress)}</p>
@@ -139,21 +141,21 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
       <OperationTimer startedAt={Date.parse(job.data.created_at)}
         finishedAt={state && isTerminalJob(state) ? Date.parse(job.data.updated_at) : null}
         completed={job.data.windows_total - job.data.remaining_windows} total={job.data.windows_total} />
-      <dl>
-        <dt>窗口</dt>
+      <dl className="ndr-job-metrics">
+        <div><dt>窗口</dt>
         <dd>
           <span data-testid="job-windows-done">
             {job.data.windows_total - job.data.remaining_windows}
           </span>
           {' / '}
           <span data-testid="job-windows-total">{job.data.windows_total}</span>
-        </dd>
-        <dt>真实调用次数</dt>
-        <dd data-testid="job-calls">{job.data.calls}</dd>
-        <dt>缓存命中窗口</dt>
-        <dd data-testid="job-cached-windows">{job.data.cached_windows}</dd>
-        <dt>未知用量尝试</dt>
-        <dd data-testid="job-unknown-usage">{job.data.unknown_usage_runs}</dd>
+        </dd></div>
+        <div><dt>真实调用次数</dt>
+        <dd data-testid="job-calls">{job.data.calls}</dd></div>
+        <div><dt>缓存命中窗口</dt>
+        <dd data-testid="job-cached-windows">{job.data.cached_windows}</dd></div>
+        <div><dt>未知用量尝试</dt>
+        <dd data-testid="job-unknown-usage">{job.data.unknown_usage_runs}</dd></div>
       </dl>
       {job.data.progress && (
         <details><summary>任务诊断详情</summary><ul className="hint">
@@ -186,9 +188,10 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
                   {item.label}
                 </span>
               ) : (
-                <button
+                <Button
                   key={item.action}
                   type="button"
+                  variant={item.action === 'pause' ? 'danger' : 'default'}
                   disabled={action.isPending || item.action === 'wait'}
                   onClick={() => action.mutate(item.action)}
                   data-testid={`job-action-${item.action}`}
@@ -196,7 +199,7 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
                 >
                   {item.label}
                   {item.paid ? '（可能计费）' : ''}
-                </button>
+                </Button>
               ),
             )}
           </div>

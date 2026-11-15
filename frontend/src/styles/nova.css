@@ -1,0 +1,35 @@
+/* Semantic shadcn/ui tokens resolve to the application's single light/dark palette. */
+@theme inline {
+  --color-background: var(--ndr-bg);
+  --color-foreground: var(--ndr-fg);
+  --color-card: var(--ndr-card);
+  --color-card-foreground: var(--ndr-fg);
+  --color-muted: var(--ndr-panel);
+  --color-muted-foreground: var(--ndr-muted);
+  --color-primary: var(--ndr-accent);
+  --color-primary-foreground: var(--ndr-on-solid);
+  --color-border: var(--ndr-border);
+  --color-input: var(--ndr-border);
+  --color-ring: var(--ndr-accent);
+  --color-destructive: var(--ndr-danger);
+  --radius-md: var(--ndr-radius-field);
+  --radius-lg: var(--ndr-radius-control);
+  --radius-xl: var(--ndr-radius-card);
+}
+
+/* No preflight: existing prose, forms, dialogs and export previews keep their semantics. */
+@layer nova-compatibility {
+  .ndr-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 20px;
+    padding: 1px 7px;
+    border: 1px solid var(--ndr-border);
+    border-radius: var(--ndr-radius-pill);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--ndr-muted);
+  }
+}

@@ -1,0 +1,12 @@
+.ndr-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.ndr-hint-inline { display: flex; align-items: baseline; gap: 6px; }
+.ndr-hint-inline > svg { flex-shrink: 0; align-self: flex-start; margin-top: 3px; }
+.ndr-list-pagination > .hint { margin-right: auto; }
+.ndr-task-state { display: inline-flex; gap: 5px; align-items: center; justify-content: center; }
+.ndr-job-panel { border: 1px solid var(--ndr-border); border-radius: var(--ndr-radius-card); padding: 16px; margin-top: 14px; background: var(--ndr-card); }
+.ndr-job-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ndr-job-panel .ndr-job-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 16px; margin: 16px 0; }
+.ndr-job-metrics > div { min-width: 0; }
+.ndr-job-metrics dt { font-size: .78rem; color: var(--ndr-muted); }
+.ndr-job-metrics dd { margin: 5px 0 0; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .ndr-job-panel .ndr-job-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

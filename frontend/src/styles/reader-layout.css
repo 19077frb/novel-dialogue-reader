@@ -1,0 +1,38 @@
+/* Nova reader: layout only; text rendering and scroll ownership stay in ReaderPage. */
+.ndr-reader-workspace { min-width: 0; }
+.ndr-reader-workspace-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.ndr-reader-workspace-toolbar button,
+.ndr-sidebar-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.ndr-reader-current-chapter { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ndr-reader-resize-hint { font-size: .75rem; }
+.ndr-reader-panels { height: auto !important; overflow: visible !important; align-items: flex-start; }
+.ndr-reader-navigation-panel,
+.ndr-reader-document-panel { min-width: 0; overflow: visible !important; }
+.ndr-reader-workspace[data-navigation-open="false"] .ndr-reader-navigation-panel,
+.ndr-reader-workspace[data-navigation-open="false"] .ndr-reader-resize-handle { display: none; }
+.ndr-reader-workspace .ndr-reader-sidebar { position: static; max-height: calc(100dvh - 250px); padding: 16px; }
+.ndr-reader-workspace .ndr-reader-main { padding: clamp(16px, 2.5vw, 36px); }
+.ndr-reader-workspace .ndr-reader-content { max-height: calc(100dvh - 300px); min-height: min(45dvh, 340px); padding-inline: 4px; scrollbar-gutter: stable; }
+.ndr-reader-workspace .ndr-document { max-width: 76ch; margin-inline: auto; }
+.ndr-reader-workspace .ndr-chapter-heading { letter-spacing: -.025em; margin-bottom: 24px; }
+.ndr-reader-resize-handle { align-self: stretch; display: flex; justify-content: center; align-items: center; width: 20px; flex-shrink: 0; color: var(--ndr-muted); touch-action: none; }
+.ndr-reader-resize-handle::before { content: ''; position: absolute; width: 1px; height: 40px; background: var(--ndr-border); border-radius: var(--ndr-radius-pill); }
+.ndr-reader-resize-handle svg { z-index: 1; background: var(--ndr-bg); border: 1px solid var(--ndr-border); border-radius: var(--ndr-radius-control); height: 30px; }
+.ndr-reader-resize-handle:focus-visible { outline: 2px solid var(--ndr-accent); outline-offset: -4px; border-radius: var(--ndr-radius-control); }
+.ndr-reader-resize-handle[data-resize-handle-active] { color: var(--ndr-accent); }
+.ndr-reader-workspace .ndr-quote-legend { padding-bottom: 16px; border-bottom: 1px solid var(--ndr-border); margin-bottom: 24px; }
+.ndr-reader-workspace .ndr-chapter-navigation { padding-top: 16px; border-top: 1px solid var(--ndr-border); }
+.ndr-chapter-navigation button,
+.ndr-bookmark-card .ndr-form-actions > :is(a, button),
+.ndr-bookmark-refresh { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.ndr-bookmark-card .ndr-form-actions { flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .ndr-reader-panels { flex-direction: column !important; gap: 16px; }
+  .ndr-reader-navigation-panel,
+  .ndr-reader-document-panel { flex: none !important; width: 100%; }
+  .ndr-reader-workspace .ndr-reader-sidebar { max-height: 40dvh; }
+  .ndr-reader-resize-handle,
+  .ndr-reader-resize-hint { display: none; }
+  .ndr-reader-workspace .ndr-reader-content { max-height: none; overflow: visible; }
+  .ndr-reader-workspace .ndr-reader-main { padding: 18px 14px; }
+}

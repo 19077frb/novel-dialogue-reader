@@ -105,7 +105,7 @@ describe('LibraryPage', () => {
     expect(books.deleteBook).toHaveBeenCalledWith('b1')
     await waitFor(() => expect(screen.queryByTestId('delete-book-b1')).not.toBeInTheDocument())
     expect(screen.getByTestId('delete-book-b2')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('已永久删除《义妹人生》，此操作无法撤销。')
+    expect(screen.getByText('已永久删除《义妹人生》，此操作无法撤销。')).toHaveAttribute('role', 'status')
   })
 
   it('取消确认不删除，删除失败保留书籍并显示具体原因', async () => {

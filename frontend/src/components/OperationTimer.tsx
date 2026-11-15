@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Clock3 } from 'lucide-react'
+import '../styles/components.css'
 
 export function durationLabel(seconds: number): string {
   const value = Math.max(0, Math.floor(seconds))
@@ -20,12 +22,12 @@ export function OperationTimer({ startedAt, finishedAt, completed = 0, total = 0
   const elapsed = Math.max(0, ((finishedAt || now) - startedAt) / 1000)
   const remaining = completed > 0 && completed < total && elapsed >= 1
     ? elapsed * (total - completed) / completed : null
-  return <p className="hint" data-testid="operation-timer">
+  return <p className="hint ndr-hint-inline" data-testid="operation-timer"><Clock3 size={14} aria-hidden="true" /><span>
     {finishedAt ? '用时' : '已等待'} {durationLabel(elapsed)}
     {!finishedAt && (remaining !== null
       ? ` · 预计还需约 ${durationLabel(remaining)}（按当前进度估算）`
       : ' · 暂无足够进度估算剩余时间')}
-  </p>
+  </span></p>
 }
 
 export function useOperationClock() {
