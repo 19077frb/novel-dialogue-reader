@@ -50,7 +50,7 @@ export function SortableBookShelf({ books, onDelete, deletingId }: {
   return <>
     <div className="ndr-library-toolbar">
       <div><h2>全部书籍 <span className="hint">{books.length} 本</span></h2>
-        <p className="hint">{editing ? '仅整理当前列表，在本浏览器保存；不影响处理顺序。可拖动手柄或使用前移、后移按钮。' : '选一本书，继续你的阅读。'}</p></div>
+        <p className="hint">{editing ? '拖动手柄或使用前移、后移按钮调整顺序，点击保存后保存在本浏览器。' : '选一本书，继续你的阅读。'}</p></div>
       {editing ? <div className="ndr-form-actions">
         <Button onClick={() => { setDraft(null); setNotice('已取消整理，顺序未保存。') }}><X size={15} aria-hidden="true" />取消</Button>
         <Button variant="primary" onClick={() => { const saved = saveOrder(ids); setDraft(null); setNotice(saved ? '书架顺序已保存在本浏览器。' : '浏览器无法保存顺序，本次打开仍可使用；刷新后可能恢复。') }}><Save size={15} aria-hidden="true" />保存顺序</Button>
@@ -62,8 +62,8 @@ export function SortableBookShelf({ books, onDelete, deletingId }: {
         announcements: {
           onDragStart: ({ active }) => `已拿起《${title(active.id)}》。`,
           onDragOver: ({ active, over }) => over ? `《${title(active.id)}》将移到第 ${ids.indexOf(String(over.id)) + 1} 本的位置。` : '已离开可放置区域。',
-          onDragEnd: ({ active, over }) => over ? `已调整《${title(active.id)}》的位置，点击保存顺序后生效。` : '位置未改变。',
-          onDragCancel: () => '已取消本次拖动，位置未改变。',
+          onDragEnd: ({ active, over }) => over ? `已调整《${title(active.id)}》的位置，点击保存顺序后生效。` : '已保留当前顺序。',
+          onDragCancel: () => '已取消本次拖动。',
         } }}
       onDragEnd={({ active, over }) => { if (editing && over && active.id !== over.id) move(ids.indexOf(String(active.id)), ids.indexOf(String(over.id))) }}>
       <SortableContext items={ids} strategy={rectSortingStrategy}>

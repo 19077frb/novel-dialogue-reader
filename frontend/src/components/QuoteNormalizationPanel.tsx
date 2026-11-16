@@ -82,7 +82,7 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
           <h3>引号修复</h3>
           <p className="hint">
             导入时会检查跨段未闭合的 <code>“</code>。确认结果只更新候选边界；
-            不改写原文，也不会清除对白归属或人工锁定结果。
+            原文、对白归属和人工锁定结果保持原样。
           </p>
         </div>
         <button
@@ -156,7 +156,7 @@ export function QuoteNormalizationPanel({ bookId }: QuoteNormalizationPanelProps
                   <button title={offset >= chars.length ? '已到段尾，不能再后移。' : undefined} disabled={offset >= chars.length} onClick={() => move(offset + 1)}>后移一字</button>
                   <button title={offset <= 1 ? '已到最前端，没有更早的可用标点位置。' : undefined} disabled={offset <= 1} onClick={() => move(moveClosingPoint(item.original_text, offset, -1))}>上一个标点后</button>
                   <button title={offset >= chars.length ? '已到段尾，没有后续标点位置。' : undefined} disabled={offset >= chars.length} onClick={() => move(moveClosingPoint(item.original_text, offset, 1))}>下一个标点后</button>
-                  <button title={offset === chars.length ? '当前已在段尾，无需再移动。' : undefined} disabled={offset === chars.length} onClick={() => move(chars.length)}>移到段尾</button>
+                  <button title={offset === chars.length ? '当前已在段尾。' : undefined} disabled={offset === chars.length} onClick={() => move(chars.length)}>移到段尾</button>
                 </div>
                 <p className="hint">预览只改变虚拟闭合位置；确认后点击“保存并重扫”。</p>
                 <code data-testid={`quote-normalization-preview-${item.id}`}>{chars.slice(0, offset).join('')}<mark className="ndr-context-target">{draft.replacement}</mark>{chars.slice(offset).join('')}</code>

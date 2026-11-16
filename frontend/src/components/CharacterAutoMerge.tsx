@@ -80,7 +80,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
     {result.isError && <p className="status-error" role="alert">任务状态读取失败：{result.error.message} <button onClick={() => void result.refetch()}>重新读取进度</button>。确认已有任务状态前不能启动新任务。</p>}
     {open && <>
       <h3 className="ndr-step-heading"><span className="ndr-step-badge">1</span>分析重复人物与姓名</h3>
-      <p className="hint">仅分析已保存的人物姓名、别名和说明，请先保存编辑。也会检查代称及已有姓名，包括人工指定的名称，提出有资料依据的修正建议。分析会消耗 Tokens，但不会修改人物。模型可能误判，完成后由你选择接受哪些建议；确认后更新已有对白与导出，不改正文或章节完成状态。</p>
+      <p className="hint">请先保存人物编辑。分析会根据已保存的姓名、别名和说明提出合并或更名建议，包括人工指定的名称。分析会消耗 Tokens，模型可能误判；核对后勾选建议并确认，才会更新人物、已有对白与导出。正文和章节完成状态保持原样。</p>
       <ThinkingSettings disabled={blocked} disabledReason={blockedReason ?? undefined} profiles={profiles.data ?? []} profileId={preferences.profileId}
         onProfileChange={profileId => update({ profileId })} profileTestId="character-merge-profile" />
       {profiles.isError && <p role="alert" className="status-error">模型配置读取失败：{profiles.error.message}</p>}
@@ -116,7 +116,7 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
           {waitingForNewJob && <p className="hint">以下为上一次合并结果。</p>}
           <OperationTimer key={jobId} startedAt={Date.parse(result.data.created_at)} finishedAt={resultRunning ? null : Date.parse(result.data.updated_at)} />
           <p>已知消耗 {result.data.usage?.total_tokens ?? 0} Tokens{result.data.unknown_usage_runs > 0 ? `；另有 ${result.data.unknown_usage_runs} 次调用用量未知` : ''}</p>
-          {noSuggestions && <p className="hint">本次未修改人物，无需确认或放弃。{result.data.skipped_groups > 0 ? `有 ${result.data.skipped_groups} 组建议未达到接受条件，未纳入结果。` : '模型未提供合并或更名建议。'}你可以调整配置，重新勾选同意后再次分析；不会自动调用模型。</p>}
+          {noSuggestions && <p className="hint">本次分析已结束，人物资料保持原样。{result.data.skipped_groups > 0 ? `有 ${result.data.skipped_groups} 组建议未达到接受条件，未纳入结果。` : '模型未提供合并或更名建议。'}你可以调整配置，重新勾选同意后再次分析。</p>}
           {result.data.last_error && <p className="status-error" role="alert">{result.data.last_error}</p>}
           {awaiting && Boolean(result.data.validation_issues?.length) && <p role="status">部分建议未通过检查，已排除；其余建议仍可查看并选择确认。</p>}
           {Boolean(result.data.validation_issues?.length) && <details>
@@ -124,15 +124,15 @@ export function CharacterAutoMerge({ bookId, versionId, count, disabled, onBusyC
             <ul className="ndr-merge-text">{result.data.validation_issues?.map((issue, index) => <li key={index}>
               {issue.message}{issue.field ? `；字段：${issue.field}` : ''}
             </li>)}</ul>
-            <p className="hint">{awaiting ? '未通过检查的组不能确认；请核对下方有效建议后选择接受或放弃。' : result.data.phase === 'applied' ? '未通过检查的组没有执行，仅合并了你选择的有效建议。' : '本次没有执行合并，不会自动再次调用模型。请核对问题后决定是否重新分析。'}</p>
+            <p className="hint">{awaiting ? '未通过检查的组不能确认；请核对下方有效建议后选择接受或放弃。' : result.data.phase === 'applied' ? '未通过检查的组没有执行，仅合并了你选择的有效建议。' : '本次分析已结束。请核对问题后决定是否重新分析。'}</p>
           </details>}
           {awaiting && <section className="ndr-merge-preview" aria-label="合并建议预览">
             <h3 className="ndr-step-heading"><span className="ndr-step-badge">2</span>预览并选择合并建议</h3>
-            <p className="hint">默认不选中。请核对姓名、别名、依据和整理后的说明；确认后会用新说明替换保留人物的原说明，未选中的人物保持不变。确认后无法自动撤销，不会再次调用模型。</p>
+            <p className="hint">请核对姓名、别名、依据和整理后的说明，再勾选要接受的建议。确认后会用新说明替换保留人物的原说明，其余人物保留当前资料。确认直接应用已保存的建议，无法自动撤销。</p>
             <p>共 {proposals.length} 组建议，涉及 {duplicateCount} 条重复人物记录；已选 {selected.length} 组。</p>
             <div className="ndr-form-actions">
               <button title={disabled || busy ? blockedReason ?? undefined : !proposals.length ? '没有可选择的合并建议。' : undefined} disabled={disabled || busy || !proposals.length} onClick={() => setSelected(proposals.map(group => group.target.character_id))}>全选合并建议</button>
-              <button title={disabled || busy ? blockedReason ?? undefined : !selected.length ? '尚未选择建议，无需清空。' : undefined} disabled={disabled || busy || !selected.length} onClick={() => setSelected([])}>清空选择</button>
+              <button title={disabled || busy ? blockedReason ?? undefined : !selected.length ? '当前选择为空。' : undefined} disabled={disabled || busy || !selected.length} onClick={() => setSelected([])}>清空选择</button>
             </div>
             {!result.data.proposals?.length && <p>没有可接受的合并建议。</p>}
             <CollapsibleBlock title="合并建议明细" summary={`共 ${proposals.length} 组建议；已选 ${selected.length} 组`}>

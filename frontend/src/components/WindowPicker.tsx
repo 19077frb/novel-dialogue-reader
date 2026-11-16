@@ -15,7 +15,7 @@ export function WindowPicker({ windows, selectedIds, onChange, disabled = false 
     <fieldset title={disabled ? '正在预览窗口或提交处理任务，请等待完成后再选择窗口。' : undefined} className="ndr-window-picker" data-testid="window-picker" disabled={disabled}>
       <legend>选择要处理的窗口（可多选）</legend>
       {disabled && <p className="hint">正在预览窗口或提交处理任务，请等待完成后再选择窗口。</p>}
-      <p className="hint">这里只限制对白归属窗口；人物识别仍会读取本章全文。默认选择未完成窗口，已完成窗口无需重复处理；也可手动重做。</p>
+      <p className="hint">这里只限制对白归属窗口；人物识别仍会读取本章全文。默认选择未完成窗口，已完成窗口复用结果；也可手动重做。</p>
       <div className="ndr-form-actions">
         <button type="button" onClick={() => onChange(windows.filter(window => window.processing_status !== 'completed').map(window => String(window.window_id)))}>只选未完成窗口</button>
         <button type="button" onClick={() => onChange(windows.filter(window => window.processing_status === 'failed').map(window => String(window.window_id)))}>只选失败窗口</button>

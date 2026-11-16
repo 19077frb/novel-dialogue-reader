@@ -1,8 +1,9 @@
+import { revealProfile } from './profiles'
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { confirmChapterRoster } from './roster'
+import { confirmChapterRoster, selectAllChapterWindows } from './roster'
 
 /**
  * 可访问性与 360 / 1280px 布局检查。
@@ -22,7 +23,7 @@ async function createProfile(page: Page, name: string, model = 'fake-model-a11y'
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill(model)
   await page.getByTestId('profile-save').click()
-  await expect(page.getByTestId('profile-card').filter({ hasText: name })).toBeVisible()
+  await revealProfile(page, name)
 }
 
 async function importFile(page: Page, fileName: string) {
@@ -154,6 +155,7 @@ test.describe('可访问性与布局检查', () => {
       label: `${profileName} · fake-model-a11y`,
     })
     await confirmChapterRoster(page)
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     await page.getByRole('link', { name: '去阅读' }).click()

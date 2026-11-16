@@ -11,7 +11,8 @@ for (const layout of [
     const person = (id: string) => ({ character_id: id, name: `人物${id}${'LongName'.repeat(12)}`,
       aliases: ['Alias'.repeat(24)], description: `第一段\n${'Description'.repeat(35)}\n最后一段`, kind: 'book', version: 1 })
     const proposals = ['1', '2'].map(id => ({ target: person(`t${id}`), sources: [person(`s${id}`)],
-      confidence: 0.99, reason: `第一行依据\n${'Reason'.repeat(60)}\n最后一行依据` }))
+      confidence: 0.99, reason: `第一行依据\n${'Reason'.repeat(60)}\n最后一行依据`,
+      merged_description: `整理后的说明\n${'MergedDescription'.repeat(35)}\n保留人物${id}的经历。` }))
     let result = { job_id: 'merge1', state: 'COMPLETED', phase: 'awaiting_confirmation', proposals,
       usage: { total_tokens: 100 }, merged_count: 0, skipped_groups: 0, unknown_usage_runs: 0,
       created_at: '2026-10-02T00:00:00Z', updated_at: '2026-10-02T00:01:00Z',

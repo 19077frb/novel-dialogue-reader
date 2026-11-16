@@ -16,7 +16,7 @@ export function ChapterRepairPanel({ bookId, bookVersionId }: { bookId: string; 
     const draft = drafts[id]
     if (!bookVersionId || !draft) return
     if (isBatchRunning(bookId)) { setError('请先停止本书批量或自动处理，再修复目录。'); return }
-    if (draft.merge && !window.confirm('将本章并入上一章？仅调整目录边界，不删除正文；无法自动撤销。')) return
+    if (draft.merge && !window.confirm('将本章并入上一章？合并会调整目录边界，保留完整正文；无法自动撤销。')) return
     setBusy(true); setError(''); setNotice('')
     try {
       await repairChapters(bookId, bookVersionId, [{ chapter_id: id, expected_title: title, title: draft.title, merge_previous: draft.merge }])
@@ -28,13 +28,13 @@ export function ChapterRepairPanel({ bookId, bookVersionId }: { bookId: string; 
         client.invalidateQueries({ queryKey: ['content', bookId] }),
         client.invalidateQueries({ queryKey: ['quotes', bookId] }),
       ])
-      setNotice('章节修复已保存，原文和阅读位置未改变。')
+      setNotice('章节修复已保存。')
     } catch (reason) { setError(reason instanceof Error ? reason.message : '章节修复失败') }
     finally { setBusy(false) }
   }
   return <section className="card" data-testid="chapter-repair-panel">
     <h3>章节名与边界修复</h3>
-    <p className="hint">导入时已自动检查并修复明显的正文式标题与相邻重复标题。可检查结果、改名，或将误识别的章节并入上一章，不调用模型。已有人物名单或标注的章节只能改名。</p>
+    <p className="hint">导入时已自动检查并修复明显的正文式标题与相邻重复标题。可直接检查结果、改名，或将误识别的章节并入上一章。已有人物名单或标注的章节只能改名。</p>
     <button title={busy ? '正在保存章节修复，请等待完成。' : suggestions.isFetching ? '正在检查章节，请等待读取完成。' : undefined} disabled={busy || suggestions.isFetching} onClick={() => { void suggestions.refetch(); void chapters.refetch() }}>重新检查章节</button>
     {chapters.isError && <ReadErrorNotice label="目录读取失败" error={chapters.error} retrying={chapters.isFetching} onRetry={() => void chapters.refetch()} />}
     {suggestions.isError && <ReadErrorNotice label="章节建议读取失败" error={suggestions.error} retrying={suggestions.isFetching} onRetry={() => void suggestions.refetch()} />}

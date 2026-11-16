@@ -228,7 +228,7 @@ describe('ReviewPage', () => {
     expect(screen.getByTestId('review-counts')).toHaveTextContent('待确认 2')
   })
 
-  it('空队列明确说明「不等于全部识别正确」', async () => {
+  it('空队列提示调整筛选以继续检查其他记录', async () => {
     vi.mocked(reviewApi.fetchReviewQueue).mockResolvedValue({
       items: [],
       next_cursor: null,
@@ -242,7 +242,7 @@ describe('ReviewPage', () => {
     } as never)
 
     renderRoute('/books/:bookId/review', <ReviewPage />, '/books/b1/review')
-    expect(await screen.findByTestId('review-empty')).toHaveTextContent('不等于')
+    expect(await screen.findByTestId('review-empty')).toHaveTextContent('可调整章节、原因或状态筛选')
   })
 
   it('校验警告有中文原因和警告样式，并可按原因筛选', async () => {

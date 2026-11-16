@@ -691,7 +691,7 @@ describe('PreviewPage', () => {
     vi.mocked(booksApi.fetchChapters).mockResolvedValue(CHAPTERS.map(chapter => ({ ...chapter, dialogue_processed: false })))
     vi.mocked(jobsApi.estimateRange).mockResolvedValue({ ...ESTIMATE, windows: ESTIMATE.windows!.map(window => ({ ...window, processing_status: 'completed' })) })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByRole('button', { name: '同步章节完成状态（不调用模型）' }))
+    await userEvent.click(await screen.findByRole('button', { name: '同步章节完成状态' }))
     await waitFor(() => expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1'))
     expect(jobsApi.createJob).not.toHaveBeenCalled()
     expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
@@ -1084,7 +1084,7 @@ describe('PreviewPage', () => {
       ...ROSTER, status: 'CONFIRMED', candidates: [], confirmed_characters: [], pov_character_id: null,
     })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    expect(await screen.findByText(/本章没有正文文字，已完成/)).toBeInTheDocument()
+    expect(await screen.findByText(/本章没有正文文字，已直接标为完成/)).toBeInTheDocument()
     expect(screen.getByTestId('roster-analyze')).toBeDisabled()
     expect(screen.queryByText('已确认本章主人公；如需修改，请重新确认。')).not.toBeInTheDocument()
     expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
@@ -1155,7 +1155,7 @@ describe('PreviewPage', () => {
     panel = screen.getByTestId('batch-progress-panel')
 
     await userEvent.click(within(panel).getByTestId('batch-stop'))
-    expect(within(panel).getByTestId('batch-progress-message')).toHaveTextContent('正在安全停止')
+    expect(within(panel).getByTestId('batch-progress-message')).toHaveTextContent('正在停止')
     expect(within(panel).getByTestId('batch-stop')).toBeDisabled()
     expect(within(panel).getByText('已停止')).toBeInTheDocument()
 

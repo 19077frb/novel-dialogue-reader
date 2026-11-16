@@ -24,7 +24,7 @@ function BookmarkCard({ item, activeVersionId, saved }: { item: BookmarkOut; act
     <time className="hint" dateTime={item.created_at}>{new Date(item.created_at).toLocaleString('zh-CN')}</time>
     <div className="ndr-form-actions">
       {item.book_version_id === activeVersionId ? <Link className="ndr-button ndr-primary" to={`/books/${item.book_id}/read?chapterId=${item.chapter_id}&positionCp=${item.position_cp}`}><ArrowUpRight size={15} aria-hidden="true" />跳转阅读</Link> : <span className="hint">原文版本已更换，暂不能跳转。</span>}
-      <button title={mutation.isPending ? '正在保存或删除书签，请等待完成。' : undefined} className="ndr-danger" disabled={mutation.isPending} onClick={() => { if (window.confirm('删除这个书签？不会删除正文或阅读进度。')) mutation.mutate(true) }}><Trash2 size={15} aria-hidden="true" />删除书签</button>
+      <button title={mutation.isPending ? '正在保存或删除书签，请等待完成。' : undefined} className="ndr-danger" disabled={mutation.isPending} onClick={() => { if (window.confirm('删除这个书签？正文和阅读进度将保留。')) mutation.mutate(true) }}><Trash2 size={15} aria-hidden="true" />删除书签</button>
     </div>
     <details className="ndr-bookmark-edit">
       <summary>编辑备注</summary>

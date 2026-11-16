@@ -10,7 +10,7 @@ export function ExportDownload({ artifact }: ExportDownloadProps) {
   if (!artifact.download_available) {
     return (
       <p className="hint" data-testid="export-download-unavailable">
-        校验未通过时不提供下载。
+        校验通过后即可下载；请查看校验结果。
       </p>
     )
   }
@@ -26,7 +26,7 @@ export function ExportDownload({ artifact }: ExportDownloadProps) {
       </a>
       <p className="hint">
         sha256 {artifact.file_sha256?.slice(0, 12)}… · 文件已经保存在数据目录里，
-        重复下载不会重新生成（相同快照 + 格式 + 样式直接复用）。
+        相同内容、格式和样式可直接复用已生成的文件。
       </p>
     </div>
   )

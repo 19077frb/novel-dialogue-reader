@@ -322,7 +322,7 @@ export function QuoteDetailDrawer({
               disabled={busy || Boolean(reviewItemId)}
               onClick={() => flag.mutate()}
               data-testid="drawer-flag"
-              title={busy ? '正在保存当前操作，请等待完成。' : reviewItemId ? '这句对白已在待确认队列中，无需重复标记。' : undefined}
+              title={busy ? '正在保存当前操作，请等待完成。' : reviewItemId ? '这句对白已在待确认队列中。' : undefined}
             >
               标记为待确认
             </button>

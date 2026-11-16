@@ -22,14 +22,14 @@ export interface GapDecisionControlsProps {
 export function GapDecisionControls({ gap, busy = false, onDecide }: GapDecisionControlsProps) {
   return (
     <div className="ndr-gap-decision" data-testid="gap-decision">
-      <p className="hint">场景间隔确认（不调用模型）：当前为{gapDecisionLabel(gap.decision)}</p>
+      <p className="hint">场景间隔人工确认：当前为{gapDecisionLabel(gap.decision)}</p>
       <ul className="ndr-candidates">
         {DECISIONS.map((item) => (
           <li key={item.value}>
             <button
               type="button"
               disabled={busy || gap.decision === item.value}
-              title={busy ? '正在保存当前决定，请等待完成。' : gap.decision === item.value ? '当前已采用此决定，无需重复选择。' : undefined}
+              title={busy ? '正在保存当前决定，请等待完成。' : gap.decision === item.value ? '当前已采用此决定。' : undefined}
               onClick={() => onDecide(item.value)}
               data-testid={`gap-decision-${item.value}`}
             >

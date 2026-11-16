@@ -1,8 +1,9 @@
+import { revealProfile } from './profiles'
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { confirmChapterRoster } from './roster'
+import { confirmChapterRoster, selectAllChapterWindows } from './roster'
 
 /**
  * 真实效果预览与按章处理。
@@ -21,7 +22,7 @@ async function createFakeProfile(page: Page, name: string) {
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill('fake-model')
   await page.getByTestId('profile-save').click()
-  await expect(page.getByTestId('profile-card').filter({ hasText: name })).toBeVisible()
+  await revealProfile(page, name)
 }
 
 async function importFile(page: Page, fileName: string) {
@@ -53,7 +54,7 @@ test.describe('预览与按章处理', () => {
     await expect(page.getByTestId('range-summary')).toContainText('本次范围：0 – ')
     await page
       .getByTestId('preview-profile')
-      .selectOption({ label: `${profileName} · fake-provider · fake-model` })
+      .selectOption({ label: `${profileName} · fake-model` })
     await confirmChapterRoster(page)
 
     // 本地估算：不调用模型
@@ -65,6 +66,7 @@ test.describe('预览与按章处理', () => {
     expect(targets).toBeGreaterThan(0)
 
     // 试运行：真实任务驱动的结果
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     expect(Number(await page.getByTestId('job-calls').innerText())).toBeGreaterThan(0)
@@ -116,9 +118,10 @@ test.describe('预览与按章处理', () => {
     await openPreview(page, '原创 ruby/插图样例')
     await page
       .getByTestId('preview-profile')
-      .selectOption({ label: `${profileName} · fake-provider · fake-model` })
+      .selectOption({ label: `${profileName} · fake-model` })
     await confirmChapterRoster(page)
 
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 
@@ -136,7 +139,7 @@ test.describe('预览与按章处理', () => {
     await openPreview(page, 'sample-gb18030')
     await page
       .getByTestId('preview-profile')
-      .selectOption({ label: `${profileName} · fake-provider · fake-model` })
+      .selectOption({ label: `${profileName} · fake-model` })
 
     // 核对范围：切到第二章，范围随之变化（来自目录的真实起止码点）
     const chapterOption = page.getByTestId('range-chapter').locator('option').nth(2)
@@ -149,6 +152,7 @@ test.describe('预览与按章处理', () => {
 
     // 换章节后人物名单要重新确认，确认的是这一章的人物与主人公
     await confirmChapterRoster(page)
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()

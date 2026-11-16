@@ -54,7 +54,7 @@ it('announces keyboard drag and Escape cancellation without persisting', async (
   await userEvent.keyboard(' ')
   await waitFor(() => expect(screen.getByRole('button', { name: '拖动《甲》调整顺序' })).toHaveAttribute('aria-pressed', 'true'))
   await userEvent.keyboard('{Escape}')
-  await waitFor(() => expect(screen.getByText('已取消本次拖动，位置未改变。')).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText('已取消本次拖动。')).toBeInTheDocument())
   expect(titles()).toEqual(['甲', '乙', '丙'])
   expect(localStorage.getItem(LIBRARY_ORDER_KEY)).toBeNull()
 })

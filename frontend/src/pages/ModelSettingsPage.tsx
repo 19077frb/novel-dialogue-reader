@@ -227,17 +227,25 @@ export default function ModelSettingsPage() {
         <div>
           <h2>模型配置</h2>
           <p className="hint">
-            管理 API 提供方、模型与密钥；密钥只在提交时发送，界面不回显。
+            连接模型服务，管理账号与生成参数。
           </p>
         </div>
       </header>
-      <section className="card">
+      <div className="ndr-settings-layout">
+      <nav className="ndr-section-nav" aria-label="模型配置分区">
+        <a href="#profile-editor">接口信息</a>
+        <a href="#profile-generation">生成参数</a>
+        <a href="#profile-thinking">思考设置</a>
+        <a href="#profile-credentials">密钥与凭据</a>
+        <a href="#saved-profiles">已保存的配置</a>
+      </nav>
+      <div className="ndr-settings-content">
+      <section className="card" id="profile-editor" tabIndex={-1}>
         <OperationTimer {...testClock} />
-        <h2>新增或更新配置</h2>
+        <h3>{editingId ? '编辑模型配置' : '新增模型配置'}</h3>
         <p className="hint">
-          在这里填写 API 根地址、模型名与密钥；不需要改源码。密钥只在提交时出现，
-          保存后只显示密钥是否已保存，不会显示密钥本身。保存前可以用
-          「测试当前填写内容」验证连通性，保存后也可以随时「测试连接」；除连接测试外，本页不会发起调用。
+          填写服务地址、模型名称与密钥后保存。连接测试会请求模型服务，可能产生费用；
+          可在保存前测试当前填写内容，也可测试已保存的配置。
         </p>
 
         <form
@@ -252,7 +260,8 @@ export default function ModelSettingsPage() {
           }}
         >
           <p className="hint">* 为必填项。</p>
-          <label>
+          <div className="ndr-range-grid">
+          <label className="ndr-field">
             * 名称
             <input
               type="text"
@@ -263,7 +272,7 @@ export default function ModelSettingsPage() {
             />
           </label>
 
-          <label>
+          <label className="ndr-field">
             * 协议
             <select
               value={form.protocol}
@@ -278,23 +287,25 @@ export default function ModelSettingsPage() {
               {!protocols.data && <option value={form.protocol}>{protocolLabel(form.protocol)}</option>}
             </select>
           </label>
+          </div>
 
           {selectedProtocol && (
             <details className="hint" data-testid="protocol-capabilities">
               <summary>如何填写接口配置</summary>
               {selectedProtocol.protocol === 'chat-completions-compatible' ? <>
-                <p>适用于使用 OpenAI 接口格式的云端模型和本地服务。服务地址和模型名称按服务商提供的信息填写；服务地址填写 API 根地址，不要包含 /chat/completions。</p>
+                <p>适用于使用 OpenAI 接口格式的云端模型和本地服务。服务地址和模型名称按服务商提供的信息填写；服务地址填写 API 根地址，系统会追加 /chat/completions。</p>
                 <p>云端服务通常需要 API 密钥，在“凭据”中选择保存方式并填写密钥。只有明确无需认证的本地服务，才选择“不需要密钥（本地服务）”。</p>
               </> : selectedProtocol.protocol === 'anthropic-messages' ? <>
-                <p>适用于 Anthropic Messages 接口。官方服务地址可填 https://api.anthropic.com/v1，兼容服务按服务商说明填写；不要包含 /messages。模型名称按服务商提供的信息填写。</p>
-                <p>官方服务需要 API 密钥，在“凭据”中选择保存方式并填写密钥。思考模式按模型支持情况选择；开启思考时不发送随机性与采样参数。手动思考要求最大输出 Token 大于 1024，自适应使用所选思考强度。</p>
+                <p>适用于 Anthropic Messages 接口。官方服务地址可填 https://api.anthropic.com/v1，兼容服务按服务商说明填写 API 根地址，系统会追加 /messages。模型名称按服务商提供的信息填写。</p>
+                <p>官方服务需要 API 密钥，在“凭据”中选择保存方式并填写密钥。思考模式按模型支持情况选择；开启思考时随机性与采样使用服务默认值。手动思考要求最大输出 Token 大于 1024，自适应使用所选思考强度。</p>
               </> : selectedProtocol.protocol === 'fake-provider'
-                ? <p>仅用于测试界面，不连接真实模型服务，也不需要 API 密钥。</p>
+                ? <p>用于本地模拟界面流程，返回测试数据。凭据选择“不需要密钥（本地服务）”。</p>
                 : <><p>{selectedProtocol.notes}</p><p>服务地址、模型名称和是否需要 API 密钥，请按服务商提供的接入说明填写。</p></>}
             </details>
           )}
 
-          <label>
+          <div className="ndr-range-grid">
+          <label className="ndr-field">
             * 服务地址（Base URL）
             <input
               type="text"
@@ -306,7 +317,7 @@ export default function ModelSettingsPage() {
             />
           </label>
 
-          <label>
+          <label className="ndr-field">
             * 模型名
             <input
               type="text"
@@ -317,10 +328,11 @@ export default function ModelSettingsPage() {
               onChange={(event) => setForm({ ...form, model: event.target.value })}
             />
           </label>
+          </div>
 
-          <fieldset>
+          <fieldset id="profile-generation">
             <legend>常用生成参数</legend>
-            <p className="hint">留空表示沿用提供方或任务默认值。输出上限是每次调用的上限，不是本次任务的总额度。
+            <p className="hint">留空表示沿用提供方或任务默认值。输出上限按每次调用计算，任务总额度在处理页设置。
               下方思考设置作为模型配置默认值，也可在「预览与处理」中按任务覆盖。</p>
             <div className="ndr-range-grid">{([
               ['max_tokens', '每次调用最大输出 Token', 1, undefined, 1],
@@ -334,7 +346,7 @@ export default function ModelSettingsPage() {
                 onChange={event => changeParameter(key, event.target.value)} />
             </label>)}</div>
           </fieldset>
-          <fieldset>
+          <fieldset id="profile-thinking">
             <legend>默认思考设置</legend>
             <label className="ndr-field">默认思考模式
               <select data-testid="profile-thinking-mode" value={JSON.parse(form.paramsText).thinking?.type ?? 'default'}
@@ -353,17 +365,18 @@ export default function ModelSettingsPage() {
               </select>
             </label>
             {JSON.parse(form.paramsText).thinking?.type === 'disabled' && <p className="hint">默认思考已关闭，强度设置不可用；先开启思考再调整强度。</p>}
-            <p className="hint">处理页选择“沿用模型配置”时使用这里保存的默认值；模型服务默认表示不指定参数，并不等于关闭思考。
+            <p className="hint">处理页选择“沿用模型配置”时使用这里保存的默认值；选择“模型服务默认”由服务商决定思考行为。
               思考功能需要模型服务支持。关闭思考会清除默认强度，开启思考可能增加用量与等待时间。</p>
           </fieldset>
           <details>
             <summary>查看生成参数（只读）</summary>
-            <p className="hint">保留已有提供方专用参数；本页只调整上面的常用项，不会删除其它参数。</p>
+            <p className="hint">这里展示完整生成参数，包括上方常用项和已有的提供方专用参数。</p>
             <textarea value={form.paramsText} rows={5} readOnly data-testid="profile-params" aria-label="生成参数（只读）" />
           </details>
 
-          <fieldset>
+          <fieldset id="profile-credentials">
             <legend>凭据</legend>
+            <p className="hint">选择密钥的保存方式。保存后，配置列表显示密钥的保存状态。</p>
             {editingId && (
               <div className="ndr-radio-row">
                 {(
@@ -410,8 +423,8 @@ export default function ModelSettingsPage() {
                     </label>
                   ))}
                 </div>
-                <label>
-                  接口密钥（API Key，留空不保存）
+                <label className="ndr-field">
+                  接口密钥（API Key，可选）
                   <input
                     type="password"
                     value={form.apiKey}
@@ -473,7 +486,7 @@ export default function ModelSettingsPage() {
               <li>
                 用量：
                 {testResult.data.usage_unknown
-                  ? '未知（模型服务未返回用量，不按 0 计）'
+                  ? '未知（模型服务未返回用量）'
                   : `输入 ${testResult.data.usage?.input_tokens ?? '?'} · 输出 ${
                       testResult.data.usage?.output_tokens ?? '?'
                     } · 合计 ${testResult.data.usage?.total_tokens ?? '?'}`}
@@ -483,11 +496,11 @@ export default function ModelSettingsPage() {
             </ul>
             {testResult.data.adapter === 'fake-provider' && (
               <p className="status-error" data-testid="fake-provider-warning">
-                这是测试用适配器：没有访问任何真实服务，结果只验证界面流程，不代表模型可用。
+                本地模拟测试完成，结果用于验证界面流程。真实模型连接请选择对应的服务协议后测试。
               </p>
             )}
             {testResult.data.ok && testResult.data.adapter !== 'fake-provider' && (
-              <p className="hint">连接成功只说明鉴权与 JSON 输出可解析，未评估小说标注效果。</p>
+              <p className="hint">鉴权与 JSON 输出校验通过。小说标注效果请在“预览与处理”中试运行后查看。</p>
             )}
           </div>
         )}
@@ -504,13 +517,13 @@ export default function ModelSettingsPage() {
         )}
       </section>
 
-      <section className="card">
-        <h2>已保存的配置</h2>
+      <section className="card" id="saved-profiles">
+        <h3>已保存的配置</h3>
         {profiles.isPending && <p className="hint">正在读取配置…</p>}
         {profiles.isError && <ReadErrorNotice label="模型配置读取失败" error={profiles.error} retrying={profiles.isFetching} onRetry={() => void profiles.refetch()} />}
         {profiles.isSuccess && profiles.data.length === 0 && (
           <p className="hint" data-testid="profiles-empty">
-            还没有模型配置。填写上方表单即可保存，不需要修改源码。
+            还没有模型配置。填写“接口信息”表单并保存，即可用于人物识别与对白处理。
           </p>
         )}
         <CollapsibleBlock title="模型配置列表" summary={`共 ${profiles.data?.length ?? 0} 个配置`}>
@@ -545,6 +558,7 @@ export default function ModelSettingsPage() {
                     setKeyAction('keep')
                     setNotice(null)
                     setError(null)
+                    document.getElementById('profile-editor')?.focus()
                   }}
                 >
                   编辑
@@ -572,6 +586,8 @@ export default function ModelSettingsPage() {
           </PaginatedItems>
         </CollapsibleBlock>
       </section>
+      </div>
+      </div>
     </div>
   )
 }

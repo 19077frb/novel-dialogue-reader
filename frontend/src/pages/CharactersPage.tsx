@@ -113,7 +113,7 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
     onMutate: begin, onError: failed, onSuccess: result => completed(result),
   })
   const busy = removed || disabled || d.pending || save.isPending || merge.isPending || saveColor.isPending
-  const lockReason = removed ? '该人物已不在最新列表中，请核对合并结果；保留的修改不会自动应用。' : disabled ? '本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。' : d.pending || save.isPending || merge.isPending || saveColor.isPending ? '正在保存人物资料或合并人物，请等待完成。' : undefined
+  const lockReason = removed ? '该人物已移出最新列表，请核对合并结果；草稿保留在此处供查阅。' : disabled ? '本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。' : d.pending || save.isPending || merge.isPending || saveColor.isPending ? '正在保存人物资料或合并人物，请等待完成。' : undefined
   const dirty = name !== d.base.name || aliases !== (d.base.aliases ?? []).join('、') || description !== (d.base.description ?? '')
   const colorReason = lockReason ?? (item.kind === 'speaker' ? '请先保存人物资料，纳入全书人物后再设置颜色。' : dirty ? '有未保存的人物资料，请先保存，避免改色后丢失编辑。' : color === (item.preferred_color_index ?? null) ? '颜色设置没有变化。' : undefined)
   const error = d.error
@@ -170,7 +170,7 @@ function CharacterEditor({ item, targets, bookId, onSaved, disabled, visibleFrom
     {!target && <p className="hint">请选择合并目标后再合并。</p>}
     {!confirmMerge ? <button title={lockReason ?? (!target ? '请先选择另一个全书人物作为合并目标。' : undefined)} type="button" disabled={busy || !target} onClick={() => patch({ confirmMerge: true })}>合并人物…</button> :
       <div role="alert">
-        <p>将“{item.name}”合并到“{target?.name}”？全部已有对白和章节名单将改为目标人物；原姓名及别名保留为别名，使用目标说明。此操作无法自动撤销，未保存的编辑不会应用。</p>
+        <p>将“{item.name}”合并到“{target?.name}”？全部已有对白和章节名单将改为目标人物；原姓名及别名保留为别名，使用目标说明。此操作无法自动撤销。合并使用已保存资料，请先保存需要保留的编辑。</p>
         <button title={lockReason ?? (!target ? '合并目标已不在最新列表中，请重新选择目标。' : undefined)} type="button" className="ndr-danger" disabled={busy || !target} onClick={() => merge.mutate()}>确认合并</button>
         <button title={lockReason} type="button" disabled={busy} onClick={() => patch({ confirmMerge: false })}>取消</button>
       </div>}
@@ -261,12 +261,15 @@ export default function CharactersPage() {
       <p className="hint">适用于本次保存资料、手动合并及接受自动合并建议。更早章节保留当时的姓名、说明与不同身份；重读立即显示最终结果。请选择原文已经揭示该信息的章节，不确定时保留默认。</p>
       {chapters.isError && <p role="alert" className="status-error">可见章节读取失败：{chapters.error.message}，可使用全书末尾或重新读取页面。</p>}
     </section>}
-    <CharacterAutoMerge key={bookId} bookId={bookId} versionId={book.data?.active_version_id} count={entries.length} visibleFromCp={effectiveVisibleFromCp}
-      disabled={batchProgress.running} onBusyChange={setAutoMergeBusy} onSaved={saved} />
-    <section className="card">
+    <nav className="ndr-section-nav" aria-label="人物页分区">
+      <a href="#character-directory">人物资料</a>
+      <a href="#character-merge">自动整理</a>
+    </nav>
+    <section className="card" id="character-directory">
       <CollapsibleBlock title="使用说明" defaultOpen={false}>
-      <p className="hint">汇总当前书籍版本已识别的人物（包括未发言人物），可能包含后文剧透。人工确认只是来源记录，并不表示永远正确；仍可手动修改，或让模型提出更名、合并与说明修正建议，预览接受后才生效。后台是否更新人工姓名与说明由通用设置决定，默认关闭。修改会影响已有对白、后续人物识别和导出，不改原文或章节完成状态。请先停止本书处理任务再编辑。</p>
-      <p className="hint">颜色由程序生成，保存不调用模型、不更改人工确认状态。选择“自动分配”可恢复；自动占用的色号会为手动选择让位。改色在所有阅读模式中均生效。</p>
+      <p className="hint">这里汇总当前版本已识别的人物，包括尚未发言的人物和后文人物。可手动编辑资料，也可让模型提出更名、合并与说明建议，预览接受后生效。后台更新人工姓名与说明的开关位于通用设置，默认关闭。人物修改用于已有对白、后续识别和导出。编辑前请先停止本书处理任务。</p>
+      <p className="hint">选择人物颜色后点击“保存颜色”，所有阅读模式都会使用该颜色。选择“自动分配”可恢复程序配色；自动占用的色号会为手动选择让位。</p>
+      <p className="hint">按出现章节数从多到少排列，章节数相同时按对白数排列。仅统计已识别章节和当前有效的对白归属，未处理章节不计入。</p>
       </CollapsibleBlock>
       {(batchProgress.running || autoMergeBusy) && <p role="status">本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。</p>}
       {message && <p role="status">{message}</p>}
@@ -275,11 +278,11 @@ export default function CharactersPage() {
         <button title={directory.isFetching ? '正在读取人物资料，请等待完成。' : undefined} type="button" disabled={directory.isFetching} onClick={() => void directory.refetch()}>重新读取</button>
       </div>
       {directory.isPending && <p>正在读取全书人物…</p>}
-      <p className="hint">按出现章节数从多到少排列，章节数相同时按对白数排列。仅统计已识别章节和当前有效的对白归属，未处理章节不计入。</p>
+      <p className="hint">按出现章节数与有效对白数排序。</p>
       {directory.isError && <p role="alert" className="status-error">人物读取失败：{directory.error.message}</p>}
       {directory.data && <p>共 {entries.length} 个人物{term ? `，匹配 ${filtered.length} 个` : ''}</p>}
       {!directory.isPending && !directory.isError && !entries.length && <p>尚未识别人物，请先在预览与处理中分析人物。</p>}
-      {removedDrafts.length > 0 && <CollapsibleBlock title="已移除人物的未保存修改" summary={`有 ${removedDrafts.length} 个人物已不在最新列表中，保留的修改不会自动应用。`}>
+      {removedDrafts.length > 0 && <CollapsibleBlock title="已移除人物的未保存修改" summary={`有 ${removedDrafts.length} 个人物已移出最新列表，草稿保留在此处供查阅。`}>
         <PaginatedItems label="已移除人物草稿" pageSize={5} scope={bookId}>
           {removedDrafts.map(item => <div key={item.character_id}>
             <p>“{item.name}”已不在最新人物列表中，请核对合并结果。</p>
@@ -302,5 +305,9 @@ export default function CharactersPage() {
       } />
       </CollapsibleBlock>
     </section>
+    <div id="character-merge" className="ndr-character-tools">
+      <CharacterAutoMerge key={bookId} bookId={bookId} versionId={book.data?.active_version_id} count={entries.length} visibleFromCp={effectiveVisibleFromCp}
+        disabled={batchProgress.running} onBusyChange={setAutoMergeBusy} onSaved={saved} />
+    </div>
   </div>
 }

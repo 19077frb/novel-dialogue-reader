@@ -1,9 +1,10 @@
+import { revealProfile } from './profiles'
 import { expect, test, type Download, type Page } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { confirmChapterRoster } from './roster'
+import { confirmChapterRoster, selectAllChapterWindows } from './roster'
 
 /**
  * 导出对话框、后端样张与下载闭环。
@@ -21,7 +22,7 @@ async function createProfile(page: Page, name: string, model = 'fake-model') {
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill(model)
   await page.getByTestId('profile-save').click()
-  await expect(page.getByTestId('profile-card').filter({ hasText: name })).toBeVisible()
+  await revealProfile(page, name)
 }
 
 async function importFile(page: Page, fileName: string) {
@@ -47,6 +48,7 @@ async function processFirstChapter(page: Page, profileLabel: string) {
   await page.getByTestId('preview-profile').selectOption({ label: profileLabel })
   // 逐句归属前必须先确认本章人物与第一视角主人公。
   await confirmChapterRoster(page)
+  await selectAllChapterWindows(page)
   await page.getByTestId('preview-run').click()
   await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 }
@@ -77,13 +79,13 @@ test.describe('导出对话框与下载闭环', () => {
     await createProfile(page, profileName, 'fake-model-html')
     await importFile(page, 'sample-utf8.txt')
     await openReader(page, 'sample-utf8')
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model-html`)
+    await processFirstChapter(page, `${profileName} · fake-model-html`)
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
 
     await openExportDialog(page)
     // 重读：显示全部有效投影（含第一章已确认的编号）
-    await page.getByTestId('export-policy-reread').check()
+    await expect(page.getByTestId('export-policy')).toHaveCount(0) // 默认使用重读，初读切换属于试验功能
     await expect(page.getByTestId('export-coverage')).toContainText('已接受')
     const sample = page.getByTestId('export-sample')
     await expect(sample).toHaveAttribute('sandbox', '')
@@ -91,7 +93,7 @@ test.describe('导出对话框与下载闭环', () => {
 
     await generate(page, 'html')
     await expect(page.getByTestId('export-check-mimetype_value')).toHaveCount(0) // HTML 没有 zip 检查
-    await expect(page.getByTestId('export-check-text_consistency')).toContainText('✓')
+    await expect(page.getByTestId('export-check-text_consistency')).toHaveText(/^\s*通过 · /)
     await expect(page.getByTestId('export-standard')).toContainText('NOT_APPLICABLE')
 
     const download = await downloadArtifact(page)
@@ -114,16 +116,16 @@ test.describe('导出对话框与下载闭环', () => {
     await createProfile(page, profileName, 'fake-model-epub')
     await importFile(page, 'original-sample.epub')
     await openReader(page, '原创 ruby/插图样例')
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model-epub`)
+    await processFirstChapter(page, `${profileName} · fake-model-epub`)
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
 
     await openExportDialog(page)
-    await page.getByTestId('export-policy-reread').check()
+    await expect(page.getByTestId('export-policy')).toHaveCount(0) // 默认使用重读，初读切换属于试验功能
     await generate(page, 'epub')
-    await expect(page.getByTestId('export-check-mimetype_first')).toContainText('✓')
-    await expect(page.getByTestId('export-check-mimetype_stored')).toContainText('✓')
-    await expect(page.getByTestId('export-check-resource_closure')).toContainText('✓')
+    await expect(page.getByTestId('export-check-mimetype_first')).toHaveText(/^\s*通过 · /)
+    await expect(page.getByTestId('export-check-mimetype_stored')).toHaveText(/^\s*通过 · /)
+    await expect(page.getByTestId('export-check-resource_closure')).toHaveText(/^\s*通过 · /)
     // 本机没有 EPUBCheck：状态如实显示 NOT_RUN，而不是 PASS
     await expect(page.getByTestId('export-standard')).toContainText('NOT_RUN')
 
@@ -142,6 +144,7 @@ test.describe('导出对话框与下载闭环', () => {
   })
 
   test('指定章节导出：文件名标「节选」，只带选中章节', async ({ page }) => {
+    await importFile(page, 'sample-utf8.txt')
     await openReader(page, 'sample-utf8')
     await openExportDialog(page)
     await page.getByTestId('export-scope-chapters').check()
@@ -162,11 +165,11 @@ test.describe('导出对话框与下载闭环', () => {
     await createProfile(page, profileName, 'fake-model-unprocessed')
     await importFile(page, 'sample-export.txt')
     await openReader(page, 'sample-export')
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model-unprocessed`)
+    await processFirstChapter(page, `${profileName} · fake-model-unprocessed`)
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
     await openExportDialog(page)
-    await page.getByTestId('export-policy-reread').check()
+    await expect(page.getByTestId('export-policy')).toHaveCount(0) // 默认使用重读，初读切换属于试验功能
     await expect(page.getByTestId('export-coverage')).toContainText('未处理 1')
     await expect(page.getByTestId('export-warnings')).toContainText('还没有标注')
 
@@ -187,7 +190,7 @@ test.describe('导出对话框与下载闭环', () => {
     await createProfile(page, profileName, 'fake-model-concurrent')
     await importFile(page, 'sample-export.txt')
     await openReader(page, 'sample-export')
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model-concurrent`)
+    await processFirstChapter(page, `${profileName} · fake-model-concurrent`)
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
 

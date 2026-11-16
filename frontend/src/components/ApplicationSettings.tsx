@@ -9,7 +9,7 @@ import { CollapsibleBlock } from './CollapsibleBlock'
 const BYTES_PER_MB = 1024 * 1024
 const capacityFields: Record<string, { label: string; description: string }> = {
   max_import_bytes: { label: '导入文件大小上限（MB）', description: '单个上传文件的最大大小。过大文件会占用更多内存和磁盘。' },
-  max_epub_total_uncompressed_bytes: { label: 'EPUB解压总大小上限（MB）', description: '限制全部解压内容的总大小，不是原始上传文件大小。' },
+  max_epub_total_uncompressed_bytes: { label: 'EPUB解压总大小上限（MB）', description: '按 EPUB 解压后的全部内容计算总大小。' },
   max_epub_entry_bytes: { label: 'EPUB单个内部文件大小上限（MB）', description: '限制解压后每个内部文件的大小，不能超过解压总大小上限。' },
 }
 const displayValue = (key: string, value: ApplicationSettingsPatch['values'][string]) =>
@@ -50,9 +50,9 @@ export function ApplicationSettings() {
     deterministic: '确定性测试标注', rate_limited_once: '模拟一次限流', unavailable_once: '模拟一次服务不可用',
     timeout_once: '模拟一次超时', auth_failed_once: '模拟一次凭据错误',
   }
-  return <section className="card ndr-application-settings" aria-label="应用配置">
+  return <section className="card ndr-application-settings" id="application-settings" aria-label="应用配置">
     <h3>应用配置</h3>
-    <p className="hint">无需创建 .env 文件。这里的配置保存在本机，重启后生效。普通保存不会重启，也不改变正在运行的任务；可以手动重启，或在任务结束后选择“保存并重启”。模型密钥仍在“模型配置”中管理。</p>
+    <p className="hint">应用配置保存在本机，重启服务后生效。保存后可手动重启，或在任务结束后选择“保存并重启”。运行中的任务使用当前配置，模型密钥在“模型配置”中管理。</p>
     {query.isPending && <p role="status">正在读取应用配置…</p>}
     {query.isError && <p className="status-error">应用配置读取失败：{query.error.message} <button onClick={() => void query.refetch()}>重新读取应用配置</button></p>}
     {data && <>
@@ -62,7 +62,7 @@ export function ApplicationSettings() {
           : '配置已保存，当前值没有变化。'}
       </p>}
       {(data.restart_required.includes('port') || data.restart_required.includes('host')) && <p className="hint">重启后的阅读地址：{restartAddress}</p>}
-      {data.restart_required.includes('data_dir') && <p className="hint">现有书库没有搬迁。重启后使用新目录，若尚无书籍，书架将为空。</p>}
+      {data.restart_required.includes('data_dir') && <p className="hint">现有书籍保留在原目录。重启后使用新目录，空目录会显示空书架；如需使用现有书库，请先完成迁移。</p>}
       {groups.map(group => <CollapsibleBlock key={group} title={group}
         defaultOpen={group !== '离线测试（高级）'}>
         <div className="ndr-range-grid ndr-application-grid">
@@ -98,19 +98,19 @@ export function ApplicationSettings() {
           })}
         </div>
       </CollapsibleBlock>)}
-      <p className="hint">配置文件：{data.config_path}。更换书库目录不会改变这个文件的位置；请勿在文件里填写模型密钥。</p>
+      <details><summary>配置文件位置</summary><p className="hint">{data.config_path}。应用始终使用此文件保存配置；模型密钥由“模型配置”中的凭据方式管理。</p></details>
       <button disabled={busy || data.fields.every(field => field.locked_reason)}
         title={busy ? '正在保存或重启，请等待完成。' : data.fields.every(field => field.locked_reason) ? '全部应用配置已由启动参数或安全策略锁定，无法恢复。' : '仅恢复未锁定的应用配置草稿，仍需保存和重启。'}
         onClick={() => {
           const staticField = data.fields.find(field => field.key === 'static_dir')
           const pageWarning = staticField && !staticField.locked_reason && staticField.default_value === null && (draft.static_dir ?? staticField.value)
             ? '源码版网页目录会恢复为空，重启后本服务可能不再提供页面。' : ''
-          if (!window.confirm(`恢复未锁定的应用配置默认值？可能包括书库目录、端口和密钥保存方式；不会搬迁或删除书籍、密钥。${pageWarning}其他区域不变，仍需保存并重启才生效。`)) return
+          if (!window.confirm(`恢复未锁定的应用配置默认值？可能包括书库目录、端口和密钥保存方式；现有书籍与密钥保留在原处。${pageWarning}点击保存并重启后生效。`)) return
           setDraft(previous => ({ ...previous, ...Object.fromEntries(data.fields.filter(field => !field.locked_reason)
             .map(field => [field.key, field.default_value])) }))
           setSaved(false); mutation.reset()
         }}>恢复应用配置默认值</button>
-      <p className="hint">只恢复未锁定的应用配置；阅读、人物资料更新和自动处理偏好不变。恢复后仍需保存并重启，不会自动切换书库或删除数据。</p>
+      <p className="hint">恢复默认值会更新上方未锁定的配置草稿。保存后请重启服务，使应用配置生效。</p>
       {mutation.isError && <p role="alert" className="status-error">保存失败：{mutation.error.message}</p>}
       <button className="ndr-primary" disabled={!changed || busy}
         title={mutation.isPending ? '正在保存，请等待完成。' : !changed ? '尚未修改应用配置。' : undefined}
@@ -120,7 +120,7 @@ export function ApplicationSettings() {
       <button disabled={busy || Boolean(data.restart_blocked_reason)}
         title={busy ? '正在保存或重启，请等待完成。' : data.restart_blocked_reason ?? '保存应用配置并重新启动服务。'}
         onClick={() => {
-          if (!window.confirm('保存应用配置并重启服务？未保存的阅读与处理设置不会自动保存。')) return
+          if (!window.confirm('保存应用配置并重启服务？阅读与处理偏好请先通过“保存阅读与处理设置”保存。')) return
           mutation.mutate({ payload: { values: changes, revision: data.revision }, restart: true }, {
             onSuccess: () => setRestarting(true),
           })

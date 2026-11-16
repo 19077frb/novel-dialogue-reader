@@ -11,7 +11,7 @@ describe('SpeakerLegend tooltips', () => {
     }]} />)
     const button = screen.getByRole('button')
     expect(button).toBeDisabled()
-    expect(button).toHaveAttribute('title', '悠太：书店店员；这里只展示人物信息，不提供定位对白操作。')
+    expect(button).toHaveAttribute('title', '悠太：书店店员；当前仅展示人物信息。')
   })
   it('显示姓名和人物描述，格式与正文提示一致', () => {
     render(<SpeakerLegend onFocus={vi.fn()} legend={[{

@@ -22,7 +22,7 @@ export function QuoteContext({
   return (
     <div className="ndr-quote-context" data-testid="quote-context">
       <p className="hint">
-        前后各 {contextWindowCp} 字符的原文（不调用模型）
+        前后各 {contextWindowCp} 字符的本地原文
       </p>
       <p className="ndr-context-line">
         {before}

@@ -16,6 +16,22 @@ beforeEach(() => {
   vi.mocked(applicationSettings.fetchApplicationSettings).mockResolvedValue({ fields: [], revision: 'missing', config_path: 'test', restart_required: [], restart_blocked_reason: '测试启动方式不重启' })
 })
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks() })
+it('分区导航定位到现有表单，跳转时保留未保存草稿', async () => {
+  renderWithProviders(<SettingsPage />)
+  const font = screen.getByLabelText('正文字号')
+  fireEvent.change(font, { target: { value: '21' } })
+  const navigation = screen.getByRole('navigation', { name: '通用设置分区' })
+  for (const link of navigation.querySelectorAll('a')) {
+    const target = document.getElementById(link.hash.slice(1))
+    expect(target).toBeInTheDocument()
+    await userEvent.click(link)
+    expect(screen.getByLabelText('正文字号')).toBe(font)
+    expect(font).toHaveValue(21)
+    expect(getGeneralSettings().fontSize).toBe(16)
+  }
+  await userEvent.click(screen.getByRole('button', { name: '保存阅读与处理设置' }))
+  expect(getGeneralSettings().fontSize).toBe(21)
+})
 it('待确认标记默认关闭，保存后记忆，恢复默认仅修改草稿', async () => {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ showAnnotations: true, showReviewMarkers: 'true' }))
   const page = renderWithProviders(<SettingsPage />)

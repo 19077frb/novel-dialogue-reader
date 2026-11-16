@@ -1,8 +1,9 @@
+import { revealProfile } from './profiles'
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { confirmChapterRoster } from './roster'
+import { confirmChapterRoster, selectAllChapterWindows } from './roster'
 
 /**
  * 待确认队列与阅读页确认抽屉。
@@ -21,7 +22,7 @@ async function createFakeProfile(page: Page, name: string) {
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill('fake-model')
   await page.getByTestId('profile-save').click()
-  await expect(page.getByTestId('profile-card').filter({ hasText: name })).toBeVisible()
+  await revealProfile(page, name)
 }
 
 async function importFile(page: Page, fileName: string) {
@@ -60,6 +61,7 @@ async function processFirstChapter(page: Page, profileLabel: string) {
   await page.getByTestId('preview-profile').selectOption({ label: profileLabel })
   // 逐句归属前必须先确认本章人物与第一视角主人公。
   await confirmChapterRoster(page)
+  await selectAllChapterWindows(page)
   await page.getByTestId('preview-run').click()
   await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 }
@@ -70,7 +72,7 @@ test.describe('待确认队列与确认抽屉', () => {
     await createFakeProfile(page, profileName)
     await importSample(page)
     await openReader(page)
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model`)
+    await processFirstChapter(page, `${profileName} · fake-model`)
     await page.getByTestId('processing-thinking-mode').selectOption('enabled')
     await page.getByTestId('processing-thinking-effort').selectOption('high')
     await page.getByRole('link', { name: '去阅读' }).click()
@@ -93,7 +95,7 @@ test.describe('待确认队列与确认抽屉', () => {
     await createFakeProfile(page, profileName)
     await importSample(page)
     await openReader(page)
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model`)
+    await processFirstChapter(page, `${profileName} · fake-model`)
 
     // 回到阅读页（第一章），点击已着色的对白 → 打开确认抽屉
     await page.getByRole('link', { name: '去阅读' }).click()
@@ -104,7 +106,7 @@ test.describe('待确认队列与确认抽屉', () => {
     const drawer = page.getByTestId('quote-detail-drawer')
     await expect(drawer).toBeVisible()
     await expect(page.getByTestId('drawer-quote')).toHaveText('「雨停了。」')
-    await expect(page.getByTestId('drawer-annotation')).toContainText('ACCEPTED')
+    await expect(page.getByTestId('drawer-annotation')).toContainText('已自动接受')
     // 展开原文只读本地原文（不产生任务面板）
     await page.getByTestId('expand-context').click()
     await expect(page.getByTestId('quote-context')).toContainText('前后各 600 字符')
@@ -117,12 +119,12 @@ test.describe('待确认队列与确认抽屉', () => {
     await page.getByTestId('correction-action').selectOption('mark_unknown')
     await page.getByTestId('correction-submit').click()
     await expect(page.getByTestId('drawer-notice')).toContainText('已确认 1 条')
-    await expect(page.getByTestId('drawer-annotation')).toContainText('UNKNOWN')
+    await expect(page.getByTestId('drawer-annotation')).toContainText('尚未确定')
 
     // 撤销 → 回到 ACCEPTED
     await page.getByTestId('drawer-undo').click()
     await expect(page.getByTestId('drawer-notice')).toContainText('已撤销更正')
-    await expect(page.getByTestId('drawer-annotation')).toContainText('ACCEPTED')
+    await expect(page.getByTestId('drawer-annotation')).toContainText('已自动接受')
 
     // 阅读页上这条对白仍然着色（投影没有被破坏）
     await page.getByTestId('drawer-close').click()
@@ -148,7 +150,7 @@ test.describe('待确认队列与确认抽屉', () => {
     const item = page.getByTestId('review-item').first()
     await expect(item).toBeVisible()
     await item.getByTestId('review-open').click()
-    await expect(page.getByTestId('drawer-queue-item')).toContainText('USER_FLAGGED')
+    await expect(page.getByTestId('drawer-queue-item')).toContainText('用户标记')
 
     // 跳过（延后）→ 默认视图里消失，切到「已跳过」还能找回
     await page.getByTestId('drawer-defer').click()
@@ -167,7 +169,7 @@ test.describe('待确认队列与确认抽屉', () => {
     await createFakeProfile(page, profileName)
     await importFile(page, 'sample-review.txt')
     await openReader(page, 'sample-review')
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model`)
+    await processFirstChapter(page, `${profileName} · fake-model`)
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').nth(1).click()
 
@@ -178,7 +180,7 @@ test.describe('待确认队列与确认抽屉', () => {
     await expect(page.getByTestId('correction-no-groups')).toBeVisible()
     await page.getByTestId('correction-submit').click()
     await expect(page.getByTestId('drawer-notice')).toContainText('已确认 1 条')
-    await expect(page.getByTestId('drawer-annotation')).toContainText('USER_CONFIRMED')
+    await expect(page.getByTestId('drawer-annotation')).toContainText('已人工确认')
   })
 
   test('旧版本提交返回 409：提示冲突并刷新为最新状态', async ({ page }) => {

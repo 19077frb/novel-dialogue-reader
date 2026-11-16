@@ -121,7 +121,7 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
         <p className="hint">{reviewProgress(job.data.progress)}</p>
       )}
       {job.data.progress?.stage === 'local_finalization_pending' && (
-        <p className="hint" role="status">模型任务已退出，正在等待数据库保存状态；不会重新调用模型。</p>
+        <p className="hint" role="status">模型任务已退出，正在等待处理结果保存完成。</p>
       )}
       {['write_queue_waiting', 'write_queue_active'].includes(String(job.data.progress?.stage)) && (
         <p className="hint" role="status">{job.data.progress?.stage === 'write_queue_waiting'

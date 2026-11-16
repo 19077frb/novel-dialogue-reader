@@ -32,7 +32,7 @@ export function ThinkingSettings({ disabled, disabledReason, profiles, profileId
         {profiles.map(item => <option key={item.id} value={item.id} title={`${item.name} · ${protocolLabel(item.protocol)} · ${item.model}`}>{item.name} · {item.model}</option>)}
       </select>
     </label>
-    {profile?.protocol === 'fake-provider' && <p className="hint">当前选择的是模拟服务，仅用于测试，不会调用真实模型。</p>}
+    {profile?.protocol === 'fake-provider' && <p className="hint">当前选择的是本地模拟服务，用于测试处理流程。</p>}
     {profiles.length === 0 && <p className="hint" data-testid="preview-no-profile">还没有模型配置：请先到“模型配置”添加提供方（真实提供方需要密钥）。</p>}
     <div className="ndr-range-grid">
       <label className="ndr-field">思考模式
@@ -52,8 +52,8 @@ export function ThinkingSettings({ disabled, disabledReason, profiles, profileId
     </div>
     <DisabledHint reason={disabled ? lockReason : effectivelyDisabled && '思考已关闭，无法调整思考强度；需要调整时请先将思考模式改为开启或自适应。'} />
     {profile && <p className="hint" data-testid="profile-thinking-defaults">当前配置「{profile.name}」默认：模式 {labels[thinking?.type ?? ''] ?? '模型服务默认'}；强度 {labels[String(params.reasoning_effort ?? '')] ?? '模型服务默认'}。</p>}
-    <p className="hint">{draftPreferences ? '修改后请保存阅读与处理设置。' : '单章、人物识别、试运行、批量与局部复核共用并记忆此设置；'}不修改已保存的模型配置或运行中任务。
+    <p className="hint">{draftPreferences ? '修改后请保存阅读与处理设置。' : '单章、人物识别、试运行、批量与局部复核共用并记忆此设置；'}新建任务使用此设置，运行中任务沿用启动时的配置。
       思考功能需要模型服务支持，不确定时请选择沿用模型配置。
-      沿用模型配置时使用模型配置页保存的默认值；未指定则由模型服务决定。关闭思考时不发送强度。开启思考可能增加用量与等待时间，不会自动提高输出上限。</p>
+      沿用模型配置时使用模型配置页保存的默认值；未指定则由模型服务决定。开启或自适应模式可设置思考强度。开启思考可能增加用量与等待时间，输出上限沿用当前配置。</p>
   </section>
 }

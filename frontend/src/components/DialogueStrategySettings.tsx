@@ -42,13 +42,13 @@ export function DialogueStrategySettings({ value, onChange, disabled = false, di
       : value.startsWith('complete-blocks')
         ? '结合完整原文判断说话人；长章按完整段落和连续对白分窗处理。'
         : '一次处理所选范围的完整原文；范围太长时，请缩小处理范围。'}
-      {value.includes('-isolated') && ' 辅助信息有问题时，保留不受影响的对白结果。'}
+      {value.includes('-isolated') && ' 辅助信息有问题时，保留其余有效的对白结果。'}
       {value.endsWith('-review') && (rounds > 0 ? ` 最多复核 ${rounds} 次；有分歧时会额外调用模型检查，增加用量和等待。` : ' 复核次数为 0，独立复核已关闭。')}
       {value === 'complete-blocks-isolated-feedback-review' && ' 每窗额外调用一次模型，检查是否漏掉人物或认错身份。'}
     </p>
     <CollapsibleBlock title="策略区别与使用说明" defaultOpen={false}>
     {value === 'complete-blocks-isolated-feedback-review' && <p className="hint">适合怀疑人物名单有遗漏时使用。每窗多调用一次模型，并配合至少 1 次复核。人物建议和理由可在任务详情查看；需要修改第一视角主人公时，请回到本章人物确认。</p>}
-    {value.includes('-isolated') && <p className="hint">例如模型没判断清楚对白是在对谁说，不受影响的对白结果会保留；需要核对的相关对白会放入待确认队列。</p>}
+    {value.includes('-isolated') && <p className="hint">例如模型没判断清楚对白是在对谁说，相关对白会进入待确认队列，其余有效结果继续保留。</p>}
     <p className="hint">单章、批量、自动处理与局部复核共用此选择。修改后从新任务开始生效，正在运行的任务保持原设置。</p>
     {value !== 'legacy' && <p className="hint">模型结合原文判断对白、心声和引用属于谁。需要更细致的判断时，可在思考设置中选择模型支持的思考强度。</p>}
     {value.startsWith('complete-blocks') && <p className="hint">整章能放下时一次处理，长章自动分窗。如果一个完整段落仍太长，请缩小处理范围。初读只参考当前窗口及前文，重读可参考处理范围内的后文。</p>}

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { FileUp } from 'lucide-react'
 
 export interface ImportDropzoneProps {
   onFile: (file: File) => void
@@ -31,7 +32,8 @@ export function ImportDropzone({ onFile, disabled = false }: ImportDropzoneProps
         if (!disabled) handleFiles(event.dataTransfer.files)
       }}
     >
-      <p>把 TXT 或 EPUB 拖到这里，或选择文件</p>
+      <FileUp size={28} strokeWidth={1.4} aria-hidden="true" />
+      <p>拖入一本书<br /><span className="hint">TXT / EPUB</span></p>
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
