@@ -20,7 +20,7 @@ it('explains locked controls and separates repair count from primary format retr
   expect(screen.getByTestId('roster-repair-enabled')).toBeDisabled()
   expect(screen.getByText(/当前处理任务尚未结束/)).toBeVisible()
   expect(screen.getByLabelText(/人物证据最多修复次数/)).toBeDisabled()
-  expect(screen.getByText(/修复返回格式错误也占用修复次数/)).toBeVisible()
+  expect(screen.getByLabelText(/人物证据最多修复次数/)).toHaveAttribute('title', expect.stringMatching(/修复.*格式错误.*修复次数/))
   view.rerender(<RosterRepairSettings experimentalEnabled preferences={preferences} onChange={onChange} />)
   fireEvent.change(screen.getByLabelText(/人物证据最多修复次数/), { target: { value: '3' } })
   expect(onChange).toHaveBeenCalledWith({ maxRosterRepairs: 3 })

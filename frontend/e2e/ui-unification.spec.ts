@@ -69,8 +69,10 @@ for (const layout of [
         await expect(page.getByTestId('profile-card').first()).toBeVisible()
       }
       if (item.name === 'settings') {
-        await expect(page.locator('.ndr-application-grid').first()).toBeVisible()
-        await expect(page.getByLabel('导入文件大小上限（MB）', { exact: true })).not.toHaveValue('')
+        await expect(page.getByRole('navigation', { name: '通用设置分区' }).getByRole('link')).toHaveCount(6)
+        await expect(page.getByLabel('正文字号', { exact: true })).toBeVisible()
+        await expect(page.getByTestId('settings-actions').getByRole('button', { name: '保存设置', exact: true })).toBeVisible()
+        await expect(page.getByRole('region', { name: '应用配置', exact: true })).toBeHidden()
       }
       if (item.name === 'bookmarks') {
         await expect(page.getByRole('button', { name: '重新读取书签', exact: true })).toBeEnabled()
