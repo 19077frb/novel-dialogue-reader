@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from sqlalchemy import func, select, text, update
@@ -13,6 +14,7 @@ from ..domain.enums import ErrorCode, JobState
 from ..storage.models import (
     Annotation,
     Bookmark,
+    BookVersion,
     Chapter,
     ChapterCharacterRoster,
     ContentNode,
@@ -120,6 +122,19 @@ def apply_repairs(
             raise ApiError.validation("章节名不能为空")
 
     previous: Chapter | None = None
+    version = session.get(BookVersion, payload.book_version_id)
+    toc = json.loads(version.toc_json) if version.toc_json is not None else None
+
+    def rename_target(chapter_id: str, title: str) -> None:
+        if toc is not None:
+            # Rename the deepest alias at the chapter's first navigation target.
+            # Later targets can identify independent subsections in the same chapter.
+            targets = [entry for entry in toc if entry["chapter_id"] == chapter_id]
+            if targets:
+                first_cp = min(entry["target_cp"] for entry in targets)
+                first_targets = [entry for entry in targets if entry["target_cp"] == first_cp]
+                first_targets[-1]["title"] = title
+
     for chapter in chapters:
         item = changes.get(chapter.id)
         if item and item.merge_previous:
@@ -192,9 +207,17 @@ def apply_repairs(
             )
             previous.end_cp = chapter.end_cp
             previous.title = item.title.strip()
+            rename_target(previous.id, previous.title)
+            if toc is not None:
+                for entry in toc:
+                    if entry["chapter_id"] == chapter.id:
+                        entry["chapter_id"] = previous.id
             session.delete(chapter)
         else:
             if item:
                 chapter.title = item.title.strip()
+                rename_target(chapter.id, chapter.title)
             previous = chapter
+    if toc is not None:
+        version.toc_json = json.dumps(toc, ensure_ascii=False)
     book.version += 1

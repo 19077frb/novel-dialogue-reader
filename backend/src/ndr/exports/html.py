@@ -18,7 +18,22 @@ def _image_data_url(media_type: str | None, data: bytes) -> str:
     return f"data:{kind};base64,{base64.b64encode(data).decode('ascii')}"
 
 
-def render_block(block: RenderedBlock, *, images: Mapping[str, bytes]) -> str:
+def render_block(
+    block: RenderedBlock, *, images: Mapping[str, bytes], anchor_cps: set[int] | None = None,
+) -> str:
+    def anchored_text(text: str, start_cp: int) -> str:
+        parts: list[str] = []
+        offset = 0
+        for cp in sorted(anchor_cps or ()):
+            position = cp - start_cp
+            if 0 <= position <= len(text):
+                parts.append(escape(text[offset:position]))
+                parts.append(f'<span id="toc-cp-{cp}"></span>')
+                offset = position
+                anchor_cps.discard(cp)
+        parts.append(escape(text[offset:]))
+        return "".join(parts)
+
     if block.node_type is ContentNodeType.IMAGE:
         resource_id = block.resource_id
         if not resource_id or resource_id not in images:
@@ -30,10 +45,13 @@ def render_block(block: RenderedBlock, *, images: Mapping[str, bytes]) -> str:
         return '<hr class="separator"/>'
     if block.node_type is ContentNodeType.HEADING:
         level = 3 if (block.level or 1) >= 1 else 3
-        return f'<h{level} class="node-heading">{escape(block.plain_text)}</h{level}>'
+        text = anchored_text(block.plain_text, block.start_cp or 0)
+        return f'<h{level} class="node-heading">{text}</h{level}>'
     parts: list[str] = []
+    run_start = block.start_cp or 0
     for run in block.runs:
-        text = escape(run.text)
+        text = anchored_text(run.text, run_start)
+        run_start += len(run.text)
         if run.quote_id and (run.color_class or run.label):
             classes = " ".join(name for name in (run.color_class,) if name)
             label = (

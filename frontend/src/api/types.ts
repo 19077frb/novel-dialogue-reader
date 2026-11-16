@@ -22,6 +22,7 @@ export type RosterConfirmCandidateIn = components['schemas']['RosterConfirmCandi
 export type RosterConfirmIn = components['schemas']['RosterConfirmIn']
 export type BookVersionOut = components['schemas']['BookVersionOut']
 export type ChapterOut = components['schemas']['ChapterOut']
+export type TocNodeOut = components['schemas']['TocNodeOut']
 export type ChapterRepairSuggestion = components['schemas']['ChapterRepairSuggestion']
 export type ChapterRepairIn = components['schemas']['ChapterRepairIn']
 export type ChapterProcessingCompleteOut = components['schemas']['ChapterProcessingCompleteOut']

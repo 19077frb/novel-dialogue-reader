@@ -208,6 +208,21 @@ npm config get cache
 
 源码版配置文件位于 `<仓库>/data/application-settings.json`，免安装版位于 `%LOCALAPPDATA%\NovelDialogueReader\data\application-settings.json`。切换书库不改变配置文件位置，也不搬迁数据。模型密钥不能写入 `.env` 或 JSON。
 
+### 离线目录维护
+
+已有 EPUB 的目录层级可显式从保存的原文件补齐。先正常结束任务并关闭服务；工具不会停止任务、重新导入或调用模型。以下命令从仓库根目录执行，先查看只读计划，再加 `--apply` 执行：
+
+```powershell
+uv run --project backend python -m ndr.storage.toc_repair --data-dir D:\Library\data --book-id BOOK_ID
+uv run --project backend python -m ndr.storage.toc_repair --data-dir D:\Library\data --book-id BOOK_ID --apply
+```
+
+工具取得书库锁和数据库独占访问后复查任务，校验原文件、正文摘要及全部现存章节边界，备份完整数据库，再迁移并写入目录元数据。旧解析器已并入相邻章节的无正文彩页保持原章节身份，不另建章节。只校正能从原目录确认的旧标题；人工改名、非空正文边界差异或在途/可恢复任务会阻止执行。执行前后校验其他业务字段，失败回滚，不执行VACUUM。重复执行相同计划不再写入或生成备份。
+
+结果中的 `backup_path` 是经过校验的完整压缩数据库，`metadata_backup_path` 保存本次目录修复前后的元数据。只回退目录时，使用同一命令增加 `--restore-metadata <metadata_backup_path>` 先预览，再加 `--apply`。回退要求书籍版本、目录和相关标题仍与修复结果一致，书籍版本号继续递增；后续编辑导致不一致时拒绝覆盖。完整数据库备份恢复会影响备份之后的其他修改，不能用整库覆盖替代目录回退。备份由维护者确认后管理，程序不会自动删除。
+
+目录树通过 `BookVersionOut.toc` 提供，生成接口定义沿用本项目 OpenAPI 流程。新增解析保留NCX/NAV的父子节点与精确锚点；TXT/无目录使用平铺，旧版本NULL目录保留兼容。导出快照冻结当前目录，目录变更后重新生成预览；历史快照不被改写。
+
 ### 日志排查与容量
 
 日志位于当前书库的 `logs/tasks.log`；轮转文件为 `tasks.log.1` 至 `.3`。每份最多 5 MiB，总量约 20 MiB，不按任务另建文件。新记录每行一个 JSON 对象，含 UTC `time`、`level`、`event` 和 `schema_version`；单条最多 8 KiB，超限保留关联标识与错误分类并标记截断。已有普通文本日志不重写，轮转期间可能与新格式共存。

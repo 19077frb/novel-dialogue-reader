@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { RotateCcw, X } from 'lucide-react'
 import { useGeneralSettings } from '../settings/preferences'
-import type { ChapterOut } from '../api/types'
+import type { ChapterOut, TocNodeOut } from '../api/types'
 import { cancelChapterProcessing, retryChapterProcessing } from './BatchProcessor'
 import type { ChapterProcessingProgress, ChapterProcessingState } from './BatchProcessor'
 import { CollapsibleBlock } from './CollapsibleBlock'
@@ -22,8 +22,9 @@ function chapterGroups(chapters: ChapterOut[]) {
 export interface ChapterNavigationProps {
   bookId?: string
   chapters: ChapterOut[]
+  toc?: TocNodeOut[] | null
   activeChapterId: string | null
-  onSelect: (chapter: ChapterOut) => void
+  onSelect: (chapter: ChapterOut, targetCp?: number) => void
   processingStates?: Record<string, ChapterProcessingProgress>
   onSetProcessingStatus?: (chapter: ChapterOut, processed: boolean) => Promise<ChapterOut>
 }
@@ -72,7 +73,47 @@ function progressLabel(progress: ChapterProcessingProgress): string {
   return STATE_LABELS[progress.state]
 }
 
-export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect, processingStates = {}, onSetProcessingStatus }: ChapterNavigationProps) {
+interface NavigationNode {
+  node: TocNodeOut
+  chapter?: ChapterOut
+  children: NavigationNode[]
+  chapters: ChapterOut[]
+}
+
+function navigationTree(toc: TocNodeOut[], chapters: ChapterOut[]) {
+  const byChapter = new Map(chapters.map(chapter => [chapter.id, chapter]))
+  const nodes = new Map<string, NavigationNode>()
+  for (const node of toc) {
+    if (!nodes.has(node.id)) nodes.set(node.id, { node, chapter: byChapter.get(node.chapter_id ?? ''), children: [], chapters: [] })
+  }
+  const roots: NavigationNode[] = []
+  for (const item of nodes.values()) {
+    const ancestors = new Set([item.node.id])
+    let parent = item.node.parent_id
+    while (parent && !ancestors.has(parent)) {
+      ancestors.add(parent)
+      parent = nodes.get(parent)?.node.parent_id ?? null
+    }
+    const owner = parent ? undefined : nodes.get(item.node.parent_id ?? '')
+    if (owner) owner.children.push(item)
+    else roots.push(item)
+  }
+  const covered = new Set<string>()
+  const collect = (item: NavigationNode): ChapterOut[] => {
+    const own = item.chapter ? [item.chapter] : []
+    item.chapters = [...new Map([...own, ...item.children.flatMap(collect)].map(chapter => [chapter.id, chapter])).values()]
+    for (const chapter of own) covered.add(chapter.id)
+    return item.chapters
+  }
+  roots.forEach(collect)
+  return { roots, remaining: chapters.filter(chapter => !covered.has(chapter.id)) }
+}
+
+export function ChapterNavigation(props: ChapterNavigationProps) {
+  return <ChapterNavigationContent key={props.bookId ?? ''} {...props} />
+}
+
+function ChapterNavigationContent({ bookId, chapters, toc, activeChapterId, onSelect, processingStates = {}, onSetProcessingStatus }: ChapterNavigationProps) {
   const [settings] = useGeneralSettings()
   const selectionTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const statusLocks = useRef(new Set<string>())
@@ -81,9 +122,23 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
   useEffect(() => () => { if (selectionTimer.current) clearTimeout(selectionTimer.current) }, [bookId, canToggle])
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
-  const groups = chapterGroups(chapters)
+  const groups = useMemo(() => chapterGroups(chapters), [chapters])
+  const tree = useMemo(() => toc == null ? null : navigationTree(toc, chapters), [toc, chapters])
   const activeGroup = groups.find(group => group.chapters.some(chapter => chapter.id === activeChapterId))?.key
   const [openVolumes, setOpenVolumes] = useState<Record<string, boolean>>({})
+  const ancestors: string[] = []
+  const findActive = (items: NavigationNode[]) => {
+    for (const item of items) {
+      if (item.children.length && item.chapters.some(chapter => chapter.id === activeChapterId)) ancestors.push(item.node.id)
+      findActive(item.children)
+    }
+  }
+  if (tree) findActive(tree.roots)
+  const ancestorKey = JSON.stringify(ancestors)
+  useEffect(() => {
+    const ids = JSON.parse(ancestorKey) as string[]
+    setOpenVolumes(current => ({ ...current, ...Object.fromEntries(ids.map(id => [id, true])) }))
+  }, [ancestorKey, activeChapterId])
   useEffect(() => {
     if (activeGroup) setOpenVolumes(current => ({ ...current, [activeGroup]: true }))
   }, [activeGroup, activeChapterId])
@@ -110,7 +165,7 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
       completedWindows: 0, totalWindows: 0, error: null,
     }
   }
-  const renderChapters = (items: ChapterOut[], volume: string | null) => <ol>
+  const renderChapters = (items: ChapterOut[], volume: string | null, navigation?: TocNodeOut) => <ol>
           {items.map((sourceChapter) => {
             const manual = manualUpdates[sourceChapter.id]
             const chapter = manual?.source === sourceChapter ? manual.saved : sourceChapter
@@ -124,7 +179,8 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
               || progress.cancelRequested || (progress.pendingTasks ?? 0) > 0 || ['queued', 'roster', 'dialogue'].includes(progress.state))
             const retryable = !cancellable && ['failed', 'stopped'].includes(progress.state)
             const label = `${cancellable ? '取消' : '重试'}${chapter.title ?? `第 ${chapter.ordinal + 1} 节`}的任务`
-            const displayTitle = volume ? chapter.title?.slice(volume.length + 3) : chapter.title
+            const displayTitle = navigation ? navigation.title : volume ? chapter.title?.slice(volume.length + 3) : chapter.title
+            const select = () => navigation?.target_cp != null ? onSelect(chapter, navigation.target_cp) : onSelect(chapter)
             return (
               <li key={chapter.id} className="ndr-chapter-row">
                 <button type="button"
@@ -134,9 +190,9 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
                   aria-current={active ? 'true' : undefined}
                   disabled={Boolean(busy[chapter.id]) && statusLocks.current.has(chapter.id)}
                   onClick={event => {
-                    if (!canToggle || event.detail === 0) { onSelect(chapter); return }
+                    if (!canToggle || event.detail === 0) { select(); return }
                     if (selectionTimer.current) clearTimeout(selectionTimer.current)
-                    selectionTimer.current = setTimeout(() => onSelect(chapter), 500)
+                    selectionTimer.current = setTimeout(select, 500)
                   }}>
                   <span className="ndr-chapter-title" onDoubleClick={event => {
                     event.stopPropagation(); toggleStatus(sourceChapter, progress.state !== 'processed')
@@ -171,6 +227,19 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
       .catch(reason => setError(`${chapter.title ?? '本章'}：${reason instanceof Error ? reason.message : '操作失败'}`))
       .finally(() => setBusy(current => ({ ...current, [chapter.id]: false })))
   }
+  const renderTree = (items: NavigationNode[]) => <ol className="ndr-toc-tree">
+    {items.map(item => <li key={item.node.id}>
+      {item.children.length > 0 ? <CollapsibleBlock title={item.node.title}
+        summary={<>
+          {item.chapter && renderChapters([item.chapter], null, item.node)}
+          <VolumeProgressSummary volume={item.node.title} chapters={item.chapters} progressOf={effectiveProgress} />
+        </>}
+        open={openVolumes[item.node.id] ?? ancestors.includes(item.node.id)}
+        onOpenChange={open => setOpenVolumes(current => ({ ...current, [item.node.id]: open }))}>
+        {renderTree(item.children)}
+      </CollapsibleBlock> : item.chapter ? renderChapters([item.chapter], null, item.node) : <span>{item.node.title}</span>}
+    </li>)}
+  </ol>
   return (
     <nav className="ndr-chapter-nav" aria-label="章节导航">
       {error && <p className="status-error" role="alert">{error}</p>}
@@ -188,7 +257,7 @@ export function ChapterNavigation({ bookId, chapters, activeChapterId, onSelect,
             <span className="failed">失败/已停止</span>
             <span className="skipped">自动跳过处理</span>
           </p>
-          {groups.map(group => group.volume ? (
+          {tree ? <>{renderTree(tree.roots)}{renderChapters(tree.remaining, null)}</> : groups.map(group => group.volume ? (
             <CollapsibleBlock key={group.key} title={group.volume}
               summary={<VolumeProgressSummary volume={group.volume} chapters={group.chapters} progressOf={effectiveProgress} />}
               open={openVolumes[group.key] ?? group.key === activeGroup}

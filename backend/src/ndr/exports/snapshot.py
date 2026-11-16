@@ -171,6 +171,7 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
                                 for chapter in session.scalars(select(Chapter).where(
                                     Chapter.book_version_id == version.id))}
     payload["warnings"] = warnings
+    payload["toc"] = json.loads(version.toc_json) if version.toc_json is not None else None
     payload["snapshot_version"] = EXPORT_SNAPSHOT_VERSION
     payload["chapter_processing"] = {
         chapter.id: {"processed": chapter.dialogue_processed,

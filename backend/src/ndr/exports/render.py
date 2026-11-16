@@ -24,7 +24,7 @@ from ..ingest.query import load_canonical_text
 from ..intervals import SpanIndex
 from ..storage.models import Book, BookVersion, Chapter, ContentNode
 
-EXPORTER_VERSION = "exporter-6"
+EXPORTER_VERSION = "exporter-7"
 
 EXPORT_PALETTE = BASE_COLORS
 
@@ -81,6 +81,8 @@ class RenderedChapter:
     ordinal: int
     title: str
     blocks: list[RenderedBlock] = field(default_factory=list)
+    start_cp: int | None = None
+    end_cp: int | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +102,7 @@ class RenderedBook:
     legend: list[RenderedLegendEntry] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     visible_horizon_cp: int | None = None
+    toc: list[dict[str, Any]] | None = None
 
     @property
     def plain_text(self) -> str:
@@ -356,6 +359,10 @@ def render_book(
                 ordinal=chapter.ordinal,
                 title=chapter.title or f"第 {chapter.ordinal + 1} 章",
                 blocks=blocks,
+                start_cp=chapter.start_cp,
+                end_cp=(chapter.end_cp if max_blocks is None else
+                        max((block.end_cp for block in blocks if block.end_cp is not None),
+                            default=chapter.start_cp)),
             )
         )
 
@@ -381,6 +388,7 @@ def render_book(
         legend=legend,
         warnings=list(projection_payload.get("warnings") or []),
         visible_horizon_cp=projection_payload.get("visible_horizon_cp"),
+        toc=projection_payload.get("toc"),
     )
 
 

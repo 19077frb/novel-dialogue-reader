@@ -117,7 +117,7 @@ def test_annotation_scene_index_keeps_real_scene_queries_and_fk_coverage(migrate
 
 
 def test_annotation_index_upgrade_downgrade_preserves_data_and_is_repeatable(tmp_settings):
-    run_migrations(tmp_settings, revision="0019")
+    run_migrations(tmp_settings)
     engine = create_db_engine(tmp_settings)
     try:
         with Session(engine) as session:
@@ -133,6 +133,7 @@ def test_annotation_index_upgrade_downgrade_preserves_data_and_is_repeatable(tmp
                 dependency_hash="historical-dependency", evidence_refs_json='["evidence"]',
                 visible_from_cp=quote.end_cp))
             session.commit()
+        command.downgrade(build_alembic_config(tmp_settings), "0019")
         with closing(sqlite3.connect(tmp_settings.database_path)) as db:
             digest = _logical_digest(db)
         old_indexes = inspect(engine).get_indexes("annotations")
