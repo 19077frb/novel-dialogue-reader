@@ -7,7 +7,7 @@ import { ApiError } from '../api/client'
 import type { BookOut, ImportResult } from '../api/types'
 import { SortableBookShelf } from '../components/SortableBookShelf'
 import { Button } from '../components/ui/button'
-import { Library, Upload } from 'lucide-react'
+import { BookOpen, Library, Upload } from 'lucide-react'
 import { ImportDropzone } from '../components/ImportDropzone'
 import { JobPanel } from '../components/JobPanel'
 import { clearBatchProgress, isBatchRunning } from '../components/BatchProcessor'
@@ -106,7 +106,7 @@ export default function LibraryPage() {
     if (!window.confirm(
       `确定删除《${book.title}》吗？\n导入时间：${new Date(book.created_at).toLocaleString('zh-CN')}\n` +
       `书籍 ID：${book.id}\n\n将永久删除本书的阅读进度、人物、标注和任务记录，` +
-      '并删除书籍及导出文件，此操作无法撤销。同名的其他书籍不会受影响。',
+      '并删除书籍及导出文件，此操作无法撤销。',
     )) return
     deleteMutation.mutate(book)
   }
@@ -121,15 +121,35 @@ export default function LibraryPage() {
         <div>
           <h2><Library size={22} aria-hidden="true" /> 书架</h2>
           <p className="hint">
-            导入 TXT/EPUB 书籍后即可阅读原文；识别说话人后按人物着色，可随时导出。
+            导入书籍，继续上次阅读。
           </p>
         </div>
+        <a className="ndr-button" href="#import-book"><Upload size={16} aria-hidden="true" />导入书籍</a>
       </header>
-      <section className="card">
-        <h2>导入书籍</h2>
+      <div className="ndr-library-layout">
+      <section className="card ndr-library-books" aria-label="全部书籍">
+        {deleteError && <p className="status-error" role="alert" data-testid="delete-book-error">{deleteError}</p>}
+        {deleteNotice && <p className="status-ok" role="status">{deleteNotice}</p>}
+        {books.isPending && <p className="hint">正在读取书架…</p>}
+        {books.isError && <ReadErrorNotice label="书架读取失败" error={books.error} retrying={books.isFetching} onRetry={() => void books.refetch()} />}
+        <OperationTimer {...deleteClock.clock} />
+        {books.isSuccess && books.data.items.length === 0 && (
+          <div className="ndr-library-empty" data-testid="library-empty">
+            <BookOpen size={40} strokeWidth={1.2} aria-hidden="true" />
+            <h3>把第一本书放上书架</h3>
+            <p className="hint">导入 TXT 或 EPUB，即可开始阅读。人物与对白识别可在阅读时配置。</p>
+            <a className="ndr-button" href="#import-book">导入第一本书</a>
+          </div>
+        )}
+        {books.isSuccess && books.data.items.length > 0 && (
+          <SortableBookShelf books={books.data.items} onDelete={handleDelete}
+            deletingId={deleteMutation.isPending ? deleteMutation.variables?.id : undefined} />
+        )}
+      </section>
+      <section className="card ndr-library-import" id="import-book" aria-labelledby="import-heading">
+        <h2 id="import-heading"><Upload size={18} aria-hidden="true" /> 导入书籍</h2>
         <p className="hint">
-          支持 TXT 与 EPUB。TXT 需要选对编码；不确定就保持“自动检测”，解析失败时会给出可用的编码候选与预演，
-          不会静默丢字。
+          支持 TXT 与 EPUB，选择文件开始阅读。
         </p>
         <ImportDropzone onFile={setFile} disabled={importMutation.isPending} />
 
@@ -189,7 +209,7 @@ export default function LibraryPage() {
               {result.encoding ? `，编码 ${result.encoding}` : '（EPUB 文档自带编码）'}
               {result.reused_version ? '（复用已有版本）' : ''}
             </p>
-            <p className="hint">{result.reused_version ? '已复用原来的预处理结果，不覆盖你的调整。' : `自动预处理完成：章节修复 ${result.chapter_repairs_applied ?? 0} 处，引号修复 ${result.quote_repairs_applied ?? 0} 处。`}</p>
+            <p className="hint">{result.reused_version ? '已沿用本书的预处理结果与调整。' : `自动预处理完成：章节修复 ${result.chapter_repairs_applied ?? 0} 处，引号修复 ${result.quote_repairs_applied ?? 0} 处。`}</p>
             <Link className="ndr-button" to={`/books/${result.book_id}/preprocessing`}>检查预处理结果</Link>
             {warnings.length > 0 && (
               <ul className="hint">
@@ -236,7 +256,7 @@ export default function LibraryPage() {
             )}
             {preview && (
               <details open>
-                <summary>有损预演（只用于挑编码，不是正文）</summary>
+                <summary>编码预演（用于挑选编码）</summary>
                 <pre data-testid="import-preview">{preview}</pre>
               </details>
             )}
@@ -244,22 +264,7 @@ export default function LibraryPage() {
         )}
       </section>
 
-      <section className="card ndr-library-books" aria-label="全部书籍">
-        {deleteError && <p className="status-error" role="alert" data-testid="delete-book-error">{deleteError}</p>}
-        {deleteNotice && <p className="status-ok" role="status">{deleteNotice}</p>}
-        {books.isPending && <p className="hint">正在读取书架…</p>}
-        {books.isError && <ReadErrorNotice label="书架读取失败" error={books.error} retrying={books.isFetching} onRetry={() => void books.refetch()} />}
-        <OperationTimer {...deleteClock.clock} />
-        {books.isSuccess && books.data.items.length === 0 && (
-          <p className="hint" data-testid="library-empty">
-            还没有书。导入 TXT 或 EPUB 后即可阅读；不需要填写任何 API 配置。
-          </p>
-        )}
-        {books.isSuccess && books.data.items.length > 0 && (
-          <SortableBookShelf books={books.data.items} onDelete={handleDelete}
-            deletingId={deleteMutation.isPending ? deleteMutation.variables?.id : undefined} />
-        )}
-      </section>
+      </div>
     </div>
   )
 }

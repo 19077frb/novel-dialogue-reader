@@ -1,3 +1,4 @@
+import { revealProfile } from './profiles'
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,7 +22,7 @@ async function createFakeProfile(page: Page, name: string) {
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill('fake-model')
   await page.getByTestId('profile-save').click()
-  await expect(page.getByTestId('profile-card').filter({ hasText: name })).toBeVisible()
+  await revealProfile(page, name)
 }
 
 async function importFile(page: Page, fileName: string) {
@@ -53,7 +54,7 @@ test.describe('预览与按章处理', () => {
     await expect(page.getByTestId('range-summary')).toContainText('本次范围：0 – ')
     await page
       .getByTestId('preview-profile')
-      .selectOption({ label: `${profileName} · fake-provider · fake-model` })
+      .selectOption({ label: `${profileName} · fake-model` })
     await confirmChapterRoster(page)
 
     // 本地估算：不调用模型
@@ -116,7 +117,7 @@ test.describe('预览与按章处理', () => {
     await openPreview(page, '原创 ruby/插图样例')
     await page
       .getByTestId('preview-profile')
-      .selectOption({ label: `${profileName} · fake-provider · fake-model` })
+      .selectOption({ label: `${profileName} · fake-model` })
     await confirmChapterRoster(page)
 
     await page.getByTestId('preview-run').click()
@@ -136,7 +137,7 @@ test.describe('预览与按章处理', () => {
     await openPreview(page, 'sample-gb18030')
     await page
       .getByTestId('preview-profile')
-      .selectOption({ label: `${profileName} · fake-provider · fake-model` })
+      .selectOption({ label: `${profileName} · fake-model` })
 
     // 核对范围：切到第二章，范围随之变化（来自目录的真实起止码点）
     const chapterOption = page.getByTestId('range-chapter').locator('option').nth(2)

@@ -347,7 +347,7 @@ describe('CharactersPage', () => {
     } as never)
     renderPage()
     await screen.findByText('自动合并：处理中')
-    expect(screen.getAllByText(/^颜色由程序生成，保存不调用模型/)).toHaveLength(1)
+    expect(screen.getAllByText(/^选择人物颜色后点击“保存颜色”/)).toHaveLength(1)
     expect(screen.getAllByText('本书任务或合并决定正在执行，请等待结束或先停止任务后再编辑人物。')).toHaveLength(1)
     for (const button of screen.getAllByRole('button', { name: '展开编辑与合并' })) await userEvent.click(button)
     for (const input of screen.getAllByLabelText('姓名')) {
@@ -494,7 +494,7 @@ describe('CharactersPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('第2组与第1组冲突')
     expect(screen.getByText('查看校验详情（1 处）')).toBeInTheDocument()
     expect(screen.getByText(/字段：source_ids\[0\]/)).toBeInTheDocument()
-    expect(screen.getByText(/不会自动再次调用模型/)).toBeInTheDocument()
+    expect(screen.getByText(/请核对问题后决定是否重新分析/)).toBeInTheDocument()
     expect(api.startCharacterAutoMerge).not.toHaveBeenCalled()
     expect(api.confirmCharacterAutoMerge).not.toHaveBeenCalled()
   })

@@ -88,7 +88,7 @@ describe('JobPanel', () => {
     vi.mocked(booksApi.fetchJob).mockResolvedValue({ ...JOB, state: 'RUNNING',
       progress: { stage: 'local_finalization_pending' } })
     renderWithProviders(<JobPanel jobId="j1" />)
-    expect(await screen.findByText('模型任务已退出，正在等待数据库保存状态；不会重新调用模型。')).toBeInTheDocument()
+    expect(await screen.findByText('模型任务已退出，正在等待处理结果保存完成。')).toBeInTheDocument()
     expect(screen.getByTestId('job-state')).toHaveTextContent('正在保存状态')
   })
   it.each([
@@ -116,7 +116,7 @@ describe('JobPanel', () => {
     await userEvent.click(toggle)
     expect(screen.getByText(/人物关联有争议：姓名指向同一个人/)).toBeVisible()
     expect(screen.getByText(/第一视角建议：叙述者可能是林舟/)).toBeVisible()
-    expect(screen.getByText(/不会自动修改本章主人公/)).toBeVisible()
+    expect(screen.getByText(/请回到本章人物确认，查看原文后调整主人公/)).toBeVisible()
     expect(booksApi.fetchJob).toHaveBeenCalledTimes(1)
   })
   it('keeps bounded auxiliary diagnostics visible from a restored checkpoint', async () => {

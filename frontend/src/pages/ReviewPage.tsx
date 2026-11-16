@@ -167,8 +167,7 @@ export default function ReviewPage() {
         <div>
           <h2>待确认队列：{book.data?.title ?? '载入中…'}</h2>
           <p className="hint">
-            这里只列出**已知的待确认项**。队列清空不等于全部识别正确：
-            过滤条件与「未知/暂定/过期」数量都要一起看。
+            按章节检查对白归属与场景边界，结合各状态数量完成复核。
           </p>
         </div>
         <nav className="ndr-book-nav" aria-label="本书导航">
@@ -179,19 +178,8 @@ export default function ReviewPage() {
         </nav>
       </header>
 
-      <section className="card">
-        <button type="button" onClick={() => cleanup.mutate()} disabled={Boolean(cleanupBlocker)}
-          title={cleanupBlocker ?? undefined} data-testid="cleanup-dependency-reviews">
-          清理历史误触发的重新确认
-        </button>
-        <p className="hint">清理本书因改单句而连带产生的历史待确认记录，不改变人物归属、不调用模型。真实不确定项、结构调整及来源不明的记录会保留；有任务运行时不能清理。</p>
-        {cleanupBlocker && <p className="hint" role="status">{cleanupBlocker}</p>}
-        {cleanup.data && <p role="status">已清理 {cleanup.data.resolved_records} 条误触发记录，恢复 {cleanup.data.restored_quotes} 句正常显示；保留 {cleanup.data.preserved_records} 条需继续检查的记录。</p>}
-        {cleanup.isError && <p className="status-error" role="alert">清理失败：{cleanup.error.message}</p>}
-      </section>
-
-      <section className="card ndr-review-filters">
-        <label>
+      <section className="card ndr-review-filters" aria-label="筛选待确认项">
+        <label className="ndr-field">
           章节
           <select
             value={chapterId}
@@ -206,7 +194,7 @@ export default function ReviewPage() {
             ))}
           </select>
         </label>
-        <label>
+        <label className="ndr-field">
           原因
           <select
             value={reason}
@@ -221,7 +209,7 @@ export default function ReviewPage() {
             ))}
           </select>
         </label>
-        <label>
+        <label className="ndr-field">
           状态
           <select
             value={queueStatus}
@@ -244,13 +232,12 @@ export default function ReviewPage() {
         )}
       </section>
 
-      <section className="card">
+      <section className="card ndr-review-results">
         {queue.isPending && <p className="hint">正在读取队列…</p>}
         {queue.isError && <ReadErrorNotice label="队列读取失败" error={queue.error} retrying={queue.isFetching} onRetry={() => void queue.refetch()} />}
         {queue.isSuccess && items.length === 0 && (
           <p className="hint" data-testid="review-empty">
-            当前筛选条件下没有待确认项。注意：这**不等于**整本书已完全确认——请同时查看
-            「未知/暂定/过期」数量，或调整筛选条件。
+            当前筛选条件下没有待确认项。可调整章节、原因或状态筛选，继续检查其他记录。
           </p>
         )}
         <CollapsibleBlock title="待确认列表" summary={`当前已加载 ${groupedItems.length} 项`}>
@@ -314,6 +301,18 @@ export default function ReviewPage() {
           })}
         </PaginatedItems></div>
         </CollapsibleBlock>
+      </section>
+
+      <section className="card ndr-review-maintenance">
+        <h3>整理历史记录</h3>
+        <p className="hint">清理本书因改单句而连带产生的历史待确认记录，恢复对应对白的显示。真实不确定项、结构调整及来源不明的记录继续保留。请在本书任务结束后操作。</p>
+        <button type="button" onClick={() => cleanup.mutate()} disabled={Boolean(cleanupBlocker)}
+          title={cleanupBlocker ?? undefined} data-testid="cleanup-dependency-reviews">
+          清理历史误触发的重新确认
+        </button>
+        {cleanupBlocker && <p className="hint" role="status">{cleanupBlocker}</p>}
+        {cleanup.data && <p role="status">已清理 {cleanup.data.resolved_records} 条误触发记录，恢复 {cleanup.data.restored_quotes} 句正常显示；保留 {cleanup.data.preserved_records} 条需继续检查的记录。</p>}
+        {cleanup.isError && <p className="status-error" role="alert">清理失败：{cleanup.error.message}</p>}
       </section>
 
       <QuoteDetailDrawer

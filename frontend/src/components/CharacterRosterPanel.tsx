@@ -235,14 +235,14 @@ export function CharacterRosterPanel({
   const analyzeBlocker = disabled ? '本书处理任务正在运行，请等待结束或先停止任务。'
     : skipReason ? skipReason
     : analyze.isPending ? '正在创建人物分析任务，请等待提交完成。'
-    : textlessCompleted ? '本章没有正文文字，已完成，无需再分析人物。'
+    : textlessCompleted ? '本章没有正文文字，已标为完成。'
     : recent.isPending ? '正在读取已有的人物任务，读取完成后再分析。'
     : recent.isError ? '已有任务读取失败，请先点击“重新读取任务”。'
     : job.data && !TERMINAL_JOB_STATES.has(job.data.state) ? '本章人物分析已有任务在任务队列中等待执行或正在执行，请等待完成或先停止任务。'
     : !profileId ? '请先在上方选择模型配置，再分析本章人物。' : null
   const confirmBlocker = confirm.isPending ? '正在保存人物名单，请等待保存完成。'
     : !draftCurrent ? '人物名单正在更新，请等待读取完成后再确认。'
-    : textlessCompleted ? '无文字章节无需确认人物或主人公，不必为了启用按钮而添加人物。'
+    : textlessCompleted ? '本章没有正文文字，人物确认已完成。'
     : acceptedCount === 0 ? '请先分析或手动添加人物，并勾选至少一个“确认本章出现”。'
     : !drafts.some(item => item.accepted && item.temp_ref === povTempRef) ? '请先为已勾选的人物选择“本章第一视角主人公”。'
     : !canConfirm ? '请为已勾选的人物填写姓名，或选择已有全书人物，再确认名单。' : null
@@ -340,7 +340,7 @@ export function CharacterRosterPanel({
 
       {analyzeBlocker && !textlessCompleted && <p className="hint" role="status">{analyzeBlocker}</p>}
 
-      {textlessCompleted && <p className="hint">本章没有正文文字，已完成，无需人物识别或对白处理，不消耗模型 Token。</p>}
+      {textlessCompleted && <p className="hint">本章没有正文文字，已直接标为完成。</p>}
       {roster.isPending && (
         <p className="hint" data-testid="roster-loading">
           正在读取人物名单…

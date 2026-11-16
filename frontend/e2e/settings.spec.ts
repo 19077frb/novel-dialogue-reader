@@ -1,3 +1,4 @@
+import { revealProfile } from './profiles'
 import { expect, test } from '@playwright/test'
 
 /**
@@ -71,7 +72,7 @@ test.describe('模型配置', () => {
   test('新建、编辑、清除密钥与删除配置', async ({ page }) => {
     const name = `E2E 网关 ${Date.now()}`
     await page.goto('/settings/models')
-    await expect(page.getByTestId('protocol-capabilities')).toContainText('json_schema')
+    await expect(page.getByTestId('protocol-capabilities')).toContainText('OpenAI 接口格式')
 
     await page.getByTestId('profile-name').fill(name)
     await page.getByTestId('profile-base-url').fill('https://api.example.com/v1')
@@ -81,9 +82,9 @@ test.describe('模型配置', () => {
     await page.getByTestId('profile-thinking-effort').selectOption('high')
     await page.getByTestId('profile-save').click()
 
-    const card = page.getByTestId('profile-card').filter({ hasText: name })
+    const card = await revealProfile(page, name)
     await expect(card).toContainText('已保存密钥')
-    await expect(card).toContainText('session')
+    await expect(card).toContainText('仅本次会话')
     // 密钥绝不回显在页面上
     await expect(page.locator('body')).not.toContainText(SECRET)
 
@@ -134,9 +135,9 @@ test.describe('模型配置', () => {
     await page.getByTestId('credential-mode-none').check()
     await page.getByTestId('profile-save').click()
 
-    const card = page.getByTestId('profile-card').filter({ hasText: name })
+    const card = await revealProfile(page, name)
     await expect(card).toContainText('未保存密钥')
-    await expect(card).toContainText('none')
+    await expect(card).toContainText('不使用密钥')
     await card.getByRole('button', { name: '删除' }).click()
     await expect(card).toHaveCount(0)
   })
@@ -151,16 +152,16 @@ test.describe('模型配置', () => {
     await page.getByTestId('profile-model').fill('fake-model')
     await page.getByTestId('profile-save').click()
 
-    const card = page.getByTestId('profile-card').filter({ hasText: name })
+    const card = await revealProfile(page, name)
     await expect(card).toContainText(name)
     await card.getByRole('button', { name: '测试连接' }).click()
 
     const result = page.getByTestId('connection-result')
     await expect(result).toContainText('连接成功')
     await expect(result).toContainText('fake-provider')
-    await expect(result).toContainText('未知（提供方未返回 usage，不按 0 计）')
+    await expect(result).toContainText('未知（模型服务未返回用量）')
     // 明确标注这是测试适配器，不是真实模型
-    await expect(page.getByTestId('fake-provider-warning')).toContainText('没有访问任何真实服务')
+    await expect(page.getByTestId('fake-provider-warning')).toContainText('本地模拟测试完成，结果用于验证界面流程')
 
     // 清理：只删除本用例创建的配置
     await card.getByRole('button', { name: '删除' }).click()

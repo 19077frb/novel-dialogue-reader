@@ -1,3 +1,4 @@
+import { revealProfile } from './profiles'
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -44,7 +45,7 @@ async function createProfile(
     const patched = await page.request.patch(`/api/model-profiles/${profile.id}`, { data: { params: JSON.parse(input.params) } })
     expect(patched.ok()).toBeTruthy()
   }
-  await expect(page.getByTestId('profile-card').filter({ hasText: input.name })).toBeVisible()
+  await revealProfile(page, input.name)
 }
 
 async function openPreview(page: Page, title = 'sample-utf8') {
@@ -74,7 +75,7 @@ test.describe('预算与故障恢复', () => {
     await openPreview(page)
     await page
       .getByTestId('preview-profile')
-      .selectOption({ label: `${profileName} · fake-provider · fake-model` })
+      .selectOption({ label: `${profileName} · fake-model` })
     await confirmChapterRoster(page)
 
     await page.getByTestId('budget-max-input').fill('1')
@@ -87,7 +88,7 @@ test.describe('预算与故障恢复', () => {
     await expect(page.getByTestId('recovery-summary')).toContainText('预算')
     await expect(page.getByTestId('job-action-new_job')).toContainText('提高预算后重新处理')
     // 默认不会自动重算：这里必须由用户显式点
-    await expect(page.getByTestId('recompute-entry')).toContainText('不会')
+    await expect(page.getByTestId('recompute-entry')).toContainText('可调整预算重新处理')
 
     await page.getByTestId('budget-max-input').fill('200000')
     await page.getByTestId('preview-recompute').click()
@@ -110,11 +111,11 @@ test.describe('预算与故障恢复', () => {
     await openPreview(page, 'sample-gb18030')
     await page
       .getByTestId('preview-profile')
-      .selectOption({ label: `${rosterProfileName} · fake-provider · fake-model` })
+      .selectOption({ label: `${rosterProfileName} · fake-model` })
     await confirmChapterRoster(page)
     await page
       .getByTestId('preview-profile')
-      .selectOption({ label: `${profileName} · chat-completions-compatible · fake-model-no-key` })
+      .selectOption({ label: `${profileName} · fake-model-no-key` })
 
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('失败', { timeout: 30_000 })
@@ -138,7 +139,7 @@ test.describe('预算与故障恢复', () => {
     await openPreview(page, '原创 ruby/插图样例')
     await page
       .getByTestId('preview-profile')
-      .selectOption({ label: `${profileName} · fake-provider · fake-model-timeout` })
+      .selectOption({ label: `${profileName} · fake-model-timeout` })
     await confirmChapterRoster(page)
 
     await page.getByTestId('preview-run').click()

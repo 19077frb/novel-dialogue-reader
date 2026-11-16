@@ -118,7 +118,7 @@ describe('ExportDialog', () => {
     await screen.findByTestId('export-preview')
     await userEvent.click(screen.getByTestId('export-generate'))
     await waitFor(() => expect(exportsApi.fetchExportArtifact).toHaveBeenCalledWith('a1', expect.anything()))
-    expect(screen.getByTestId('export-progress')).toHaveTextContent('正在生成或保存')
+    expect(screen.getByTestId('export-progress')).toHaveTextContent('正在本地生成或保存')
     expect(screen.queryByTestId('export-failed')).not.toBeInTheDocument()
     await act(async () => status.resolve(artifact()))
     expect(await screen.findByTestId('export-download-link')).toBeInTheDocument()

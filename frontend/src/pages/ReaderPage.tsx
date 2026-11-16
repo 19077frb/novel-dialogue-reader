@@ -500,7 +500,7 @@ export default function ReaderPage() {
               )}
               {annotations.isError && (
                 <p className="hint" data-testid="annotations-error">
-                  对白标注读取失败（原文不受影响）。
+                  对白标注读取失败，请稍后重试。
                 </p>
               )}
               {showAnnotations && (annotations.data?.legend?.length ?? 0) > 0 && (

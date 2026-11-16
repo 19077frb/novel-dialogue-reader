@@ -65,7 +65,7 @@ export function BookCard({ book, onDelete, deleting = false }: {
       )}
       </CardContent>
       <CardFooter className="ndr-book-actions">
-        {deleting ? <p role="status">正在清理书籍记录，请等待；暂不能阅读。</p> : <Link className="ndr-button ndr-primary" to={`/books/${book.id}/read`}>
+        {deleting ? <p role="status">正在清理书籍记录，请等待完成。</p> : <Link className="ndr-button ndr-primary" to={`/books/${book.id}/read`}>
           开始阅读
           <ArrowUpRight size={15} aria-hidden="true" />
         </Link>}
@@ -74,7 +74,7 @@ export function BookCard({ book, onDelete, deleting = false }: {
           className="ndr-danger"
           variant="danger"
           disabled={deleting}
-          title={deleting ? '删除正在进行，请等待书籍清理完成，不要重复删除。' : undefined}
+          title={deleting ? '删除正在进行，请等待书籍清理完成。' : undefined}
           onClick={() => onDelete(book)}
           data-testid={`delete-book-${book.id}`}
         ><Trash2 size={14} aria-hidden="true" />{deleting ? '正在删除…' : '删除'}</Button>}

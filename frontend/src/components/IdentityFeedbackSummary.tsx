@@ -22,7 +22,7 @@ export function IdentityFeedbackSummary({ checkpoint }: { checkpoint: unknown })
   const count = entries.reduce((total, entry) => total + entry.issues.length, 0)
   return <CollapsibleBlock title="人物名单反馈" defaultOpen={false}
     summary={`${entries.length} 个窗口已收到反馈，提出 ${count} 个问题；反馈不是最终确认结果。`}>
-    <p className="hint">归属建议仍需复核与裁决，争议会保留待确认。第一视角建议不会自动修改本章主人公；可回到本章人物确认查看原文后调整。</p>
+    <p className="hint">归属建议仍需复核与裁决，争议会保留待确认。第一视角建议供核对参考；请回到本章人物确认，查看原文后调整主人公。</p>
     {entries.slice(-20).map((entry, index) => <section key={entry.id}>
       <h4>窗口反馈 {Math.max(0, entries.length - 20) + index + 1}</h4>
       {entry.issues.length === 0 ? <p className="hint">本次反馈没有提出名单问题，不代表已经人工核实。</p>

@@ -185,7 +185,7 @@ export function CorrectionForm({
               <option key={item.value} value={item.value}>{item.label}</option>
             ))}
           </select>
-          <span className="hint">发声、心声和引用均可指定人物，不会强制改为发声。</span>
+          <span className="hint">发声、心声和引用均可指定人物，并保留所选类型。</span>
         </label>
       )}
 
@@ -224,7 +224,7 @@ export function CorrectionForm({
         data-testid="correction-submit"
         title={disabledReason}
       >
-        {busy ? '提交中…' : '确认更正（不调用模型）'}
+        {busy ? '提交中…' : '确认更正（人工保存）'}
       </button>
       {disabledReason && <p className="hint" role="status">{disabledReason}</p>}
     </div>

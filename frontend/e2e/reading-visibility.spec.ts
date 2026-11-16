@@ -1,3 +1,4 @@
+import { revealProfile } from './profiles'
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -29,7 +30,7 @@ async function createProfile(page: Page, input: { name: string; model?: string; 
     const patched = await page.request.patch(`/api/model-profiles/${profile.id}`, { data: { params: JSON.parse(input.params) } })
     expect(patched.ok()).toBeTruthy()
   }
-  await expect(page.getByTestId('profile-card').filter({ hasText: input.name })).toBeVisible()
+  await revealProfile(page, input.name)
 }
 
 async function importFile(page: Page, fileName: string) {
@@ -52,7 +53,7 @@ async function runWholeBook(page: Page, profileName: string, model = 'fake-model
   await page.getByRole('link', { name: '预览与处理' }).click()
   await expect(page).toHaveURL(/\/books\/[^/]+\/preview/)
   await page.getByTestId('preview-profile').selectOption({
-    label: `${profileName} · fake-provider · ${model}`,
+    label: `${profileName} · ${model}`,
   })
   await page.getByTestId('range-chapter').selectOption('') // 整本
   await page.getByTestId('preview-run').click()
@@ -61,6 +62,10 @@ async function runWholeBook(page: Page, profileName: string, model = 'fake-model
 
 test.describe('证据时点与定位回归', () => {
   test('：后文才揭示的合并不会在初读时提前同色，重读才合并', async ({ page }) => {
+    await page.goto('/settings/general')
+    await page.getByLabel('启用试验功能', { exact: true }).check()
+    await page.getByRole('button', { name: '保存阅读与处理设置', exact: true }).click()
+    await expect(page.getByText('阅读与处理设置已保存。', { exact: true })).toBeVisible()
     const profileName = '合并可见性提供方'
     await createProfile(page, {
       name: profileName,
@@ -74,6 +79,7 @@ test.describe('证据时点与定位回归', () => {
     // 回到阅读页第一章：两个声音必须是两种颜色/称呼（合并证据在第二章末尾）
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
+    await page.getByTestId('reader-reading-mode').selectOption('initial')
     await expect
       .poll(async () => page.getByTestId('annotation-label').allTextContents())
       .toEqual(['〔第一个声音〕', '〔第二个声音〕'])
@@ -100,7 +106,7 @@ test.describe('证据时点与定位回归', () => {
     await openReader(page, 'sample-astral')
     await page.getByRole('link', { name: '预览与处理' }).click()
     await page.getByTestId('preview-profile').selectOption({
-      label: `${profileName} · fake-provider · fake-model-astral`,
+      label: `${profileName} · fake-model-astral`,
     })
     await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()
@@ -122,7 +128,7 @@ test.describe('证据时点与定位回归', () => {
     await openReader(page, '原创 ruby/插图样例')
     await page.getByRole('link', { name: '预览与处理' }).click()
     await page.getByTestId('preview-profile').selectOption({
-      label: `${profileName} · fake-provider · fake-model-ruby`,
+      label: `${profileName} · fake-model-ruby`,
     })
     await confirmChapterRoster(page)
     await page.getByTestId('preview-run').click()

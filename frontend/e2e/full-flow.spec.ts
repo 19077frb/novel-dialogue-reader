@@ -1,3 +1,4 @@
+import { revealProfile } from './profiles'
 import { expect, test, type Download, type Page } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -24,7 +25,7 @@ async function createProfile(page: Page, name: string, model = 'fake-model') {
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill(model)
   await page.getByTestId('profile-save').click()
-  await expect(page.getByTestId('profile-card').filter({ hasText: name })).toBeVisible()
+  await revealProfile(page, name)
 }
 
 async function importFile(page: Page, fileName: string) {
@@ -74,7 +75,7 @@ test.describe('完整联调：导入 → 处理 → 导出', () => {
     await createProfile(page, profileName, 'fake-model-full-txt')
     await importFile(page, FULL_FLOW_TEXT)
     await openReader(page, 'sample-full-flow')
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model-full-txt`)
+    await processFirstChapter(page, `${profileName} · fake-model-full-txt`)
 
     // 处理结果回到阅读页
     await page.getByRole('link', { name: '去阅读' }).click()
@@ -84,7 +85,7 @@ test.describe('完整联调：导入 → 处理 → 导出', () => {
     // 一次会话里导出两种格式
     await page.getByTestId('open-export').click()
     await expect(page.getByTestId('export-dialog')).toBeVisible()
-    await page.getByTestId('export-policy-reread').check()
+    await expect(page.getByTestId('export-policy')).toHaveCount(0) // 默认使用重读，初读切换属于试验功能
 
     await generate(page, 'html')
     const html = await downloadArtifact(page)
@@ -97,8 +98,8 @@ test.describe('完整联调：导入 → 处理 → 导出', () => {
     expect(htmlBody).not.toContain('<script')
 
     await generate(page, 'epub')
-    await expect(page.getByTestId('export-check-mimetype_first')).toContainText('✓')
-    await expect(page.getByTestId('export-check-resource_closure')).toContainText('✓')
+    await expect(page.getByTestId('export-check-mimetype_first')).toHaveText(/^\s*通过 · /)
+    await expect(page.getByTestId('export-check-resource_closure')).toHaveText(/^\s*通过 · /)
     // 没有 EPUBCheck jar：标准检查如实为 NOT_RUN，不伪装成通过
     await expect(page.getByTestId('export-standard')).toContainText('NOT_RUN')
     const epub = await downloadArtifact(page)
@@ -117,12 +118,12 @@ test.describe('完整联调：导入 → 处理 → 导出', () => {
     await createProfile(page, profileName, 'fake-model-full-epub')
     await importFile(page, 'original-sample.epub')
     await openReader(page, '原创 ruby/插图样例')
-    await processFirstChapter(page, `${profileName} · fake-provider · fake-model-full-epub`)
+    await processFirstChapter(page, `${profileName} · fake-model-full-epub`)
 
     await page.getByRole('link', { name: '去阅读' }).click()
     await page.locator('.ndr-chapter').first().click()
     await page.getByTestId('open-export').click()
-    await page.getByTestId('export-policy-reread').check()
+    await expect(page.getByTestId('export-policy')).toHaveCount(0) // 默认使用重读，初读切换属于试验功能
 
     await generate(page, 'epub')
     const epub = await downloadArtifact(page)

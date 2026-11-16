@@ -53,7 +53,7 @@ export function BudgetForm({ value, onChange }: BudgetFormProps) {
           }
           data-testid="budget-max-rechecks"
         />
-        <span className="hint">0 关闭；每轮检查原窗口全部对白（含已自动接受项），人工锁定结果不覆盖。每轮可能拆为多个模型调用并消耗 Tokens；校验失败重试另行设置。</span>
+        <span className="hint">0 关闭；每轮检查原窗口全部对白（含已自动接受项），保留人工锁定结果。每轮可能拆为多个模型调用并消耗 Tokens；校验失败重试另行设置。</span>
       </label>
       <FormatRetrySetting value={value.maxFormatRetries ?? 1}
         onChange={maxFormatRetries => onChange({ ...value, maxFormatRetries })} />

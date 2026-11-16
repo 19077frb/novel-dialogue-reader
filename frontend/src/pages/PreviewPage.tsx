@@ -419,7 +419,7 @@ export default function PreviewPage() {
   const selectedTask = singleTasks.find(task => task.job?.id === jobId)
   const showBatchProcessor = processingMode === 'batch' || batchProgress.running || batchProgress.tasks.length > 0
   const usagePanel = (
-    <section className="card" data-testid="preview-usage">
+    <section className="card ndr-preview-usage" id="processing-usage" data-testid="preview-usage">
       <h2>用量</h2>
       {usage.isPending && <p className="hint">正在读取用量…</p>}
       {usage.isError && <p className="status-error">用量读取失败。</p>}
@@ -435,7 +435,7 @@ export default function PreviewPage() {
         <div>
           <h2>预览与按章处理：{book.data?.title ?? '载入中…'}</h2>
           <p className="hint">
-            先选择单章或批量处理，再展开对应配置；处理结果直接用于正式阅读。
+            选择处理范围，确认人物，让每句对白找到说话人。
           </p>
         </div>
         <nav className="ndr-book-nav" aria-label="本书导航">
@@ -466,13 +466,22 @@ export default function PreviewPage() {
         />
       )}
 
-      <section className="card">
-        <h3>书籍预处理</h3>
-        <p className="hint">检查章节名、分章边界和引号修复。导入时已自动检查，可在这里确认结果、调整或重试。</p>
+      <nav className="ndr-section-nav" aria-label="处理页分区">
+        <a href="#processing-configuration">处理配置</a>
+        <a href="#processing-workflow">处理范围</a>
+        <a href="#processing-usage">用量</a>
+        <a href="#processing-document">原文与标注</a>
+      </nav>
+
+      <section className="card ndr-inline-section">
+        <div>
+          <h3>书籍预处理</h3>
+          <p className="hint">导入时已检查章节与引号，可继续查看结果、调整或重试。</p>
+        </div>
         <Link className="ndr-button" to={`/books/${bookId}/preprocessing${returnChapterId ? `?chapterId=${encodeURIComponent(returnChapterId)}` : ''}`}>打开预处理</Link>
       </section>
 
-      <section className="card ndr-step-card" data-testid="processing-mode-picker">
+      <section className="card ndr-step-card" id="processing-configuration" data-testid="processing-mode-picker">
         <div className="ndr-step-heading">
           <div>
             <h3>选择处理方式</h3>
@@ -506,6 +515,8 @@ export default function PreviewPage() {
         </div>
       </section>
 
+      <section className="card ndr-shared-configuration">
+      <CollapsibleBlock title="模型与处理偏好" summary="单章与批量共用，调整后自动记忆。">
       <ThinkingSettings disabled={jobMutation.isPending} profiles={profiles.data ?? []}
         disabledReason="正在保存本次任务，请稍后调整下一次处理的配置。"
         profileId={profileId} onProfileChange={setProfileId}
@@ -515,6 +526,10 @@ export default function PreviewPage() {
         onChange={dialogueStrategy => setPreferences({ dialogueStrategy })} />
       <RosterRepairSettings preferences={preferences} onChange={setPreferences}
         disabled={jobMutation.isPending} />
+      </CollapsibleBlock>
+      </section>
+
+      <div id="processing-workflow" className="ndr-section-anchor" />
 
       {processingMode === 'single' && (
         <>
@@ -543,7 +558,7 @@ export default function PreviewPage() {
         />
         {range.chapterId && (
           <>
-            {estimateQuery.isFetching && <p className="hint" role="status">正在生成窗口预览（不调用模型）…</p>}
+            {estimateQuery.isFetching && <p className="hint" role="status">正在生成窗口预览…</p>}
             {estimateQuery.isError && <ReadErrorNotice label="窗口预览失败" error={estimateQuery.error}
               retrying={estimateQuery.isFetching} onRetry={() => void estimateQuery.refetch()} />}
             {estimate && (estimate.windows?.length ?? 0) > 0 && <WindowPicker
@@ -553,10 +568,10 @@ export default function PreviewPage() {
             {estimate?.windows?.length && estimate.windows.every(window => window.processing_status === 'completed')
               && chapters.data?.some(chapter => chapter.id === range.chapterId && !chapter.dialogue_processed
                 && chapter.start_cp === range.startCp && chapter.end_cp === resolvedEnd) ? <p className="hint">
-                全部窗口已有标注，可直接同步章节状态，无需再次调用模型。
+                全部窗口已有标注，可直接同步章节完成状态。
                 <button type="button" disabled={jobMutation.isPending || syncCompletion.isPending || estimateQuery.isFetching}
                   title={jobMutation.isPending ? '窗口任务正在提交，请等待完成。' : syncCompletion.isPending ? '正在同步章节完成状态，请等待保存完成。' : estimateQuery.isFetching ? '正在读取窗口，请等待读取完成。' : undefined}
-                  onClick={() => syncCompletion.mutate()}>同步章节完成状态（不调用模型）</button>
+                  onClick={() => syncCompletion.mutate()}>同步章节完成状态</button>
               </p> : null}
             {estimate && !estimateQuery.isFetching && (estimate.windows?.length ?? 0) === 0 && (
               <p className="hint">本章没有可处理的对白窗口。</p>
@@ -610,7 +625,7 @@ export default function PreviewPage() {
             data-testid="preview-estimate"
             title={!rangeValid ? '请先选择有效的处理范围。' : estimateQuery.isFetching ? '正在生成窗口预览，请等待完成。' : jobMutation.isPending ? '正在提交窗口任务，请等待完成。' : strategyReason ?? undefined}
           >
-            重新预览窗口与估算（不调用模型）
+            重新预览窗口与估算
           </button>
           <button
             type="button"
@@ -683,12 +698,12 @@ export default function PreviewPage() {
         <section className="card" id="single-task-details" ref={taskDetailRef} tabIndex={-1}
           aria-labelledby="single-task-details-heading" data-testid="single-task-details" data-job-id={jobId}>
           <h2 id="single-task-details-heading">{selectedTask ? `窗口 ${selectedTask.ordinal} 任务详情` : '任务详情'}</h2>
-          <p className="hint">查看本窗口的状态、耗时、调用次数与失败原因，不会重新调用模型。手动选择后不会被新派发的窗口切换。</p>
+          <p className="hint">查看所选窗口的状态、耗时、调用次数与失败原因；点击其他窗口的“查看任务”可切换详情。</p>
           <JobPanel key={jobId} jobId={jobId} onUpdate={handleJobUpdate} />
           <div className="ndr-recompute-entry" data-testid="recompute-entry">
             <p className="hint">
-              任务**不会**自动重算：暂停/限流/预算到顶或失败后，都需要你显式重新发起。
-              已完成窗口命中缓存，不会重复计费；只有未完成的窗口会真正调用模型。
+              暂停、限流、额度用尽或失败后，可调整预算重新处理。
+              已完成窗口复用缓存，其余窗口按实际模型调用计费。
             </p>
             <button
               type="button"
@@ -725,7 +740,8 @@ export default function PreviewPage() {
         </BatchProcessor>
       ) : usagePanel}
 
-      <section className="card">
+      <section className="card ndr-preview-reading" id="processing-document">
+        <h2>原文与标注</h2>
         <div className="ndr-preview-viewbar">
           <div className="ndr-radio-row">
             <label>
@@ -736,7 +752,7 @@ export default function PreviewPage() {
                 onChange={() => setViewMode('original')}
                 data-testid="view-original"
               />
-              原文（不显示颜色）
+              原文
             </label>
             <label>
               <input
@@ -750,7 +766,7 @@ export default function PreviewPage() {
             </label>
           </div>
           <p className="hint" data-testid="view-summary">
-            切换视图只改变显示，不会调用模型。当前范围 {range.startCp} – {resolvedEnd}，
+            当前字符位置 {range.startCp} – {resolvedEnd}，
             已标注 {items.length} 条，候选 {candidates.length} 条。
           </p>
         </div>

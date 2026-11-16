@@ -1,3 +1,4 @@
+import { revealProfile } from './profiles'
 import { expect, test } from '@playwright/test'
 
 test('导入自动修复后可检查章节与引号，章节修复排在前面', async ({ page }) => {
@@ -25,11 +26,13 @@ test('阅读自动处理当前章和后一章，跳过范围外章节且可以�
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill('fake-model')
   await page.getByTestId('profile-save').click()
-  await expect(page.getByTestId('profile-card').filter({ hasText: name })).toBeVisible()
+  await revealProfile(page, name)
   await page.goto('/settings/general')
   await page.getByLabel('提前处理后续章节数').fill('1')
-  await page.getByTestId('automatic-profile').selectOption({ label: `${name} · fake-provider · fake-model` })
+  await page.getByTestId('automatic-profile').selectOption({ label: `${name} · fake-model` })
   await page.getByLabel('阅读时自动处理当前章及后续章节（会调用模型）').check()
+  await page.getByRole('button', { name: '保存阅读与处理设置', exact: true }).click()
+  await expect(page.getByText('阅读与处理设置已保存。', { exact: true })).toBeVisible()
   await page.goto('/library')
   await page.getByTestId('import-file-input').setInputFiles({
     name: '自动处理范围.txt', mimeType: 'text/plain',
@@ -60,12 +63,14 @@ test('切换阅读章节时利用空闲并发追加处理，不等待旧章节�
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill('fake-model')
   await page.getByTestId('profile-save').click()
-  await expect(page.getByTestId('profile-card').filter({ hasText: name })).toBeVisible()
+  await revealProfile(page, name)
   await page.goto('/settings/general')
   await page.getByLabel('提前处理后续章节数').fill('0')
   await page.getByLabel('最大并发任务数', { exact: true }).fill('3')
-  await page.getByTestId('automatic-profile').selectOption({ label: `${name} · fake-provider · fake-model` })
+  await page.getByTestId('automatic-profile').selectOption({ label: `${name} · fake-model` })
   await page.getByLabel('阅读时自动处理当前章及后续章节（会调用模型）').check()
+  await page.getByRole('button', { name: '保存阅读与处理设置', exact: true }).click()
+  await expect(page.getByText('阅读与处理设置已保存。', { exact: true })).toBeVisible()
   await page.goto('/library')
   await page.getByTestId('import-file-input').setInputFiles({ name: '持续补充队列.txt', mimeType: 'text/plain',
     buffer: Buffer.from('第一章 等待\n「我先等一会儿。」\n第二章 追加\n「我可以先处理。」\n第三章 不处理\n「范围之外。」\n') })

@@ -30,7 +30,10 @@ for (const layout of [
     const cards = directory.locator('article:visible')
     await expect(cards.first()).toBeVisible()
     await directory.scrollIntoViewIfNeeded()
-    await expect.poll(async () => (await directory.boundingBox())?.height ?? Infinity).toBeLessThan(layout.height - 32)
+    await expect(cards).toHaveCount(6)
+    const columns = await directory.evaluate(element => Number(getComputedStyle(element).getPropertyValue('--ndr-character-columns')))
+    const rows = Math.ceil(6 / columns)
+    await expect.poll(async () => (await directory.boundingBox())?.height ?? Infinity).toBeLessThan(rows * 250 + 96)
     const collapsedHeight = (await cards.first().boundingBox())!.height
     expect(collapsedHeight).toBeLessThan(250)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)

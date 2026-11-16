@@ -1,3 +1,4 @@
+import { revealProfile } from './profiles'
 import { expect, test } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 
@@ -8,7 +9,7 @@ test('批量失败窗口可以直接重试，成功后目录和单章窗口显�
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill('fake-model')
   await page.getByTestId('profile-save').click()
-  await expect(page.getByTestId('profile-card').filter({ hasText: '失败重试离线模型' })).toBeVisible()
+  await revealProfile(page, '失败重试离线模型')
   await page.goto('/library')
   await page.getByTestId('import-file-input').setInputFiles({ name: '窗口失败重试.txt', mimeType: 'text/plain',
     buffer: Buffer.from('第一章 开始\n「你好。」\n第二章 继续\n「再见。」\n') })
@@ -17,10 +18,15 @@ test('批量失败窗口可以直接重试，成功后目录和单章窗口显�
   await page.getByTestId('book-card').filter({ hasText: '窗口失败重试' }).getByRole('link', { name: '开始阅读' }).click()
   const bookId = page.url().match(/books\/([^/]+)/)![1]
   await page.getByRole('link', { name: '预览与处理' }).click()
-  await page.getByTestId('preview-profile').selectOption({ label: '失败重试离线模型 · fake-provider · fake-model' })
+  await page.getByTestId('preview-profile').selectOption({ label: '失败重试离线模型 · fake-model' })
   await page.getByTestId('processing-mode-batch').check()
   await page.getByTestId('batch-format-retries').fill('3')
   let submissions = 0
+  const failedJobId = randomUUID()
+  let failedJob: Record<string, unknown> | undefined
+  await page.route(`**/api/jobs/${failedJobId}`, async route => {
+    await route.fulfill({ json: { data: failedJob } })
+  })
   // Only the first dialogue submission is simulated as a definite failure.
   // Subsequent jobs exercise the real isolated backend and offline provider.
   await page.route('**/api/jobs', async route => {
@@ -29,13 +35,14 @@ test('批量失败窗口可以直接重试，成功后目录和单章窗口显�
     expect(route.request().postDataJSON().budget.max_format_retries).toBe(3)
     if (submissions !== 1) { await route.continue(); return }
     const body = route.request().postDataJSON()
-    await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ data: {
-      id: randomUUID(), kind: 'INFERENCE', purpose: 'process', state: 'FAILED',
+    failedJob = {
+      id: failedJobId, kind: 'INFERENCE', purpose: 'process', state: 'FAILED',
       book_id: body.book_id, book_version_id: body.book_version_id, last_error: '离线模拟窗口失败',
       windows: [], remaining_windows: 1, windows_total: 1, calls: 1, cached_windows: 0,
       unknown_usage_runs: 0, usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 },
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    } }) })
+    }
+    await route.fulfill({ status: 202, json: { data: failedJob } })
   })
   await page.getByTestId('batch-run').click()
   await expect(page.getByTestId('batch-estimate')).toBeVisible()
@@ -64,7 +71,7 @@ test('目录取消图标只停止本章，等待请求收尾后可重试恢复�
   await page.getByTestId('profile-base-url').fill('http://127.0.0.1:1')
   await page.getByTestId('profile-model').fill('fake-model')
   await page.getByTestId('profile-save').click()
-  await expect(page.getByTestId('profile-card').filter({ hasText: '章节取消离线模型' })).toBeVisible()
+  await revealProfile(page, '章节取消离线模型')
   await page.goto('/library')
   await page.getByTestId('import-file-input').setInputFiles({ name: '章节取消检查.txt', mimeType: 'text/plain',
     buffer: Buffer.from('第一章 取消\n「先取消这一章。」\n第二章 继续\n「我会继续处理。」\n') })
@@ -73,7 +80,7 @@ test('目录取消图标只停止本章，等待请求收尾后可重试恢复�
   await page.getByTestId('book-card').filter({ hasText: '章节取消检查' }).getByRole('link', { name: '开始阅读' }).click()
   const bookId = page.url().match(/books\/([^/]+)/)![1]
   await page.getByRole('link', { name: '预览与处理' }).click()
-  await page.getByTestId('preview-profile').selectOption({ label: '章节取消离线模型 · fake-provider · fake-model' })
+  await page.getByTestId('preview-profile').selectOption({ label: '章节取消离线模型 · fake-model' })
   await page.getByTestId('processing-mode-batch').check()
   await page.getByTestId('batch-concurrency').fill('3')
   let heldJob = ''

@@ -352,7 +352,7 @@ export async function cancelChapterProcessing(bookId: string, chapterId: string)
   publishBatch(bookId, { tasks: current.tasks.map(task => task.chapterId === chapterId && task.state === 'queued'
     ? { ...task, state: 'cancelled' } : task), message: '已取消本章后续任务；其他章节继续处理。' })
   updateChapterProgress(bookId, chapterId, { cancelRequested: active.length > 0, pendingTasks: active.length, state: active.length ? current.chapterStates[chapterId]?.state ?? 'dialogue' : 'stopped',
-    error: active.length ? '正在取消本章任务；已发出的请求安全收尾，不保证停止计费。' : '本章任务已取消。' })
+    error: active.length ? '正在取消本章任务；已发出的请求将完成收尾，仍可能计费。' : '本章任务已取消。' })
   const results = await Promise.allSettled(active.filter(task => task.jobId).map(task => pauseJob(task.jobId!)))
   finishChapterCancellation(bookId, chapterId)
   const failed = results.find(result => result.status === 'rejected')
@@ -503,7 +503,7 @@ async function prepareBatchRetry(bookId: string, taskId: string, wholeChapter: b
   if (!wholeChapter && (batchSnapshots.get(bookId)?.tasks ?? []).some(item => item.chapterId === task.chapterId
     && item.type === 'roster' && ['queued', 'running'].includes(item.state))) throw new Error('请等待本章人物识别完成后再重试窗口。')
   if (!controller) publishBatch(bookId, { running: true, startedAt: Date.now(), finishedAt: null, stopRequested: false,
-    message: '正在检查失败任务与已保存的窗口（不调用模型）…' })
+    message: '正在读取失败任务与已保存的窗口…' })
   try {
     const [book, chapters, status] = await Promise.all([fetchBook(bookId), fetchChapters(bookId), fetchProcessingStatus(bookId)])
     if (status.active_jobs > 0 && !controller) throw new Error('后台仍有任务运行，请等待结束后重试。')
@@ -598,7 +598,7 @@ export function BatchRetryControls({ bookId, taskId }: { bookId: string; taskId?
     </button>)}
     {error && <p className="status-error" role="alert">{error}</p>}
     {serviceBlock && <p className="hint">{serviceBlockReason(serviceBlock)} <Link className="ndr-button" to="/tasks">前往任务队列</Link></p>}
-    {!taskId && <p className="hint">点击重试先核实原任务状态，再使用原模型配置和剩余额度补齐失败任务，不刷新已用额度。仍在执行或结果未核实时不会重复调用；成功窗口不会重复处理。</p>}
+    {!taskId && <p className="hint">重试会先核实原任务状态，确认结束后使用原模型配置和剩余额度补齐失败任务。已用额度继续累计，成功窗口直接复用结果。</p>}
   </div>
 }
 
@@ -694,7 +694,7 @@ export function requestBatchStop(bookId: string) {
   const current = batchSnapshots.get(bookId) ?? EMPTY_BATCH
   publishBatch(bookId, {
     stopRequested: true,
-    message: '正在安全停止：不会再派发新任务，等待在途请求收尾…',
+    message: '正在停止：新任务派发已关闭，等待在途请求收尾…',
     tasks: current.tasks.map((task) => task.state === 'queued'
       ? { ...task, state: 'cancelled', error: null }
       : task),
@@ -1436,8 +1436,8 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
     try {
       if (selectedPlans.length === 0) {
         const filtered = requested.filter(chapter => chapterFilterReason(chapter.title, chapterFilter)).length
-        const message = filtered ? `自动跳过处理 ${filtered} 章，其余章节已处理；本次无需调用模型。`
-          : `所选 ${requested.length} 章均已处理，无需重复调用模型。`
+        const message = filtered ? `自动跳过处理 ${filtered} 章，其余章节已处理；本次范围已检查完成。`
+          : `所选 ${requested.length} 章均已处理，可直接查看已有结果。`
         setProgress(message)
         publishBatch(bookId, { running: false, stopRequested: false, message })
         onFinished()
@@ -1696,8 +1696,8 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
           }))} />
         </CollapsibleBlock>
         <p className="hint">{batchProgress.running
-          ? '停止后不会再派发排队任务；已经发给模型的请求会安全收尾。'
-          : '最近一次任务明细会保存；跨书籍任务与已添加范围可从顶部“任务队列”查看。'}</p>
+          ? '停止后关闭队列派发，等待已发出的模型请求收尾。'
+          : '最近一次任务明细会保存；跨书籍任务与已添加范围可从主导航“任务队列”查看。'}</p>
       </section>
     )
   })()
@@ -1731,7 +1731,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         <label>
           每个窗口最多复核次数
           <input type="number" min={0} value={maxRecheckRounds} onChange={(event) => { setMaxRecheckRounds(nonNegativeInteger(event.target.value)); resetEstimate() }} disabled={running} data-testid="batch-max-rechecks" />
-          <span className="hint">0 关闭；每轮检查原窗口全部对白（含已自动接受项），人工锁定结果不覆盖。每轮可能拆为多个模型调用并消耗 Tokens；校验失败重试另行设置。</span>
+          <span className="hint">0 关闭；每轮检查原窗口全部对白（含已自动接受项），保留人工锁定结果。每轮可能拆为多个模型调用并消耗 Tokens；校验失败重试另行设置。</span>
         </label>
         <FormatRetrySetting value={maxFormatRetries} disabled={running}
           onChange={value => { setPreferences({ maxFormatRetries: value }); resetEstimate() }} testId="batch-format-retries" />
@@ -1770,7 +1770,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
         <p className="hint" data-testid="batch-estimate">
           整批预计约 {estimatedTokens.toLocaleString()} tokens（包含逐章人物识别预留与对白归属估算）。
           对白输入已计入当前已知人物资料；尚未分析或确认的章节可能新增人物名册和档案，增加后续每窗用量。实际用量还受复核、重试和模型推理影响，估算不构成消耗上限。
-          {forceReprocess ? ' 已包含已处理章节的重做费用估算。' : chapters.slice(startIndex, endIndex + 1).some((chapter) => chapter.dialogue_processed) ? ' 已处理章节不会重复计费或处理。' : ''}
+          {forceReprocess ? ' 已包含已处理章节的重做费用估算。' : chapters.slice(startIndex, endIndex + 1).some((chapter) => chapter.dialogue_processed) ? ' 已处理章节直接复用结果。' : ''}
           {positiveIntegerOrNull(tokenLimitText) !== null && estimatedTokens > (positiveIntegerOrNull(tokenLimitText) ?? 0) ? ' 预计会超过当前上限，系统只会在剩余额度允许时派发新任务。' : ''}
         </p>
       )}

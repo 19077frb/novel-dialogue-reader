@@ -25,55 +25,57 @@ export default function SettingsPage() {
   const updatePreferences = (patch: Partial<ProcessingPreferences>) => { setPreferences(previous => ({ ...previous, ...patch })); setSaved(false) }
   const changed = JSON.stringify(settings) !== JSON.stringify(storedSettings) || JSON.stringify(preferences) !== JSON.stringify(storedPreferences)
   const profiles = useQuery({ queryKey: profileKeys.profiles(), queryFn: ({ signal }) => fetchProfiles(signal) })
-  return <div className="ndr-page">
-    <header className="card ndr-page-header"><h2>通用设置</h2><p className="hint">修改后请点击保存。阅读与处理偏好保存在当前浏览器；应用配置保存在本机，重启服务后生效。</p></header>
-    <section className="card">
-      <h3>试验功能</h3>
-      <label><input type="checkbox" checked={settings.enableExperimentalFeatures} onChange={event => {
-        update({ enableExperimentalFeatures: event.target.checked })
-        if (event.target.checked) {
-          const { dialogueStrategy, rosterRepairEnabled } = getStoredProcessingPreferences()
-          updatePreferences({ dialogueStrategy, rosterRepairEnabled })
-        }
-      }} />启用试验功能</label>
-      <p className="hint">默认关闭。保存后显示初读、完整上下文对白策略和人物证据修复等试验选项；效果可能不稳定。关闭后隐藏这些入口，阅读与导出使用重读（完整标注），新处理使用默认策略。重读可能显示后文才揭示的人名。已启动的任务保持原配置。</p>
-      <p className="hint">保存在当前浏览器，点击“保存阅读与处理设置”后生效，无需重启。</p>
-    </section>
-    <section className="card">
+  return <div className="ndr-page ndr-settings">
+    <header className="card ndr-page-header"><div><h2>通用设置</h2><p className="hint">调整阅读显示与处理偏好，设置应用运行方式。</p></div></header>
+    <div className="ndr-settings-layout">
+    <nav className="ndr-section-nav" aria-label="通用设置分区">
+      <a href="#reading-settings">阅读显示</a>
+      <a href="#character-settings">人物资料</a>
+      <a href="#chapter-filter-settings">章节过滤</a>
+      <a href="#automatic-settings">自动处理</a>
+      <a href="#experimental-settings">试验功能</a>
+      <a href="#save-preferences">保存偏好</a>
+      <a href="#application-settings">应用配置</a>
+    </nav>
+    <div className="ndr-settings-content">
+    <section className="card" id="reading-settings">
       <h3>阅读显示</h3>
+      <p className="hint">阅读与处理偏好保存在当前浏览器，点击“保存阅读与处理设置”后生效。</p>
       <div className="ndr-range-grid">
         <label className="ndr-field">正文字号<input type="number" min={14} max={28} value={settings.fontSize} onChange={e => update({ fontSize: Number(e.target.value) })} /></label>
         <label className="ndr-field">正文行距<input type="number" min={1.5} max={2.6} step={0.05} value={settings.lineHeight} onChange={e => update({ lineHeight: Number(e.target.value) })} /></label>
       </div>
       <div className="ndr-settings-options">
-        <label><input type="checkbox" checked={settings.resumeReading} onChange={e => update({ resumeReading: e.target.checked })} />重新打开时自动续读（不影响最后阅读位置的保存）</label>
+        <label><input type="checkbox" checked={settings.resumeReading} onChange={e => update({ resumeReading: e.target.checked })} />重新打开时自动续读</label>
         <label><input type="checkbox" checked={settings.showCandidates} onChange={e => update({ showCandidates: e.target.checked })} />阅读页默认显示候选引语</label>
         <label><input type="checkbox" checked={settings.showAnnotations} onChange={e => update({ showAnnotations: e.target.checked })} />阅读页默认显示人物标注</label>
         <label><input type="checkbox" checked={settings.showReviewMarkers} onChange={e => update({ showReviewMarkers: e.target.checked })} />显示待确认对白标记</label>
         <label><input type="checkbox" checked={settings.doubleClickChapterStatus} onChange={e => update({ doubleClickChapterStatus: e.target.checked })} />双击目录章节名切换完成状态</label>
       </div>
-      <p className="hint">显示开关在下一次进入阅读页时作为默认值；阅读中仍可临时调整。字号和行距也用于处理页原文预览，不改变导出样式。</p>
-      <p className="hint">待确认标记默认关闭；保存后立即用于阅读与处理页原文预览，为所有仍待确认的对白显示待确认标记，不改变人物归属或导出内容。</p>
-      <p className="hint">双击切换默认关闭，保存开启后生效：未处理与已完成互相切换；处理中、失败或已停止先标为已完成，再次双击改为未处理。仅改完成标记，不删除标注或停止已发送的模型请求；重新启动本章处理后恢复自动进度更新。</p>
+      <p className="hint">显示开关在下一次进入阅读页时作为默认值，阅读中可临时调整。字号和行距也用于处理页原文预览；导出样式在导出窗口设置。最后阅读位置会持续保存。</p>
+      <details><summary>阅读标记与章节状态</summary>
+      <p className="hint">待确认标记默认关闭，保存开启后立即在阅读与处理页原文预览中标记待确认的对白。人物归属由对白确认结果决定。</p>
+      <p className="hint">双击切换默认关闭。保存开启后，未处理与已完成互相切换；处理中、失败或已停止先标为已完成，再次双击改为未处理。标注继续保留，已发送的模型请求继续执行；重新启动本章处理后恢复自动进度更新。</p>
+      </details>
       <div className="ndr-document"><p>阅读样例：「雨停了。」少女合上伞。</p></div>
       <button onClick={() => {
-        if (!window.confirm('仅恢复阅读显示的默认值？其他区域不变，点击保存后生效。')) return
+        if (!window.confirm('恢复阅读显示的默认值？点击“保存阅读与处理设置”后生效。')) return
         const { fontSize, lineHeight, resumeReading, showCandidates, showAnnotations, showReviewMarkers, doubleClickChapterStatus } = defaultSettings
         update({ fontSize, lineHeight, resumeReading, showCandidates, showAnnotations, showReviewMarkers, doubleClickChapterStatus })
       }}>恢复阅读显示默认值</button>
     </section>
-    <section className="card">
+    <section className="card" id="character-settings">
       <h3>人物资料更新</h3>
       <label><input type="checkbox" checked={settings.allowOverwriteManualCharacters} onChange={event => update({ allowOverwriteManualCharacters: event.target.checked })} />允许后台人物识别更新人工姓名与说明</label>
       <p className="hint">默认关闭。保存开启后，批量处理及阅读时的自动处理可以根据有原文依据的人物识别结果修正人工资料；模型可能误判。仅影响之后创建的人物任务，已有任务保持原设置。单章人工确认仍由你选择。</p>
       <button onClick={() => {
-        if (window.confirm('仅恢复人物资料更新的默认值（关闭后台覆盖人工资料）？其他区域不变，点击保存后生效。')) {
+        if (window.confirm('恢复人物资料更新的默认值，关闭后台覆盖人工资料？点击保存后生效。')) {
           update({ allowOverwriteManualCharacters: defaultSettings.allowOverwriteManualCharacters })
         }
       }}>恢复人物资料更新默认值</button>
     </section>
-    <ChapterFilterSettings value={settings} onChange={update} />
-    <section className="card" data-testid="automatic-processing-settings">
+    <div id="chapter-filter-settings"><ChapterFilterSettings value={settings} onChange={update} /></div>
+    <section className="card" id="automatic-settings" data-testid="automatic-processing-settings">
       <h3>自动提前处理章节</h3>
       <label><input type="checkbox" checked={settings.autoProcessing} onChange={event => {
         update({ autoProcessing: event.target.checked })
@@ -92,22 +94,34 @@ export default function SettingsPage() {
       <DialogueStrategySettings value={preferences.dialogueStrategy} rounds={preferences.maxRecheckRounds}
         experimentalEnabled={settings.enableExperimentalFeatures}
         onChange={dialogueStrategy => updatePreferences({ dialogueStrategy })} />
-      {settings.enableExperimentalFeatures && <p className="hint">对白策略修改后也需点击“保存阅读与处理设置”；人物合并不使用此选项。</p>}
+      {settings.enableExperimentalFeatures && <p className="hint">对白策略用于对白处理，点击“保存阅读与处理设置”后生效。</p>}
       <RosterRepairSettings preferences={preferences} onChange={updatePreferences} experimentalEnabled={settings.enableExperimentalFeatures} />
       {settings.enableExperimentalFeatures && <p className="hint">人物修复配置同样点击“保存阅读与处理设置”后生效，已启动任务保持原配置。</p>}
-      <p className="hint">这些模型、思考、并发和额度设置与单章、批量处理共用。自动处理额度按本页会话中每本书累计；接近上限时会提醒调整，阅读侧栏可停止或刷新额度并重试。修改设置不改变已启动的任务。</p>
+      <p className="hint">这些模型、思考、并发和额度设置与单章、批量处理共用。自动处理额度按本页会话中每本书累计；接近上限时会提醒调整，阅读侧栏可停止或刷新额度并重试。已启动的任务使用启动时的配置。</p>
       <Link className="ndr-button" to="/settings/models">管理模型账号</Link>
       <button onClick={() => {
-        if (!window.confirm(`恢复本栏的自动处理开关、提前章节数、模型选择、思考、并发、复核和Token上限${settings.enableExperimentalFeatures ? '，以及显示的试验处理选项' : ''}默认值？不删除模型账号，其他区域及未在本栏显示的参数不变，点击保存后生效。`)) return
+        if (!window.confirm(`恢复本栏的自动处理开关、提前章节数、模型选择、思考、并发、复核和 Token 上限${settings.enableExperimentalFeatures ? '，以及显示的试验处理选项' : ''}默认值？点击保存后生效。`)) return
         update({ autoProcessing: defaultSettings.autoProcessing, lookAheadChapters: defaultSettings.lookAheadChapters })
         const { profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort, dialogueStrategy, rosterRepairEnabled, maxRosterRepairs, maxFormatRetries } = getDefaultProcessingPreferences()
         updatePreferences({ profileId, concurrency, tokenLimit, maxRecheckRounds, thinkingMode, thinkingEffort,
           ...(settings.enableExperimentalFeatures ? { dialogueStrategy, rosterRepairEnabled, maxRosterRepairs } : {}),
           ...(settings.enableExperimentalFeatures && preferences.rosterRepairEnabled ? { maxFormatRetries } : {}) })
       }}>恢复自动处理默认值</button>
-      <p className="hint">恢复仅修改本栏草稿，不停止任务或删除模型账号；保存后生效。输出上限不变。{settings.enableExperimentalFeatures && '人物修复开启时，本栏可见的校验失败重试次数也会恢复默认值。'}</p>
+      <p className="hint">恢复默认值后请保存本栏草稿。任务继续按启动时的配置执行，模型账号在“模型配置”管理，输出上限在处理页设置。{settings.enableExperimentalFeatures && '人物修复开启时，本栏可见的校验失败重试次数也会恢复默认值。'}</p>
     </section>
-    <section className="card" aria-label="保存阅读与处理设置">
+    <section className="card" id="experimental-settings">
+      <h3>试验功能</h3>
+      <label><input type="checkbox" checked={settings.enableExperimentalFeatures} onChange={event => {
+        update({ enableExperimentalFeatures: event.target.checked })
+        if (event.target.checked) {
+          const { dialogueStrategy, rosterRepairEnabled } = getStoredProcessingPreferences()
+          updatePreferences({ dialogueStrategy, rosterRepairEnabled })
+        }
+      }} />启用试验功能</label>
+      <p className="hint">默认关闭。保存后显示初读、完整上下文对白策略和人物证据修复等试验选项；效果可能不稳定。关闭后隐藏这些入口，阅读与导出使用重读（完整标注），新处理使用默认策略。重读可能显示后文才揭示的人名。已启动的任务保持原配置。</p>
+      <p className="hint">保存在当前浏览器，点击“保存阅读与处理设置”后生效。</p>
+    </section>
+    <section className="card ndr-settings-save" id="save-preferences" aria-label="保存阅读与处理设置">
       <button className="ndr-primary" disabled={!changed} title={!changed ? '尚未修改阅读或处理设置。' : undefined} onClick={() => {
         if (storedSettings.autoProcessing && !settings.autoProcessing) stopAutomaticProcessing()
         saveSettings(settings)
@@ -115,8 +129,10 @@ export default function SettingsPage() {
         else { const { dialogueStrategy: _strategy, rosterRepairEnabled: _repair, ...ordinary } = preferences; savePreferences(ordinary) }
         setSettings(getGeneralSettings()); setPreferences(getProcessingPreferences()); setSaved(true)
       }}>保存阅读与处理设置</button>
-      <p className="hint" role="status">{changed ? '有未保存的修改，离开页面会丢弃。保存后生效，不需要重启服务。' : saved ? '阅读与处理设置已保存。' : '修改阅读或处理设置后可保存。'}</p>
+      <p className="hint" role="status">{changed ? '有未保存的修改，离开页面会丢弃。点击保存后生效。' : saved ? '阅读与处理设置已保存。' : '修改阅读或处理设置后可保存。'}</p>
     </section>
     <ApplicationSettings />
+    </div>
+    </div>
   </div>
 }

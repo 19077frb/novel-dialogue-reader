@@ -13,7 +13,7 @@ const CHECK_LABEL: Record<string, string> = {
   mimetype_first: '格式声明位于首项', mimetype_stored: '格式声明未压缩',
   mimetype_value: '格式声明正确', has_container: '存在书籍入口',
   has_opf: '存在书籍信息', has_nav: '存在目录', resource_closure: '图片等资源完整',
-  no_external_references: '无需外部资源', no_localhost: '不依赖本机服务',
+  no_external_references: '资源均包含在文件中', no_localhost: '本机服务地址检查',
   text_consistency: '正文完整一致',
 }
 
@@ -26,7 +26,7 @@ export function ExportProgress({ artifact, busy }: ExportProgressProps) {
   if (busy) {
     return (
       <p className="hint" role="status" aria-live="polite" data-testid="export-progress">
-        正在生成…（本地打包，不调用模型）
+        正在本地生成导出文件…
       </p>
     )
   }
@@ -34,7 +34,7 @@ export function ExportProgress({ artifact, busy }: ExportProgressProps) {
   if (artifact.state === 'QUEUED' || artifact.state === 'RUNNING') {
     return (
       <p className="hint" role="status" aria-live="polite" data-testid="export-progress">
-        正在生成或保存导出结果…（不调用模型）
+        正在本地生成或保存导出结果…
       </p>
     )
   }
@@ -83,13 +83,13 @@ export function ExportProgress({ artifact, busy }: ExportProgressProps) {
       {typeof ledger.omitted === 'number' && Number.isInteger(ledger.omitted) && ledger.omitted > 0 && (
         <p className="hint" data-testid="export-identity-omitted">
           有 {ledger.omitted} 位人物的完整资料需要未导出的章节、无法核验的位置或超过可携带限制，未写入文件。
-          正文和已导出的对白标注不受影响；若需迁移完整人物资料，请导出整本。
+          文件包含所选范围的正文和对白标注；迁移完整人物资料时，请导出整本。
         </p>
       )}
       {artifact.state === 'FAILED' && (
         <p className="status-error" data-testid="export-failed">
           导出失败。{typeof artifact.validation?.detail === 'string'
-            ? artifact.validation.detail : '请查看校验结果，文件不会提供下载。'}
+            ? artifact.validation.detail : '请按校验结果修正后重新生成，校验通过后即可下载。'}
         </p>
       )}
     </div>

@@ -79,9 +79,9 @@ describe('LibraryPage', () => {
     })
   })
 
-  it('空书架给出无需 API 配置即可阅读的提示', async () => {
+  it('空书架给出导入与阅读的入口', async () => {
     renderWithProviders(<LibraryPage />)
-    expect(await screen.findByTestId('library-empty')).toHaveTextContent('不需要填写任何 API 配置')
+    expect(await screen.findByTestId('library-empty')).toHaveTextContent('导入 TXT 或 EPUB，即可开始阅读')
   })
 
   const duplicateBooks = ['b1', 'b2'].map((id) => ({

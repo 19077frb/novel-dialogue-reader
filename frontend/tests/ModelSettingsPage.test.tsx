@@ -99,18 +99,34 @@ describe('ModelSettingsPage', () => {
       expect(screen.getByTestId('profile-max_tokens')).not.toBeRequired()
     }
     checkLabels()
-    expect(screen.getByLabelText('接口密钥（API Key，留空不保存）')).not.toBeRequired()
+    expect(screen.getByLabelText('接口密钥（API Key，可选）')).not.toBeRequired()
     await userEvent.click(screen.getByTestId('profile-edit-p1'))
     checkLabels()
     expect(screen.getByTestId('key-action-keep')).toBeChecked()
+    expect(document.getElementById('profile-editor')).toHaveFocus()
+  })
+
+  it('分区导航覆盖接口与已保存配置，跳转保留编辑内容', async () => {
+    renderWithProviders(<ModelSettingsPage />)
+    await userEvent.type(screen.getByTestId('profile-name'), '待保存模型')
+    const name = screen.getByTestId('profile-name')
+    const navigation = screen.getByRole('navigation', { name: '模型配置分区' })
+    for (const link of navigation.querySelectorAll('a')) {
+      expect(document.getElementById(link.hash.slice(1))).toBeInTheDocument()
+      await userEvent.click(link)
+      expect(screen.getByTestId('profile-name')).toBe(name)
+      expect(name).toHaveValue('待保存模型')
+    }
+    expect(profilesApi.createProfile).not.toHaveBeenCalled()
+    expect(profilesApi.testConnection).not.toHaveBeenCalled()
   })
 
   it('空状态说明可配置，并提示连接测试的入口', async () => {
     renderWithProviders(<ModelSettingsPage />)
 
-    expect(await screen.findByTestId('profiles-empty')).toHaveTextContent('不需要修改源码')
+    expect(await screen.findByTestId('profiles-empty')).toHaveTextContent('填写“接口信息”表单并保存')
     await waitFor(() => expect(profilesApi.fetchProtocols).toHaveBeenCalled())
-    expect(screen.getByText(/保存前可以用/)).toBeInTheDocument()
+    expect(screen.getByText(/连接测试会请求模型服务，可能产生费用/)).toBeInTheDocument()
     const help = await screen.findByTestId('protocol-capabilities')
     await userEvent.click(screen.getByText('如何填写接口配置'))
     expect(help).toHaveTextContent('云端服务通常需要 API 密钥')
@@ -120,7 +136,7 @@ describe('ModelSettingsPage', () => {
     expect(help).not.toHaveTextContent('json_schema')
     expect(help).not.toHaveTextContent('需要 Key：否')
     await userEvent.selectOptions(screen.getByTestId('profile-protocol'), 'fake-provider')
-    expect(help).toHaveTextContent('不连接真实模型服务，也不需要 API 密钥')
+    expect(help).toHaveTextContent('用于本地模拟界面流程，返回测试数据')
     expect(help).not.toHaveTextContent('云端服务通常需要 API 密钥')
     expect(help).not.toHaveTextContent('https://api.anthropic.com/v1')
   })
@@ -383,7 +399,7 @@ describe('ModelSettingsPage / 连接测试', () => {
     const result = await screen.findByTestId('connection-result')
     expect(result).toHaveTextContent('连接失败')
     expect(result).toHaveTextContent('PROVIDER_AUTH_FAILED')
-    expect(result).toHaveTextContent('未知（模型服务未返回用量，不按 0 计）')
+    expect(result).toHaveTextContent('未知（模型服务未返回用量）')
   })
 
   it('FakeProvider 结果会被明确标注为测试适配器', async () => {
@@ -404,7 +420,7 @@ describe('ModelSettingsPage / 连接测试', () => {
     renderWithProviders(<ModelSettingsPage />)
     await userEvent.click(await screen.findByTestId('profile-test-p1'))
 
-    expect(await screen.findByTestId('fake-provider-warning')).toHaveTextContent('没有访问任何真实服务')
+    expect(await screen.findByTestId('fake-provider-warning')).toHaveTextContent('本地模拟测试完成')
   })
 
   it('可以先用草稿测试（不保存配置），密钥只在请求体里', async () => {

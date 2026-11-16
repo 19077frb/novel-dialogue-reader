@@ -83,7 +83,7 @@ export function RecheckPanel({ quoteId, onStarted }: RecheckPanelProps) {
   return (
     <div className="ndr-recheck" data-testid="recheck-panel">
       <p className="hint">
-        局部复核会围绕**本场景**重新调用模型，可能产生费用；它不改变任何人工锁定的对白。
+        局部复核会围绕本场景重新调用模型，可能产生费用；人工锁定的对白保留当前结果。
       </p>
       {recent.isPending && <p className="hint">正在读取已有复核任务…</p>}
       <ThinkingSettings disabled={running} profiles={profiles.data ?? []} profileId={effectiveProfileId}
