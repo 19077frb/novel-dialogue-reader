@@ -77,8 +77,6 @@ def load_config(path: str | Path) -> EvalConfig:
     if payload.get("context_policy", "context-1") not in {"context-1", "context-2"}:
         raise ValueError("context_policy 必须为 context-1 或 context-2")
     raw_budget = payload.get("budget") or {}
-    if not isinstance(raw_budget, dict):
-        raise ValueError("budget 必须是 JSON 对象")
     if raw_budget.keys() - {
         "max_input_tokens",
         "max_output_tokens",

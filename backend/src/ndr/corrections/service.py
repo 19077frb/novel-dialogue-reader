@@ -170,7 +170,6 @@ def _apply_quote_action(
 
     action = CorrectionAction(payload.action)
     if action is CorrectionAction.ASSIGN_EXISTING:
-        assert payload.speaker_ref is not None  # schema 已校验
         group = _resolve_existing_group(session, scene_id=scene.id, ref=payload.speaker_ref)
         annotation.kind = payload.kind or QuoteKind.SPEECH
         annotation.assignment = Assignment.EXISTING
@@ -198,7 +197,6 @@ def _apply_quote_action(
         annotation.status = AnnotationStatus.USER_CONFIRMED
         return group_id
     if action is CorrectionAction.SET_KIND:
-        assert payload.kind is not None  # schema 已校验
         annotation.kind = payload.kind
         if payload.kind not in EXPRESSION_OWNER_KINDS:
             annotation.assignment = None

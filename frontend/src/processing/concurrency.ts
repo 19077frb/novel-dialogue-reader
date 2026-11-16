@@ -23,12 +23,8 @@ export async function mapWithConcurrency<T, R>(
   return results
 }
 
-export interface TaskLimiter {
-  run<T>(task: () => Promise<T>): Promise<T>
-}
-
 /** 共享任务池；批量人物识别与对白窗口使用同一个并发额度。 */
-export function createTaskLimiter(concurrency: number): TaskLimiter {
+export function createTaskLimiter(concurrency: number) {
   const limit = Math.max(1, Math.floor(concurrency) || 1)
   let active = 0
   const queue: Array<() => void> = []
@@ -47,7 +43,7 @@ export function createTaskLimiter(concurrency: number): TaskLimiter {
     })
 
   const leave = () => {
-    active = Math.max(0, active - 1)
+    active -= 1
     queue.shift()?.()
   }
 

@@ -14,6 +14,12 @@ it('updates only visible IDs, retaining other pages and accommodating new/delete
   expect(orderLibraryBooks([{ id: 'new' }, { id: 'b' }, { id: 'a' }], ['a', 'deleted', 'b'])).toEqual([{ id: 'a' }, { id: 'b' }, { id: 'new' }])
 })
 
+it('bounds merged orders after inserting new visible books', () => {
+  const previous = Array.from({ length: 1999 }, (_, index) => String(index))
+  expect(mergeLibraryOrder(previous, ['new', '0', 'overflow']))
+    .toEqual(['new', ...previous.slice(1), '0'])
+})
+
 it('persists only IDs and remains usable when local storage rejects writes', () => {
   expect(useLibraryLayoutStore.getState().saveOrder(['b', 'a'])).toBe(true)
   expect(JSON.parse(localStorage.getItem(LIBRARY_ORDER_KEY)!)).toEqual(['b', 'a'])

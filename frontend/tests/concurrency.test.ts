@@ -36,4 +36,12 @@ describe('processing concurrency', () => {
     ])
     expect(peak).toBe(2)
   })
+
+  it('releases the slot to queued work after a rejection', async () => {
+    const limiter = createTaskLimiter(1)
+    const failed = limiter.run(async () => { throw new Error('任务失败') })
+    const next = limiter.run(async () => '下一项')
+    await expect(failed).rejects.toThrow('任务失败')
+    await expect(next).resolves.toBe('下一项')
+  })
 })

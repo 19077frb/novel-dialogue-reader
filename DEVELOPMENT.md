@@ -164,7 +164,7 @@ pwsh -File scripts/verify.ps1
 
 所有PR（包括仅修改文档的PR）都会执行该验证，不按修改路径跳过；主分支推送前端、后端或验证依赖也会触发检查。任务分支不另开push检查，避免同一修改因push和PR重复执行。前端在独立并行任务中执行类型、API一致性、单元测试及生产构建，`database` 总检查也必须等待前端成功。PR新增提交后需重新等待最新结果，不能使用旧提交或本地结果替代。这里的生产构建生成前端资源，不自动打包EXE或发布Release；免安装发布仍按 [发布指南](docs/RELEASING.md) 显式执行。
 
-本地默认 `verify.ps1` 仍执行全量检查，并输出最慢的20项测试阶段（包括准备、执行和清理）。从项目根目录复现某组：
+本地默认 `verify.ps1` 仍执行全量检查，并输出最慢的20项测试阶段（包括准备、执行和清理）。本地验证与CI前端步骤先运行 `typecheck`，再以 `build:assets` 生成生产资源，避免重复类型检查；单独运行 `npm --prefix frontend run build` 仍包含类型检查和生产构建。`build:assets` 只用于已经完成类型检查的流程。从项目根目录复现某组：
 
 ```powershell
 uv run --project backend python backend/scripts/run_test_group.py --group database

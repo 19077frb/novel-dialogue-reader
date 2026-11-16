@@ -1,5 +1,5 @@
 /** 模型配置的查询与写操作。密钥只出现在创建/替换请求里，绝不进入查询缓存以外的状态。 */
-import { apiData } from './client'
+import { apiData, apiRequest } from './client'
 import type {
   ConnectionTestIn,
   ConnectionTestOut,
@@ -45,17 +45,11 @@ export function updateProfile(
   })
 }
 
-export async function deleteProfile(profileId: string, signal?: AbortSignal): Promise<void> {
-  const response = await fetch(`/api/model-profiles/${profileId}`, {
+export function deleteProfile(profileId: string, signal?: AbortSignal): Promise<void> {
+  return apiRequest<void>(`/api/model-profiles/${profileId}`, {
     method: 'DELETE',
     signal,
-    headers: { Accept: 'application/json' },
   })
-  if (!response.ok) {
-    const body = await response.json().catch(() => null)
-    const message = body?.error?.message ?? `删除失败（HTTP ${response.status}）`
-    throw new Error(message)
-  }
 }
 
 /**
