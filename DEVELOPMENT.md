@@ -162,6 +162,8 @@ pwsh -File scripts/verify.ps1
 
 数据库回归Actions保留全部后端测试，分为 `unit`、`database`、`integration-1`、`integration-2` 四组，最多四组并行。分组脚本和测试保证文件不遗漏、不重复；其中一组失败不会取消其他组，原 `database` 汇总检查必须在静态检查和全部测试组通过后才能通过。同一分支或PR的新提交会取消该回归工作流的旧运行，不取消独立的发布工作流；行为遵循 [GitHub并发规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)。实际并行数仍受账号可用runner限制。
 
+`unit` 收集全部单元测试，`database` 收集已登记的数据库测试（含离线存储保留）。其余集成测试先按文件路径排序交替分配，再依据实测耗时将少量较慢文件固定到 `integration-2`；规则由 [分组脚本](backend/scripts/run_test_group.py) 维护，新文件仍会自动纳入。后续可根据各组JUnit附件重新评估分配，实际耗时受测试变化和runner环境影响。
+
 所有PR（包括仅修改文档的PR）都会执行该验证，不按修改路径跳过；主分支推送前端、后端或验证依赖也会触发检查。任务分支不另开push检查，避免同一修改因push和PR重复执行。前端在独立并行任务中执行类型、API一致性、单元测试及生产构建，`database` 总检查也必须等待前端成功。PR新增提交后需重新等待最新结果，不能使用旧提交或本地结果替代。这里的生产构建生成前端资源，不自动打包EXE或发布Release；免安装发布仍按 [发布指南](docs/RELEASING.md) 显式执行。
 
 本地默认 `verify.ps1` 仍执行全量检查，并输出最慢的20项测试阶段（包括准备、执行和清理）。本地验证与CI前端步骤先运行 `typecheck`，再以 `build:assets` 生成生产资源，避免重复类型检查；单独运行 `npm --prefix frontend run build` 仍包含类型检查和生产构建。`build:assets` 只用于已经完成类型检查的流程。从项目根目录复现某组：

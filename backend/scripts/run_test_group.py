@@ -11,6 +11,12 @@ TEST_GROUPS = ("unit", "database", "integration-1", "integration-2")
 DATABASE_FILES = frozenset({
     "test_schema.py", "test_index_policy.py", "test_database_maintenance.py",
     "test_query_performance.py", "test_upgrade_preserves_data.py", "test_test_database.py",
+    "test_storage_retention.py",
+})
+# File-level CI timings place these heavier suites together on the second shard.
+# Keep automatic discovery for the remaining files instead of a complete file manifest.
+INTEGRATION_2_FILES = frozenset({
+    "test_expression_pipeline.py", "test_character_directory.py", "test_evaluation_run.py",
 })
 
 
@@ -33,7 +39,9 @@ def test_groups(root: Path) -> dict[str, list[Path]]:
     if missing:
         raise ValueError(f"Database test registration no longer exists: {sorted(missing)}")
     for index, path in enumerate(ordinary):
-        groups[f"integration-{index % 2 + 1}"].append(path)
+        group = ("integration-2" if path.name in INTEGRATION_2_FILES
+                 else f"integration-{index % 2 + 1}")
+        groups[group].append(path)
     if any(not paths for paths in groups.values()):
         raise ValueError("A CI test group is empty")
     return groups

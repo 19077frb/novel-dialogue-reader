@@ -22,6 +22,16 @@ def test_ci_groups_cover_all_test_files_once():
     assert {path.name for path in groups["database"]} == runner.DATABASE_FILES
 
 
+def test_slow_files_keep_measured_groups_and_assignment_is_deterministic():
+    root = ROOT / "backend/tests"
+    groups = runner.test_groups(root)
+    assert runner.test_groups(root) == groups
+    assert root / "integration/test_storage_retention.py" in groups["database"]
+    for name in ("test_expression_pipeline.py", "test_character_directory.py",
+                 "test_evaluation_run.py"):
+        assert root / "integration" / name in groups["integration-2"]
+
+
 def test_workflow_matrix_matches_runner_and_keeps_full_results():
     workflow = yaml.safe_load((ROOT / ".github/workflows/schema-indexes.yml").read_text(encoding="utf-8"))
     strategy = workflow["jobs"]["tests"]["strategy"]
