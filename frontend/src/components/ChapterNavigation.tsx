@@ -78,6 +78,7 @@ interface NavigationNode {
   chapter?: ChapterOut
   children: NavigationNode[]
   chapters: ChapterOut[]
+  duplicateTarget?: boolean
 }
 
 function navigationTree(toc: TocNodeOut[], chapters: ChapterOut[]) {
@@ -99,11 +100,18 @@ function navigationTree(toc: TocNodeOut[], chapters: ChapterOut[]) {
     else roots.push(item)
   }
   const covered = new Set<string>()
-  const collect = (item: NavigationNode): ChapterOut[] => {
+  const collect = (item: NavigationNode): Set<string> => {
+    const targets = new Set(item.children.flatMap(child => [...collect(child)]))
     const own = item.chapter ? [item.chapter] : []
-    item.chapters = [...new Map([...own, ...item.children.flatMap(collect)].map(chapter => [chapter.id, chapter])).values()]
+    item.chapters = [...new Map([...own, ...item.children.flatMap(child => child.chapters)].map(chapter => [chapter.id, chapter])).values()]
+    if (item.chapter) {
+      // Only an actual descendant reading entry can replace the same raw target.
+      const target = JSON.stringify([item.chapter.id, item.node.target_cp ?? null])
+      item.duplicateTarget = targets.has(target)
+      targets.add(target)
+    }
     for (const chapter of own) covered.add(chapter.id)
-    return item.chapters
+    return targets
   }
   roots.forEach(collect)
   return { roots, remaining: chapters.filter(chapter => !covered.has(chapter.id)) }
@@ -230,12 +238,10 @@ function ChapterNavigationContent({ bookId, chapters, toc, activeChapterId, onSe
   const renderTree = (items: NavigationNode[]) => <ol className="ndr-toc-tree">
     {items.map(item => <li key={item.node.id}>
       {item.children.length > 0 ? <CollapsibleBlock title={item.node.title}
-        summary={<>
-          {item.chapter && renderChapters([item.chapter], null, item.node)}
-          <VolumeProgressSummary volume={item.node.title} chapters={item.chapters} progressOf={effectiveProgress} />
-        </>}
+        summary={<VolumeProgressSummary volume={item.node.title} chapters={item.chapters} progressOf={effectiveProgress} />}
         open={openVolumes[item.node.id] ?? ancestors.includes(item.node.id)}
         onOpenChange={open => setOpenVolumes(current => ({ ...current, [item.node.id]: open }))}>
+        {item.chapter && !item.duplicateTarget && renderChapters([item.chapter], null, item.node)}
         {renderTree(item.children)}
       </CollapsibleBlock> : item.chapter ? renderChapters([item.chapter], null, item.node) : <span>{item.node.title}</span>}
     </li>)}
