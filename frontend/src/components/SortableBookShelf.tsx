@@ -62,8 +62,8 @@ export function SortableBookShelf({ books, onDelete, deletingId }: {
         announcements: {
           onDragStart: ({ active }) => `已拿起《${title(active.id)}》。`,
           onDragOver: ({ active, over }) => over ? `《${title(active.id)}》将移到第 ${ids.indexOf(String(over.id)) + 1} 本的位置。` : '已离开可放置区域。',
-          onDragEnd: ({ active, over }) => over ? `已调整《${title(active.id)}》的位置，点击保存顺序后生效。` : '位置未改变。',
-          onDragCancel: () => '已取消本次拖动，位置未改变。',
+          onDragEnd: ({ active, over }) => over ? `已调整《${title(active.id)}》的位置，点击保存顺序后生效。` : '已保留当前顺序。',
+          onDragCancel: () => '已取消本次拖动。',
         } }}
       onDragEnd={({ active, over }) => { if (editing && over && active.id !== over.id) move(ids.indexOf(String(active.id)), ids.indexOf(String(over.id))) }}>
       <SortableContext items={ids} strategy={rectSortingStrategy}>

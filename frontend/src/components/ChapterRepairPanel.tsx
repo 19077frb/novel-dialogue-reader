@@ -28,7 +28,7 @@ export function ChapterRepairPanel({ bookId, bookVersionId }: { bookId: string; 
         client.invalidateQueries({ queryKey: ['content', bookId] }),
         client.invalidateQueries({ queryKey: ['quotes', bookId] }),
       ])
-      setNotice('章节修复已保存，原文和阅读位置未改变。')
+      setNotice('章节修复已保存。')
     } catch (reason) { setError(reason instanceof Error ? reason.message : '章节修复失败') }
     finally { setBusy(false) }
   }

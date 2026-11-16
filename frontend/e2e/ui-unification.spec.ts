@@ -49,11 +49,37 @@ for (const layout of [
     ]
     for (const item of pages) {
       await page.goto(item.route)
+      await expect(page.getByTestId('health-ok')).toBeVisible()
       const header = page.locator('.ndr-page > .ndr-page-header').first()
       await expect(header).toBeVisible()
       // Reader heading is the book title, not a separate "阅读" title.
       if (item.name !== 'reader') await expect(header.locator('h2')).toContainText(item.title)
+      if (item.route.startsWith('/books/')) await expect(header.locator('h2')).toContainText('sample-utf8')
       await expect(header.locator('.hint')).not.toBeEmpty()
+      if (['reader', 'single', 'batch'].includes(item.name)) {
+        await expect(page.getByTestId('document-renderer')).toBeVisible()
+      }
+      if (item.name === 'characters') {
+        await expect(page.getByText(/^共 \d+ 个人物/)).toBeVisible()
+      }
+      if (item.name === 'review') {
+        await expect(page.getByTestId('review-counts')).toBeVisible()
+      }
+      if (item.name === 'models') {
+        await expect(page.getByTestId('profile-card').first()).toBeVisible()
+      }
+      if (item.name === 'settings') {
+        await expect(page.locator('.ndr-application-grid').first()).toBeVisible()
+        await expect(page.getByLabel('导入文件大小上限（MB）', { exact: true })).not.toHaveValue('')
+      }
+      if (item.name === 'bookmarks') {
+        await expect(page.getByRole('button', { name: '重新读取书签', exact: true })).toBeEnabled()
+      }
+      if (item.name === 'preprocessing') {
+        await expect(page.getByTestId('chapter-repair-panel').locator('summary').first()).toBeVisible()
+        await expect(page.getByRole('button', { name: '重新检查章节', exact: true })).toBeEnabled()
+      }
+      await expect(page.getByText(/^正在读取.+…$/)).toHaveCount(0)
       if (item.name === 'library') {
         const card = page.getByTestId('book-card').first()
         const read = card.getByRole('link', { name: '开始阅读' })
