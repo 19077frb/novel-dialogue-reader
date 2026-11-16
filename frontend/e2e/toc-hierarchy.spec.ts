@@ -12,7 +12,9 @@ test('EPUB保留四层目录，父章可阅读，子目录可展开且窄屏不�
   await page.setInputFiles('[data-testid=import-file-input]', fixture)
   await page.getByTestId('import-submit').click()
   await expect(page.getByTestId('import-result')).toContainText('导入完成：EPUB')
-  await page.getByTestId('book-card').getByRole('link', { name: '开始阅读' }).click()
+  await page.getByTestId('book-card').filter({
+    has: page.getByRole('heading', { name: '原创 EPUB 样例', exact: true }),
+  }).getByRole('link', { name: '开始阅读' }).click()
   const nav = page.getByRole('navigation', { name: '章节导航' })
   const root = nav.locator('.ndr-toc-tree > li > .ndr-collapsible-block').filter({
     has: page.getByRole('heading', { name: '作品', exact: true }),
