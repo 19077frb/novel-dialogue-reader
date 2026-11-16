@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -282,9 +282,61 @@ describe('QuoteDetailDrawer 可访问性', () => {
     expect(document.getElementById(labelledBy as string)).toHaveTextContent('对白确认')
     await waitFor(() => expect(drawer).toHaveFocus())
 
-    await userEvent.keyboard('{Escape}')
+    fireEvent(drawer, new Event('cancel', { cancelable: true }))
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
     expect(screen.queryByRole('dialog')).toBeNull()
     await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it('只有框外完整点击才关闭，内容点击和跨边界拖动不关闭', async () => {
+    const onClose = vi.fn()
+    renderWithProviders(<QuoteDetailDrawer quoteId="q1" onClose={onClose} />)
+    const quote = await screen.findByTestId('drawer-quote')
+    const dialog = screen.getByRole('dialog')
+    await userEvent.click(quote)
+    expect(onClose).not.toHaveBeenCalled()
+    await userEvent.pointer([
+      { keys: '[MouseLeft>]', target: quote },
+      { keys: '[/MouseLeft]', target: dialog },
+    ])
+    expect(onClose).not.toHaveBeenCalled()
+    await userEvent.pointer([
+      { keys: '[MouseLeft>]', target: dialog },
+      { keys: '[/MouseLeft]', target: quote },
+    ])
+    expect(onClose).not.toHaveBeenCalled()
+    await userEvent.click(dialog)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('关闭/卸载恢复原滚动样式，保存中的更正继续完成', async () => {
+    let finish!: (value: CorrectionOut) => void
+    vi.mocked(reviewApi.submitQuoteCorrection).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const initialBody = document.body.style.cssText
+    const initialRoot = document.documentElement.style.cssText
+    document.body.style.setProperty('overflow', 'auto', 'important')
+    document.documentElement.style.overflow = 'scroll'
+    function Host() {
+      const [open, setOpen] = useState(true)
+      return <QuoteDetailDrawer quoteId={open ? 'q1' : null} onClose={() => setOpen(false)} />
+    }
+    const { unmount } = renderWithProviders(<Host />)
+    try {
+      await screen.findByTestId('drawer-quote')
+      expect(document.body.style.overflow).toBe('hidden')
+      expect(document.documentElement.style.overflow).toBe('hidden')
+      await userEvent.click(screen.getByTestId('correction-submit'))
+      await waitFor(() => expect(reviewApi.submitQuoteCorrection).toHaveBeenCalledTimes(1))
+      await userEvent.click(screen.getByRole('dialog'))
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(document.body.style.overflow).toBe('auto')
+      expect(document.body.style.getPropertyPriority('overflow')).toBe('important')
+      expect(document.documentElement.style.overflow).toBe('scroll')
+      await act(async () => finish(CORRECTION))
+    } finally {
+      unmount()
+      document.body.style.cssText = initialBody
+      document.documentElement.style.cssText = initialRoot
+    }
   })
 })

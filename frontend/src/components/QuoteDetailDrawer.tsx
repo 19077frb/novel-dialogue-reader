@@ -57,27 +57,33 @@ export function QuoteDetailDrawer({
     setContextWindowCp(CONTEXT_STEPS[0])
   }, [quoteId])
 
-  // 可访问性：抽屉是一个有标题的对话框区域；打开时移入焦点，Escape 关闭并归还焦点。
+  // 原生模态隔离背景交互和键盘焦点；关闭仍只隐藏详情，不取消在途保存或复核。
   const titleId = useId()
-  const drawerRef = useRef<HTMLElement | null>(null)
-  const closeRef = useRef(onClose)
-  closeRef.current = onClose
+  const drawerRef = useRef<HTMLDialogElement | null>(null)
+  const backdropPointer = useRef<number | null>(null)
 
   useEffect(() => {
     if (!quoteId) return
     const previous = document.activeElement as HTMLElement | null
-    drawerRef.current?.focus()
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        closeRef.current()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
+    const dialog = drawerRef.current
+    const scrollRoots = [document.documentElement, document.body]
+    const previousOverflow = scrollRoots.map((element) => ({
+      value: element.style.getPropertyValue('overflow'),
+      priority: element.style.getPropertyPriority('overflow'),
+    }))
+    dialog?.showModal()
+    dialog?.focus({ preventScroll: true })
+    scrollRoots.forEach((element) => element.style.setProperty('overflow', 'hidden'))
     return () => {
-      document.removeEventListener('keydown', handleKeyDown)
+      backdropPointer.current = null
+      dialog?.close()
+      scrollRoots.forEach((element, index) => {
+        const { value, priority } = previousOverflow[index]
+        if (value) element.style.setProperty('overflow', value, priority)
+        else element.style.removeProperty('overflow')
+      })
       if (previous && typeof previous.focus === 'function' && document.contains(previous)) {
-        previous.focus()
+        previous.focus({ preventScroll: true })
       }
     }
   }, [quoteId])
@@ -184,14 +190,55 @@ export function QuoteDetailDrawer({
     correction.isPending || undo.isPending || defer.isPending || flag.isPending || gapDecision.isPending
 
   return (
-    <aside
-      className="ndr-drawer"
-      role="dialog"
+    <dialog
+      className="ndr-drawer-backdrop"
+      aria-modal="true"
       aria-labelledby={titleId}
       ref={drawerRef}
       tabIndex={-1}
       data-testid="quote-detail-drawer"
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Tab') return
+        // Chromium can hand focus to browser chrome at a native dialog's ends.
+        // Keep both tab directions within the visible controls of this panel.
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+          'button, a[href], input, select, textarea, summary, [tabindex]',
+        )).filter(element => element.tabIndex >= 0 && !element.matches(':disabled') && element.getClientRects().length > 0)
+        const first = controls[0]
+        const last = controls[controls.length - 1]
+        const active = document.activeElement
+        if (!first) {
+          event.preventDefault()
+          event.currentTarget.focus({ preventScroll: true })
+        } else if (event.shiftKey && (active === first || active === event.currentTarget)) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && (active === last || active === event.currentTarget)) {
+          event.preventDefault()
+          first.focus()
+        }
+      }}
+      onPointerDown={(event) => {
+        backdropPointer.current = event.target === event.currentTarget && event.button === 0
+          ? event.pointerId : null
+      }}
+      onPointerCancel={() => { backdropPointer.current = null }}
+      onPointerUp={(event) => {
+        if (event.target !== event.currentTarget || backdropPointer.current !== event.pointerId) {
+          backdropPointer.current = null
+        }
+      }}
+      onClick={(event) => {
+        const fromBackdrop = backdropPointer.current !== null
+        backdropPointer.current = null
+        if (fromBackdrop && event.target === event.currentTarget) onClose()
+      }}
     >
+      <div className="ndr-drawer">
       <header className="ndr-drawer-header">
         <h2 id={titleId}>对白确认</h2>
         <button type="button" onClick={onClose} data-testid="drawer-close">
@@ -306,6 +353,7 @@ export function QuoteDetailDrawer({
           </details>
         </>
       )}
-    </aside>
+      </div>
+    </dialog>
   )
 }
