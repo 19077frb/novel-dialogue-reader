@@ -42,6 +42,7 @@ def version_out(version: BookVersion) -> BookVersionOut:
         canonical_sha256=version.canonical_sha256,
         canonical_length_cp=version.canonical_length_cp,
         warnings=[str(item) for item in warnings],
+        toc=json.loads(version.toc_json) if version.toc_json is not None else None,
         created_at=version.created_at,
     )
 

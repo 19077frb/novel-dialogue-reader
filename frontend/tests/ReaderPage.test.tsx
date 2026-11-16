@@ -483,6 +483,57 @@ describe('ReaderPage', () => {
     }
   })
 
+  it('多级目录同章别名按目标位置重复跳转，不改变上下章顺序', async () => {
+    let version = BOOK.version
+    vi.mocked(booksApi.saveReadingProgress).mockImplementation(async (_id, input) => ({
+      book_id: 'b1', book_version_id: 'v1', read_position_cp: input.readPositionCp,
+      reading_mode: input.readingMode, version: ++version,
+    }))
+    vi.mocked(booksApi.fetchBook).mockResolvedValue({ ...BOOK, active_version: { ...BOOK.active_version!, toc: [
+      { id: 'root', parent_id: null, title: '全书目录', chapter_id: null, target_cp: null },
+      { id: 'later', parent_id: 'root', title: '第二段目录', chapter_id: 'c2', target_cp: 40 },
+      { id: 'early', parent_id: 'later', title: '首段目录', chapter_id: 'c2', target_cp: 21 },
+      { id: 'terminal', parent_id: 'root', title: '章末目录', chapter_id: 'c2', target_cp: 60 },
+    ] } })
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
+    const scroll = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+    vi.mocked(booksApi.fetchContent).mockImplementation(async (_bookId, query) => ({
+      book_id: 'b1', book_version_id: 'v1', canonical_length_cp: 60, chapter_id: query?.chapterId ?? null,
+      start_cp: 0, end_cp: 60, next_cursor: null,
+      nodes: query?.chapterId === 'c2' ? [...nodesFor('c2'), { ...nodesFor('c2')[0], node_id: 'later',
+        ordinal: 1, start_cp: 40, end_cp: 60, text: '目录目标正文。' }] : nodesFor('c1'),
+    }))
+    const view = renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c2')
+    try {
+      await screen.findByText(/第二章的正文/)
+      const originalParagraph = document.querySelector('[data-paragraph-start="21"]')
+      const contentCalls = vi.mocked(booksApi.fetchContent).mock.calls.length
+      fireEvent.click(screen.getByRole('button', { name: '收起第二段目录' }))
+      expect(document.querySelector('[data-paragraph-start="21"]')).toBe(originalParagraph)
+      expect(booksApi.fetchContent).toHaveBeenCalledTimes(contentCalls)
+      expect(booksApi.saveReadingProgress).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: '展开第二段目录' }))
+      for (const [title, position, paragraph] of [['第二段目录', '40', '40'], ['首段目录', '21', '21'],
+        ['第二段目录', '40', '40'], ['章末目录', '59', '40']] as const) {
+        scroll.mockClear()
+        await userEvent.click(screen.getByText(title, { selector: '.ndr-chapter-title' }))
+        await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1))
+        expect((scroll.mock.contexts.at(-1) as HTMLElement).dataset.paragraphStart).toBe(paragraph)
+        await waitFor(() => expect(booksApi.saveReadingProgress).toHaveBeenLastCalledWith('b1', expect.objectContaining({ readPositionCp: Number(position) })))
+        expect(document.querySelector('[data-paragraph-start="21"]')).toBe(originalParagraph)
+        expect(booksApi.fetchContent).toHaveBeenCalledTimes(contentCalls)
+      }
+      await userEvent.click(screen.getByRole('button', { name: '上一章' }))
+      await screen.findByText(/第一章的正文/)
+      expect(screen.getByRole('button', { current: true })).toHaveTextContent('第一章')
+    } finally {
+      view.unmount()
+      if (descriptor) Object.defineProperty(Element.prototype, 'scrollIntoView', descriptor)
+      else Reflect.deleteProperty(Element.prototype, 'scrollIntoView')
+    }
+  })
+
   it('侧栏书签每次点击都重新定位，同章不同书签和手动换章后也能跳转', async () => {
     const fetchMarks = vi.spyOn(bookmarksApi, 'fetchBookmarks').mockResolvedValue({ items: [21, 40].map(position => ({
       id: `mark-${position}`, version: 1, book_id: 'b1', book_version_id: 'v1', chapter_id: 'c2',

@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from xml.etree import ElementTree as ET
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,7 +26,16 @@ from fixtures.corrections import (
     run_deterministic_job,
     session_scope,
 )
-from ndr.storage.models import Annotation, BookCharacter, Chapter, Quote, Scene, SpeakerGroup
+from ndr.ingest.query import load_canonical_text
+from ndr.storage.models import (
+    Annotation,
+    BookCharacter,
+    BookVersion,
+    Chapter,
+    Quote,
+    Scene,
+    SpeakerGroup,
+)
 from ndr.storage.transactions import transaction
 
 
@@ -96,10 +106,35 @@ def test_nested_thought_colors_and_owners_survive_epub_roundtrip(
                                    speaker_id=group.id, status="USER_CONFIRMED", source="USER",
                                    assignment="EXISTING", basis="DIRECT", visible_from_cp=0))
     original = annotations_of(client, data["book_id"], reading_mode="reread")["items"]
-    raw = _export(client, data["book_id"], _preview(client, data["book_id"])["snapshot_id"])
+    with transaction(client.app.state.session_factory) as session:
+        version = session.get(BookVersion, data["book_version_id"])
+        original_text = load_canonical_text(client.app.state.settings, version)
+        chapter = session.scalar(select(Chapter).where(Chapter.book_version_id == version.id))
+        quotes = list(session.scalars(select(Quote).where(
+            Quote.book_version_id == version.id,
+        ).order_by(Quote.start_cp)))
+        version.toc_json = json.dumps([
+            dict(id="volume", parent_id=None, title="卷", chapter_id=None, target_cp=None),
+            dict(id="parent", parent_id="volume", title="可读父章", chapter_id=chapter.id,
+                 target_cp=quotes[0].start_cp),
+            dict(id="child", parent_id="parent", title="同名", chapter_id=chapter.id,
+                 target_cp=quotes[1].start_cp),
+            dict(id="child2", parent_id="child", title="同名", chapter_id=chapter.id,
+                 target_cp=quotes[2].start_cp),
+        ], ensure_ascii=False)
+    snapshot_id = _preview(client, data["book_id"])["snapshot_id"]
+    # A later metadata change must not alter the directory frozen in this snapshot.
+    with transaction(client.app.state.session_factory) as session:
+        session.get(BookVersion, data["book_version_id"]).toc_json = "[]"
+    assert _preview(client, data["book_id"])["snapshot_id"] != snapshot_id
+    raw = _export(client, data["book_id"], snapshot_id)
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         manifest = json.loads(archive.read("OEBPS/annotations.json"))
         assert [entry.get("nesting_depth", 0) for entry in manifest["annotations"]] == [0, 1, 0]
+        nav = ET.fromstring(archive.read("OEBPS/nav.xhtml"))
+        ns = {"h": "http://www.w3.org/1999/xhtml"}
+        assert len(nav.findall(".//h:li", ns)) == 4
+        assert len(nav.findall(".//h:a", ns)) == 3
     if depth_metadata != "current":
         def change_depth(manifest):  # noqa: ANN001 - 测试回调
             if depth_metadata == "legacy":
@@ -115,8 +150,28 @@ def test_nested_thought_colors_and_owners_survive_epub_roundtrip(
         "file": ("nested-restored.epub", raw, "application/epub+zip"),
     })
     assert restored.status_code == 202, restored.text
-    actual = annotations_of(client, restored.json()["data"]["book_id"], reading_mode="reread")["items"]
-    fields = ("label", "color_index", "kind")
+    restored_data = restored.json()["data"]
+    actual = annotations_of(client, restored_data["book_id"], reading_mode="reread")["items"]
+    with transaction(client.app.state.session_factory) as session:
+        restored_chapters = list(session.scalars(select(Chapter).where(
+            Chapter.book_version_id == restored_data["book_version_id"],
+        )))
+        assert len(restored_chapters) == 1
+        restored_quotes = list(session.scalars(select(Quote).where(
+            Quote.book_version_id == restored_data["book_version_id"],
+        ).order_by(Quote.start_cp)))
+        assert [quote.nesting_depth for quote in restored_quotes] == [0, 1, 0]
+        restored_version = session.get(BookVersion, restored_data["book_version_id"])
+        restored_text = load_canonical_text(client.app.state.settings, restored_version)
+        assert [restored_text[q.start_cp:q.end_cp] for q in restored_quotes] == [
+            original_text[q.start_cp:q.end_cp] for q in quotes
+        ]
+        restored_toc = json.loads(restored_version.toc_json)
+        assert [node["title"] for node in restored_toc] == ["卷", "可读父章", "同名", "同名"]
+        assert [node["target_cp"] for node in restored_toc[1:]] == [
+            quote.start_cp for quote in restored_quotes
+        ]
+    fields = ("start_cp", "end_cp", "label", "color_index", "kind")
     if depth_metadata != "current":
         original = [row for row in original if row["label"] != "人物2"]
     assert sorted(tuple(row[key] for key in fields) for row in actual) == sorted(

@@ -25,15 +25,18 @@ from ndr.storage.migrate import build_alembic_config, run_migrations
 
 
 def seed(settings):
-    run_migrations(settings, revision="0018")
+    # Seed using the current ORM, then produce an actual historical schema.
+    run_migrations(settings)
     engine = create_db_engine(settings)
     try:
         with Session(engine) as session:
             outcome = import_txt(session, settings, filename="sample.txt", raw=("第一章\n\n「你好。」\n" * 100).encode())
             session.commit()
-            return outcome.book.id
+            book_id = outcome.book.id
     finally:
         engine.dispose()
+    command.downgrade(build_alembic_config(settings), "0018")
+    return book_id
 
 
 def test_statistics_are_read_only_and_do_not_create_missing_databases(tmp_settings):
