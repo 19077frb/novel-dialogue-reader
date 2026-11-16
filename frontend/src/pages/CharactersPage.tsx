@@ -194,7 +194,8 @@ export default function CharactersPage() {
   const [revealedId, setRevealedId] = useState<string | null>(null)
   const [listOpen, setListOpen] = useState(true)
   const [visibleFromCp, setVisibleFromCp] = useState<number | null>(null)
-  const effectiveVisibleFromCp = settings.enableExperimentalFeatures ? visibleFromCp : null
+  const initialReadingEnabled = settings.enableExperimentalFeatures && settings.enableInitialReading
+  const effectiveVisibleFromCp = initialReadingEnabled ? visibleFromCp : null
   const [message, setMessage] = useState('')
   const batchProgress = useBatchProgress(bookId)
   const [autoMergeBusy, setAutoMergeBusy] = useState(false)
@@ -209,7 +210,7 @@ export default function CharactersPage() {
     enabled: Boolean(bookId),
   })
   const chapters = useQuery({ queryKey: queryKeys.chapters(bookId),
-    queryFn: ({ signal }) => fetchChapters(bookId, signal), enabled: Boolean(bookId) && settings.enableExperimentalFeatures })
+    queryFn: ({ signal }) => fetchChapters(bookId, signal), enabled: Boolean(bookId) && initialReadingEnabled })
   const saved = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['character-directory', bookId] }),
@@ -247,7 +248,7 @@ export default function CharactersPage() {
         <Link to="/library">返回书架</Link>
       </nav>
     </header>
-    {settings.enableExperimentalFeatures && <section className="card">
+    {initialReadingEnabled && <section className="card">
       <label className="ndr-field">本次人物修改从哪一章起可见（初读·试验）
         <select value={visibleFromCp ?? ''} disabled={batchProgress.running || autoMergeBusy}
           title={batchProgress.running || autoMergeBusy ? '本书任务或合并决定正在执行，请等待结束或先停止任务，再调整可见章节。' : undefined}

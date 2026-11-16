@@ -49,7 +49,7 @@ describe('shared processing preferences', () => {
   })
 
   it.each(['complete-review', 'complete-blocks', 'complete-blocks-review', 'complete-blocks-isolated', 'complete-blocks-isolated-review', 'complete-blocks-isolated-feedback-review'] as const)('persists %s and never upgrades old or unknown values', async dialogueStrategy => {
-    ;(await import('../src/settings/preferences')).updateGeneralSettings({ enableExperimentalFeatures: true })
+    ;(await import('../src/settings/preferences')).updateGeneralSettings({ enableExperimentalFeatures: true, enableDialogueStrategies: true })
     const module = await import('../src/processing/preferences')
     expect(module.getProcessingPreferences().dialogueStrategy).toBe('legacy')
     module.updateProcessingPreferences({ dialogueStrategy })
@@ -79,11 +79,58 @@ describe('shared processing preferences', () => {
     expect(module.getProcessingPreferences()).toBe(module.getProcessingPreferences())
     module.updateProcessingPreferences({ concurrency: 4 })
     expect(module.getStoredProcessingPreferences()).toMatchObject({ dialogueStrategy: frozen.dialogueStrategy, rosterRepairEnabled: true })
-    general.updateGeneralSettings({ enableExperimentalFeatures: true })
+    general.updateGeneralSettings({ enableExperimentalFeatures: true, enableDialogueStrategies: true })
     expect(module.getProcessingPreferences()).toMatchObject({ dialogueStrategy: frozen.dialogueStrategy, rosterRepairEnabled: true, concurrency: 4 })
     general.updateGeneralSettings({ enableExperimentalFeatures: false })
     expect(module.getProcessingPreferences().dialogueStrategy).toBe('legacy')
     expect(frozen.rosterRepairEnabled).toBe(true)
     expect(module.rosterRepairOptions(frozen).rosterRepairEnabled).toBe(true)
+  })
+
+  it.each([false, true].flatMap(master => [false, true].flatMap(dialogue =>
+    [false, true].map(repair => ({ master, dialogue, repair })),
+  )))('applies the independent experiment gates: %j', async ({ master, dialogue, repair }) => {
+    const general = await import('../src/settings/preferences')
+    const module = await import('../src/processing/preferences')
+    general.updateGeneralSettings({ enableExperimentalFeatures: master, enableDialogueStrategies: dialogue })
+    module.updateProcessingPreferences({ dialogueStrategy: 'complete-review', rosterRepairEnabled: repair })
+    expect(module.getProcessingPreferences()).toMatchObject({
+      dialogueStrategy: master && dialogue ? 'complete-review' : 'legacy',
+      rosterRepairEnabled: master && repair,
+    })
+    expect(module.getStoredProcessingPreferences()).toMatchObject({
+      dialogueStrategy: 'complete-review', rosterRepairEnabled: repair,
+    })
+  })
+
+  it('refreshes the effective cache for dialogue switches and keeps its identity for unrelated settings', async () => {
+    const general = await import('../src/settings/preferences')
+    const module = await import('../src/processing/preferences')
+    general.updateGeneralSettings({ enableExperimentalFeatures: true })
+    module.updateProcessingPreferences({ dialogueStrategy: 'complete-review', rosterRepairEnabled: true })
+    const disabled = module.getProcessingPreferences()
+    expect(disabled).toMatchObject({ dialogueStrategy: 'legacy', rosterRepairEnabled: true })
+    general.updateGeneralSettings({ enableInitialReading: true, fontSize: 22 })
+    expect(module.getProcessingPreferences()).toBe(disabled)
+    general.updateGeneralSettings({ enableDialogueStrategies: true })
+    const enabled = module.getProcessingPreferences()
+    expect(enabled).not.toBe(disabled)
+    expect(enabled.dialogueStrategy).toBe('complete-review')
+    general.updateGeneralSettings({ enableDialogueStrategies: false })
+    expect(module.getProcessingPreferences()).not.toBe(enabled)
+    expect(module.getProcessingPreferences()).toMatchObject({ dialogueStrategy: 'legacy', rosterRepairEnabled: true })
+    expect(module.getProcessingPreferences()).toBe(module.getProcessingPreferences())
+    expect(enabled.dialogueStrategy).toBe('complete-review')
+  })
+
+  it('keeps the effective behavior of legacy enabled experiments until individual choices are saved', async () => {
+    const general = await import('../src/settings/preferences')
+    const module = await import('../src/processing/preferences')
+    localStorage.setItem(general.SETTINGS_KEY, JSON.stringify({ enableExperimentalFeatures: true }))
+    module.updateProcessingPreferences({ dialogueStrategy: 'complete-blocks-review', rosterRepairEnabled: true })
+    expect(module.getProcessingPreferences()).toMatchObject({ dialogueStrategy: 'complete-blocks-review', rosterRepairEnabled: true })
+    general.updateGeneralSettings({ enableDialogueStrategies: false })
+    expect(module.getProcessingPreferences()).toMatchObject({ dialogueStrategy: 'legacy', rosterRepairEnabled: true })
+    expect(module.getStoredProcessingPreferences().dialogueStrategy).toBe('complete-blocks-review')
   })
 })

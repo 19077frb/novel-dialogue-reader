@@ -5,7 +5,7 @@ import * as profilesApi from '../src/api/profiles'
 import * as reviewApi from '../src/api/review'
 import * as jobsApi from '../src/api/jobs'
 import { RecheckPanel } from '../src/components/RecheckPanel'
-import { updateProcessingPreferences } from '../src/processing/preferences'
+import { getStoredProcessingPreferences, updateProcessingPreferences } from '../src/processing/preferences'
 import { updateGeneralSettings } from '../src/settings/preferences'
 import type { JobDetailOut, ModelProfileOut } from '../src/api/types'
 import { renderWithProviders } from './helpers'
@@ -23,7 +23,7 @@ const profile: ModelProfileOut = {
 }
 beforeEach(() => {
   localStorage.clear()
-  updateGeneralSettings({ enableExperimentalFeatures: true })
+  updateGeneralSettings({ enableExperimentalFeatures: true, enableDialogueStrategies: true })
   vi.clearAllMocks()
   vi.mocked(jobsApi.fetchRecentJobs).mockResolvedValue([])
   vi.mocked(profilesApi.fetchProfiles).mockResolvedValue([profile])
@@ -36,6 +36,20 @@ it('finds an existing recheck after remount without creating a new model request
   await waitFor(() => expect(jobsApi.fetchRecentJobs).toHaveBeenCalledWith({ quoteId: 'q1', kind: 'RECHECK', limit: 1 }, expect.any(AbortSignal)))
   expect(screen.getByTestId('recheck-start')).toBeDisabled()
   expect(reviewApi.recheckQuote).not.toHaveBeenCalled()
+})
+
+it('uses the standard strategy for a new recheck when the strategy switch is off', async () => {
+  updateProcessingPreferences({ profileId: 'p1', dialogueStrategy: 'complete-blocks-isolated-feedback-review', maxRecheckRounds: 0 })
+  updateGeneralSettings({ enableDialogueStrategies: false })
+  renderWithProviders(<RecheckPanel quoteId="q1" />)
+  await screen.findByTestId('profile-thinking-defaults')
+  expect(screen.queryByTestId('dialogue-strategy')).not.toBeInTheDocument()
+  expect(screen.getByTestId('recheck-start')).toBeEnabled()
+  await userEvent.click(screen.getByTestId('recheck-start'))
+  await waitFor(() => expect(reviewApi.recheckQuote).toHaveBeenCalledWith('q1', expect.objectContaining({
+    dialogueStrategy: 'legacy', maxRecheckRounds: 0,
+  })))
+  expect(getStoredProcessingPreferences().dialogueStrategy).toBe('complete-blocks-isolated-feedback-review')
 })
 
 it('explains feedback prerequisites and unlocks only when the user sets a review round', async () => {

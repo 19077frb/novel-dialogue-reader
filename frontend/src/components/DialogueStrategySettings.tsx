@@ -4,18 +4,19 @@ import { DisabledHint, disabledHint } from './DisabledHint'
 import { CollapsibleBlock } from './CollapsibleBlock'
 import { useGeneralSettings } from '../settings/preferences'
 
-export function DialogueStrategySettings({ value, onChange, disabled = false, disabledReason, rounds, experimentalEnabled }: {
+export function DialogueStrategySettings({ value, onChange, disabled = false, disabledReason, rounds, experimentalEnabled, compact = false }: {
   value: DialogueStrategy
   onChange: (value: DialogueStrategy) => void
   disabled?: boolean
   disabledReason?: string
   rounds: number
   experimentalEnabled?: boolean
+  compact?: boolean
 }) {
   const [settings] = useGeneralSettings()
-  if (!(experimentalEnabled ?? settings.enableExperimentalFeatures)) return null
+  if (!(experimentalEnabled ?? (settings.enableExperimentalFeatures && settings.enableDialogueStrategies))) return null
   const reason = disabledReason ?? '任务正在执行，请等待完成或先停止任务再修改对白策略。'
-  return <section className="card" aria-label="对白处理策略">
+  return <section className={compact ? 'ndr-experiment-details' : 'card'} aria-label="对白处理策略">
     <label className="ndr-field">对白处理策略
       <select data-testid="dialogue-strategy" value={value} disabled={disabled} {...disabledHint(disabled && reason)}
         onChange={event => onChange(event.target.value as DialogueStrategy)}>
@@ -35,7 +36,7 @@ export function DialogueStrategySettings({ value, onChange, disabled = false, di
     </label>
     <DisabledHint reason={disabled && reason} />
     <DisabledHint reason={dialogueStrategyDisabledReason(value, rounds)} />
-    <p className="hint">拿不准时，选带“推荐”标签的方案，并把复核次数设为至少 1。想减少用量，选“较省用量”方案。</p>
+    {!compact && <p className="hint">拿不准时，选带“推荐”标签的方案，并把复核次数设为至少 1。想减少用量，选“较省用量”方案。</p>}
     <p className="hint">复核次数越多、思考越深入，通常用量和等待也会增加。常规复核按你设置的次数执行。</p>
     <p className="hint" role="status">{value === 'legacy'
       ? '每次处理一小段对白，并参考附近的原文。'
@@ -47,6 +48,7 @@ export function DialogueStrategySettings({ value, onChange, disabled = false, di
       {value === 'complete-blocks-isolated-feedback-review' && ' 每窗额外调用一次模型，检查是否漏掉人物或认错身份。'}
     </p>
     <CollapsibleBlock title="策略区别与使用说明" defaultOpen={false}>
+    {compact && <p className="hint">拿不准时，选带“推荐”标签的方案，并把复核次数设为至少 1。想减少用量，选“较省用量”方案。</p>}
     {value === 'complete-blocks-isolated-feedback-review' && <p className="hint">适合怀疑人物名单有遗漏时使用。每窗多调用一次模型，并配合至少 1 次复核。人物建议和理由可在任务详情查看；需要修改第一视角主人公时，请回到本章人物确认。</p>}
     {value.includes('-isolated') && <p className="hint">例如模型没判断清楚对白是在对谁说，相关对白会进入待确认队列，其余有效结果继续保留。</p>}
     <p className="hint">单章、批量、自动处理与局部复核共用此选择。修改后从新任务开始生效，正在运行的任务保持原设置。</p>

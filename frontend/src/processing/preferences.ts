@@ -86,14 +86,17 @@ export function getStoredProcessingPreferences(): ProcessingPreferences {
 }
 let effectiveSource: ProcessingPreferences | undefined
 let effectiveEnabled: boolean | undefined
+let effectiveDialogueEnabled: boolean | undefined
 let effectiveCache = defaults
 /** Only new workflows use these effective preferences; frozen task inputs remain intact. */
 export function getProcessingPreferences(): ProcessingPreferences {
   const source = getStoredProcessingPreferences()
-  const enabled = getGeneralSettings().enableExperimentalFeatures
-  if (source !== effectiveSource || enabled !== effectiveEnabled) {
-    effectiveSource = source; effectiveEnabled = enabled
-    effectiveCache = enabled ? source : { ...source, dialogueStrategy: 'legacy', rosterRepairEnabled: false }
+  const settings = getGeneralSettings()
+  const enabled = settings.enableExperimentalFeatures
+  const dialogueEnabled = enabled && settings.enableDialogueStrategies
+  if (source !== effectiveSource || enabled !== effectiveEnabled || dialogueEnabled !== effectiveDialogueEnabled) {
+    effectiveSource = source; effectiveEnabled = enabled; effectiveDialogueEnabled = dialogueEnabled
+    effectiveCache = dialogueEnabled ? source : { ...source, dialogueStrategy: 'legacy', rosterRepairEnabled: enabled && source.rosterRepairEnabled }
   }
   return effectiveCache
 }
@@ -113,4 +116,7 @@ function subscribe(listener: () => void) {
 }
 export function useProcessingPreferences() {
   return [useSyncExternalStore(subscribe, getProcessingPreferences), updateProcessingPreferences] as const
+}
+export function useStoredProcessingPreferences() {
+  return [useSyncExternalStore(subscribe, getStoredProcessingPreferences), updateProcessingPreferences] as const
 }

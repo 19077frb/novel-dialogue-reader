@@ -1,0 +1,66 @@
+/* Category controls and save stay in the same sticky toolbar. */
+.ndr-settings-navigation {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  padding: 12px 0;
+  background: var(--ndr-bg);
+  border-bottom: 1px solid var(--ndr-border);
+  scroll-margin-top: 0;
+}
+.ndr-settings-navigation .ndr-section-nav { margin: 0; gap: 6px; }
+.ndr-settings-navigation [aria-current='page'] { color: var(--ndr-accent); border-color: var(--ndr-accent); background: var(--ndr-panel); }
+.ndr-settings-command { display: flex; align-items: flex-start; gap: 8px; }
+.ndr-settings-command button { white-space: nowrap; }
+.ndr-settings-feedback { grid-column: 1 / -1; }
+.ndr-settings-feedback p { margin: 0; font-size: .8rem; }
+.ndr-settings .ndr-settings-content { border: 0; padding: 0; margin: 0; min-width: 0; }
+.ndr-settings .ndr-settings-content > .card, .ndr-settings .ndr-settings-content > div { margin: 16px 0 0; }
+.ndr-settings .ndr-settings-content > div > .card { margin: 0; }
+.ndr-settings .ndr-settings-content .card { padding: 20px; }
+.ndr-settings .ndr-settings-content h3 { margin-top: 0; }
+.ndr-settings .ndr-settings-options { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; }
+.ndr-settings .ndr-settings-options label { display: flex; align-items: baseline; gap: 6px; }
+.ndr-settings .ndr-settings-options input { flex-shrink: 0; }
+.ndr-settings .ndr-settings-fields, .ndr-settings .ndr-thinking-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ndr-settings-group { padding-block: 18px; border-bottom: 1px solid var(--ndr-border); }
+.ndr-settings-group h4 { margin: 0 0 12px; font-size: .95rem; font-weight: 600; }
+.ndr-settings-group .ndr-range-grid { margin: 0; gap: 12px 24px; }
+.ndr-settings-group .hint { margin: 8px 0 0; }
+.ndr-automatic-schedule { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: center; gap: 16px 24px; padding-top: 0; }
+.ndr-settings .ndr-experimental-list { border: 0; margin: 0; padding: 0; min-width: 0; }
+.ndr-experiment-item { padding-block: 18px; border-top: 1px solid var(--ndr-border); }
+.ndr-experiment-item > label, .ndr-experiment-details > label:not(.ndr-field) { font-weight: 600; }
+.ndr-experiment-item .hint { margin: 8px 0; }
+.ndr-experiment-details { margin-top: 12px; }
+.ndr-experiment-item > .ndr-experiment-details { margin-top: 0; }
+.ndr-experimental-list:disabled .ndr-experiment-item { color: var(--ndr-muted); }
+.ndr-experiment-details .ndr-range-grid { margin-bottom: 0; }
+.ndr-experiment-details .ndr-range-grid > .ndr-field:only-child { max-width: 340px; }
+.ndr-settings .ndr-reading-sample { margin-block: 12px; padding: 14px 18px; }
+.ndr-settings .ndr-reading-sample p { margin: 0; }
+.ndr-settings-actions, .ndr-settings-save-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.ndr-settings .ndr-application-groups { display: grid; gap: 12px; }
+.ndr-settings .ndr-application-groups > .ndr-collapsible-block { border-bottom: 1px solid var(--ndr-border); padding-bottom: 12px; }
+.ndr-settings .ndr-application-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 24px; }
+.ndr-settings .ndr-application-grid .ndr-field:has(input[type='checkbox']) { display: flex; flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 8px; }
+.ndr-settings .ndr-application-grid input[type='checkbox'] { width: auto; }
+.ndr-settings .ndr-application-grid .ndr-setting-wide { grid-column: 1 / -1; }
+.ndr-settings .ndr-application-grid .hint { margin-block: 6px; font-size: .8rem; }
+@media (max-width: 900px) {
+  .ndr-settings .ndr-application-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .ndr-settings-navigation { gap: 8px; }
+  .ndr-settings-command { flex-direction: column; }
+  .ndr-settings-command button { padding-inline: 10px; font-size: .8rem; }
+  .ndr-settings-navigation .ndr-section-nav a { padding: 8px 10px; font-size: .8rem; }
+  .ndr-settings .ndr-settings-content .card { padding: 16px; }
+  .ndr-settings .ndr-settings-options, .ndr-settings .ndr-settings-fields, .ndr-settings .ndr-thinking-fields, .ndr-automatic-schedule { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 380px) {
+  .ndr-settings .ndr-application-grid { grid-template-columns: minmax(0, 1fr); }
+}

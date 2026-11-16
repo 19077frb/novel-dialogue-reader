@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ApplicationSettings } from '../src/components/ApplicationSettings'
@@ -15,6 +15,9 @@ const example: api.ApplicationSettings = {
     { key: 'port', label: '服务端口', group: '服务与书库', description: '重启后使用新端口', kind: 'number', minimum: 1, maximum: 65535, options: [], value: 8765, current_value: 8765, default_value: 8765, locked_reason: null },
     { key: 'host', label: '监听地址', group: '服务与书库', description: '本地服务', kind: 'text', minimum: null, maximum: null, options: [], value: '127.0.0.1', current_value: '127.0.0.1', default_value: '127.0.0.1', locked_reason: '免安装版固定监听本机' },
   ],
+}
+function applicationSaveButton() {
+  return within(screen.getByRole('region', { name: '应用配置' })).getByRole('button', { name: '保存设置' })
 }
 beforeEach(() => {
   vi.resetAllMocks()
@@ -43,7 +46,7 @@ it.each(capacityExamples)('%s 使用MB展示、范围和小数输入，保存仍
   expect(input).toHaveAttribute('step', 'any')
   fireEvent.change(input, { target: { value: '100.5' } })
   expect(api.saveApplicationSettings).not.toHaveBeenCalled()
-  await userEvent.click(screen.getByRole('button', { name: '保存应用配置' }))
+  await userEvent.click(applicationSaveButton())
   await waitFor(() => expect(api.saveApplicationSettings).toHaveBeenCalledWith({ values: { [key]: 100.5 * 1024 ** 2 }, revision: 'missing' }))
   expect(await screen.findByText(`当前生效：${amount} MB`)).toBeVisible()
   expect(input).toHaveValue(100.5)
@@ -60,7 +63,7 @@ it('字节旧配置精确显示，恢复容量默认及保存并重启不会二�
   renderWithProviders(<ApplicationSettings />)
   const input = await screen.findByLabelText('导入文件大小上限（MB）')
   expect(input).toHaveValue(1048577 / 1024 ** 2)
-  expect(screen.getByRole('button', { name: '保存应用配置' })).toBeDisabled()
+  expect(applicationSaveButton()).toBeDisabled()
   await userEvent.click(screen.getByRole('button', { name: '恢复应用配置默认值' }))
   expect(input).toHaveValue(50)
   await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
@@ -71,11 +74,12 @@ it('编辑不自动保存，保存显示待重启状态和新端口', async () =
   vi.mocked(api.saveApplicationSettings).mockResolvedValue({ ...example, revision: 'saved', restart_required: ['port'], fields: [{ ...example.fields[0], value: 8800 }, example.fields[1]] })
   renderWithProviders(<ApplicationSettings />)
   await screen.findByLabelText('服务端口')
+  expect(applicationSaveButton()).toBeVisible()
   expect(screen.getByLabelText('监听地址')).toBeDisabled()
   expect(screen.getByText(/免安装版固定监听本机/)).toBeVisible()
   fireEvent.change(screen.getByLabelText('服务端口'), { target: { value: '8800' } })
   expect(api.saveApplicationSettings).not.toHaveBeenCalled()
-  await userEvent.click(screen.getByRole('button', { name: '保存应用配置' }))
+  await userEvent.click(applicationSaveButton())
   await waitFor(() => expect(api.saveApplicationSettings).toHaveBeenCalledWith({ values: { port: 8800 }, revision: 'missing' }))
   expect(await screen.findByText(/已保存，重启后生效/)).toBeVisible()
   expect(screen.getByText(/http:\/\/127.0.0.1:8800/)).toBeVisible()
@@ -106,7 +110,7 @@ it('成功重启后锁定编辑并显示重新打开入口', async () => {
   renderWithProviders(<ApplicationSettings />)
   await screen.findByLabelText('服务端口')
   await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
-  expect(await screen.findByRole('link', { name: '重新打开设置' })).toHaveAttribute('href', 'http://127.0.0.1:8765/settings/general')
+  expect(await screen.findByRole('link', { name: '重新打开设置' })).toHaveAttribute('href', 'http://127.0.0.1:8765/settings/general#application-settings')
   expect(screen.getByRole('link', { name: '重新打开设置' })).toHaveClass('ndr-button')
   expect(screen.getByLabelText('服务端口')).toBeDisabled()
 })
@@ -124,7 +128,7 @@ it('恢复应用配置只修改未锁定草稿，不自动保存或重启', asyn
   expect(screen.getByLabelText('监听地址')).toHaveValue('localhost')
   expect(api.saveApplicationSettings).not.toHaveBeenCalled()
   expect(api.saveAndRestartApplication).not.toHaveBeenCalled()
-  expect(screen.getByRole('button', { name: '保存应用配置' })).toBeEnabled()
+  expect(applicationSaveButton()).toBeEnabled()
 })
 
 it('取消应用配置恢复保留草稿，全锁定时提示无法恢复', async () => {

@@ -1501,7 +1501,6 @@ textarea:focus-visible {
 .ndr-section-nav a { display: inline-flex; align-items: center; min-height: 40px; padding: 8px 14px; text-decoration: none; color: var(--ndr-muted); border: 1px solid var(--ndr-border); border-radius: var(--ndr-radius-control); background: var(--ndr-card); font-size: .85rem; }
 .ndr-section-nav a:hover { color: var(--ndr-accent); border-color: var(--ndr-accent); }
 .ndr-settings-content { min-width: 0; }
-.ndr-settings-content > .card:first-child { margin-top: 0; }
 .ndr-shared-configuration > .ndr-collapsible-block > [aria-labelledby] > .card { border: 0; padding-inline: 0; box-shadow: var(--ndr-shadow-none); }
 .ndr-settings-save { position: sticky; bottom: 12px; z-index: 5; box-shadow: var(--ndr-shadow-sticky); border-color: var(--ndr-accent); }
 .ndr-settings-save p { margin-bottom: 0; }

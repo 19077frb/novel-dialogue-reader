@@ -190,18 +190,23 @@ describe('ExportDialog', () => {
     expect(screen.getByTestId('export-failed')).toHaveTextContent('检查数据目录空间和写入权限')
   })
 
-  it('默认重读并隐藏初读，启用后可选初读，关闭后重新冻结重读快照', async () => {
+  it.each(['enableExperimentalFeatures', 'enableInitialReading'] as const)('默认重读，启用后可选初读，关闭 %s 后导出重读快照', async key => {
+    vi.mocked(exportsApi.previewExport).mockImplementation(async (_book, input) =>
+      preview(input?.visibilityPolicy === 'position_safe' ? 's-initial' : 's-reread'))
+    vi.mocked(exportsApi.createExport).mockResolvedValue(artifact({ snapshot_id: 's-reread' }))
     renderWithProviders(<ExportDialog bookId="b1" open onClose={vi.fn()} chapters={CHAPTERS} />)
     await screen.findByTestId('export-preview')
     expect(screen.queryByTestId('export-policy')).not.toBeInTheDocument()
     expect(exportsApi.previewExport).toHaveBeenLastCalledWith('b1', expect.objectContaining({ visibilityPolicy: 'reread' }), expect.anything())
-    act(() => updateGeneralSettings({ enableExperimentalFeatures: true }))
+    act(() => updateGeneralSettings({ enableExperimentalFeatures: true, enableInitialReading: true }))
     expect(screen.getByTestId('export-policy-reread')).toBeChecked()
     await userEvent.click(screen.getByTestId('export-policy-position-safe'))
     await waitFor(() => expect(exportsApi.previewExport).toHaveBeenLastCalledWith('b1', expect.objectContaining({ visibilityPolicy: 'position_safe' }), expect.anything()))
-    act(() => updateGeneralSettings({ enableExperimentalFeatures: false }))
+    act(() => updateGeneralSettings({ [key]: false }))
     expect(screen.queryByTestId('export-policy')).not.toBeInTheDocument()
     await waitFor(() => expect(exportsApi.previewExport).toHaveBeenLastCalledWith('b1', expect.objectContaining({ visibilityPolicy: 'reread' }), expect.anything()))
+    await userEvent.click(screen.getByTestId('export-generate'))
+    await waitFor(() => expect(exportsApi.createExport).toHaveBeenCalledWith('b1', expect.objectContaining({ snapshotId: 's-reread' })))
   })
 
   it('人物资料因节选遗漏时显示数量和完整迁移建议，仍允许下载正文', async () => {

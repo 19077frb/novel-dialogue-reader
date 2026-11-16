@@ -24,36 +24,53 @@ export function ThinkingSettings({ disabled, disabledReason, profiles, profileId
   const effectivelyDisabled = preferences.thinkingMode === 'disabled'
     || (preferences.thinkingMode === 'default' && thinking?.type === 'disabled')
   const lockReason = disabledReason ?? '当前配置已锁定，请按本页面的任务或确认提示完成前置操作。'
-  return <section className="card" data-testid="model-thinking-settings">
-    <h3>模型配置与本次思考设置</h3>
-    <label className="ndr-field">模型配置
-      <select value={profileId} disabled={disabled} {...disabledHint(disabled && lockReason)} onChange={event => onProfileChange(event.target.value)} data-testid={profileTestId}>
+  const settingHint = (description: string, reason: string | false) =>
+    disabledHint([draftPreferences && description, reason].filter(Boolean).join(' '))
+  const modelField = <label className="ndr-field">模型配置
+      <select value={profileId} disabled={disabled}
+        {...settingHint('保存后用于新建任务，运行中任务沿用启动时的配置。模型账号在“模型配置”管理。', disabled && lockReason)}
+        onChange={event => onProfileChange(event.target.value)} data-testid={profileTestId}>
         <option value="">（请选择模型配置）</option>
         {profiles.map(item => <option key={item.id} value={item.id} title={`${item.name} · ${protocolLabel(item.protocol)} · ${item.model}`}>{item.name} · {item.model}</option>)}
       </select>
     </label>
+  const profileNotices = <>
     {profile?.protocol === 'fake-provider' && <p className="hint">当前选择的是本地模拟服务，用于测试处理流程。</p>}
     {profiles.length === 0 && <p className="hint" data-testid="preview-no-profile">还没有模型配置：请先到“模型配置”添加提供方（真实提供方需要密钥）。</p>}
-    <div className="ndr-range-grid">
+  </>
+  const thinkingFields = <>
       <label className="ndr-field">思考模式
-        <select data-testid="processing-thinking-mode" disabled={disabled} {...disabledHint(disabled && lockReason)} value={preferences.thinkingMode}
+        <select data-testid="processing-thinking-mode" disabled={disabled}
+          {...settingHint('选择“沿用模型配置”使用已保存的默认值，未指定时由模型服务决定。', disabled && lockReason)} value={preferences.thinkingMode}
           onChange={event => update({ thinkingMode: event.target.value as ProcessingPreferences['thinkingMode'] })}>
           <option value="default">沿用模型配置</option><option value="disabled">关闭</option>
           <option value="enabled">开启</option><option value="adaptive">自适应</option>
         </select>
       </label>
       <label className="ndr-field">思考强度
-        <select data-testid="processing-thinking-effort" disabled={disabled || effectivelyDisabled} {...disabledHint(disabled ? lockReason : effectivelyDisabled && '当前思考模式为关闭；先选择开启或自适应，再调整思考强度。')} value={preferences.thinkingEffort}
+        <select data-testid="processing-thinking-effort" disabled={disabled || effectivelyDisabled}
+          {...settingHint('开启或自适应模式可设置思考强度，输出上限沿用当前配置。', disabled ? lockReason : effectivelyDisabled && '当前思考模式为关闭；先选择开启或自适应，再调整思考强度。')} value={preferences.thinkingEffort}
           onChange={event => update({ thinkingEffort: event.target.value as ProcessingPreferences['thinkingEffort'] })}>
           <option value="default">沿用模型配置</option><option value="low">低</option>
           <option value="medium">中</option><option value="high">高</option>
         </select>
       </label>
-    </div>
+  </>
+  return <section className={draftPreferences ? 'ndr-settings-group ndr-thinking-compact' : 'card'} data-testid="model-thinking-settings">
+    {draftPreferences ? <h4>模型与思考</h4> : <h3>模型配置与本次思考设置</h3>}
+    {draftPreferences ? <>
+      <div className="ndr-range-grid ndr-thinking-fields">{modelField}{thinkingFields}</div>
+      {profileNotices}
+    </> : <>
+      {modelField}
+      {profileNotices}
+      <div className="ndr-range-grid">{thinkingFields}</div>
+    </>}
     <DisabledHint reason={disabled ? lockReason : effectivelyDisabled && '思考已关闭，无法调整思考强度；需要调整时请先将思考模式改为开启或自适应。'} />
     {profile && <p className="hint" data-testid="profile-thinking-defaults">当前配置「{profile.name}」默认：模式 {labels[thinking?.type ?? ''] ?? '模型服务默认'}；强度 {labels[String(params.reasoning_effort ?? '')] ?? '模型服务默认'}。</p>}
-    <p className="hint">{draftPreferences ? '修改后请保存阅读与处理设置。' : '单章、人物识别、试运行、批量与局部复核共用并记忆此设置；'}新建任务使用此设置，运行中任务沿用启动时的配置。
+    {draftPreferences ? <p className="hint">思考功能需模型服务支持，开启后可能增加用量与等待。</p>
+    : <p className="hint">单章、人物识别、试运行、批量与局部复核共用并记忆此设置；新建任务使用此设置，运行中任务沿用启动时的配置。
       思考功能需要模型服务支持，不确定时请选择沿用模型配置。
-      沿用模型配置时使用模型配置页保存的默认值；未指定则由模型服务决定。开启或自适应模式可设置思考强度。开启思考可能增加用量与等待时间，输出上限沿用当前配置。</p>
+      沿用模型配置时使用模型配置页保存的默认值；未指定则由模型服务决定。开启或自适应模式可设置思考强度。开启思考可能增加用量与等待时间，输出上限沿用当前配置。</p>}
   </section>
 }

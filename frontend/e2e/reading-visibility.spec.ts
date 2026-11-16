@@ -62,9 +62,10 @@ async function runWholeBook(page: Page, profileName: string, model = 'fake-model
 
 test.describe('证据时点与定位回归', () => {
   test('：后文才揭示的合并不会在初读时提前同色，重读才合并', async ({ page }) => {
-    await page.goto('/settings/general')
+    await page.goto('/settings/general#experimental-settings')
     await page.getByLabel('启用试验功能', { exact: true }).check()
-    await page.getByRole('button', { name: '保存阅读与处理设置', exact: true }).click()
+    await page.getByLabel('初读与安全导出', { exact: true }).check()
+    await page.getByRole('button', { name: '保存设置', exact: true }).click()
     await expect(page.getByText('阅读与处理设置已保存。', { exact: true })).toBeVisible()
     const profileName = '合并可见性提供方'
     await createProfile(page, {

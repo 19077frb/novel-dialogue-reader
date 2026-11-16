@@ -63,7 +63,8 @@ export function ExportDialog({
   const [style, setStyle] = useState<ExportStylePreset>('color_and_label')
   const [settings] = useGeneralSettings()
   const [selectedPolicy, setVisibilityPolicy] = useState<VisibilityPolicy>('reread')
-  const visibilityPolicy: VisibilityPolicy = settings.enableExperimentalFeatures ? selectedPolicy : 'reread'
+  const initialReadingEnabled = settings.enableExperimentalFeatures && settings.enableInitialReading
+  const visibilityPolicy: VisibilityPolicy = initialReadingEnabled ? selectedPolicy : 'reread'
   const [format, setFormat] = useState<ExportFormat>('epub')
   const [artifact, setArtifact] = useState<ExportArtifactOut | null>(null)
   // 与产物一起记录提交时的来源，后续预览或选项变化不能改写它。
@@ -201,7 +202,7 @@ export function ExportDialog({
         />
         <ExportStylePreview value={style} onChange={setStyle} />
 
-        {settings.enableExperimentalFeatures && <fieldset className="ndr-export-policy" data-testid="export-policy">
+        {initialReadingEnabled && <fieldset className="ndr-export-policy" data-testid="export-policy">
           <legend>标注显示模式</legend>
           <label>
             <input
