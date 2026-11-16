@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { confirmChapterRoster } from './roster'
+import { confirmChapterRoster, selectAllChapterWindows } from './roster'
 
 /**
  * 暂停恢复、预算到顶与故障闭环（界面侧）。
@@ -79,6 +79,7 @@ test.describe('预算与故障恢复', () => {
     await confirmChapterRoster(page)
 
     await page.getByTestId('budget-max-input').fill('1')
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('额度已用完', {
       timeout: 30_000,
@@ -117,6 +118,7 @@ test.describe('预算与故障恢复', () => {
       .getByTestId('preview-profile')
       .selectOption({ label: `${profileName} · fake-model-no-key` })
 
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('失败', { timeout: 30_000 })
     await expect(page.getByTestId('recovery-summary')).toContainText('失败')
@@ -142,6 +144,7 @@ test.describe('预算与故障恢复', () => {
       .selectOption({ label: `${profileName} · fake-model-timeout` })
     await confirmChapterRoster(page)
 
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('结果未知，需确认', {
       timeout: 30_000,

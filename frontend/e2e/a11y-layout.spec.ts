@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { confirmChapterRoster } from './roster'
+import { confirmChapterRoster, selectAllChapterWindows } from './roster'
 
 /**
  * 可访问性与 360 / 1280px 布局检查。
@@ -155,6 +155,7 @@ test.describe('可访问性与布局检查', () => {
       label: `${profileName} · fake-model-a11y`,
     })
     await confirmChapterRoster(page)
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     await page.getByRole('link', { name: '去阅读' }).click()

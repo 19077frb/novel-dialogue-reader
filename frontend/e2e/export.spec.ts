@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { confirmChapterRoster } from './roster'
+import { confirmChapterRoster, selectAllChapterWindows } from './roster'
 
 /**
  * 导出对话框、后端样张与下载闭环。
@@ -48,6 +48,7 @@ async function processFirstChapter(page: Page, profileLabel: string) {
   await page.getByTestId('preview-profile').selectOption({ label: profileLabel })
   // 逐句归属前必须先确认本章人物与第一视角主人公。
   await confirmChapterRoster(page)
+  await selectAllChapterWindows(page)
   await page.getByTestId('preview-run').click()
   await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 }

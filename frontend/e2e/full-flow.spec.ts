@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { confirmChapterRoster } from './roster'
+import { confirmChapterRoster, selectAllChapterWindows } from './roster'
 
 /**
  * 完整联调（TXT/EPUB 导入 → 处理 → EPUB/HTML 导出 → 下载件离线可读）。
@@ -51,6 +51,7 @@ async function processFirstChapter(page: Page, profileLabel: string) {
   await confirmChapterRoster(page)
   await page.getByTestId('preview-estimate').click()
   await expect(page.getByTestId('estimate-summary')).toBeVisible()
+  await selectAllChapterWindows(page)
   await page.getByTestId('preview-run').click()
   await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 }

@@ -22,7 +22,7 @@ export function AppShell({ children, status, recovery }: {
         <div className="ndr-shell-topbar">
           <div className="ndr-shell-brand">
             <span className="ndr-shell-mark"><BookOpen size={20} aria-hidden="true" /></span>
-            <div><h1><span>轻小说</span><span>对话辅助阅读器</span></h1><p>阅读原文，整理人物与对白。</p></div>
+            <div><h1 aria-label="轻小说对话辅助阅读器"><span>轻小说</span><span>对话辅助阅读器</span></h1><p>阅读原文，整理人物与对白。</p></div>
           </div>
           <p className="ndr-shell-label">工作空间</p>
           <nav className="ndr-shell-nav" aria-label="主导航">

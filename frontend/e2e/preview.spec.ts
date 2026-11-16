@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { confirmChapterRoster } from './roster'
+import { confirmChapterRoster, selectAllChapterWindows } from './roster'
 
 /**
  * 真实效果预览与按章处理。
@@ -66,6 +66,7 @@ test.describe('预览与按章处理', () => {
     expect(targets).toBeGreaterThan(0)
 
     // 试运行：真实任务驱动的结果
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     expect(Number(await page.getByTestId('job-calls').innerText())).toBeGreaterThan(0)
@@ -120,6 +121,7 @@ test.describe('预览与按章处理', () => {
       .selectOption({ label: `${profileName} · fake-model` })
     await confirmChapterRoster(page)
 
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 
@@ -150,6 +152,7 @@ test.describe('预览与按章处理', () => {
 
     // 换章节后人物名单要重新确认，确认的是这一章的人物与主人公
     await confirmChapterRoster(page)
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()

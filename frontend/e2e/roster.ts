@@ -1,5 +1,13 @@
 import { expect, type Page } from '@playwright/test'
 
+/** Explicitly include completed windows when a scenario reuses an imported book. */
+export async function selectAllChapterWindows(page: Page) {
+  const selectAll = page.getByTestId('windows-select-all')
+  await expect(selectAll).toBeEnabled()
+  await selectAll.click()
+  await expect(page.getByTestId('preview-run')).toBeEnabled()
+}
+
 /**
  * 「本章人物」是逐句归属的前置步骤：先分析本章人物，再确认名单与第一视角主人公，
  * 之后「试运行预览 / 按此范围正式处理」才会启用。
