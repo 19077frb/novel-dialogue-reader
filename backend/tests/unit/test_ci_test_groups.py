@@ -42,8 +42,12 @@ def test_all_pull_requests_require_frontend_validation_and_production_build():
     assert "frontend/**" in events["push"]["paths"]
     assert events["push"]["branches"] == ["main"]
     commands = [step["run"] for step in workflow["jobs"]["frontend"]["steps"] if "run" in step]
-    for command in ("ci", "run typecheck", "run check:api", "run test", "run build"):
+    for command in ("ci", "run typecheck", "run check:api", "run test", "run build:assets"):
         assert f"npm --prefix frontend {command}" in commands
+    assert commands.count("npm --prefix frontend run typecheck") == 1
+    assert "npm --prefix frontend run build" not in commands
+    assert commands.index("npm --prefix frontend run typecheck") < commands.index(
+        "npm --prefix frontend run build:assets")
     summary = workflow["jobs"]["database"]
     assert summary["if"] == "always()"
     assert any("$env:FRONTEND_RESULT -ne 'success'" in step.get("run", "")

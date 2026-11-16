@@ -102,7 +102,7 @@ jobs:
       - name: Run frontend tests
         run: npm --prefix frontend run test
       - name: Build frontend production assets
-        run: npm --prefix frontend run build
+        run: npm --prefix frontend run build:assets
 
   database:
     # Keep the original overall check name; success requires every group.

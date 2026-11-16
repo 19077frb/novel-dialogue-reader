@@ -18,8 +18,8 @@ export function mergeLibraryOrder(previous: string[], current: string[]): string
   const visible = validLibraryOrder(current)
   const visibleSet = new Set(visible)
   let next = 0
-  const merged = validLibraryOrder(previous).map(id => visibleSet.has(id) ? visible[next++] : id)
-  return validLibraryOrder([...merged, ...visible.slice(next)])
+  const merged = previous.map(id => visibleSet.has(id) ? visible[next++] : id)
+  return [...merged, ...visible.slice(next)].slice(0, MAX_IDS)
 }
 
 export function orderLibraryBooks<T extends { id: string }>(books: T[], order: string[]): T[] {

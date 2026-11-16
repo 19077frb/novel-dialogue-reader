@@ -83,11 +83,9 @@ class CompiledIdentityFeedback:
         )
 
 
-def prepare_identity_feedback(task, primary, *, primary_source, locked_targets=(), generation=0):
+def prepare_identity_feedback(task, primary, *, primary_source, locked_targets=()):
     if not task.quote_ids:
         raise ValueError("Identity feedback requires expression targets")
-    if type(generation) is not int or generation != 0:
-        raise ValueError("Identity feedback permits one generation only")
     if not isinstance(primary_source, str) or not primary_source.strip():
         raise ValueError("Primary identity proposal requires an explicit source")
     compilation = compile_expression_output(primary, task)

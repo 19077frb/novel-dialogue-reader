@@ -74,7 +74,7 @@ if (-not $SkipFrontend) {
     }
 
     Invoke-Check 'frontend build' {
-        & npm --prefix frontend run build
+        & npm --prefix frontend run build:assets
     }
 }
 

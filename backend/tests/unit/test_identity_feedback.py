@@ -152,13 +152,6 @@ def test_locked_member_protects_whole_identity_block(locked):
         compile_case(task, primary, feedback, locked_targets=locked)
 
 
-@pytest.mark.parametrize("generation", [1, -1, False, None])
-def test_feedback_generation_is_bounded(generation):
-    task, primary, _ = fixture()
-    with pytest.raises(ValueError, match="one generation"):
-        prepare_identity_feedback(task, primary, primary_source="first", generation=generation)
-
-
 def test_source_binding_scope_and_full_proposal_cannot_be_bypassed():
     task, primary, feedback = fixture()
     plan = prepare_identity_feedback(task, primary, primary_source="first")

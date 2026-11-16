@@ -2,14 +2,18 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, apiRequest, readRetryDelay, shouldRetryReadRequest } from '../src/api/client'
 import { fetchBooks } from '../src/api/books'
+import { deleteProfile } from '../src/api/profiles'
 
 describe('read query retry policy', () => {
-  it('保留顶层错误编号，内部错误展示编号且不改变其他业务错误文案', async () => {
+  it.each([
+    { name: '通用请求', run: () => apiRequest('/api/jobs', { method: 'POST', body: {} }) },
+    { name: '删除模型配置', run: () => deleteProfile('p1') },
+  ])('$name 保留顶层错误编号且不改变其他业务错误文案', async ({ run }) => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       error: { code: 'INTERNAL_ERROR', message: '服务器内部错误', details: {} }, request_id: 'request-123',
     }), { status: 500 }))
     try {
-      const error = await apiRequest('/api/jobs', { method: 'POST', body: {} }).catch(value => value)
+      const error = await run().catch(value => value)
       expect(error).toBeInstanceOf(ApiError)
       if (!(error instanceof ApiError)) throw new Error('Expected ApiError')
       expect(error.requestId).toBe('request-123')
@@ -28,12 +32,19 @@ describe('read query retry policy', () => {
       expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/books', '/api/books?cursor=page%202%2F%2B'])
     } finally { fetchMock.mockRestore() }
   })
-  it('删除成功的 204 响应不尝试读取 JSON', async () => {
+  it.each(['', 'https://api.example.test'])('删除配置遵守 API 地址 %s 和取消信号，204 不读取 JSON', async base => {
+    vi.stubEnv('VITE_API_BASE', base)
+    vi.resetModules()
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
     try {
-      await expect(apiRequest<void>('/api/books/b1', { method: 'DELETE' })).resolves.toBeUndefined()
+      const { deleteProfile: deleteWithBase } = await import('../src/api/profiles')
+      const { signal } = new AbortController()
+      await expect(deleteWithBase('p1', signal)).resolves.toBeUndefined()
+      expect(fetchMock).toHaveBeenCalledWith(`${base}/api/model-profiles/p1`, expect.objectContaining({ method: 'DELETE', signal }))
     } finally {
       fetchMock.mockRestore()
+      vi.unstubAllEnvs()
+      vi.resetModules()
     }
   })
   it('只重试网络错误、限流和服务端临时错误，且最多两次', () => {
