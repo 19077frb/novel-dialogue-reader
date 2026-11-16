@@ -56,8 +56,8 @@ export function ThinkingSettings({ disabled, disabledReason, profiles, profileId
         </select>
       </label>
   </>
-  return <section className={draftPreferences ? 'card ndr-thinking-compact' : 'card'} data-testid="model-thinking-settings">
-    <h3>模型配置与本次思考设置</h3>
+  return <section className={draftPreferences ? 'ndr-settings-group ndr-thinking-compact' : 'card'} data-testid="model-thinking-settings">
+    {draftPreferences ? <h4>模型与思考</h4> : <h3>模型配置与本次思考设置</h3>}
     {draftPreferences ? <>
       <div className="ndr-range-grid ndr-thinking-fields">{modelField}{thinkingFields}</div>
       {profileNotices}

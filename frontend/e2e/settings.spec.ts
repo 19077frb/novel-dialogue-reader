@@ -48,6 +48,62 @@ async function expectHeaderActions(page: Page) {
 }
 
 test.describe('通用设置保存', () => {
+  test('分类切换保持滚动位置，各面板间距一致，用途提示位于导航内', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 600 })
+    await page.goto('/settings/general')
+    await expect(page.getByTestId('health-ok')).toBeVisible()
+    await expect(page.getByLabel('导入文件大小上限（MB）', { exact: true })).not.toHaveValue('')
+    const navigation = page.getByTestId('settings-navigation')
+    const categories = page.getByRole('navigation', { name: '通用设置分区' })
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+    const gaps: number[] = []
+    for (const section of generalSections) {
+      await categories.getByRole('link', { name: section.name, exact: true }).click()
+      await expect(page.locator(`#${section.id}`)).toBeVisible()
+      await page.mouse.move(0, 0)
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+      const panelTop = await page.locator(`#${section.id}`).evaluate(element => {
+        const card = element.matches('.card') ? element : element.querySelector('.card')!
+        return card.getBoundingClientRect().top
+      })
+      const navigationBottom = await navigation.evaluate(element => element.getBoundingClientRect().bottom)
+      const gap = panelTop - navigationBottom
+      expect(gap, `${section.name}应与导航留出间距`).toBeGreaterThanOrEqual(12)
+      gaps.push(gap)
+    }
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1)
+
+    await categories.getByRole('link', { name: '阅读显示', exact: true }).click()
+    await categories.getByRole('link', { name: '自动处理', exact: true }).hover()
+    const description = navigation.locator('.ndr-settings-feedback').getByText('设置自动处理与模型偏好', { exact: true })
+    await expect(description).toBeVisible()
+    const descriptionBox = (await description.boundingBox())!
+    const navigationBox = (await navigation.boundingBox())!
+    const titleBox = (await page.locator('#reading-settings').getByRole('heading', { name: '阅读显示', exact: true }).boundingBox())!
+    expect(descriptionBox.x).toBeGreaterThanOrEqual(navigationBox.x)
+    expect(descriptionBox.x + descriptionBox.width).toBeLessThanOrEqual(navigationBox.x + navigationBox.width)
+    expect(descriptionBox.y).toBeGreaterThanOrEqual(navigationBox.y)
+    expect(descriptionBox.y + descriptionBox.height).toBeLessThanOrEqual(navigationBox.y + navigationBox.height)
+    expect(descriptionBox.y + descriptionBox.height).toBeLessThanOrEqual(titleBox.y)
+    await expect(categories.getByRole('link', { name: '阅读显示', exact: true })).toHaveAttribute('aria-current', 'page')
+
+    await categories.getByRole('link', { name: '自动处理', exact: true }).click()
+    await page.mouse.move(0, 0)
+    const automaticMaxScroll = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)
+    const scrollOffset = Math.min(60, automaticMaxScroll)
+    expect(scrollOffset).toBeGreaterThan(0)
+    await categories.getByRole('link', { name: '应用配置', exact: true }).click()
+    await page.mouse.move(0, 0)
+    await page.evaluate(offset => window.scrollTo(0, offset), scrollOffset)
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollOffset)
+    await categories.getByRole('link', { name: '自动处理', exact: true }).click()
+    await page.mouse.move(0, 0)
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollOffset)
+    await categories.getByRole('link', { name: '应用配置', exact: true }).click()
+    await page.mouse.move(0, 0)
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollOffset)
+  })
+
   test('六个分类按需展示，切换与历史导航保留草稿，刷新恢复当前分类', async ({ page }) => {
     await page.goto('/settings/general')
     await expect(page.getByTestId('health-ok')).toBeVisible()
@@ -77,9 +133,10 @@ test.describe('通用设置保存', () => {
       else await expect(page.getByRole('button', { name: '保存并重启', exact: true })).toBeHidden()
     }
     await navigation.getByRole('link', { name: '阅读显示', exact: true }).hover()
-    await expect(page.getByText('调整正文的阅读体验', { exact: true })).toBeVisible()
+    const categoryDescription = page.getByTestId('settings-navigation').locator('.ndr-settings-feedback').getByText('调整正文的阅读体验', { exact: true })
+    await expect(categoryDescription).toBeVisible()
     await page.mouse.move(0, 0)
-    await expect(page.getByText('调整正文的阅读体验', { exact: true })).toBeHidden()
+    await expect(categoryDescription).toBeHidden()
 
     await navigation.getByRole('link', { name: '阅读显示', exact: true }).click()
     await page.getByLabel('正文字号', { exact: true }).fill('24')
@@ -143,6 +200,126 @@ test.describe('通用设置保存', () => {
     await expect(page.getByTestId('processing-thinking-effort')).toHaveValue('high')
     await page.getByRole('navigation', { name: '通用设置分区' }).getByRole('link', { name: '阅读显示', exact: true }).click()
     await expect(page.getByLabel('正文字号', { exact: true })).toHaveValue('16')
+  })
+
+  test('试验子功能独立选择，跨分类保存并在关闭和重新开启总开关后保留', async ({ page }) => {
+    await page.goto('/settings/general#experimental-settings')
+    const navigation = page.getByRole('navigation', { name: '通用设置分区' })
+    const experimental = page.locator('#experimental-settings')
+    const master = experimental.getByRole('checkbox', { name: '启用试验功能', exact: true })
+    const initialReading = experimental.getByRole('checkbox', { name: '初读与安全导出', exact: true })
+    const dialogue = experimental.getByRole('checkbox', { name: '试验对白策略', exact: true })
+    const repair = experimental.getByTestId('roster-repair-enabled')
+    const strategy = experimental.getByTestId('dialogue-strategy')
+    const repairLimit = experimental.getByLabel('人物证据最多修复次数（0 关闭修复）', { exact: true })
+    const formatRetries = page.locator('#automatic-settings').getByLabel('校验失败后的重试次数（与对白共用）', { exact: true })
+    const save = page.getByRole('button', { name: '保存设置', exact: true })
+    const storedGeneral = () => page.evaluate(() => JSON.parse(localStorage.getItem('ndr:general-settings:v1') ?? '{}'))
+    const storedProcessing = () => page.evaluate(() => JSON.parse(localStorage.getItem('ndr:processing-preferences:v1') ?? '{}'))
+
+    await expect(master).not.toBeChecked()
+    for (const option of [initialReading, dialogue, repair]) {
+      await expect(option).toBeVisible()
+      await expect(option).not.toBeChecked()
+      await expect(option).toBeDisabled()
+    }
+    await master.check()
+    for (const option of [initialReading, dialogue, repair]) {
+      await expect(option).toBeEnabled()
+      await expect(option).not.toBeChecked()
+    }
+    await initialReading.check()
+    await expect(dialogue).not.toBeChecked()
+    await expect(repair).not.toBeChecked()
+    await expect(strategy).toBeHidden()
+    await repair.check()
+    await repairLimit.fill('3')
+    await navigation.getByRole('link', { name: '自动处理', exact: true }).click()
+    await expect(page.locator('#automatic-settings').getByTestId('dialogue-strategy')).toHaveCount(0)
+    await expect(page.locator('#automatic-settings').getByTestId('roster-repair-enabled')).toHaveCount(0)
+    await page.getByLabel('最大并发任务数', { exact: true }).fill('3')
+    await formatRetries.fill('2')
+    await navigation.getByRole('link', { name: '试验功能', exact: true }).click()
+    await expect(initialReading).toBeChecked()
+    await expect(dialogue).not.toBeChecked()
+    await expect(repair).toBeChecked()
+    await expect(repairLimit).toHaveValue('3')
+    await expect(formatRetries).toHaveValue('2')
+    await dialogue.check()
+    await strategy.selectOption('complete-blocks')
+    await initialReading.uncheck()
+    await expect(dialogue).toBeChecked()
+    await expect(strategy).toHaveValue('complete-blocks')
+    await expect(repair).toBeChecked()
+    await initialReading.check()
+    await master.uncheck()
+    for (const option of [initialReading, dialogue, repair]) {
+      await expect(option).toBeChecked()
+      await expect(option).toBeDisabled()
+    }
+    await master.check()
+    await expect(strategy).toHaveValue('complete-blocks')
+    await expect(repairLimit).toHaveValue('3')
+    expect(await storedGeneral()).not.toMatchObject({ enableExperimentalFeatures: true })
+    expect(await storedProcessing()).not.toMatchObject({ dialogueStrategy: 'complete-blocks' })
+    await navigation.getByRole('link', { name: '自动处理', exact: true }).click()
+    await save.click()
+    await expect.poll(storedGeneral).toMatchObject({ enableExperimentalFeatures: true, enableInitialReading: true, enableDialogueStrategies: true })
+    await expect.poll(storedProcessing).toMatchObject({ concurrency: 3, dialogueStrategy: 'complete-blocks', rosterRepairEnabled: true, maxRosterRepairs: 3, maxFormatRetries: 2 })
+    await page.reload()
+    await navigation.getByRole('link', { name: '试验功能', exact: true }).click()
+    for (const option of [master, initialReading, dialogue, repair]) await expect(option).toBeChecked()
+    await expect(strategy).toHaveValue('complete-blocks')
+    await expect(repairLimit).toHaveValue('3')
+
+    await dialogue.uncheck()
+    await expect(initialReading).toBeChecked()
+    await expect(repair).toBeChecked()
+    await expect(strategy).toBeHidden()
+    await save.click()
+    await expect.poll(storedGeneral).toMatchObject({ enableExperimentalFeatures: true, enableInitialReading: true, enableDialogueStrategies: false })
+    await expect.poll(storedProcessing).toMatchObject({ dialogueStrategy: 'complete-blocks', rosterRepairEnabled: true })
+    await page.reload()
+    await expect(dialogue).not.toBeChecked()
+    await expect(initialReading).toBeChecked()
+    await expect(repair).toBeChecked()
+    await dialogue.check()
+    await expect(strategy).toHaveValue('complete-blocks')
+    await master.uncheck()
+    await save.click()
+    await expect.poll(storedGeneral).toMatchObject({ enableExperimentalFeatures: false, enableInitialReading: true, enableDialogueStrategies: true })
+    await page.reload()
+    await expect(master).not.toBeChecked()
+    for (const option of [initialReading, dialogue, repair]) {
+      await expect(option).toBeChecked()
+      await expect(option).toBeDisabled()
+    }
+    await master.check()
+    await expect(strategy).toHaveValue('complete-blocks')
+    await expect(repairLimit).toHaveValue('3')
+    await expect(formatRetries).toHaveValue('2')
+    await save.click()
+    await expect.poll(storedGeneral).toMatchObject({ enableExperimentalFeatures: true, enableInitialReading: true, enableDialogueStrategies: true })
+    await expect.poll(storedProcessing).toMatchObject({ dialogueStrategy: 'complete-blocks', rosterRepairEnabled: true, maxRosterRepairs: 3, maxFormatRetries: 2 })
+  })
+
+  test('已有试验偏好延续初读和对白功能，保存后记录独立开关', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('ndr:general-settings:v1', JSON.stringify({ enableExperimentalFeatures: true }))
+      localStorage.setItem('ndr:processing-preferences:v1', JSON.stringify({ dialogueStrategy: 'complete-blocks', rosterRepairEnabled: true }))
+    })
+    await page.goto('/settings/general#experimental-settings')
+    await expect(page.getByRole('checkbox', { name: '启用试验功能', exact: true })).toBeChecked()
+    await expect(page.getByRole('checkbox', { name: '初读与安全导出', exact: true })).toBeChecked()
+    await expect(page.getByRole('checkbox', { name: '试验对白策略', exact: true })).toBeChecked()
+    await expect(page.getByTestId('dialogue-strategy')).toHaveValue('complete-blocks')
+    await expect(page.getByTestId('roster-repair-enabled')).toBeChecked()
+    await page.getByRole('navigation', { name: '通用设置分区' }).getByRole('link', { name: '阅读显示', exact: true }).click()
+    await page.getByLabel('正文字号', { exact: true }).fill('20')
+    await page.getByRole('button', { name: '保存设置', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('ndr:general-settings:v1') ?? '{}'))).toMatchObject({
+      enableExperimentalFeatures: true, enableInitialReading: true, enableDialogueStrategies: true, fontSize: 20,
+    })
   })
 
   test('统一保存跨分类的阅读、处理与应用草稿，应用配置显示待重启', async ({ page }) => {
@@ -221,6 +398,65 @@ for (const width of [320, 390, 768, 1440]) {
         await expect(control).toHaveAttribute('title', /\S.+/)
         for (const meaning of field.meanings) await expect(control).toHaveAttribute('title', meaning)
       }
+
+      await categories.getByRole('link', { name: '自动处理', exact: true }).click()
+      const automatic = page.locator('#automatic-settings')
+      await automatic.getByRole('checkbox', { name: '阅读时自动处理章节（会调用模型）', exact: true }).check()
+      await automatic.getByTestId('processing-thinking-mode').selectOption('disabled')
+      await expect(automatic.getByTestId('processing-thinking-effort')).toBeDisabled()
+      await expect(automatic.getByText(/思考已关闭，无法调整思考强度/)).toBeVisible()
+      await expect(automatic.getByText(/处理当前章及后续章节，可能产生费用/)).toBeVisible()
+      const automaticLayout = await automatic.evaluate(element => {
+        const bounds = (node: Element) => {
+          const rectangle = node.getBoundingClientRect()
+          return { left: rectangle.left, top: rectangle.top, width: rectangle.width }
+        }
+        return {
+          heading: bounds(element.querySelector('h3')!),
+          groupHeadings: [...element.querySelectorAll('h4')].map(bounds),
+          thinking: [...element.querySelectorAll('.ndr-thinking-fields > .ndr-field')].map(bounds),
+          parameters: [...element.querySelectorAll('.ndr-settings-fields > .ndr-field')].map(bounds),
+        }
+      })
+      expect(automaticLayout.thinking).toHaveLength(3)
+      expect(automaticLayout.parameters).toHaveLength(4)
+      for (const content of [...automaticLayout.groupHeadings, automaticLayout.thinking[0], automaticLayout.parameters[0]]) {
+        expect(Math.abs(content.left - automaticLayout.heading.left)).toBeLessThanOrEqual(1)
+      }
+      if (width >= 768) {
+        for (let column = 0; column < 3; column += 1) {
+          expect(Math.abs(automaticLayout.thinking[column].left - automaticLayout.parameters[column].left)).toBeLessThanOrEqual(1)
+          expect(Math.abs(automaticLayout.thinking[column].width - automaticLayout.parameters[column].width)).toBeLessThanOrEqual(1)
+          expect(Math.abs(automaticLayout.thinking[column].top - automaticLayout.thinking[0].top)).toBeLessThanOrEqual(1)
+          expect(Math.abs(automaticLayout.parameters[column].top - automaticLayout.parameters[0].top)).toBeLessThanOrEqual(1)
+          if (column > 0) expect(automaticLayout.thinking[column].left).toBeGreaterThan(automaticLayout.thinking[column - 1].left)
+        }
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      const automaticScreenshot = testInfo.outputPath('settings-automatic.png')
+      await page.screenshot({ path: automaticScreenshot, fullPage: true })
+      await testInfo.attach('自动处理列对齐与禁用提示', { path: automaticScreenshot, contentType: 'image/png' })
+
+      await categories.getByRole('link', { name: '试验功能', exact: true }).click()
+      const experimental = page.locator('#experimental-settings')
+      await expect(experimental.getByRole('checkbox', { name: '初读与安全导出', exact: true })).toBeDisabled()
+      await expect(experimental.getByText('先启用试验功能，再选择下方功能。', { exact: true })).toBeVisible()
+      await experimental.getByRole('checkbox', { name: '启用试验功能', exact: true }).check()
+      await experimental.getByRole('checkbox', { name: '初读与安全导出', exact: true }).check()
+      await experimental.getByRole('checkbox', { name: '试验对白策略', exact: true }).check()
+      await experimental.getByTestId('dialogue-strategy').selectOption('complete-blocks')
+      await experimental.getByTestId('roster-repair-enabled').check()
+      await expect(experimental.getByLabel('人物证据最多修复次数（0 关闭修复）', { exact: true })).toBeVisible()
+      await expect(experimental.getByText(/额外调用会增加用量与等待/)).toBeVisible()
+      expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ndr:general-settings:v1') ?? '{}').enableExperimentalFeatures)).not.toBe(true)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      const experimentalScreenshot = testInfo.outputPath('settings-experimental-enabled.png')
+      await page.screenshot({ path: experimentalScreenshot, fullPage: true })
+      await testInfo.attach('试验功能全部开启的未保存草稿', { path: experimentalScreenshot, contentType: 'image/png' })
 
       await categories.getByRole('link', { name: '应用配置', exact: true }).click()
       await expect(page.getByLabel('导入文件大小上限（MB）', { exact: true })).not.toHaveValue('')

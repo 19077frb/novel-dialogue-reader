@@ -182,7 +182,8 @@ export default function ReaderPage() {
     [quotes.data],
   )
   const activeChapter = chapters.data?.find((chapter) => chapter.id === chapterId) ?? null
-  const readingMode: ReadingMode = settings.enableExperimentalFeatures
+  const initialReadingEnabled = settings.enableExperimentalFeatures && settings.enableInitialReading
+  const readingMode: ReadingMode = initialReadingEnabled
     ? readingModeOverride ?? book.data?.reading_mode ?? 'reread' : 'reread'
   const persist = useReadingProgress(bookId ?? '', book.data, setNotice)
   const bookmark = useMutation({ mutationFn: ({ cp, note }: { cp: number; note: string }) => addBookmark(bookId!, {
@@ -454,7 +455,7 @@ export default function ReaderPage() {
                   />
                   本章已标注 {annotations.data?.items?.length ?? 0} 句对白
                 </label>
-                {settings.enableExperimentalFeatures && <label>
+                {initialReadingEnabled && <label>
                   阅读模式
                   <select
                     value={readingMode}
