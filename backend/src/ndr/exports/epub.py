@@ -71,6 +71,75 @@ def _write(
     archive.writestr(info, payload)
 
 
+def _structured_nav(rendered: RenderedBook) -> tuple[list[str], dict[str, set[int]]]:
+    """Keep selected targets and their ancestors, retaining distinct node identities."""
+    chapters = {chapter.chapter_id: f"text/chapter-{index:03d}.xhtml"
+                for index, chapter in enumerate(rendered.chapters, start=1)}
+    bounds = {
+        chapter.chapter_id: (
+            chapter.start_cp if chapter.start_cp is not None else
+            min((block.start_cp for block in chapter.blocks if block.start_cp is not None),
+                default=None),
+            chapter.end_cp if chapter.end_cp is not None else
+            max((block.end_cp for block in chapter.blocks if block.end_cp is not None),
+                default=None),
+        ) for chapter in rendered.chapters
+    }
+    nodes = {node["id"]: node for node in rendered.toc or []}
+    targets: set[str] = set()
+    for node in nodes.values():
+        chapter_id = node.get("chapter_id")
+        if chapter_id not in chapters:
+            continue
+        start, end = bounds[chapter_id]
+        cp = node.get("target_cp")
+        if cp is None or ((start is None or cp >= start) and (end is None or cp <= end)):
+            targets.add(node["id"])
+    all_targets_selected = all(node.get("chapter_id") is None or node["id"] in targets
+                               for node in nodes.values())
+    retained: set[str] = set(nodes) if all_targets_selected else set()
+    for node in nodes.values():
+        if node["id"] in targets:
+            current = node
+            while current["id"] not in retained:
+                retained.add(current["id"])
+                parent = nodes.get(current.get("parent_id"))
+                if parent is None:
+                    break
+                current = parent
+    children: dict[str | None, list[dict]] = {}
+    for node in nodes.values():
+        if node["id"] in retained:
+            children.setdefault(node.get("parent_id"), []).append(node)
+    anchors: dict[str, set[int]] = {}
+    covered_chapters: set[str] = set()
+
+    def render_nodes(parent_id: str | None) -> list[str]:
+        result: list[str] = []
+        for node in children.get(parent_id, []):
+            title = escape(node["title"])
+            chapter_id = node.get("chapter_id")
+            href = chapters.get(chapter_id) if node["id"] in targets else None
+            if href:
+                covered_chapters.add(chapter_id)
+                cp = node.get("target_cp")
+                if cp is not None:
+                    anchors.setdefault(chapter_id, set()).add(cp)
+                    href += f"#toc-cp-{cp}"
+                label = f'<a href="{href}">{title}</a>'
+            else:
+                label = f"<span>{title}</span>"
+            nested = render_nodes(node["id"])
+            subtree = "<ol>" + "".join(nested) + "</ol>" if nested else ""
+            result.append(f"<li>{label}{subtree}</li>")
+        return result
+
+    result = render_nodes(None)
+    result.extend(f'<li><a href="{chapters[chapter.chapter_id]}">{escape(chapter.title)}</a></li>'
+                  for chapter in rendered.chapters if chapter.chapter_id not in covered_chapters)
+    return result, anchors
+
+
 def build_epub(
     rendered: RenderedBook,
     *,
@@ -106,11 +175,19 @@ def build_epub(
         spine: list[str] = []
         nav_items: list[str] = []
         nav_volume: str | None = None
+        chapter_anchors: dict[str, set[int]] = {}
+        if rendered.toc is not None:
+            nav_items, chapter_anchors = _structured_nav(rendered)
         used_images: dict[str, str] = {}
 
         for index, chapter in enumerate(rendered.chapters, start=1):
             body_parts: list[str] = []
+            pending_anchors = chapter_anchors.get(chapter.chapter_id, set()).copy()
             for block in chapter.blocks:
+                preceding = {cp for cp in pending_anchors
+                             if block.start_cp is not None and cp < block.start_cp}
+                body_parts.extend(f'<span id="toc-cp-{cp}"></span>' for cp in sorted(preceding))
+                pending_anchors.difference_update(preceding)
                 if block.node_type is ContentNodeType.IMAGE and block.resource_id:
                     filename = resource_filename(block.resource_id, block.media_type)
                     if block.resource_id not in used_images and block.resource_id in images:
@@ -122,7 +199,10 @@ def build_epub(
                         f'<figcaption data-ndr-auxiliary="true">{alt}</figcaption></figure>'
                     )
                     continue
-                body_parts.append(render_block(block, images={}))
+                body_parts.append(render_block(block, images={}, anchor_cps=pending_anchors))
+            # Targets in whitespace or empty chapters still resolve to a legal anchor.
+            body_parts.extend(f'<span id="toc-cp-{cp}"></span>'
+                              for cp in sorted(pending_anchors))
             href = f"text/chapter-{index:03d}.xhtml"
             _write(
                 archive,
@@ -133,6 +213,8 @@ def build_epub(
                 f'<item id="chapter-{index}" href="{href}" media-type="application/xhtml+xml"/>'
             )
             spine.append(f'<itemref idref="chapter-{index}"/>')
+            if rendered.toc is not None:
+                continue
             volume, separator, leaf = chapter.title.partition(" · ")
             volume = volume if separator else None
             if volume != nav_volume:

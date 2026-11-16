@@ -74,9 +74,49 @@ def test_export_nav_preserves_volume_groups_and_leaf_order() -> None:
     ns = {"h": "http://www.w3.org/1999/xhtml"}
     groups = root.findall(".//h:nav/h:ol/h:li", ns)
     assert [group.find("h:span", ns).text for group in groups[:2]] == ["第一卷", "第二卷"]
-    assert [item["title"] for item in _parse_toc_nav(nav)] == ["彩页", "目录", "序章", "后记"]
-    assert [item["volume"] for item in _parse_toc_nav(nav)] == ["第一卷", "第一卷", "第二卷", ""]
+    targets = [item for item in _parse_toc_nav(nav) if item["href"]]
+    assert [item["title"] for item in targets] == ["彩页", "目录", "序章", "后记"]
+    assert [item["volume"] for item in targets] == ["第一卷", "第一卷", "第二卷", ""]
     assert [chapter.title for chapter in parse_epub(raw).chapters] == titles
+
+
+def test_structured_nav_preserves_ancestors_targets_and_exact_anchors() -> None:
+    from xml.etree import ElementTree as ET
+
+    from ndr.exports.epub import build_epub
+
+    chapters = [RenderedChapter(chapter_id=f"c{i}", ordinal=i, title=f"完整 · 章{i}", blocks=[
+        RenderedBlock(node_type=ContentNodeType.PARAGRAPH, start_cp=i * 20,
+                      end_cp=i * 20 + 8, runs=[RenderedRun(text="前文「对白」后文")]),
+    ]) for i in range(2)]
+    toc = [
+        dict(id="v", parent_id=None, title="卷", chapter_id=None, target_cp=None),
+        dict(id="p", parent_id="v", title="同名", chapter_id="c0", target_cp=0),
+        dict(id="a", parent_id="p", title="同名", chapter_id="c1", target_cp=23),
+        dict(id="b", parent_id="p", title="另一锚点", chapter_id="c1", target_cp=26),
+        dict(id="empty", parent_id="v", title="附录结构", chapter_id=None, target_cp=None),
+    ]
+    ns = {"h": "http://www.w3.org/1999/xhtml"}
+    for selected in (chapters, chapters[1:]):
+        book = _book(chapters=selected, toc=toc)
+        raw = build_epub(book, images={}, identifier="test", generated_at="test")
+        assert raw == build_epub(book, images={}, identifier="test", generated_at="test")
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            nav = ET.fromstring(archive.read("OEBPS/nav.xhtml"))
+            parent = nav.find(".//h:nav/h:ol/h:li/h:ol/h:li", ns)
+            assert parent is not None
+            assert parent.find("h:a" if len(selected) == 2 else "h:span", ns).text == "同名"
+            assert len(parent.findall("h:ol/h:li", ns)) == 2
+            assert len(nav.findall(".//h:li", ns)) == (5 if len(selected) == 2 else 4)
+            for link in nav.findall(".//h:a", ns):
+                href, fragment = link.get("href").split("#")
+                document = ET.fromstring(archive.read("OEBPS/" + href))
+                target = document.find(f".//*[@id='{fragment}']")
+                assert target is not None
+                if fragment == "toc-cp-23":
+                    paragraph = document.find(".//h:p", ns)
+                    assert paragraph.text == "前文「"
+                    assert "".join(paragraph.itertext()) == "前文「对白」后文"
 
 
 def test_extended_colors_are_emitted_in_html_and_epub_without_modulo():
@@ -213,3 +253,68 @@ def test_check_epub_does_not_parse_visible_source_text_twice() -> None:
 
     assert report["ok"] is True, report
     assert report["checks"]["text_consistency"] is True
+
+
+def test_empty_toc_exports_flat_chapter_navigation() -> None:
+    from xml.etree import ElementTree as ET
+
+    from ndr.exports.epub import build_epub
+
+    chapters = [RenderedChapter(chapter_id=f"c{i}", ordinal=i, title=f"原题 · 章{i}")
+                for i in range(2)]
+    raw = build_epub(_book(chapters=chapters, toc=[]), images={},
+                     identifier="test", generated_at="test")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        nav = ET.fromstring(archive.read("OEBPS/nav.xhtml"))
+    ns = {"h": "http://www.w3.org/1999/xhtml"}
+    links = nav.findall(".//h:nav/h:ol/h:li/h:a", ns)
+    assert [link.text for link in links] == [chapter.title for chapter in chapters]
+    assert [link.get("href") for link in links] == [
+        "text/chapter-001.xhtml", "text/chapter-002.xhtml",
+    ]
+
+
+def test_structured_toc_appends_unlisted_chapters_without_guessing_groups() -> None:
+    from xml.etree import ElementTree as ET
+
+    from ndr.exports.epub import build_epub
+
+    chapters = [RenderedChapter(chapter_id=f"c{i}", ordinal=i, title=f"原题 · 章{i}")
+                for i in range(3)]
+    toc = [dict(id="v", parent_id=None, title="卷", chapter_id=None, target_cp=None),
+           dict(id="c", parent_id="v", title="目录原题", chapter_id="c1", target_cp=None)]
+    raw = build_epub(_book(chapters=chapters, toc=toc), images={},
+                     identifier="test", generated_at="test")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        nav = ET.fromstring(archive.read("OEBPS/nav.xhtml"))
+    ns = {"h": "http://www.w3.org/1999/xhtml"}
+    links = nav.findall(".//h:a", ns)
+    assert [link.text for link in links] == ["目录原题", "原题 · 章0", "原题 · 章2"]
+    assert [link.get("href") for link in links] == [
+        "text/chapter-002.xhtml", "text/chapter-001.xhtml", "text/chapter-003.xhtml",
+    ]
+
+
+def test_structured_toc_filters_targets_outside_rendered_chapter_fragment() -> None:
+    from xml.etree import ElementTree as ET
+
+    from ndr.exports.epub import build_epub
+
+    chapter = RenderedChapter(chapter_id="c", ordinal=0, title="原章", blocks=[
+        RenderedBlock(node_type=ContentNodeType.PARAGRAPH, start_cp=20, end_cp=22,
+                      runs=[RenderedRun(text="正文")]),
+    ])
+    toc = [dict(id="p", parent_id=None, title="片段前的父目标", chapter_id="c", target_cp=0),
+           dict(id="a", parent_id="p", title="片段内", chapter_id="c", target_cp=21),
+           dict(id="b", parent_id="p", title="片段后", chapter_id="c", target_cp=30)]
+    raw = build_epub(_book(chapters=[chapter], toc=toc), images={},
+                     identifier="test", generated_at="test")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        nav = ET.fromstring(archive.read("OEBPS/nav.xhtml"))
+        document = ET.fromstring(archive.read("OEBPS/text/chapter-001.xhtml"))
+    ns = {"h": "http://www.w3.org/1999/xhtml"}
+    assert [node.text for node in nav.findall(".//h:span", ns)] == ["片段前的父目标"]
+    assert [link.text for link in nav.findall(".//h:a", ns)] == ["片段内"]
+    assert document.find(".//*[@id='toc-cp-21']") is not None
+    assert document.find(".//*[@id='toc-cp-0']") is None
+    assert document.find(".//*[@id='toc-cp-30']") is None

@@ -21,6 +21,14 @@ from .enums import (
 )
 
 
+class TocNodeOut(ApiModel):
+    id: str
+    parent_id: str | None = None
+    title: str
+    chapter_id: str | None = None
+    target_cp: int | None = Field(default=None, ge=0)
+
+
 class BookVersionOut(ApiModel):
     id: str
     encoding: str
@@ -29,6 +37,7 @@ class BookVersionOut(ApiModel):
     canonical_sha256: str
     canonical_length_cp: int = Field(ge=0)
     warnings: list[str] = Field(default_factory=list)
+    toc: list[TocNodeOut] | None = None
     created_at: datetime
 
 

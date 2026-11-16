@@ -67,6 +67,7 @@ class BookVersion(IdMixin, TimestampMixin, Base):
     # 规范化全文的相对路径（位于数据目录内）；原始文件路径见 source_path。
     canonical_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     warnings_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    toc_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Chapter(IdMixin, TimestampMixin, Base):

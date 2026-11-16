@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as batch from '../src/components/BatchProcessor'
 
 import { ChapterNavigation } from '../src/components/ChapterNavigation'
-import type { ChapterOut } from '../src/api/types'
+import type { ChapterOut, TocNodeOut } from '../src/api/types'
 import { updateGeneralSettings } from '../src/settings/preferences'
 
 const CHAPTERS = [
@@ -14,6 +14,97 @@ const CHAPTERS = [
 
 describe('ChapterNavigation', () => {
   beforeEach(() => { vi.restoreAllMocks(); localStorage.clear() })
+  const node = (id: string, parent_id: string | null, title: string, chapter_id: string | null = null, target_cp: number | null = null): TocNodeOut =>
+    ({ id, parent_id, title, chapter_id, target_cp })
+  it('保留包装根和多级同名目录，父章可跳转，摘要去重别名，遗漏章节仍可读', () => {
+    const select = vi.fn()
+    const toc = [node('root', null, '全书'), node('v1', 'root', '卷'),
+      node('parent', 'v1', '上篇', 'c1', 2), node('child', 'parent', '子目', 'c2', 12),
+      node('alias', 'parent', '别名', 'c2', 15), node('v2', 'root', '卷')]
+    render(<ChapterNavigation bookId="book" chapters={CHAPTERS} toc={toc} activeChapterId="c2" onSelect={select}
+      processingStates={{ c2: { state: 'failed', completedWindows: 0, totalWindows: 1, error: '失败' } }} />)
+    expect(screen.getByRole('button', { name: '收起全书' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '收起卷' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '收起上篇' })).toBeVisible()
+    const summary = screen.getByRole('group', { name: /^全书：共 2 章/ })
+    expect(within(summary).getByLabelText('失败/已停止 1 章')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /上篇.*未处理/ }))
+    expect(select).toHaveBeenLastCalledWith(CHAPTERS[0], 2)
+    fireEvent.click(screen.getByRole('button', { name: /别名.*失败/ }))
+    expect(select).toHaveBeenLastCalledWith(CHAPTERS[1], 15)
+    expect(screen.getByRole('button', { name: /第三章/ })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '收起上篇' }))
+    expect(screen.queryByRole('button', { name: /子目.*失败/ })).not.toBeInTheDocument()
+    expect(within(summary).getByLabelText('失败/已停止 1 章')).toBeVisible()
+    expect(screen.getByRole('button', { name: /上篇.*未处理/ })).toBeVisible()
+  })
+  it('显式空目录平铺，旧数据继续按卷分组；标题分隔符不修改新目录标签', () => {
+    const chapters = [{ ...CHAPTERS[0], title: '第一卷 · 原章节' }]
+    const { rerender } = render(<ChapterNavigation chapters={chapters} toc={[]} activeChapterId={null} onSelect={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: '展开第一卷' })).not.toBeInTheDocument()
+    expect(screen.getByText('第一卷 · 原章节')).toBeVisible()
+    rerender(<ChapterNavigation chapters={chapters} toc={[node('one', null, '标题 · 保留', 'c1')]} activeChapterId={null} onSelect={vi.fn()} />)
+    expect(screen.getByText('标题 · 保留')).toBeVisible()
+    rerender(<ChapterNavigation chapters={chapters} toc={null} activeChapterId={null} onSelect={vi.fn()} />)
+    expect(screen.getByRole('button', { name: '展开第一卷' })).toBeVisible()
+  })
+  it('同名目录不共享展开状态，切换当前章节展开全部祖先，切书清除展开状态', () => {
+    const toc = [node('root', null, '全书'), node('v1', 'root', '相同'), node('c1', 'v1', '第一章', 'c1'),
+      node('v2', 'root', '相同'), node('c2', 'v2', '第二章', 'c2')]
+    const { rerender } = render(<ChapterNavigation bookId="a" chapters={CHAPTERS} toc={toc} activeChapterId="c1" onSelect={vi.fn()} />)
+    expect(screen.getByRole('button', { name: '收起相同' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '展开相同' })).toBeVisible()
+    rerender(<ChapterNavigation bookId="a" chapters={CHAPTERS} toc={toc} activeChapterId="c2" onSelect={vi.fn()} />)
+    expect(screen.getAllByRole('button', { name: '收起相同' })).toHaveLength(2)
+    rerender(<ChapterNavigation bookId="b" chapters={CHAPTERS} toc={toc} activeChapterId="c2" onSelect={vi.fn()} />)
+    expect(screen.getByRole('button', { name: '展开相同' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '收起相同' })).toBeVisible()
+    expect(screen.getByRole('button', { name: /第二章/ })).toHaveAttribute('aria-current', 'true')
+  })
+  it('无效目标及断开的父目录不隐藏章节，循环引用也不导致递归失败', () => {
+    render(<ChapterNavigation chapters={CHAPTERS} activeChapterId="c1" onSelect={vi.fn()}
+      toc={[node('a', 'b', '环甲', 'c1'), node('b', 'a', '环乙'), node('orphan', 'missing', '孤立标题', 'missing')]} />)
+    expect(screen.getByRole('button', { name: /环甲/ })).toBeVisible()
+    expect(screen.getByText('孤立标题')).toBeVisible()
+    expect(screen.getByRole('button', { name: /第二章/ })).toBeVisible()
+    expect(screen.getByRole('button', { name: /第三章/ })).toBeVisible()
+  })
+  it('新目录的别名共享实时任务和双击保存状态，保留重试与取消', async () => {
+    updateGeneralSettings({ doubleClickChapterStatus: true })
+    const retry = vi.spyOn(batch, 'retryChapterProcessing').mockResolvedValue()
+    const cancel = vi.spyOn(batch, 'cancelChapterProcessing').mockResolvedValue()
+    const save = vi.fn(async (chapter: ChapterOut, processed: boolean) => ({ ...chapter,
+      dialogue_processed: processed, processing_status_override: processed }))
+    render(<ChapterNavigation bookId="book" chapters={CHAPTERS} activeChapterId="c1" onSelect={vi.fn()}
+      onSetProcessingStatus={save}
+      toc={[node('root', null, '全书'), node('a', 'root', '别名甲', 'c1'), node('b', 'root', '别名乙', 'c1'), node('c', 'root', '排队章', 'c2')]}
+      processingStates={{ c1: { state: 'failed', completedWindows: 0, totalWindows: 1, error: '失败' },
+        c2: { state: 'queued', completedWindows: 0, totalWindows: 1, pendingTasks: 1, error: null } }} />)
+    fireEvent.click(screen.getAllByRole('button', { name: '重试第一章的任务' })[0])
+    await waitFor(() => expect(retry).toHaveBeenCalledWith('book', 'c1'))
+    fireEvent.click(screen.getByRole('button', { name: '取消第二章的任务' }))
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith('book', 'c2'))
+    fireEvent.doubleClick(screen.getByText('别名甲'))
+    await waitFor(() => expect(screen.getByText('别名乙').closest('button')).toHaveAttribute('data-processing-state', 'processed'))
+    expect(save).toHaveBeenCalledWith(CHAPTERS[0], true)
+    const summary = screen.getByRole('group', { name: /^全书：共 2 章/ })
+    expect(within(summary).getByLabelText('已完成 1 章')).toBeVisible()
+  })
+  it('重复节点ID不会重复渲染或漏章，动态章节状态更新摘要且保留折叠', () => {
+    const toc = [node('root', null, '目录'), node('a', 'root', '原条目', 'c1'),
+      node('a', 'root', '重复ID条目', 'c2'), node('alias', 'root', '别名', 'c1')]
+    const { rerender } = render(<ChapterNavigation bookId="a" chapters={CHAPTERS} toc={toc} activeChapterId="c1" onSelect={vi.fn()} />)
+    expect(screen.queryByText('重复ID条目')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /第二章/ })).toBeVisible()
+    expect(screen.getByRole('group', { name: /^目录：共 1 章/ })).toHaveTextContent('1 章')
+    fireEvent.click(screen.getByRole('button', { name: '收起目录' }))
+    rerender(<ChapterNavigation bookId="a" chapters={CHAPTERS.map(chapter => ({ ...chapter, dialogue_processed: true }))}
+      toc={toc} activeChapterId="c1" onSelect={vi.fn()} />)
+    expect(screen.getByRole('button', { name: '展开目录' })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(screen.getByRole('group', { name: /^目录：共 1 章/ })).getByLabelText('已完成 1 章')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '展开目录' }))
+    expect(screen.getByText('别名').closest('button')).toHaveAttribute('data-processing-state', 'processed')
+  })
   it('shows filtered chapters without changing completion, preserves active work and clears stale skipped states', () => {
     updateGeneralSettings({ chapterFilterEnabled: true })
     const chapters = [{ ...CHAPTERS[0], title: '封面', dialogue_processed: false },

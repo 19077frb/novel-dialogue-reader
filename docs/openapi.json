@@ -4874,6 +4874,20 @@
             "type": "array",
             "title": "Warnings"
           },
+          "toc": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TocNodeOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toc"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -11155,6 +11169,59 @@
           "created_at"
         ],
         "title": "TaskQueueItemOut"
+      },
+      "TocNodeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "target_cp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Cp"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "TocNodeOut"
       },
       "UndoOut": {
         "properties": {

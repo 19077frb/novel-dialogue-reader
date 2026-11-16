@@ -49,6 +49,7 @@ from .chapter_repairs import apply_repairs, suggestions
 from .document import ParsedBook
 from .encoding import DecodeFailure
 from .epub import EpubError, EpubLimits, parse_epub
+from .toc import bind_toc
 from .txt import parse_txt
 
 DEFAULT_TITLE_FALLBACK = "未命名"
@@ -201,6 +202,14 @@ def persist_parsed(
             version.canonical_path = to_relative(settings, canonical_path)
 
             chapter_ids = _insert_chapters(session, version, parsed)
+            if parsed.format == "EPUB":
+                stored_chapters = list(session.scalars(
+                    select(Chapter).where(Chapter.book_version_id == version.id)
+                    .order_by(Chapter.ordinal)
+                ))
+                version.toc_json = json.dumps(bind_toc(parsed, stored_chapters), ensure_ascii=False)
+            else:
+                version.toc_json = "[]"
             _insert_nodes(session, parsed, chapter_ids)
             _insert_mappings(session, version, parsed, chapter_ids)
             _insert_resources(session, version, parsed)

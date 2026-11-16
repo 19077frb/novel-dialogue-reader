@@ -107,8 +107,15 @@ def test_identity_facts_migration_keeps_old_metadata_without_guessing_reveal_tim
             session.flush()
             version = BookVersion(book_id=book.id, encoding="utf-8", parser_version="test",
                 normalization_version="test", canonical_sha256="b" * 64, canonical_length_cp=100)
-            session.add(version)
-            session.flush()
+            # Historical schemas do not contain newer optional ORM columns.
+            version.id = str(uuid4())
+            session.execute(BookVersion.__table__.insert().values(
+                id=version.id, book_id=version.book_id, encoding=version.encoding,
+                parser_version=version.parser_version,
+                normalization_version=version.normalization_version,
+                canonical_sha256=version.canonical_sha256,
+                canonical_length_cp=version.canonical_length_cp,
+            ))
             session.execute(text(
                 "INSERT INTO book_characters (id, book_version_id, canonical_name, aliases_json,"
                 " description, source, user_confirmed, name_locked, confirmation_source,"
@@ -150,8 +157,15 @@ def test_confirmation_origin_migration_does_not_guess_old_human_confirmation(tmp
                 book_id=book.id, encoding="utf-8", parser_version="test",
                 normalization_version="test", canonical_sha256="b" * 64, canonical_length_cp=0,
             )
-            session.add(version)
-            session.flush()
+            # Historical schemas do not contain newer optional ORM columns.
+            version.id = str(uuid4())
+            session.execute(BookVersion.__table__.insert().values(
+                id=version.id, book_id=version.book_id, encoding=version.encoding,
+                parser_version=version.parser_version,
+                normalization_version=version.normalization_version,
+                canonical_sha256=version.canonical_sha256,
+                canonical_length_cp=version.canonical_length_cp,
+            ))
             for key, confirmed, locked, temp_key in [
                 ("legacy", True, False, None), ("manual", True, True, None),
                 ("model", False, False, None),
@@ -298,8 +312,15 @@ def test_processing_state_is_backfilled_once_when_upgrading_from_0009(
                 canonical_sha256="e" * 64,
                 canonical_length_cp=10,
             )
-            session.add(version)
-            session.flush()
+            # Historical schemas do not contain newer optional ORM columns.
+            version.id = str(uuid4())
+            session.execute(BookVersion.__table__.insert().values(
+                id=version.id, book_id=version.book_id, encoding=version.encoding,
+                parser_version=version.parser_version,
+                normalization_version=version.normalization_version,
+                canonical_sha256=version.canonical_sha256,
+                canonical_length_cp=version.canonical_length_cp,
+            ))
             # Insert with the historical shape: today's ORM also contains
             # columns that correctly do not exist before the later migration.
             chapter_id = str(uuid4())

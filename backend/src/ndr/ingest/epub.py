@@ -39,7 +39,7 @@ from .document import (
 )
 from .layout import LayoutNormalizer
 
-EPUB_PARSER_VERSION = "epub-7"
+EPUB_PARSER_VERSION = "epub-8"
 EPUB_NORMALIZATION_VERSION = "canonical-epub-blocks-2"
 
 CONTAINER_PATH = "META-INF/container.xml"
@@ -265,6 +265,7 @@ class _RawBlock:
     source_href: str | None = None
     source_start_cp: int | None = None
     continuation: bool = False
+    toc_targets: list[tuple[str, int]] = field(default_factory=list)
 
     @property
     def is_image(self) -> bool:
@@ -367,6 +368,8 @@ def _group_by_toc(
     boundaries: dict[tuple[int, int], dict[str, str]] = {}
     ordered_points = []
     for entry in entries:
+        if not entry["href"]:
+            continue
         path = entry["href"]
         doc = docs.get(path)
         if doc is None:
@@ -424,6 +427,10 @@ def _group_by_toc(
                     block, text=block.text[left:right], ruby=ruby,
                     continuation=left > 0,
                     source_start_cp=(block.source_start_cp or 0) + left,
+                    toc_targets=[(node_id, offset - left)
+                                 for node_id, offset in block.toc_targets
+                                 if left <= offset < right
+                                 or (offset == right == len(block.text))],
                 )
             document.blocks.append(block)
         if document.blocks:
@@ -465,10 +472,11 @@ class _BlockBuilder:
         self._resolve_image = resolve_image
         self._anchors: dict[str, tuple[_RawBlock | None, int, int]] = {}
 
-    def mark_anchor(self, anchor: str) -> None:
+    def mark_anchor(self, anchor: str, offset: int | None = None) -> None:
         if anchor not in self._anchors:
             self._anchors[anchor] = (
-                self._current, len(self.blocks), len(self._current.text) if self._current else 0,
+                self._current, len(self.blocks),
+                offset if offset is not None else len(self._current.text) if self._current else 0,
             )
 
     def anchors(self) -> dict[str, tuple[int, int]]:
@@ -539,13 +547,35 @@ def _iter_text(element: ET.Element) -> str:
     return "".join(parts)
 
 
-def _ndr_paragraph_text(element: ET.Element) -> str:
-    if element.get("data-ndr-auxiliary") == "true":
-        return ""
-    parts = [element.text or ""]
-    for child in element:
-        parts.extend((_ndr_paragraph_text(child), child.tail or ""))
-    return "".join(parts)
+def _ndr_paragraph_anchors(element: ET.Element) -> tuple[str, list[tuple[str, int]]]:
+    """Collect anchors without splitting the whole-paragraph whitespace normalization."""
+    parts: list[str] = []
+    targets: list[tuple[str, int]] = []
+    cursor = 0
+
+    def visit(node: ET.Element) -> None:
+        nonlocal cursor
+        if node.get("data-ndr-auxiliary") == "true":
+            return
+        if anchor := node.get("id") or node.get("{http://www.w3.org/XML/1998/namespace}id"):
+            targets.append((anchor, cursor))
+        parts.append(node.text or "")
+        cursor += len(node.text or "")
+        for child in node:
+            visit(child)
+            parts.append(child.tail or "")
+            cursor += len(child.tail or "")
+
+    visit(element)
+    raw = "".join(parts)
+    normalized = []
+    for anchor, position in targets:
+        prefix = raw[:position]
+        offset = len(" ".join(prefix.split()))
+        if prefix and prefix[-1].isspace() and prefix.strip() and raw[position:].strip():
+            offset += 1
+        normalized.append((anchor, offset))
+    return raw, normalized
 
 
 def _walk(
@@ -568,7 +598,10 @@ def _walk(
         # NDR splits a paragraph into colored spans. Normalize the original
         # paragraph once, not each fragment (which would erase boundary spaces).
         builder.start_block(ContentNodeType.PARAGRAPH)
-        builder.add_text(_ndr_paragraph_text(element))
+        raw, targets = _ndr_paragraph_anchors(element)
+        builder.add_text(raw)
+        for anchor, offset in targets:
+            builder.mark_anchor(anchor, offset)
         return
 
     block_type = BLOCK_TAGS.get(tag)
@@ -726,8 +759,8 @@ def _parse_opf(data: bytes) -> tuple[dict[str, str], list[_ManifestItem], list[d
     return metadata, manifest, spine
 
 
-def _parse_toc_nav(data: bytes) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
+def _parse_toc_nav(data: bytes) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
     try:
         root = ET.fromstring(data)
     except ET.ParseError:
@@ -736,45 +769,53 @@ def _parse_toc_nav(data: bytes) -> list[dict[str, str]]:
         if _local(nav.tag) != "nav":
             continue
         nav_type = nav.get("{http://www.idpf.org/2007/ops}type") or nav.get("type") or ""
-        if nav_type and "toc" not in nav_type:
+        if nav_type and "toc" not in nav_type.split():
             continue
-        def visit(element: ET.Element, volume: str = "") -> None:
+
+        def visit(element: ET.Element, parent_id: str | None = None,
+                  ancestors: tuple[str, ...] = ()) -> None:
             if _local(element.tag) == "li":
                 anchor = next((c for c in element if _local(c.tag) in {"a", "span"}), None)
                 children = [c for c in element if _local(c.tag) in {"ol", "ul"}]
                 label = collapse_whitespace(_iter_text(anchor)) if anchor is not None else ""
-                if anchor is not None and anchor.get("href"):
-                    entries.append({"href": anchor.get("href", ""), "title": label,
-                                    "volume": volume, "parent": "true" if children else "false"})
+                node_id = f"toc-{len(entries)}"
+                entries.append({"id": node_id, "parent_id": parent_id, "title": label,
+                                "href": anchor.get("href", "") if anchor is not None else "",
+                                "volume": " · ".join(ancestors),
+                                "parent": "true" if children else "false"})
                 for child in children:
-                    visit(child, label if children and label else volume)
+                    visit(child, node_id, (*ancestors, label) if label else ancestors)
             else:
                 for child in element:
-                    visit(child, volume)
+                    visit(child, parent_id, ancestors)
         visit(nav)
     return entries
 
 
-def _parse_toc_ncx(data: bytes) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
+def _parse_toc_ncx(data: bytes) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
     try:
         root = ET.fromstring(data)
     except ET.ParseError:
         return entries
-    def visit(element: ET.Element, volume: str = "") -> None:
+
+    def visit(element: ET.Element, parent_id: str | None = None,
+              ancestors: tuple[str, ...] = ()) -> None:
         if _local(element.tag) == "navPoint":
             label_node = next((c for c in element if _local(c.tag) == "navLabel"), None)
             content_node = next((c for c in element if _local(c.tag) == "content"), None)
             label = collapse_whitespace(_iter_text(label_node)) if label_node is not None else ""
             children = [c for c in element if _local(c.tag) == "navPoint"]
-            if content_node is not None and content_node.get("src"):
-                entries.append({"href": content_node.get("src", ""), "title": label,
-                                "volume": volume, "parent": "true" if children else "false"})
+            node_id = f"toc-{len(entries)}"
+            entries.append({"id": node_id, "parent_id": parent_id, "title": label,
+                            "href": content_node.get("src", "") if content_node is not None else "",
+                            "volume": " · ".join(ancestors),
+                            "parent": "true" if children else "false"})
             for child in children:
-                visit(child, label if label and children else volume)
+                visit(child, node_id, (*ancestors, label) if label else ancestors)
         else:
             for child in element:
-                visit(child, volume)
+                visit(child, parent_id, ancestors)
     visit(root)
     return entries
 
@@ -869,13 +910,15 @@ def parse_epub(
         register_resource(item.path, item.media_type)
 
     # 目录（TOC）：EPUB3 nav 优先，其次 NCX；与 spine 顺序分离
-    toc_entries: list[dict[str, str]] = []
+    toc_entries: list[dict[str, Any]] = []
     for item in manifest:
         if "nav" in item.properties and item.path:
             nav_dir = posixpath.dirname(item.path)
             for entry in _parse_toc_nav(archive.read(item.path)):
-                resolved = resolve(nav_dir, entry["href"], allow_external=True)
+                resolved = (resolve(nav_dir, entry["href"], allow_external=True)
+                            if entry["href"] else None)
                 if resolved is None:
+                    toc_entries.append({**entry, "href": "", "fragment": ""})
                     continue
                 toc_entries.append(
                     {**entry, "href": resolved[0], "fragment": unquote(resolved[1] or "")}
@@ -885,8 +928,10 @@ def parse_epub(
             if item.media_type == "application/x-dtbncx+xml" and item.path:
                 ncx_dir = posixpath.dirname(item.path)
                 for entry in _parse_toc_ncx(archive.read(item.path)):
-                    resolved = resolve(ncx_dir, entry["href"], allow_external=True)
+                    resolved = (resolve(ncx_dir, entry["href"], allow_external=True)
+                                if entry["href"] else None)
                     if resolved is None:
+                        toc_entries.append({**entry, "href": "", "fragment": ""})
                         continue
                     toc_entries.append(
                         {
@@ -899,7 +944,8 @@ def parse_epub(
 
     toc_titles: dict[str, str] = {}
     for entry in toc_entries:
-        toc_titles.setdefault(entry["href"], entry["title"])
+        if entry["href"]:
+            toc_titles.setdefault(entry["href"], entry["title"])
 
     spine_items: list[_ManifestItem] = []
     seen_spine: set[str] = set()
@@ -1004,6 +1050,29 @@ def parse_epub(
             continue
         spine_documents.append((item.path, document))
 
+    # Attach navigation targets before grouping. Splitting blocks shifts only their
+    # local offsets; publication aliases and ancestors keep independent targets.
+    toc_by_id = {entry["id"]: entry for entry in toc_entries}
+    source_documents = dict(spine_documents)
+    for entry in toc_entries:
+        document = source_documents.get(entry["href"])
+        if document is None:
+            continue
+        fragment = entry.get("fragment")
+        point = document.anchors.get(fragment) if fragment else (0, 0)
+        if point is None:
+            continue
+        index, offset = point
+        if index < len(document.blocks):
+            block = document.blocks[index]
+            if block.text and offset == len(block.text) and index + 1 < len(document.blocks):
+                index, offset = index + 1, 0
+        elif index == len(document.blocks) and document.blocks:
+            index = len(document.blocks) - 1
+            offset = len(document.blocks[index].text)
+        if index < len(document.blocks):
+            document.blocks[index].toc_targets.append((entry["id"], offset))
+
     if not strip_ndr_auxiliary:
         if grouped_by_toc := _group_by_toc(spine_documents, toc_entries, warnings):
             spine_documents = grouped_by_toc
@@ -1031,6 +1100,9 @@ def parse_epub(
                 doc_source_cursor = 0
                 previous_source_href = source_href
             if block.node_type is ContentNodeType.SEPARATOR:
+                for node_id, _offset in block.toc_targets:
+                    toc_by_id[node_id].update(target_cp=canonical_cursor,
+                                              chapter_ordinal=chapter_ordinal)
                 chapter_nodes.append(
                     ParsedNode(
                         chapter_ordinal=chapter_ordinal,
@@ -1045,6 +1117,9 @@ def parse_epub(
                 counter += 1
                 continue
             if block.is_image:
+                for node_id, _offset in block.toc_targets:
+                    toc_by_id[node_id].update(target_cp=canonical_cursor,
+                                              chapter_ordinal=chapter_ordinal)
                 if block.resource_id:
                     payload: dict[str, Any] = {
                         "resource_id": block.resource_id,
@@ -1078,6 +1153,9 @@ def parse_epub(
                 canonical_cursor += 1
                 doc_source_cursor += 1
             start_cp = canonical_cursor
+            for node_id, offset in block.toc_targets:
+                toc_by_id[node_id].update(target_cp=start_cp + offset,
+                                          chapter_ordinal=chapter_ordinal)
             canonical_parts.append(text)
             canonical_cursor += len(text)
             end_cp = canonical_cursor

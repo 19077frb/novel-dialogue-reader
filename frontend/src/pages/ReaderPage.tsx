@@ -72,6 +72,7 @@ export default function ReaderPage() {
   const [resumeCp, setResumeCp] = useState<number | null>(null)
   const [resumeRequestKey, setResumeRequestKey] = useState<string | null>(null)
   const restoredRef = useRef<string | null>(null)
+  const chapterNavigationRequest = useRef(0)
   const initializedChapterRef = useRef<string | null>(null)
   const queryClient = useQueryClient()
   const batchChapterProgress = useBatchChapterProgress(bookId)
@@ -285,12 +286,16 @@ export default function ReaderPage() {
   }, [handleScroll])
 
   const handleChapterSelect = useCallback(
-    (chapter: ChapterOut) => {
+    (chapter: ChapterOut, targetCp?: number) => {
+      const position = targetCp != null && Number.isInteger(targetCp) && targetCp >= chapter.start_cp && targetCp <= chapter.end_cp
+        ? Math.min(targetCp, Math.max(chapter.start_cp, chapter.end_cp - 1)) : null
       if (documentRef.current) documentRef.current.scrollTop = 0
       setChapterId(chapter.id)
-      setResumeCp(null)
+      setResumeCp(position)
+      setResumeRequestKey(`chapter-navigation:${++chapterNavigationRequest.current}`)
+      restoredRef.current = null
       setNotice(null)
-      persist(chapter.start_cp, readingMode, true)
+      persist(position ?? chapter.start_cp, readingMode, true)
     },
     [persist, readingMode],
   )
@@ -375,8 +380,10 @@ export default function ReaderPage() {
           <div id="chapter-panel" role="tabpanel" aria-labelledby="chapter-tab" hidden={sidebarTab !== 'chapters'}>
           {chapters.isSuccess && (
             <ChapterNavigation
+              key={`${bookId}:${book.data?.active_version_id}`}
               bookId={bookId}
               chapters={chapters.data}
+              toc={book.data?.active_version?.toc}
               activeChapterId={chapterId}
               onSelect={handleChapterSelect}
               processingStates={batchChapterProgress}

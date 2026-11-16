@@ -565,6 +565,12 @@ textarea:focus-visible {
   gap: 4px;
 }
 
+.ndr-toc-tree > li > .ndr-collapsible-block > [aria-labelledby] {
+  margin-inline-start: 12px;
+  padding-inline-start: 8px;
+  border-inline-start: 1px solid var(--ndr-border);
+}
+
 .ndr-chapter-status-legend {
   display: flex;
   flex-wrap: wrap;

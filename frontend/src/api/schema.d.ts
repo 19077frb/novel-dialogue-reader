@@ -1479,6 +1479,8 @@ export interface components {
             canonical_length_cp: number;
             /** Warnings */
             warnings?: string[];
+            /** Toc */
+            toc?: components["schemas"]["TocNodeOut"][] | null;
             /**
              * Created At
              * Format: date-time
@@ -3975,6 +3977,19 @@ export interface components {
             last_error?: string | null;
             /** Created At */
             created_at: string;
+        };
+        /** TocNodeOut */
+        TocNodeOut: {
+            /** Id */
+            id: string;
+            /** Parent Id */
+            parent_id?: string | null;
+            /** Title */
+            title: string;
+            /** Chapter Id */
+            chapter_id?: string | null;
+            /** Target Cp */
+            target_cp?: number | null;
         };
         /** UndoOut */
         UndoOut: {
