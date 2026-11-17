@@ -105,6 +105,12 @@ export function updateProcessingPreferences(patch: Partial<ProcessingPreferences
   try { localStorage.setItem(PROCESSING_PREFERENCES_KEY, fallbackRaw) } catch { storageUnavailable = true }
   listeners.forEach(listener => listener())
 }
+export function processingPreferencesPersisted(expected: ProcessingPreferences): boolean {
+  try {
+    const raw = localStorage.getItem(PROCESSING_PREFERENCES_KEY)
+    return raw !== null && JSON.stringify(normalize(JSON.parse(raw))) === JSON.stringify(normalize(expected))
+  } catch { return false }
+}
 function subscribe(listener: () => void) {
   listeners.add(listener)
   const unsubscribeGeneral = subscribeGeneralSettings(listener)

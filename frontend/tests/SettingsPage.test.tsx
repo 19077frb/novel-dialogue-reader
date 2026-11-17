@@ -9,6 +9,12 @@ import * as profiles from '../src/api/profiles'
 import * as applicationSettings from '../src/api/applicationSettings'
 import { getProcessingPreferences, getStoredProcessingPreferences, updateProcessingPreferences } from '../src/processing/preferences'
 import { renderWithProviders } from './helpers'
+import * as restartApi from '../src/api/applicationRestart'
+
+vi.mock('../src/api/applicationRestart', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/api/applicationRestart')>(),
+  readRestartHealth: vi.fn(), waitForApplicationRestart: vi.fn(), openRestartedSettings: vi.fn(),
+}))
 
 vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['profiles'] } }))
 vi.mock('../src/api/applicationSettings', () => ({ fetchApplicationSettings: vi.fn(), saveApplicationSettings: vi.fn(), saveAndRestartApplication: vi.fn(), applicationSettingsKey: ['application-settings'] }))
@@ -41,6 +47,8 @@ function HistoryControls() {
 }
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.mocked(restartApi.readRestartHealth).mockResolvedValue({ started_at: 'old-instance', server_time: 'before-restart' } as never)
+  vi.mocked(restartApi.waitForApplicationRestart).mockImplementation(() => new Promise(() => {}))
   localStorage.clear(); vi.mocked(profiles.fetchProfiles).mockResolvedValue([])
   vi.mocked(applicationSettings.fetchApplicationSettings).mockResolvedValue({ fields: [], revision: 'missing', config_path: 'test', restart_required: [], restart_blocked_reason: '测试启动方式不重启' })
 })
@@ -239,6 +247,76 @@ it('取消保存并重启保留全部草稿，确认后统一保存并保持重�
   expect(settingsSaveButton()).toBeDisabled()
   expect(screen.getByRole('button', { name: '保存并重启' })).toBeDisabled()
 })
+it('统一保存先持久化浏览器偏好，再检测新实例并整页重新打开', async () => {
+  vi.mocked(applicationSettings.fetchApplicationSettings).mockResolvedValue(applicationExample)
+  vi.mocked(applicationSettings.saveAndRestartApplication).mockResolvedValue(applicationExample)
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(restartApi.waitForApplicationRestart).mockImplementation(async () => {
+    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!).fontSize).toBe(21)
+    expect(getStoredProcessingPreferences().thinkingMode).toBe('enabled')
+  })
+  renderWithProviders(<SettingsPage />)
+  fireEvent.change(screen.getByLabelText('正文字号'), { target: { value: '21' } })
+  await selectCategory('自动处理')
+  await userEvent.selectOptions(screen.getByTestId('processing-thinking-mode'), 'enabled')
+  await selectCategory('应用配置')
+  await screen.findByLabelText('服务端口')
+  await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
+  await waitFor(() => expect(restartApi.openRestartedSettings).toHaveBeenCalledWith(window.location.origin))
+  expect(applicationSettings.saveAndRestartApplication).toHaveBeenCalledTimes(1)
+  expect(restartApi.readRestartHealth).toHaveBeenCalledTimes(1)
+})
+
+it('浏览器偏好写入失败时保留页面草稿，检测完成后暂停自动导航', async () => {
+  vi.mocked(applicationSettings.fetchApplicationSettings).mockResolvedValue(applicationExample)
+  vi.mocked(applicationSettings.saveAndRestartApplication).mockResolvedValue(applicationExample)
+  vi.mocked(restartApi.waitForApplicationRestart).mockResolvedValue()
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  const store = Storage.prototype.setItem
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    if (key === SETTINGS_KEY) throw new DOMException('存储已满', 'QuotaExceededError')
+    return store.call(this, key, value)
+  })
+  renderWithProviders(<SettingsPage />)
+  fireEvent.change(screen.getByLabelText('正文字号'), { target: { value: '21' } })
+  await selectCategory('自动处理')
+  await userEvent.selectOptions(screen.getByTestId('processing-thinking-mode'), 'enabled')
+  await selectCategory('应用配置')
+  await screen.findByLabelText('服务端口')
+  await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('自动重新打开已暂停')
+  expect(restartApi.waitForApplicationRestart).toHaveBeenCalledTimes(1)
+  expect(restartApi.openRestartedSettings).not.toHaveBeenCalled()
+  expect(screen.getByRole('link', { name: '重新打开设置' })).toBeVisible()
+  await selectCategory('阅读显示')
+  expect(screen.getByLabelText('正文字号')).toHaveValue(21)
+  expect(screen.getByLabelText('正文字号')).toBeEnabled()
+  expect(localStorage.getItem(SETTINGS_KEY)).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: '重新检测服务' }))
+  expect(restartApi.openRestartedSettings).not.toHaveBeenCalled()
+  expect(applicationSettings.saveAndRestartApplication).toHaveBeenCalledTimes(1)
+})
+
+it('重启恢复失败显示检测反馈并解除跨分类锁定，重试不重复保存', async () => {
+  vi.mocked(applicationSettings.fetchApplicationSettings).mockResolvedValue(applicationExample)
+  vi.mocked(applicationSettings.saveAndRestartApplication).mockResolvedValue(applicationExample)
+  vi.mocked(restartApi.waitForApplicationRestart).mockRejectedValueOnce(new Error('设置已保存，180 秒内尚未确认服务恢复。'))
+    .mockResolvedValueOnce()
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  renderWithProviders(<SettingsPage />)
+  await selectCategory('应用配置')
+  await screen.findByLabelText('服务端口')
+  await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('180 秒')
+  expect(screen.getByLabelText('服务端口')).toBeEnabled()
+  await selectCategory('阅读显示')
+  expect(screen.getByLabelText('正文字号')).toBeEnabled()
+  await userEvent.click(screen.getByRole('button', { name: '重新检测服务' }))
+  await waitFor(() => expect(restartApi.openRestartedSettings).toHaveBeenCalledTimes(1))
+  expect(applicationSettings.saveAndRestartApplication).toHaveBeenCalledTimes(1)
+  expect(restartApi.waitForApplicationRestart).toHaveBeenCalledTimes(2)
+})
+
 it('存在运行任务时锁定重启入口，普通统一保存仍可提交草稿', async () => {
   vi.mocked(applicationSettings.fetchApplicationSettings).mockResolvedValue({ ...applicationExample,
     restart_blocked_reason: '仍有排队或运行中的任务，请先等待任务结束。' })

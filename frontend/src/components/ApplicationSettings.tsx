@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   applicationSettingsKey, fetchApplicationSettings, saveApplicationSettings, saveAndRestartApplication,
@@ -6,6 +6,8 @@ import {
 import type { ApplicationSettingsPatch } from '../api/applicationSettings'
 import { ApiError } from '../api/client'
 import { CollapsibleBlock } from './CollapsibleBlock'
+import { applicationRestartTarget, openRestartedSettings, readRestartHealth, waitForApplicationRestart } from '../api/applicationRestart'
+import type { ApplicationRestartBaseline } from '../api/applicationRestart'
 
 const hiddenSettingKeys = new Set([
   'credential_backend', 'static_dir', 'cors_origins',
@@ -24,8 +26,9 @@ export type ApplicationSettingsState = {
   restartBlockedReason: string | null
   restarting: boolean
   restartAddress: string
+  restartError: string
 }
-export type ApplicationSettingsHandle = { save: (restart?: boolean) => Promise<void> }
+export type ApplicationSettingsHandle = { save: (restart?: boolean) => Promise<void>; checkRestart: (allowNavigate?: boolean) => void }
 
 export const ApplicationSettings = forwardRef<ApplicationSettingsHandle, {
   managed?: boolean
@@ -36,13 +39,58 @@ export const ApplicationSettings = forwardRef<ApplicationSettingsHandle, {
   const [draft, setDraft] = useState<ApplicationSettingsPatch['values']>({})
   const [saved, setSaved] = useState(false)
   const [restarting, setRestarting] = useState(false)
+  const [restartError, setRestartError] = useState('')
+  const restartPlan = useRef<{ baseline: ApplicationRestartBaseline; origin: string | undefined; address: string } | null>(null)
+  const restartController = useRef<AbortController | null>(null)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false; restartController.current?.abort() }
+  }, [])
+  async function checkRestart(allowNavigate = true) {
+    const plan = restartPlan.current
+    if (!plan || !mounted.current) return
+    restartController.current?.abort()
+    const controller = new AbortController()
+    restartController.current = controller
+    setRestarting(true); setRestartError('')
+    try {
+      await waitForApplicationRestart(plan.baseline, plan.origin, controller.signal)
+      if (controller.signal.aborted || !mounted.current) return
+      setRestarting(false)
+      if (allowNavigate) openRestartedSettings(plan.address)
+      else setRestartError('服务已恢复，当前页面保留浏览器偏好。可继续调整，或手动重新打开设置。')
+    } catch (error) {
+      if (controller.signal.aborted || !mounted.current) return
+      setRestarting(false)
+      setRestartError(error instanceof Error ? error.message : '设置已保存，服务恢复检测失败，请重新检测。')
+    }
+  }
   const mutation = useMutation({
-    mutationFn: ({ payload, restart }: { payload: ApplicationSettingsPatch; restart: boolean }) =>
-      restart ? saveAndRestartApplication(payload) : saveApplicationSettings(payload),
-    onSuccess: data => {
+    mutationFn: async ({ payload, restart }: { payload: ApplicationSettingsPatch; restart: boolean }) => {
+      let baseline: ApplicationRestartBaseline | undefined
+      if (restart) {
+        const controller = new AbortController()
+        restartController.current = controller
+        try {
+          const health = await readRestartHealth(undefined, controller.signal)
+          baseline = { startedAt: health.started_at, serverTime: health.server_time }
+        }
+        catch { throw new Error('尚未确认当前服务状态，设置尚未提交。请确认服务连接后重试。') }
+      }
+      const data = await (restart ? saveAndRestartApplication(payload) : saveApplicationSettings(payload))
+      return { data, baseline }
+    },
+    onSuccess: ({ data, baseline }) => {
+      if (!mounted.current) return
       queryClient.setQueryData(applicationSettingsKey, data)
       setDraft({})
       setSaved(true)
+      if (baseline) {
+        restartPlan.current = { baseline, ...applicationRestartTarget(data) }
+        setRestartError(''); setRestarting(true)
+        if (!managed) void checkRestart()
+      }
     },
   })
   const data = query.data
@@ -60,19 +108,18 @@ export const ApplicationSettings = forwardRef<ApplicationSettingsHandle, {
   }
   const groups = [...new Set(visibleFields.map(field => field.group))]
   const busy = mutation.isPending || restarting
-  const hostname = data?.fields.find(field => field.key === 'host')?.value === '::1' ? '[::1]' : '127.0.0.1'
-  const restartAddress = `http://${hostname}:${String(data?.fields.find(field => field.key === 'port')?.value)}`
+  const restartAddress = restartPlan.current?.address ?? (data ? applicationRestartTarget(data).address : '')
   const ready = Boolean(data)
-  const restartBlockedReason = data?.restart_blocked_reason ?? null
+  const restartBlockedReason = restartError ? '请重新检测服务，或打开重启后的地址。' : data?.restart_blocked_reason ?? null
   useEffect(() => {
-    onStateChange?.({ changed, busy, ready, restartBlockedReason, restarting, restartAddress })
-  }, [changed, busy, ready, restartBlockedReason, restarting, restartAddress, onStateChange])
+    onStateChange?.({ changed, busy, ready, restartBlockedReason, restarting, restartAddress, restartError })
+  }, [changed, busy, ready, restartBlockedReason, restarting, restartAddress, restartError, onStateChange])
   useImperativeHandle(ref, () => ({
     async save(restart = false) {
       if (!data) throw new Error('应用配置尚未读取，请重新读取后保存。')
       await mutation.mutateAsync({ payload: { values: changes, revision: data.revision }, restart })
-      if (restart) setRestarting(true)
     },
+    checkRestart: allowNavigate => { void checkRestart(allowNavigate) },
   }))
   return <section className="card ndr-application-settings" id="application-settings" aria-label="应用配置">
     <h3>应用配置</h3>
@@ -146,13 +193,11 @@ export const ApplicationSettings = forwardRef<ApplicationSettingsHandle, {
         onClick={() => mutation.mutate({ payload: { values: changes, revision: data.revision }, restart: false })}>
         {mutation.isPending ? '正在保存…' : '保存设置'}
       </button>
-      <button disabled={busy || Boolean(data.restart_blocked_reason)}
-        title={busy ? '正在保存或重启，请等待完成。' : data.restart_blocked_reason ?? '保存应用配置并重新启动服务。'}
+      <button disabled={busy || Boolean(restartBlockedReason)}
+        title={busy ? '正在保存或重启，请等待完成。' : restartBlockedReason ?? '保存应用配置并重新启动服务。'}
         onClick={() => {
           if (!window.confirm('保存应用配置并重启服务？')) return
-          mutation.mutate({ payload: { values: changes, revision: data.revision }, restart: true }, {
-            onSuccess: () => setRestarting(true),
-          })
+          mutation.mutate({ payload: { values: changes, revision: data.revision }, restart: true })
         }}>保存并重启</button>
       </div>}
       <p className="hint">应用配置保存在本机，保存后重启服务生效。</p>
@@ -165,9 +210,14 @@ export const ApplicationSettings = forwardRef<ApplicationSettingsHandle, {
       {(data.restart_required.includes('port') || data.restart_required.includes('host')) && <p className="hint">重启后的阅读地址：{restartAddress}</p>}
       {data.restart_required.includes('data_dir') && <p className="hint">现有书籍保留在原目录。重启后使用新目录，空目录会显示空书架；如需使用现有书库，请先完成迁移。</p>}
       {!managed && mutation.isError && <p role="alert" className="status-error">保存失败：{mutation.error.message}</p>}
-      {data.restart_blocked_reason && <p className="hint">{data.restart_blocked_reason}</p>}
-      {!managed && restarting && <p role="status">已保存，服务正在重新启动。请稍等几秒后
-        <a className="ndr-button" href={`${restartAddress}/settings/general#application-settings`}>重新打开设置</a>；若无法打开，请查看启动窗口的具体错误。</p>}
+      {restartBlockedReason && <p className="hint">{restartBlockedReason}</p>}
+      {!managed && restarting && <p role="status">设置已保存，正在等待新服务就绪；恢复后自动打开设置。</p>}
+      {!managed && restartError && <><p role="alert" className="status-error">{restartError}</p>
+        <button onClick={() => {
+          if (changed && !window.confirm('检测成功后将重新打开设置，并丢弃未保存的修改。继续？')) return
+          void checkRestart()
+        }}>重新检测服务</button></>}
+      {!managed && (restarting || restartError) && <a className="ndr-button" href={`${restartAddress}/settings/general#application-settings`}>重新打开设置</a>}
       <p className="hint">{mutation.isPending ? '正在保存，请等待完成。' : !changed ? '修改配置后可保存，重启后生效。' : '有尚未保存的修改；切换页面会丢弃这些修改。'}</p>
       </div>
     </>}

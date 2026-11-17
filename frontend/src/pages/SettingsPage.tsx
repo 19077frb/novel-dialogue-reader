@@ -9,11 +9,11 @@ import { ApplicationSettings } from '../components/ApplicationSettings'
 import type { ApplicationSettingsHandle, ApplicationSettingsState } from '../components/ApplicationSettings'
 import '../styles/settings.css'
 import { ChapterFilterSettings } from '../components/ChapterFilterSettings'
-import { useStoredProcessingPreferences, getStoredProcessingPreferences, getDefaultProcessingPreferences } from '../processing/preferences'
+import { useStoredProcessingPreferences, getStoredProcessingPreferences, getDefaultProcessingPreferences, processingPreferencesPersisted } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
 import { stopAutomaticProcessing } from '../processing/autoProcessing'
 import { defaultSettings, useGeneralSettings } from '../settings/preferences'
-import { getGeneralSettings } from '../settings/preferences'
+import { getGeneralSettings, generalSettingsPersisted } from '../settings/preferences'
 import type { GeneralSettings } from '../settings/preferences'
 
 const categories = [
@@ -38,8 +38,9 @@ export default function SettingsPage() {
   const [saveError, setSaveError] = useState('')
   const [saving, setSaving] = useState(false)
   const application = useRef<ApplicationSettingsHandle>(null)
+  const restartNavigationAllowed = useRef(true)
   const [applicationState, setApplicationState] = useState<ApplicationSettingsState>({
-    changed: false, busy: false, ready: false, restarting: false, restartAddress: '', restartBlockedReason: null,
+    changed: false, busy: false, ready: false, restarting: false, restartAddress: '', restartBlockedReason: null, restartError: '',
   })
   const applicationStateChanged = useCallback((state: ApplicationSettingsState) => {
     setApplicationState(state)
@@ -50,7 +51,8 @@ export default function SettingsPage() {
   const changed = JSON.stringify(settings) !== JSON.stringify(storedSettings) || JSON.stringify(preferences) !== JSON.stringify(storedPreferences)
   const profiles = useQuery({ queryKey: profileKeys.profiles(), queryFn: ({ signal }) => fetchProfiles(signal) })
   const busy = saving || applicationState.busy
-  const anyChanged = changed || applicationState.changed
+  const browserNeedsSave = changed || !restartNavigationAllowed.current
+  const anyChanged = browserNeedsSave || applicationState.changed
   const restartReason = busy ? '正在保存或重启，请等待完成。' : !applicationState.ready
     ? '请先读取应用配置，再重启服务。' : applicationState.restartBlockedReason
   async function saveAll(restart = false) {
@@ -60,16 +62,23 @@ export default function SettingsPage() {
         if (!application.current) throw new Error('应用配置尚未就绪，请重新读取后保存。')
         await application.current.save(restart)
       }
-      if (changed) {
+      let persisted = true
+      if (browserNeedsSave) {
         if (storedSettings.autoProcessing && !settings.autoProcessing) stopAutomaticProcessing()
         saveSettings(settings)
         savePreferences(preferences)
-        setSettings(getGeneralSettings()); setPreferences(getStoredProcessingPreferences())
+        if (restart || !restartNavigationAllowed.current) {
+          persisted = generalSettingsPersisted(settings) && processingPreferencesPersisted(preferences)
+          restartNavigationAllowed.current = persisted
+        }
+        if (persisted) { setSettings(getGeneralSettings()); setPreferences(getStoredProcessingPreferences()) }
       }
       setSavedApplication(applicationState.changed || restart)
-      setSaved(true)
+      setSaved(persisted)
+      if (!persisted) setSaveError('应用配置已保存；浏览器偏好尚未写入本地存储，当前页面保留修改，自动重新打开已暂停。')
+      if (restart) application.current?.checkRestart(restartNavigationAllowed.current)
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : '保存失败，请重试。')
+      setSaveError(`保存失败：${error instanceof Error ? error.message : '请重试。'}`)
     } finally { setSaving(false) }
   }
   return <div className="ndr-page ndr-settings" data-section={selected}>
@@ -95,10 +104,15 @@ export default function SettingsPage() {
       <div className="ndr-settings-feedback">
         {categories.map(category => <p key={category.id} id={`${category.id}-description`} className="hint"
           hidden={describedCategory !== category.id}>{category.description}</p>)}
-        {saveError ? <p className="status-error" role="alert">保存失败：{saveError}</p>
-          : <p className="hint" role="status" hidden={Boolean(describedCategory) && !saving && !applicationState.restarting}>{applicationState.restarting ? '设置已保存，服务正在重启。' : saving ? '正在保存全部修改…' : anyChanged ? '有未保存修改，点击保存全部设置。' : saved ? savedApplication ? '设置已保存，应用配置重启后生效。' : '阅读与处理设置已保存。' : '保存全部已修改的偏好与应用配置。'}</p>}
+        {saveError ? <p className="status-error" role="alert">{saveError}</p>
+          : applicationState.restartError ? <p className="status-error" role="alert">{applicationState.restartError}</p>
+          : <p className="hint" role="status" hidden={Boolean(describedCategory) && !saving && !applicationState.restarting}>{applicationState.restarting ? '设置已保存，正在等待新服务就绪；恢复后自动打开设置。' : saving ? '正在保存全部修改…' : anyChanged ? '有未保存修改，点击保存全部设置。' : saved ? savedApplication ? '设置已保存，应用配置重启后生效。' : '阅读与处理设置已保存。' : '保存全部已修改的偏好与应用配置。'}</p>}
         {selected === 'application-settings' && <p className="hint">应用配置保存后重启生效。{restartReason}</p>}
-        {applicationState.restarting && <a className="ndr-button" href={`${applicationState.restartAddress}/settings/general#application-settings`}>重新打开设置</a>}
+        {applicationState.restartError && <button onClick={() => {
+          if (restartNavigationAllowed.current && anyChanged && !window.confirm('检测成功后将重新打开设置，并丢弃未保存的修改。继续？')) return
+          application.current?.checkRestart(restartNavigationAllowed.current)
+        }}>重新检测服务</button>}
+        {(applicationState.restarting || applicationState.restartError) && <a className="ndr-button" href={`${applicationState.restartAddress}/settings/general#application-settings`}>重新打开设置</a>}
       </div>
     </div>
     <fieldset className="ndr-settings-content" disabled={busy}>
