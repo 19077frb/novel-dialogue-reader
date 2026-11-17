@@ -80,8 +80,8 @@ class Settings(BaseSettings):
     # 默认不自动迁移：显式执行 alembic 或设置 NDR_AUTO_MIGRATE=1。
     auto_migrate: bool = False
 
-    # 单次导入的文件大小上限（字节）；超出返回 413。
-    max_import_bytes: int = 50 * 1024 * 1024
+    # 单次导入的文件大小上限（字节）；0 表示不限，正数超出时返回 413。
+    max_import_bytes: int = Field(default=0, ge=0)
 
     # 模型调用：超时与 FakeProvider 开关。FakeProvider 默认关闭，只在测试/演示时显式启用。
     llm_timeout_seconds: float = 30.0
@@ -112,11 +112,11 @@ class Settings(BaseSettings):
     # 测试/E2E 显式设为 session，避免触碰真实的系统凭据库。
     credential_backend: str = "system"
 
-    # EPUB 解压与结构限制。
-    max_epub_entries: int = 2000
-    max_epub_total_uncompressed_bytes: int = 200 * 1024 * 1024
-    max_epub_entry_bytes: int = 32 * 1024 * 1024
-    max_epub_spine_items: int = 1000
+    # EPUB 容量与数量上限；0 表示不限，格式与路径校验始终执行。
+    max_epub_entries: int = Field(default=0, ge=0)
+    max_epub_total_uncompressed_bytes: int = Field(default=0, ge=0)
+    max_epub_entry_bytes: int = Field(default=0, ge=0)
+    max_epub_spine_items: int = Field(default=0, ge=0)
 
     @field_validator("data_dir")
     @classmethod

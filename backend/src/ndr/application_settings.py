@@ -163,41 +163,41 @@ DEFINITIONS = [
     _field(
         "max_import_bytes",
         "导入文件大小上限（字节）",
-        "单个上传文件的最大大小；1048576字节等于1 MiB。过大文件会占用更多内存和磁盘。",
+        "单个上传文件的最大大小；0表示不限，1048576字节等于1 MiB。",
         "导入与EPUB安全限制",
-        minimum=1,
+        minimum=0,
         maximum=10737418240,
     ),
     _field(
         "max_epub_entries",
         "EPUB内部文件数上限",
-        "限制压缩包内的文件数量，防止异常或恶意文件消耗资源。",
+        "压缩包内的文件数量上限；0表示不限。",
         "导入与EPUB安全限制",
-        minimum=1,
+        minimum=0,
         maximum=1000000,
     ),
     _field(
         "max_epub_total_uncompressed_bytes",
         "EPUB解压总大小上限（字节）",
-        "限制全部解压内容的总大小，不是原始上传文件大小。",
+        "全部解压内容的总大小上限；0表示不限，按解压后的大小计量。",
         "导入与EPUB安全限制",
-        minimum=1,
+        minimum=0,
         maximum=53687091200,
     ),
     _field(
         "max_epub_entry_bytes",
         "EPUB单个内部文件大小上限（字节）",
-        "限制解压后每个内部文件的大小，不能超过解压总大小上限。",
+        "解压后每个内部文件的大小上限；0表示不限。两项均设置上限时，单项须小于或等于总量。",
         "导入与EPUB安全限制",
-        minimum=1,
+        minimum=0,
         maximum=10737418240,
     ),
     _field(
         "max_epub_spine_items",
         "EPUB正文文档数上限",
-        "限制书籍阅读顺序中的正文文档数量，并非最终拆分出的章节数。",
+        "书籍阅读顺序中的正文文档数量上限；0表示不限，按包内正文文档计数。",
         "导入与EPUB安全限制",
-        minimum=1,
+        minimum=0,
         maximum=1000000,
     ),
     _field(
@@ -398,7 +398,11 @@ def save_settings(settings: Settings, patch: ApplicationSettingsPatch) -> Applic
                     raise ApiError.validation("网页目录中没有index.html，请选择已构建的前端目录。")
         if merged["rate_limit_backoff_max_seconds"] < merged["rate_limit_backoff_base_seconds"]:
             raise ApiError.validation("重试最大等待不能小于初始等待。")
-        if merged["max_epub_entry_bytes"] > merged["max_epub_total_uncompressed_bytes"]:
+        if (
+            merged["max_epub_entry_bytes"] > 0
+            and merged["max_epub_total_uncompressed_bytes"] > 0
+            and merged["max_epub_entry_bytes"] > merged["max_epub_total_uncompressed_bytes"]
+        ):
             raise ApiError.validation("EPUB单文件大小上限不能大于解压总大小上限。")
         try:
             validated = Settings(**merged).model_dump(mode="json")

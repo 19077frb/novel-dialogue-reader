@@ -63,7 +63,7 @@ router = APIRouter(prefix="/books", tags=["books"])
 TXT_SUFFIX = ".txt"
 EPUB_SUFFIX = ".epub"
 SUPPORTED_SUFFIXES = (TXT_SUFFIX, EPUB_SUFFIX)
-MAX_IMPORT_BYTES_FALLBACK = 50 * 1024 * 1024
+MAX_IMPORT_BYTES_FALLBACK = 0
 
 
 @router.delete("/{book_id}", status_code=204, summary="永久删除书籍、关联记录与独占文件")
@@ -82,12 +82,12 @@ def delete_book_route(request: Request, book_id: str) -> Response:
 
 def _epub_limits(settings: Settings) -> EpubLimits:
     return EpubLimits(
-        max_entries=getattr(settings, "max_epub_entries", 2000),
+        max_entries=getattr(settings, "max_epub_entries", 0),
         max_total_uncompressed_bytes=getattr(
-            settings, "max_epub_total_uncompressed_bytes", 200 * 1024 * 1024
+            settings, "max_epub_total_uncompressed_bytes", 0
         ),
-        max_entry_uncompressed_bytes=getattr(settings, "max_epub_entry_bytes", 32 * 1024 * 1024),
-        max_spine_items=getattr(settings, "max_epub_spine_items", 1000),
+        max_entry_uncompressed_bytes=getattr(settings, "max_epub_entry_bytes", 0),
+        max_spine_items=getattr(settings, "max_epub_spine_items", 0),
     )
 
 
@@ -116,10 +116,10 @@ def import_book(
 
     max_bytes = getattr(settings, "max_import_bytes", MAX_IMPORT_BYTES_FALLBACK)
     # 同步路由在工作线程运行；解析/写入不能阻塞阅读请求的事件循环。
-    raw = file.file.read(max_bytes + 1)
+    raw = file.file.read(max_bytes + 1 if max_bytes > 0 else -1)
     if not raw:
         raise ApiError.validation("文件为空，无法导入", filename=filename)
-    if len(raw) > max_bytes:
+    if max_bytes > 0 and len(raw) > max_bytes:
         raise ApiError(
             ErrorCode.PAYLOAD_TOO_LARGE,
             "文件超过导入上限",

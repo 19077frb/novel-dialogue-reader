@@ -7,10 +7,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import zipfile
 
 from fastapi.testclient import TestClient
 
+from fixtures.epub_factory import build_epub, minimal_spec
 from ndr.app import create_app
 from ndr.config import Settings
 
@@ -206,6 +209,37 @@ def test_import_rejects_oversized_file(tmp_settings: Settings) -> None:
         )
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
+
+
+def test_import_accepts_exact_positive_size_limit(migrated_settings: Settings) -> None:
+    raw = SAMPLE.encode("utf-8")
+    settings = migrated_settings.model_copy(update={"max_import_bytes": len(raw)})
+    with TestClient(create_app(settings)) as client:
+        response = _import(client, raw)
+    assert response.status_code == 202, response.text
+    assert response.json()["data"]["canonical_length_cp"] == len(SAMPLE)
+
+
+def test_default_import_accepts_epub_larger_than_previous_upload_limit(
+    migrated_client: TestClient,
+) -> None:
+    buffer = io.BytesIO(build_epub(minimal_spec()))
+    chunk = b"original fixture" * (1024 * 64)
+    with (
+        zipfile.ZipFile(buffer, "a", zipfile.ZIP_STORED) as archive,
+        archive.open("OEBPS/assets/large.txt", "w") as entry,
+    ):
+        for _ in range(51):
+            entry.write(chunk)
+    raw = buffer.getvalue()
+    assert len(raw) > 50 * 1024**2
+    response = _import(migrated_client, raw, filename="large-collection.epub")
+    assert response.status_code == 202, response.text
+    data = response.json()["data"]
+    assert data["chapter_count"] == 2
+    content = migrated_client.get(f"/api/books/{data['book_id']}/content").json()["data"]
+    assert content["canonical_length_cp"] == data["canonical_length_cp"]
+    assert content["nodes"]
 
 
 def test_content_pagination_and_range_validation(migrated_client: TestClient) -> None:

@@ -7,7 +7,7 @@
 安全边界：
 
 - 归一化路径不得越出包内；拒绝绝对路径、``..``、反斜杠逃逸、重复条目与符号链接条目。
-- 条目数量、单条目解压大小与总解压大小都有上限，超限返回可解释错误而不是吞掉整本书。
+- 容量与数量默认不限；配置正数上限时，超限返回可解释错误。
 - 不执行原书脚本：``script``/``style`` 内容既不进正文也不登记为资源；外链图片只告警、不下载。
 - 只读取包内已登记资源，资源端点不接受任意磁盘路径。
 """
@@ -99,10 +99,20 @@ class EpubError(Exception):
 
 @dataclass(frozen=True)
 class EpubLimits:
-    max_entries: int = 2000
-    max_total_uncompressed_bytes: int = 200 * 1024 * 1024
-    max_entry_uncompressed_bytes: int = 32 * 1024 * 1024
-    max_spine_items: int = 1000
+    max_entries: int = 0
+    max_total_uncompressed_bytes: int = 0
+    max_entry_uncompressed_bytes: int = 0
+    max_spine_items: int = 0
+
+    def __post_init__(self) -> None:
+        for name in (
+            "max_entries",
+            "max_total_uncompressed_bytes",
+            "max_entry_uncompressed_bytes",
+            "max_spine_items",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be non-negative; 0 means unlimited")
 
 
 def _local(tag: str) -> str:
@@ -192,7 +202,10 @@ class _Archive:
                     code="EPUB_DUPLICATE_ENTRY",
                     details={"entry": name},
                 )
-            if info.file_size > limits.max_entry_uncompressed_bytes:
+            if (
+                limits.max_entry_uncompressed_bytes > 0
+                and info.file_size > limits.max_entry_uncompressed_bytes
+            ):
                 raise EpubError(
                     "EPUB 单条目解压后过大",
                     code="EPUB_ENTRY_TOO_LARGE",
@@ -203,7 +216,10 @@ class _Archive:
                     },
                 )
             total += info.file_size
-            if total > limits.max_total_uncompressed_bytes:
+            if (
+                limits.max_total_uncompressed_bytes > 0
+                and total > limits.max_total_uncompressed_bytes
+            ):
                 raise EpubError(
                     "EPUB 解压总量超过上限",
                     code="EPUB_SIZE_LIMIT",
@@ -212,7 +228,7 @@ class _Archive:
                         "max_total_bytes": limits.max_total_uncompressed_bytes,
                     },
                 )
-            if len(self._entries) >= limits.max_entries:
+            if limits.max_entries > 0 and len(self._entries) >= limits.max_entries:
                 raise EpubError(
                     "EPUB 条目数量超过上限",
                     code="EPUB_ENTRY_LIMIT",
@@ -974,7 +990,7 @@ def parse_epub(
             code="EPUB_EMPTY_SPINE",
             details={},
         )
-    if len(spine_items) > limits.max_spine_items:
+    if limits.max_spine_items > 0 and len(spine_items) > limits.max_spine_items:
         raise EpubError(
             "EPUB spine 条目过多",
             code="EPUB_SPINE_LIMIT",
