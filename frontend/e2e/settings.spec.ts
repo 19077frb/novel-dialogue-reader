@@ -536,7 +536,7 @@ test.describe('模型配置', () => {
   test('新建、编辑、清除密钥与删除配置', async ({ page }) => {
     const name = `E2E 网关 ${Date.now()}`
     await page.goto('/settings/models')
-    await expect(page.getByTestId('protocol-capabilities')).toContainText('OpenAI 接口格式')
+    await expect(page.getByTestId('profile-protocol')).toHaveAttribute('title', /OpenAI 接口格式/)
 
     await page.getByTestId('profile-name').fill(name)
     await page.getByTestId('profile-base-url').fill('https://api.example.com/v1')
@@ -559,6 +559,7 @@ test.describe('模型配置', () => {
     await expect(page.getByTestId('profile-thinking-effort')).toHaveValue('high')
     await page.getByTestId('profile-model').fill('e2e-model-2')
     await page.getByTestId('profile-save').click()
+    await expect(page.getByTestId('model-saved-panel')).toBeVisible()
     await expect(card).toContainText('e2e-model-2')
     await expect(card).toContainText('已保存密钥')
 
@@ -568,11 +569,13 @@ test.describe('模型配置', () => {
     await expect(page.getByTestId('profile-thinking-effort')).toBeDisabled()
     await page.getByTestId('key-action-remove').check()
     await page.getByTestId('profile-save').click()
+    await expect(page.getByTestId('model-saved-panel')).toBeVisible()
     await expect(card).toContainText('未保存密钥')
     await card.getByRole('button', { name: '编辑' }).click()
     await expect(page.getByTestId('profile-thinking-mode')).toHaveValue('disabled')
     await expect(page.getByTestId('profile-thinking-effort')).toHaveValue('default')
     await page.getByTestId('profile-cancel').click()
+    await expect(page.getByTestId('model-saved-panel')).toBeVisible()
 
     // 删除
     await card.getByRole('button', { name: '删除' }).click()
@@ -622,8 +625,10 @@ test.describe('模型配置', () => {
 
     const result = page.getByTestId('connection-result')
     await expect(result).toContainText('连接成功')
+    await result.getByText('连接详情', { exact: true }).click()
     await expect(result).toContainText('fake-provider')
     await expect(result).toContainText('未知（模型服务未返回用量）')
+    await expect(result.getByText('用量：未知（模型服务未返回用量）', { exact: true })).toBeVisible()
     // 明确标注这是测试适配器，不是真实模型
     await expect(page.getByTestId('fake-provider-warning')).toContainText('本地模拟测试完成，结果用于验证界面流程')
 

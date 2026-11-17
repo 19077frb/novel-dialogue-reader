@@ -2,6 +2,8 @@ import { expect, type Page } from '@playwright/test'
 
 /** Reveal a saved model through the same paginated list used by readers. */
 export async function revealProfile(page: Page, name: string) {
+  await page.getByTestId('model-view-saved').click()
+  await expect(page.getByTestId('model-saved-panel')).toBeVisible()
   const card = page.getByTestId('profile-card').filter({ hasText: name })
   await expect(card).toBeAttached()
   const pagination = page.getByRole('navigation', { name: '模型配置分页' })

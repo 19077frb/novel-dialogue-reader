@@ -66,6 +66,7 @@ for (const layout of [
         await expect(page.getByTestId('review-counts')).toBeVisible()
       }
       if (item.name === 'models') {
+        await page.getByTestId('model-view-saved').click()
         await expect(page.getByTestId('profile-card').first()).toBeVisible()
       }
       if (item.name === 'settings') {
