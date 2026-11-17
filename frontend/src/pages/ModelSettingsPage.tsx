@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { OperationTimer, useRequestClock } from '../components/OperationTimer'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 
 import { ApiError } from '../api/client'
 import {
@@ -17,6 +18,7 @@ import { credentialLabel, protocolLabel } from '../ui/labels'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
 import { PaginatedItems } from '../components/ListPagination'
 import { ReadErrorNotice } from '../components/ReadErrorNotice'
+import '../styles/models.css'
 
 type KeyAction = 'keep' | 'replace' | 'remove'
 
@@ -67,6 +69,9 @@ function describeError(error: unknown): string {
 
 export default function ModelSettingsPage() {
   const queryClient = useQueryClient()
+  const { hash } = useLocation()
+  const [view, setView] = useState<'editor' | 'saved'>(() => hash === '#saved-profiles' ? 'saved' : 'editor')
+  const editorRef = useRef<HTMLElement>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [keyAction, setKeyAction] = useState<KeyAction>('replace')
@@ -84,6 +89,27 @@ export default function ModelSettingsPage() {
   })
 
   const selectedProtocol = protocols.data?.find((item) => item.protocol === form.protocol)
+  const protocolHelp = form.protocol === 'chat-completions-compatible'
+    ? '适用于使用 OpenAI 接口格式的云端模型和本地服务。服务地址填写 API 根地址，系统会追加 /chat/completions；模型名称按服务商提供的信息填写。云端服务通常需要 API 密钥，在凭据中选择保存方式并填写密钥。明确无需认证的本地服务可选择“不需要密钥（本地服务）”。'
+    : form.protocol === 'anthropic-messages'
+      ? '适用于 Anthropic Messages 接口。官方服务地址可填 https://api.anthropic.com/v1，系统会追加 /messages；兼容服务按服务商说明填写 API 根地址和模型名称。官方服务需要 API 密钥。思考模式按模型支持情况选择；开启思考时随机性与采样使用服务默认值。手动思考要求最大输出 Token 大于 1024，自适应使用所选思考强度。'
+      : form.protocol === 'fake-provider'
+        ? '用于本地模拟界面流程，返回测试数据。凭据选择“不需要密钥（本地服务）”。'
+        : `${selectedProtocol?.notes ?? ''} 服务地址、模型名称和是否需要 API 密钥，请按服务商提供的接入说明填写。`
+  const baseUrlHelp = form.protocol === 'anthropic-messages'
+    ? '填写 API 根地址，例如 https://api.anthropic.com/v1；系统会追加 /messages。'
+    : form.protocol === 'chat-completions-compatible'
+      ? '填写 API 根地址，例如 https://api.example.com/v1；系统会追加 /chat/completions。'
+      : '填写模型服务提供的 API 根地址。'
+
+  useEffect(() => {
+    if (view === 'editor' && editingId) editorRef.current?.focus({ preventScroll: true })
+  }, [view, editingId])
+
+  useEffect(() => {
+    if (hash === '#saved-profiles') setView('saved')
+    else if (['#profile-editor', '#profile-generation', '#profile-thinking', '#profile-credentials'].includes(hash)) setView('editor')
+  }, [hash])
 
   function resetForm() {
     setEditingId(null)
@@ -142,7 +168,7 @@ export default function ModelSettingsPage() {
   }
 
   const connectionTest = useMutation({
-    mutationFn: (payload: { profileId?: string; draftProfile?: Record<string, unknown> }) =>
+    mutationFn: (payload: { profileId?: string; profileName?: string; draftProfile?: Record<string, unknown> }) =>
       testConnection(
         payload.profileId
           ? { profile_id: payload.profileId }
@@ -150,7 +176,7 @@ export default function ModelSettingsPage() {
       ),
     onSuccess: (data, variables) => {
       setTestResult({
-        target: variables.profileId ? `配置 ${variables.profileId}` : '当前表单草稿',
+        target: variables.profileId ? `配置「${variables.profileName ?? variables.profileId}」` : `填写内容「${variables.draftProfile?.name ?? '草稿'}」`,
         data,
       })
       setError(null)
@@ -193,6 +219,7 @@ export default function ModelSettingsPage() {
           (profile.has_key ? `已保存配置「${profile.name}」与密钥。` : `已保存配置「${profile.name}」（未保存密钥）。`),
       )
       resetForm() // 成功后清空表单，api_key 不留在内存里
+      setView('saved')
       void queryClient.invalidateQueries({ queryKey: profileKeys.profiles() })
     },
     onError: async (err: unknown) => {
@@ -208,10 +235,13 @@ export default function ModelSettingsPage() {
 
   const remove = useMutation({
     mutationFn: (profileId: string) => deleteProfile(profileId),
-    onSuccess: () => {
+    onSuccess: (_data, deletedId) => {
       setError(null)
       setNotice('配置已删除，其凭据引用也已清理。')
-      resetForm()
+      if (editingId === deletedId) {
+        resetForm()
+        setView('saved')
+      }
       void queryClient.invalidateQueries({ queryKey: profileKeys.profiles() })
     },
     onError: (err: unknown) => {
@@ -221,373 +251,276 @@ export default function ModelSettingsPage() {
   })
 
   const testClock = useRequestClock(connectionTest.isPending)
+  const busy = save.isPending || remove.isPending
+  const busyReason = save.isPending
+    ? '正在保存模型配置，请等待保存完成。'
+    : remove.isPending ? '正在删除模型配置，请等待删除完成。' : undefined
+  const testDisabledReason = busyReason ?? (connectionTest.isPending ? '连接测试正在进行，请等待本次测试结束。' : undefined)
+  const params = JSON.parse(form.paramsText)
+  const thinkingDisabled = params.thinking?.type === 'disabled'
+
   return (
-    <div className="ndr-page ndr-settings">
+    <div className="ndr-page ndr-model-settings">
       <header className="card ndr-page-header">
         <div>
           <h2>模型配置</h2>
-          <p className="hint">
-            连接模型服务，管理账号与生成参数。
-          </p>
+          <p className="hint">连接模型服务，管理账号与生成参数。</p>
         </div>
+        <nav className="ndr-model-views" aria-label="模型配置视图">
+          <button type="button" data-testid="model-view-editor" aria-pressed={view === 'editor'}
+            onClick={() => setView('editor')}>{editingId ? '编辑配置' : '新建配置'}</button>
+          <button type="button" data-testid="model-view-saved" aria-pressed={view === 'saved'}
+            onClick={() => setView('saved')}>查看配置</button>
+        </nav>
       </header>
-      <div className="ndr-settings-layout">
-      <nav className="ndr-section-nav" aria-label="模型配置分区">
-        <a href="#profile-editor">接口信息</a>
-        <a href="#profile-generation">生成参数</a>
-        <a href="#profile-thinking">思考设置</a>
-        <a href="#profile-credentials">密钥与凭据</a>
-        <a href="#saved-profiles">已保存的配置</a>
-      </nav>
-      <div className="ndr-settings-content">
-      <section className="card" id="profile-editor" tabIndex={-1}>
-        <OperationTimer {...testClock} />
-        <h3>{editingId ? '编辑模型配置' : '新增模型配置'}</h3>
-        <p className="hint">
-          填写服务地址、模型名称与密钥后保存。连接测试会请求模型服务，可能产生费用；
-          可在保存前测试当前填写内容，也可测试已保存的配置。
-        </p>
 
-        <form
-          className="ndr-profile-form"
-          onSubmit={(event) => {
-            event.preventDefault()
-            setNotice(null)
-            setError(null)
-            const params = parseParams()
-            if (params === null) return
-            save.mutate(params)
-          }}
-        >
-          <p className="hint">* 为必填项。</p>
-          <div className="ndr-range-grid">
-          <label className="ndr-field">
-            * 名称
-            <input
-              type="text"
-              value={form.name}
-              required
-              data-testid="profile-name"
-              onChange={(event) => setForm({ ...form, name: event.target.value })}
-            />
-          </label>
-
-          <label className="ndr-field">
-            * 协议
-            <select
-              value={form.protocol}
-              data-testid="profile-protocol"
-              onChange={(event) => setForm({ ...form, protocol: event.target.value })}
-            >
-              {(protocols.data ?? []).map((item) => (
-                <option key={item.protocol} value={item.protocol}>
-                  {protocolLabel(item.protocol)}
-                </option>
-              ))}
-              {!protocols.data && <option value={form.protocol}>{protocolLabel(form.protocol)}</option>}
-            </select>
-          </label>
-          </div>
-
-          {selectedProtocol && (
-            <details className="hint" data-testid="protocol-capabilities">
-              <summary>如何填写接口配置</summary>
-              {selectedProtocol.protocol === 'chat-completions-compatible' ? <>
-                <p>适用于使用 OpenAI 接口格式的云端模型和本地服务。服务地址和模型名称按服务商提供的信息填写；服务地址填写 API 根地址，系统会追加 /chat/completions。</p>
-                <p>云端服务通常需要 API 密钥，在“凭据”中选择保存方式并填写密钥。只有明确无需认证的本地服务，才选择“不需要密钥（本地服务）”。</p>
-              </> : selectedProtocol.protocol === 'anthropic-messages' ? <>
-                <p>适用于 Anthropic Messages 接口。官方服务地址可填 https://api.anthropic.com/v1，兼容服务按服务商说明填写 API 根地址，系统会追加 /messages。模型名称按服务商提供的信息填写。</p>
-                <p>官方服务需要 API 密钥，在“凭据”中选择保存方式并填写密钥。思考模式按模型支持情况选择；开启思考时随机性与采样使用服务默认值。手动思考要求最大输出 Token 大于 1024，自适应使用所选思考强度。</p>
-              </> : selectedProtocol.protocol === 'fake-provider'
-                ? <p>用于本地模拟界面流程，返回测试数据。凭据选择“不需要密钥（本地服务）”。</p>
-                : <><p>{selectedProtocol.notes}</p><p>服务地址、模型名称和是否需要 API 密钥，请按服务商提供的接入说明填写。</p></>}
-            </details>
+      {(busy || testClock.startedAt > 0 || testResult || notice || error) && (
+        <section className="ndr-model-feedback" aria-label="配置操作反馈">
+          <OperationTimer {...testClock} />
+          {busyReason && <p role="status" className="hint">{busyReason}</p>}
+          {notice && <p className="status-ok" role="status" data-testid="settings-notice">{notice}</p>}
+          {error && <p className="status-error" role="alert" data-testid="settings-error">{error}</p>}
+          {testResult && (
+            <div className="ndr-connection-result" data-testid="connection-result">
+              <p className={testResult.data.ok ? 'status-ok' : 'status-error'}>
+                {testResult.target}：{testResult.data.ok ? '连接成功' : '连接失败'}
+                {testResult.data.latency_ms !== null ? '（' + testResult.data.latency_ms + ' ms）' : ''}
+              </p>
+              <p className="hint">{testResult.data.detail}</p>
+              {testResult.data.adapter === 'fake-provider' && (
+                <p className="status-error" data-testid="fake-provider-warning">
+                  本地模拟测试完成，结果用于验证界面流程。真实模型连接请选择对应的服务协议后测试。
+                </p>
+              )}
+              {testResult.data.ok && testResult.data.adapter !== 'fake-provider' && (
+                <p className="hint">鉴权与 JSON 输出校验通过。小说标注效果请在“预览与处理”中试运行后查看。</p>
+              )}
+              <details>
+                <summary>连接详情</summary>
+                <ul className="hint">
+                  <li>适配器：{testResult.data.adapter}</li>
+                  <li>协议 / 模型：{protocolLabel(testResult.data.protocol)} / {testResult.data.model}</li>
+                  <li>用量：{testResult.data.usage_unknown
+                    ? '未知（模型服务未返回用量）'
+                    : '输入 ' + (testResult.data.usage?.input_tokens ?? '?') + ' · 输出 ' +
+                      (testResult.data.usage?.output_tokens ?? '?') + ' · 合计 ' +
+                      (testResult.data.usage?.total_tokens ?? '?')}</li>
+                  {testResult.data.error_code && <li>错误码：{testResult.data.error_code}</li>}
+                </ul>
+              </details>
+            </div>
           )}
+        </section>
+      )}
 
-          <div className="ndr-range-grid">
-          <label className="ndr-field">
-            * 服务地址（Base URL）
-            <input
-              type="text"
-              value={form.baseUrl}
-              required
-              placeholder="https://api.example.com/v1"
-              data-testid="profile-base-url"
-              onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
-            />
-          </label>
+      <section className="card ndr-model-panel" id="profile-editor" tabIndex={-1} ref={editorRef}
+        aria-label="模型配置表单" data-testid="model-editor-panel" hidden={view !== 'editor'}>
+        <form className="ndr-model-form" onSubmit={(event) => {
+          event.preventDefault()
+          if (busy) return
+          setNotice(null)
+          setError(null)
+          const parsed = parseParams()
+          if (parsed !== null) save.mutate(parsed)
+        }}>
+          <fieldset className="ndr-model-editable" disabled={busy} title={busyReason}>
+            <div className="ndr-model-columns">
+              <div className="ndr-model-column">
+                <fieldset className="ndr-model-group">
+                  <legend>接口信息 <span className="hint">* 为必填项</span></legend>
+                  <div className="ndr-model-fields">
+                    <label className="ndr-field">* 名称
+                      <input type="text" value={form.name} required data-testid="profile-name"
+                        title="为这组模型服务配置填写便于识别的名称。"
+                        onChange={(event) => setForm({ ...form, name: event.target.value })} />
+                    </label>
+                    <label className="ndr-field">* 协议
+                      <select value={form.protocol} data-testid="profile-protocol" title={protocolHelp}
+                        onChange={(event) => setForm({ ...form, protocol: event.target.value })}>
+                        {(protocols.data ?? []).map((item) => (
+                          <option key={item.protocol} value={item.protocol}>{protocolLabel(item.protocol)}</option>
+                        ))}
+                        {!protocols.data && <option value={form.protocol}>{protocolLabel(form.protocol)}</option>}
+                      </select>
+                    </label>
+                    <label className="ndr-field">* 服务地址（Base URL）
+                      <input type="text" value={form.baseUrl} required placeholder="https://api.example.com/v1"
+                        data-testid="profile-base-url" title={baseUrlHelp}
+                        onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} />
+                    </label>
+                    <label className="ndr-field">* 模型名
+                      <input type="text" value={form.model} required placeholder="example-chat-model"
+                        data-testid="profile-model" title="填写服务商提供的模型标识，大小写及版本后缀按接入说明填写。"
+                        onChange={(event) => setForm({ ...form, model: event.target.value })} />
+                    </label>
+                  </div>
+                </fieldset>
 
-          <label className="ndr-field">
-            * 模型名
-            <input
-              type="text"
-              value={form.model}
-              required
-              placeholder="example-chat-model"
-              data-testid="profile-model"
-              onChange={(event) => setForm({ ...form, model: event.target.value })}
-            />
-          </label>
-          </div>
+                <fieldset className="ndr-model-group">
+                  <legend>密钥与凭据</legend>
+                  {editingId && (
+                    <div className="ndr-radio-row ndr-model-key-action">
+                      {([['keep', '保持不变'], ['replace', '替换密钥'], ['remove', '清除密钥']] as const).map(([value, label]) => (
+                        <label key={value}>
+                          <input type="radio" name="key-action" value={value} checked={keyAction === value}
+                            onChange={() => setKeyAction(value)} data-testid={'key-action-' + value} />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {(!editingId || keyAction === 'replace') && (
+                    <>
+                      <div className="ndr-radio-row ndr-model-credentials" role="group" aria-label="密钥保存方式">
+                        {([
+                          ['session', '仅本会话', '密钥用于当前运行会话，重新启动后可再次填写。'],
+                          ['system', '系统凭据库', '密钥交由系统凭据库保存，配置列表会显示保存结果。'],
+                          ['none', '不需要密钥（本地服务）', '适用于明确允许无需认证访问的本地模型服务。'],
+                        ] as const).map(([value, label, help]) => (
+                          <label key={value} title={help}>
+                            <input type="radio" name="credential-mode" value={value}
+                              checked={form.credentialMode === value} onChange={() => setForm({ ...form, credentialMode: value })}
+                              data-testid={'credential-mode-' + value} title={help} />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                      <label className="ndr-field">接口密钥（API Key，可选）
+                        <input type="password" value={form.apiKey} autoComplete="off" data-testid="profile-api-key"
+                          title="填写服务商提供的 API 密钥。保存配置时按所选方式保存；草稿连接测试使用此处填写的密钥。"
+                          onChange={(event) => setForm({ ...form, apiKey: event.target.value })} />
+                      </label>
+                    </>
+                  )}
+                </fieldset>
+              </div>
 
-          <fieldset id="profile-generation">
-            <legend>常用生成参数</legend>
-            <p className="hint">留空表示沿用提供方或任务默认值。输出上限按每次调用计算，任务总额度在处理页设置。
-              下方思考设置作为模型配置默认值，也可在「预览与处理」中按任务覆盖。</p>
-            <div className="ndr-range-grid">{([
-              ['max_tokens', '每次调用最大输出 Token', 1, undefined, 1],
-              ['temperature', '随机性（越低越稳定）', 0, 2, 0.1],
-              ['top_p', '采样范围', 0, 1, 0.05],
-              ['timeout_seconds', '请求超时（秒）', 1, undefined, 1],
-            ] as const).map(([key, label, min, max, step]) => <label className="ndr-field" key={key}>
-              {label}
-              <input type="number" data-testid={`profile-${key}`} min={min} max={max} step={step}
-                value={(JSON.parse(form.paramsText)[key] as number | undefined) ?? ''}
-                onChange={event => changeParameter(key, event.target.value)} />
-            </label>)}</div>
+              <div className="ndr-model-column">
+                <fieldset className="ndr-model-group">
+                  <legend>生成参数</legend>
+                  <div className="ndr-model-fields">
+                    {([
+                      ['max_tokens', '每次调用最大输出 Token', 1, undefined, 1, '限制每次模型调用的输出 Token 数；任务总额度在处理页设置。'],
+                      ['temperature', '随机性', 0, 2, 0.1, '取值 0 至 2，数值越低，输出通常越稳定。Anthropic 开启思考时使用服务默认值。'],
+                      ['top_p', '采样范围', 0, 1, 0.05, '取值 0 至 1，用于控制候选内容的采样范围。'],
+                      ['timeout_seconds', '请求超时（秒）', 1, undefined, 1, '单次模型请求的等待时限，填写大于或等于 1 的整数秒。'],
+                    ] as const).map(([key, label, min, max, step, help]) => (
+                      <label className="ndr-field" key={key}>{label}
+                        <input type="number" data-testid={'profile-' + key} min={min} max={max} step={step}
+                          title={help + '留空沿用提供方或任务默认值。'} value={(params[key] as number | undefined) ?? ''}
+                          onChange={(event) => changeParameter(key, event.target.value)} />
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <fieldset className="ndr-model-group">
+                  <legend>默认思考设置</legend>
+                  <div className="ndr-model-fields">
+                    <label className="ndr-field">默认思考模式
+                      <select data-testid="profile-thinking-mode" value={params.thinking?.type ?? 'default'}
+                        title="处理页选择“沿用模型配置”时使用这里保存的默认值；选择“模型服务默认”由服务商决定。关闭思考会清除默认强度。"
+                        onChange={(event) => changeThinkingDefault('mode', event.target.value)}>
+                        <option value="default">模型服务默认（不指定）</option>
+                        <option value="disabled">关闭</option><option value="enabled">开启</option><option value="adaptive">自适应</option>
+                      </select>
+                    </label>
+                    <label className="ndr-field">默认思考强度
+                      <select data-testid="profile-thinking-effort" value={params.reasoning_effort ?? 'default'} disabled={thinkingDisabled}
+                        title={thinkingDisabled ? '默认思考已关闭，请先选择开启或自适应，再设置默认强度。' : '模型服务支持思考强度时使用所选值；处理页可按任务覆盖。'}
+                        onChange={(event) => changeThinkingDefault('effort', event.target.value)}>
+                        <option value="default">模型服务默认（不指定）</option>
+                        <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
+                      </select>
+                    </label>
+                  </div>
+                  <p className="hint ndr-model-thinking-hint">思考功能需模型服务支持，开启后可能增加用量与等待时间。</p>
+                  {thinkingDisabled && <p className="hint ndr-model-thinking-hint">默认思考已关闭；先选择开启或自适应，再调整强度。</p>}
+                </fieldset>
+              </div>
+            </div>
           </fieldset>
-          <fieldset id="profile-thinking">
-            <legend>默认思考设置</legend>
-            <label className="ndr-field">默认思考模式
-              <select data-testid="profile-thinking-mode" value={JSON.parse(form.paramsText).thinking?.type ?? 'default'}
-                onChange={event => changeThinkingDefault('mode', event.target.value)}>
-                <option value="default">模型服务默认（不指定）</option>
-                <option value="disabled">关闭</option><option value="enabled">开启</option><option value="adaptive">自适应</option>
-              </select>
-            </label>
-            <label className="ndr-field">默认思考强度
-              <select data-testid="profile-thinking-effort" value={JSON.parse(form.paramsText).reasoning_effort ?? 'default'}
-                disabled={JSON.parse(form.paramsText).thinking?.type === 'disabled'}
-                title={JSON.parse(form.paramsText).thinking?.type === 'disabled' ? '默认思考已关闭，请先选择开启或自适应，再设置默认强度。' : undefined}
-                onChange={event => changeThinkingDefault('effort', event.target.value)}>
-                <option value="default">模型服务默认（不指定）</option>
-                <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
-              </select>
-            </label>
-            {JSON.parse(form.paramsText).thinking?.type === 'disabled' && <p className="hint">默认思考已关闭，强度设置不可用；先开启思考再调整强度。</p>}
-            <p className="hint">处理页选择“沿用模型配置”时使用这里保存的默认值；选择“模型服务默认”由服务商决定思考行为。
-              思考功能需要模型服务支持。关闭思考会清除默认强度，开启思考可能增加用量与等待时间。</p>
-          </fieldset>
-          <details>
+
+          <details className="ndr-model-parameters">
             <summary>查看生成参数（只读）</summary>
-            <p className="hint">这里展示完整生成参数，包括上方常用项和已有的提供方专用参数。</p>
+            <p className="hint">完整参数包含上方常用项和已保存的提供方专用参数。</p>
             <textarea value={form.paramsText} rows={5} readOnly data-testid="profile-params" aria-label="生成参数（只读）" />
           </details>
 
-          <fieldset id="profile-credentials">
-            <legend>凭据</legend>
-            <p className="hint">选择密钥的保存方式。保存后，配置列表显示密钥的保存状态。</p>
-            {editingId && (
-              <div className="ndr-radio-row">
-                {(
-                  [
-                    ['keep', '保持不变'],
-                    ['replace', '替换密钥'],
-                    ['remove', '清除密钥'],
-                  ] as const
-                ).map(([value, label]) => (
-                  <label key={value}>
-                    <input
-                      type="radio"
-                      name="key-action"
-                      value={value}
-                      checked={keyAction === value}
-                      onChange={() => setKeyAction(value)}
-                      data-testid={`key-action-${value}`}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            )}
-            {(!editingId || keyAction === 'replace') && (
-              <>
-                <div className="ndr-radio-row">
-                  {(
-                    [
-                      ['session', '仅本会话'],
-                      ['system', '系统凭据库'],
-                      ['none', '不需要密钥（本地服务）'],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <label key={value}>
-                      <input
-                        type="radio"
-                        name="credential-mode"
-                        value={value}
-                        checked={form.credentialMode === value}
-                        onChange={() => setForm({ ...form, credentialMode: value })}
-                        data-testid={`credential-mode-${value}`}
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-                <label className="ndr-field">
-                  接口密钥（API Key，可选）
-                  <input
-                    type="password"
-                    value={form.apiKey}
-                    autoComplete="off"
-                    data-testid="profile-api-key"
-                    onChange={(event) => setForm({ ...form, apiKey: event.target.value })}
-                  />
-                </label>
-              </>
-            )}
-          </fieldset>
-
-          <div className="ndr-form-actions">
-            <button title={save.isPending ? '正在保存模型配置，请等待保存完成。' : undefined} type="submit" className="ndr-primary" data-testid="profile-save" disabled={save.isPending}>
-              {editingId ? '保存修改' : '新建配置'}
-            </button>
-            <button
-              type="button"
-              data-testid="profile-test-draft"
-              title={connectionTest.isPending ? '连接测试正在进行，请等待本次测试结束。' : undefined}
-              disabled={connectionTest.isPending}
-              onClick={() => {
-                const params = parseParams()
-                if (params === null) return
-                connectionTest.mutate({
-                  draftProfile: {
-                    name: form.name || '草稿',
-                    protocol: form.protocol,
-                    base_url: form.baseUrl,
-                    model: form.model,
-                    params,
-                    credential_mode: form.credentialMode,
-                    api_key: form.apiKey || null,
-                  },
-                })
-              }}
-            >
-              {connectionTest.isPending ? '正在测试…' : '测试当前填写内容'}
-            </button>
-            {editingId && (
-              <button type="button" onClick={resetForm} data-testid="profile-cancel">
-                取消编辑
+          <footer className="ndr-model-form-footer">
+            <div className="ndr-form-actions">
+              <button title={busyReason} type="submit" className="ndr-primary" data-testid="profile-save" disabled={busy}>
+                {editingId ? '保存修改' : '保存配置'}
               </button>
-            )}
-          </div>
+              <button type="button" data-testid="profile-test-draft" title={testDisabledReason}
+                disabled={busy || connectionTest.isPending} onClick={() => {
+                  const parsed = parseParams()
+                  if (parsed === null) return
+                  connectionTest.mutate({
+                    draftProfile: {
+                      name: form.name || '草稿', protocol: form.protocol, base_url: form.baseUrl, model: form.model,
+                      params: parsed, credential_mode: form.credentialMode, api_key: form.apiKey || null,
+                    },
+                  })
+                }}>{connectionTest.isPending ? '正在测试…' : '测试当前填写内容'}</button>
+              {editingId && <button type="button" disabled={busy} title={busyReason} data-testid="profile-cancel"
+                onClick={() => { resetForm(); setView('saved') }}>取消编辑</button>}
+            </div>
+            <p className="hint">连接测试会请求模型服务，可能产生费用。</p>
+            {editingId && <p className="hint ndr-model-draft-key-hint">草稿测试使用当前输入的密钥；已保存密钥可在“查看配置”中测试。</p>}
+            {connectionTest.isPending && <p className="hint ndr-model-draft-key-hint">连接测试正在进行，请等待本次测试结束。</p>}
+          </footer>
         </form>
-
-        {testResult && (
-          <div className="ndr-connection-result" data-testid="connection-result">
-            <p className={testResult.data.ok ? 'status-ok' : 'status-error'}>
-              {testResult.target}：{testResult.data.ok ? '连接成功' : '连接失败'}
-              {testResult.data.latency_ms !== null ? `（${testResult.data.latency_ms} ms）` : ''}
-            </p>
-            <ul className="hint">
-              <li>适配器：{testResult.data.adapter}</li>
-              <li>
-                协议 / 模型：{protocolLabel(testResult.data.protocol)} / {testResult.data.model}
-              </li>
-              <li>
-                用量：
-                {testResult.data.usage_unknown
-                  ? '未知（模型服务未返回用量）'
-                  : `输入 ${testResult.data.usage?.input_tokens ?? '?'} · 输出 ${
-                      testResult.data.usage?.output_tokens ?? '?'
-                    } · 合计 ${testResult.data.usage?.total_tokens ?? '?'}`}
-              </li>
-              {testResult.data.error_code && <li>错误码：{testResult.data.error_code}</li>}
-              <li>{testResult.data.detail}</li>
-            </ul>
-            {testResult.data.adapter === 'fake-provider' && (
-              <p className="status-error" data-testid="fake-provider-warning">
-                本地模拟测试完成，结果用于验证界面流程。真实模型连接请选择对应的服务协议后测试。
-              </p>
-            )}
-            {testResult.data.ok && testResult.data.adapter !== 'fake-provider' && (
-              <p className="hint">鉴权与 JSON 输出校验通过。小说标注效果请在“预览与处理”中试运行后查看。</p>
-            )}
-          </div>
-        )}
-
-        {notice && (
-          <p className="status-ok" data-testid="settings-notice">
-            {notice}
-          </p>
-        )}
-        {error && (
-          <p className="status-error" data-testid="settings-error">
-            {error}
-          </p>
-        )}
       </section>
 
-      <section className="card" id="saved-profiles">
-        <h3>已保存的配置</h3>
+      <section className="card ndr-model-panel" id="saved-profiles" aria-label="已保存的模型配置"
+        data-testid="model-saved-panel" hidden={view !== 'saved'}>
+        <p className="hint ndr-model-list-hint">连接测试会请求模型服务，可能产生费用。</p>
         {profiles.isPending && <p className="hint">正在读取配置…</p>}
-        {profiles.isError && <ReadErrorNotice label="模型配置读取失败" error={profiles.error} retrying={profiles.isFetching} onRetry={() => void profiles.refetch()} />}
+        {profiles.isError && <ReadErrorNotice label="模型配置读取失败" error={profiles.error}
+          retrying={profiles.isFetching} onRetry={() => void profiles.refetch()} />}
         {profiles.isSuccess && profiles.data.length === 0 && (
-          <p className="hint" data-testid="profiles-empty">
-            还没有模型配置。填写“接口信息”表单并保存，即可用于人物识别与对白处理。
-          </p>
+          <p className="hint" data-testid="profiles-empty">还没有模型配置。在“新建配置”中填写接口信息并保存，即可用于人物识别与对白处理。</p>
         )}
-        <CollapsibleBlock title="模型配置列表" summary={`共 ${profiles.data?.length ?? 0} 个配置`}>
+        <CollapsibleBlock title="模型配置列表" summary={'共 ' + (profiles.data?.length ?? 0) + ' 个配置'}>
+          {connectionTest.isPending && <p className="hint">连接测试正在进行，请等待本次测试结束。</p>}
           <PaginatedItems label="模型配置" pageSize={5} className="ndr-profile-list">
-          {(profiles.data ?? []).map((profile) => (
-            <article className="ndr-profile-card" key={profile.id} data-testid="profile-card">
-              <header>
-                <h3>{profile.name}</h3>
-                <span className={profile.has_key ? 'ndr-badge ndr-badge-key' : 'ndr-badge'}>
-                  {profile.has_key ? '已保存密钥' : '未保存密钥'}
-                </span>
-              </header>
-              <dl>
-                <dt>协议</dt>
-                <dd title={profile.protocol}>{protocolLabel(profile.protocol)}</dd>
-                <dt>服务地址</dt>
-                <dd>{profile.base_url}</dd>
-                <dt>模型</dt>
-                <dd>{profile.model}</dd>
-                <dt>凭据</dt>
-                <dd>{credentialLabel(profile.credential_mode)}</dd>
-                <dt>版本</dt>
-                <dd>{profile.version}</dd>
-              </dl>
-              <div className="ndr-form-actions">
-                <button
-                  type="button"
-                  data-testid={`profile-edit-${profile.id}`}
-                  onClick={() => {
-                    setEditingId(profile.id)
-                    setForm(formFromProfile(profile))
-                    setKeyAction('keep')
-                    setNotice(null)
-                    setError(null)
-                    document.getElementById('profile-editor')?.focus()
-                  }}
-                >
-                  编辑
-                </button>
-                <button
-                  type="button"
-                  disabled={connectionTest.isPending}
-                  onClick={() => connectionTest.mutate({ profileId: profile.id })}
-                  data-testid={`profile-test-${profile.id}`}
-                  title={connectionTest.isPending ? '连接测试正在进行，请等待本次测试结束。' : undefined}
-                >
-                  测试连接
-                </button>
-                <button
-                  type="button"
-                  className="ndr-danger"
-                  onClick={() => remove.mutate(profile.id)}
-                  data-testid={`profile-delete-${profile.id}`}
-                >
-                  删除
-                </button>
-              </div>
-            </article>
-          ))}
+            {(profiles.data ?? []).map((profile) => (
+              <article className="ndr-profile-card" key={profile.id} data-testid="profile-card">
+                <header>
+                  <h3>{profile.name}</h3>
+                  <span className={profile.has_key ? 'ndr-badge ndr-badge-key' : 'ndr-badge'}>
+                    {profile.has_key ? '已保存密钥' : '未保存密钥'}
+                  </span>
+                </header>
+                <dl>
+                  <dt>协议</dt><dd title={profile.protocol}>{protocolLabel(profile.protocol)}</dd>
+                  <dt>服务地址</dt><dd>{profile.base_url}</dd>
+                  <dt>模型</dt><dd>{profile.model}</dd>
+                  <dt>凭据</dt><dd>{credentialLabel(profile.credential_mode)}</dd>
+                  <dt>版本</dt><dd>{profile.version}</dd>
+                </dl>
+                <div className="ndr-form-actions">
+                  <button type="button" data-testid={'profile-edit-' + profile.id} disabled={busy} title={busyReason}
+                    onClick={() => {
+                      setEditingId(profile.id)
+                      setForm(formFromProfile(profile))
+                      setKeyAction('keep')
+                      setNotice(null)
+                      setError(null)
+                      setView('editor')
+                    }}>编辑</button>
+                  <button type="button" disabled={busy || connectionTest.isPending} title={testDisabledReason}
+                    data-testid={'profile-test-' + profile.id}
+                    onClick={() => connectionTest.mutate({ profileId: profile.id, profileName: profile.name })}>测试连接</button>
+                  <button type="button" className="ndr-danger" disabled={busy} title={busyReason}
+                    data-testid={'profile-delete-' + profile.id} onClick={() => remove.mutate(profile.id)}>删除</button>
+                </div>
+              </article>
+            ))}
           </PaginatedItems>
         </CollapsibleBlock>
       </section>
-      </div>
-      </div>
     </div>
   )
 }
