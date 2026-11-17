@@ -206,7 +206,11 @@ npm config get cache
 
 源码版可复制 `.env.example` 为 `.env`；免安装版不读取 `.env`。配置优先级、保存和重启契约见 [接口与安全约定](docs/CONTRACTS.md)，可配置项以 [`.env.example`](.env.example) 为准。
 
-容量使用 `NDR_MAX_IMPORT_MB`、`NDR_MAX_EPUB_TOTAL_UNCOMPRESSED_MB`、`NDR_MAX_EPUB_ENTRY_MB`，支持小数，1 MB = 1024 × 1024 字节。旧 `*_BYTES` 仍兼容，同一来源 MB 优先。应用配置 JSON 使用小写 `*_mb`，仅在显式保存时转换旧容量键；内部 Settings 和 API 继续使用整数字节。
+导入默认取消上传大小、EPUB解压总量、单条目大小、内部文件数及正文文档数上限；五项限制的0值均表示不限，正数启用对应限额，负数无效。既有配置中的显式正数继续生效，设为0可取消。格式、包内路径、重复条目、符号链接及加密校验继续执行。较大文件仍需足够内存、磁盘空间与解析时间。
+
+维护者可按部署需要配置限额。容量使用 `NDR_MAX_IMPORT_MB`、`NDR_MAX_EPUB_TOTAL_UNCOMPRESSED_MB`、`NDR_MAX_EPUB_ENTRY_MB`，支持小数，1 MB = 1024 × 1024 字节。旧 `*_BYTES` 仍兼容，同一来源 MB 优先。应用配置 JSON 使用小写 `*_mb`，仅在显式保存时转换旧容量键；内部 Settings 和 API 继续使用整数字节。数量使用 `NDR_MAX_EPUB_ENTRIES` 与 `NDR_MAX_EPUB_SPINE_ITEMS`。
+
+导入限额、全局凭据后端、FakeProvider、`static_dir` 与 `cors_origins` 仅供部署或离线测试配置，通用设置仅编辑可见的用户选项。`static_dir` 指向已构建网页；`cors_origins` 用于前后端分开运行时授权网页来源。全局 `credential_backend=system` 支持模型账号逐个选择系统或会话存储；`session` 供隔离测试使用，关闭系统凭据库访问。
 
 源码版配置文件位于 `<仓库>/data/application-settings.json`，免安装版位于 `%LOCALAPPDATA%\NovelDialogueReader\data\application-settings.json`。切换书库不改变配置文件位置，也不搬迁数据。模型密钥不能写入 `.env` 或 JSON。
 

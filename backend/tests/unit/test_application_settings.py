@@ -5,6 +5,7 @@ import sys
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from ndr import application_settings as preferences
 from ndr.api.errors import ApiError
@@ -13,6 +14,14 @@ from ndr.capacity_settings import BYTES_PER_MB, CAPACITY_KEYS
 from ndr.config import Settings
 from ndr.portable import portable_settings
 from ndr.storage.migrate import run_migrations
+
+IMPORT_LIMIT_KEYS = (
+    "max_import_bytes",
+    "max_epub_entries",
+    "max_epub_total_uncompressed_bytes",
+    "max_epub_entry_bytes",
+    "max_epub_spine_items",
+)
 
 
 @pytest.fixture
@@ -71,11 +80,63 @@ def test_saved_capacity_migrates_only_on_save_and_restarts_exactly(isolated):
     assert all(getattr(Settings(), key) == 1048577 for key in CAPACITY_KEYS)
 
 
-@pytest.mark.parametrize("value", ["NaN", "Infinity", "-1", "0", "not-a-number", "100000000"])
+@pytest.mark.parametrize(
+    "value", ["NaN", "Infinity", "-1", "0.0000001", "not-a-number", "100000000"]
+)
 def test_invalid_mb_environment_rejected(isolated, monkeypatch, value):
     monkeypatch.setenv("NDR_MAX_IMPORT_MB", value)
     with pytest.raises(ValueError, match="NDR_MAX_IMPORT_MB"):
         Settings()
+
+
+@pytest.mark.parametrize("byte_key,mb_key", CAPACITY_KEYS.items())
+def test_zero_mb_sources_mean_unlimited(isolated, monkeypatch, byte_key, mb_key):
+    (isolated / ".env").write_text(f"NDR_{mb_key.upper()}=0", encoding="utf-8")
+    assert getattr(Settings(), byte_key) == 0
+    preferences.settings_path().parent.mkdir()
+    preferences.settings_path().write_text(json.dumps({mb_key: 0, byte_key: 123}))
+    assert getattr(Settings(), byte_key) == 0
+    monkeypatch.setenv(f"NDR_{byte_key.upper()}", "456")
+    monkeypatch.setenv(f"NDR_{mb_key.upper()}", "0")
+    assert getattr(Settings(), byte_key) == 0
+
+
+def test_import_limit_defaults_and_api_definitions_are_unlimited(isolated):
+    settings = Settings()
+    fields = {field.key: field for field in preferences.describe_settings(settings).fields}
+    for key in IMPORT_LIMIT_KEYS:
+        assert getattr(settings, key) == 0
+        assert fields[key].default_value == fields[key].value == 0
+        assert fields[key].minimum == 0
+
+
+@pytest.mark.parametrize("key", IMPORT_LIMIT_KEYS)
+def test_negative_import_limits_rejected_by_settings_and_api(isolated, monkeypatch, key):
+    with pytest.raises(ValidationError):
+        Settings(**{key: -1})
+    with pytest.raises(ApiError):
+        preferences.save_settings(
+            Settings(),
+            preferences.ApplicationSettingsPatch(revision="missing", values={key: -1}),
+        )
+    assert not preferences.settings_path().exists()
+    monkeypatch.setenv(f"NDR_{key.upper()}", "-1")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+@pytest.mark.parametrize("entry,total", [(0, 0), (32, 0), (0, 64), (32, 64)])
+def test_unlimited_and_finite_import_limits_save_and_reload(isolated, entry, total):
+    settings = Settings()
+    values = dict.fromkeys(IMPORT_LIMIT_KEYS, 0)
+    values.update(max_epub_entry_bytes=entry, max_epub_total_uncompressed_bytes=total)
+    output = preferences.save_settings(
+        settings,
+        preferences.ApplicationSettingsPatch(revision="missing", values=values),
+    )
+    reloaded = Settings()
+    assert all(getattr(reloaded, key) == value for key, value in values.items())
+    assert set(output.restart_required) == {key for key, value in values.items() if value > 0}
 
 
 def test_mb_json_has_priority_over_legacy_and_rejects_invalid(isolated):
@@ -193,7 +254,10 @@ def test_portable_reads_config_but_not_dotenv_and_locks_managed_values(isolated,
         {"cors_origins": ["https://user:pass@example.org"]},
         {"cors_origins": ["https://example.org/path"]},
         {"rate_limit_backoff_base_seconds": 31},
-        {"max_epub_entry_bytes": 300 * 1024**2},
+        {
+            "max_epub_entry_bytes": 300 * 1024**2,
+            "max_epub_total_uncompressed_bytes": 200 * 1024**2,
+        },
         {"environment": "x" * 5000},
     ],
 )

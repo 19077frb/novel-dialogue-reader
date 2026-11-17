@@ -10,6 +10,7 @@ import { expect, test, type Page } from '@playwright/test'
  * 因此这里所有断言都按**配置名**限定到具体卡片，不依赖“列表是空的”。
  */
 const SECRET = 'sk-e2e-secret-value'
+const applicationRetryLabel = '限流或临时不可用的重试次数'
 const generalSections = [
   { name: '阅读显示', id: 'reading-settings' },
   { name: '人物资料', id: 'character-settings' },
@@ -18,6 +19,22 @@ const generalSections = [
   { name: '试验功能', id: 'experimental-settings' },
   { name: '应用配置', id: 'application-settings' },
 ]
+
+async function expectSimplifiedApplicationSettings(page: Page) {
+  const section = page.getByRole('region', { name: '应用配置', exact: true })
+  await expect(section.getByLabel(applicationRetryLabel, { exact: true })).toHaveValue(/\d+/)
+  for (const name of ['凭据', '导入与EPUB安全限制', '离线测试（高级）']) {
+    await expect(section.getByRole('heading', { name, exact: true, includeHidden: true })).toHaveCount(0)
+  }
+  for (const name of [
+    '模型密钥保存方式', /^导入文件大小上限/, 'EPUB内部文件数上限', /^EPUB解压总大小上限/,
+    /^EPUB单个内部文件大小上限/, 'EPUB正文文档数上限', '启用离线测试提供方',
+    '离线测试标注方式', '离线测试错误脚本', '网页文件目录', '允许访问接口的网页来源',
+  ]) {
+    await expect(section.getByLabel(name, { exact: true })).toHaveCount(0)
+  }
+  await expect(section.getByRole('button', { name: '重新读取应用配置', exact: true })).toHaveCount(0)
+}
 
 async function expectHeaderActions(page: Page) {
   const navigation = page.getByTestId('settings-navigation')
@@ -52,7 +69,7 @@ test.describe('通用设置保存', () => {
     await page.setViewportSize({ width: 1440, height: 600 })
     await page.goto('/settings/general')
     await expect(page.getByTestId('health-ok')).toBeVisible()
-    await expect(page.getByLabel('导入文件大小上限（MB）', { exact: true })).not.toHaveValue('')
+    await expect(page.getByLabel(applicationRetryLabel, { exact: true })).not.toHaveValue('')
     const navigation = page.getByTestId('settings-navigation')
     const categories = page.getByRole('navigation', { name: '通用设置分区' })
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
@@ -90,10 +107,10 @@ test.describe('通用设置保存', () => {
     await categories.getByRole('link', { name: '自动处理', exact: true }).click()
     await page.mouse.move(0, 0)
     const automaticMaxScroll = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)
-    const scrollOffset = Math.min(60, automaticMaxScroll)
-    expect(scrollOffset).toBeGreaterThan(0)
     await categories.getByRole('link', { name: '应用配置', exact: true }).click()
     await page.mouse.move(0, 0)
+    const applicationMaxScroll = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)
+    const scrollOffset = Math.max(0, Math.min(60, automaticMaxScroll, applicationMaxScroll))
     await page.evaluate(offset => window.scrollTo(0, offset), scrollOffset)
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollOffset)
     await categories.getByRole('link', { name: '自动处理', exact: true }).click()
@@ -153,21 +170,21 @@ test.describe('通用设置保存', () => {
     await expect(panels).toHaveCount(1)
 
     await navigation.getByRole('link', { name: '应用配置', exact: true }).click()
-    const importLimit = page.getByLabel('导入文件大小上限（MB）', { exact: true })
-    await expect(importLimit).not.toHaveValue('')
-    const originalLimit = await importLimit.inputValue()
-    const draftLimit = String(Number(originalLimit) + 1)
-    await importLimit.fill(draftLimit)
+    const retryCount = page.getByLabel(applicationRetryLabel, { exact: true })
+    await expect(retryCount).not.toHaveValue('')
+    const originalRetries = await retryCount.inputValue()
+    const draftRetries = String(Number(originalRetries) === 20 ? 19 : Number(originalRetries) + 1)
+    await retryCount.fill(draftRetries)
     await navigation.getByRole('link', { name: '阅读显示', exact: true }).click()
     await expect(page.getByLabel('正文字号', { exact: true })).toHaveValue('24')
     await navigation.getByRole('link', { name: '应用配置', exact: true }).click()
-    await expect(importLimit).toHaveValue(draftLimit)
+    await expect(retryCount).toHaveValue(draftRetries)
     await expect(save).toHaveCount(1)
     await expect(save).toBeVisible()
     await page.reload()
     await expect(page).toHaveURL(/#application-settings$/)
     await expect(navigation.getByRole('link', { name: '应用配置', exact: true })).toHaveAttribute('aria-current', 'page')
-    await expect(importLimit).toHaveValue(originalLimit)
+    await expect(retryCount).toHaveValue(originalRetries)
     await expect(panels).toHaveCount(1)
     await page.goBack()
     await expect(page).toHaveURL(/#reading-settings$/)
@@ -324,14 +341,16 @@ test.describe('通用设置保存', () => {
 
   test('统一保存跨分类的阅读、处理与应用草稿，应用配置显示待重启', async ({ page }) => {
     // Only GET reads the isolated server. PATCH is intercepted: never write the user's config.
-    let saved: Record<string, unknown> | undefined
+    let saved: { values: Record<string, unknown> } | undefined
     await page.route('**/api/settings/application', async route => {
       if (route.request().method() === 'PATCH') {
         saved = route.request().postDataJSON()
+      }
+      if (saved) {
         const response = await route.fetch({ method: 'GET', postData: undefined })
         const payload = await response.json()
-        payload.data.fields.find((field: { key: string }) => field.key === 'max_import_bytes').value = 104857600
-        payload.data.restart_required = ['max_import_bytes']
+        payload.data.fields.find((field: { key: string }) => field.key === 'rate_limit_max_retries').value = saved.values.rate_limit_max_retries
+        payload.data.restart_required = ['rate_limit_max_retries']
         payload.data.revision = 'browser-test-only'
         await route.fulfill({ json: payload })
       } else {
@@ -346,25 +365,50 @@ test.describe('通用设置保存', () => {
     await page.getByTestId('processing-thinking-effort').selectOption('medium')
     await navigation.getByRole('link', { name: '应用配置', exact: true }).click()
     const section = page.getByRole('region', { name: '应用配置', exact: true })
-    await expect(section.getByLabel('导入文件大小上限（MB）', { exact: true })).toBeVisible()
-    await section.getByLabel('导入文件大小上限（MB）', { exact: true }).fill('100')
+    const retryCount = section.getByLabel(applicationRetryLabel, { exact: true })
+    await expectSimplifiedApplicationSettings(page)
+    await expect(retryCount).toHaveValue('2')
+    await expect(retryCount).toHaveAttribute('max', '20')
+    await retryCount.fill('3')
     expect(saved).toBeUndefined()
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ndr:general-settings:v1') ?? '{}').fontSize)).not.toBe(21)
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ndr:processing-preferences:v1') ?? '{}').thinkingMode)).not.toBe('enabled')
     await navigation.getByRole('link', { name: '阅读显示', exact: true }).click()
     await page.getByRole('button', { name: '保存设置', exact: true }).click()
-    await expect.poll(() => saved).toMatchObject({ values: { max_import_bytes: 104857600 } })
+    await expect.poll(() => saved?.values).toEqual({ rate_limit_max_retries: 3 })
     await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('ndr:general-settings:v1') ?? '{}').fontSize)).toBe(21)
     await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('ndr:processing-preferences:v1') ?? '{}'))).toMatchObject({ thinkingMode: 'enabled', thinkingEffort: 'medium' })
     await navigation.getByRole('link', { name: '应用配置', exact: true }).click()
-    await expect(page.getByText(/已保存，重启后生效：导入文件大小上限/)).toBeVisible()
-    await expect(section.getByLabel('导入文件大小上限（MB）', { exact: true })).toHaveValue('100')
+    await expect(page.getByText(/已保存，重启后生效：限流或临时不可用的重试次数/)).toBeVisible()
+    await expect(retryCount).toHaveValue('3')
+    await expectSimplifiedApplicationSettings(page)
+    await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeDisabled()
+    await page.reload()
+    await expect(retryCount).toHaveValue('3')
+    await expectSimplifiedApplicationSettings(page)
     await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeDisabled()
     await page.setViewportSize({ width: 390, height: 844 })
-    await expect(section.getByLabel('导入文件大小上限（MB）', { exact: true })).toBeVisible()
+    await expect(retryCount).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await page.emulateMedia({ colorScheme: 'dark' })
     await expect(page.getByRole('button', { name: '保存并重启', exact: true })).toBeVisible()
+  })
+
+  test('应用配置读取失败时可重试，成功后显示精简配置', async ({ page }) => {
+    let failRead = true
+    await page.route('**/api/settings/application', async route => {
+      if (failRead && route.request().method() === 'GET') {
+        await route.fulfill({ status: 503, json: { error: { code: 'TEMPORARILY_UNAVAILABLE', message: '测试读取失败' } } })
+      } else await route.continue()
+    })
+    await page.goto('/settings/general#application-settings')
+    const section = page.getByRole('region', { name: '应用配置', exact: true })
+    await expect(section.getByText(/应用配置读取失败：测试读取失败/)).toBeVisible()
+    const retry = section.getByRole('button', { name: '重新读取应用配置', exact: true })
+    await expect(retry).toBeEnabled()
+    failRead = false
+    await retry.click()
+    await expectSimplifiedApplicationSettings(page)
   })
 })
 
@@ -459,7 +503,7 @@ for (const width of [320, 390, 768, 1440]) {
       await testInfo.attach('试验功能全部开启的未保存草稿', { path: experimentalScreenshot, contentType: 'image/png' })
 
       await categories.getByRole('link', { name: '应用配置', exact: true }).click()
-      await expect(page.getByLabel('导入文件大小上限（MB）', { exact: true })).not.toHaveValue('')
+      await expectSimplifiedApplicationSettings(page)
       await expect(page.getByRole('button', { name: /说明$/ })).toHaveCount(0)
       await page.mouse.move(0, 0)
       await expectHeaderActions(page)
@@ -467,14 +511,15 @@ for (const width of [320, 390, 768, 1440]) {
       await expect(navigation).toHaveCSS('position', 'sticky')
       const position = await navigation.evaluate(element => ({
         documentTop: element.getBoundingClientRect().top + window.scrollY,
-        maxScroll: document.documentElement.scrollHeight - window.innerHeight,
+        maxScroll: Math.max(0, document.documentElement.scrollHeight - window.innerHeight),
+        stickyTop: Number.parseFloat(getComputedStyle(element).top),
       }))
-      const scrollTarget = Math.min(position.documentTop + 300, position.maxScroll)
-      expect(scrollTarget).toBeGreaterThan(position.documentTop + 50)
+      const scrollTarget = Math.min(Math.ceil(position.documentTop + 300), position.maxScroll)
       await page.evaluate(target => window.scrollTo(0, target), scrollTarget)
-      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(position.documentTop + 50)
-      await expect.poll(() => navigation.evaluate(element =>
-        Math.abs(element.getBoundingClientRect().top - Number.parseFloat(getComputedStyle(element).top)),
+      await expect.poll(() => page.evaluate(target => Math.abs(window.scrollY - target), scrollTarget)).toBeLessThanOrEqual(1)
+      const expectedNavigationTop = Math.max(position.stickyTop, position.documentTop - scrollTarget)
+      await expect.poll(() => navigation.evaluate((element, expectedTop) =>
+        Math.abs(element.getBoundingClientRect().top - expectedTop), expectedNavigationTop,
       )).toBeLessThanOrEqual(2)
       await expect(categories.getByRole('link', { name: '应用配置', exact: true })).toHaveAttribute('aria-current', 'page')
       await expectHeaderActions(page)

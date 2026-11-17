@@ -1,8 +1,11 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { createRef } from 'react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ApplicationSettings } from '../src/components/ApplicationSettings'
+import type { ApplicationSettingsHandle } from '../src/components/ApplicationSettings'
 import * as api from '../src/api/applicationSettings'
+import { ApiError } from '../src/api/client'
 import { renderWithProviders } from './helpers'
 
 vi.mock('../src/api/applicationSettings', () => ({
@@ -25,49 +28,79 @@ beforeEach(() => {
 })
 afterEach(() => vi.restoreAllMocks())
 
-const capacityExamples = [
-  ['max_import_bytes', '导入文件大小上限', 50],
-  ['max_epub_total_uncompressed_bytes', 'EPUB解压总大小上限', 200],
-  ['max_epub_entry_bytes', 'EPUB单个内部文件大小上限', 32],
-] as const
+const hiddenFields: api.ApplicationSettings['fields'] = ([
+  ['credential_backend', '模型密钥保存方式', '凭据', 'session', 'system'],
+  ['static_dir', '网页文件目录', '服务与书库', 'D:/reader/web', null],
+  ['cors_origins', '允许访问接口的网页来源', '服务与书库', ['http://localhost:5173'], []],
+  ['max_import_bytes', '导入文件大小上限（字节）', '导入与EPUB安全限制', 1048577, 0],
+  ['max_epub_entries', 'EPUB内部文件数上限', '导入与EPUB安全限制', 2000, 0],
+  ['max_epub_total_uncompressed_bytes', 'EPUB解压总大小上限（字节）', '导入与EPUB安全限制', 209715201, 0],
+  ['max_epub_entry_bytes', 'EPUB单个内部文件大小上限（字节）', '导入与EPUB安全限制', 33554433, 0],
+  ['max_epub_spine_items', 'EPUB正文文档数上限', '导入与EPUB安全限制', 1000, 0],
+  ['allow_fake_provider', '启用离线测试提供方', '离线测试（高级）', true, false],
+  ['fake_provider_labels', '离线测试标注方式', '离线测试（高级）', 'deterministic', 'unknown'],
+  ['fake_provider_script', '离线测试错误脚本', '离线测试（高级）', 'timeout_once', ''],
+] satisfies Array<[string, string, string, api.ApplicationSettingsPatch['values'][string], api.ApplicationSettingsPatch['values'][string]]>)
+  .map(([key, label, group, value, defaultValue]) => ({
+  ...example.fields[0], key, label, group, value, current_value: value, default_value: defaultValue,
+  kind: Array.isArray(value) ? 'lines' : typeof value === 'boolean' ? 'boolean' : typeof value === 'string' ? 'text' : 'number',
+}))
 
-it.each(capacityExamples)('%s 使用MB展示、范围和小数输入，保存仍使用整数字节', async (key, label, amount) => {
-  const field = { ...example.fields[0], key, label: `${label}（字节）`, value: amount * 1024 ** 2,
-    current_value: amount * 1024 ** 2, default_value: amount * 1024 ** 2, minimum: 1, maximum: 10 * 1024 ** 3 }
-  const settings = { ...example, fields: [...example.fields, field] }
-  vi.mocked(api.fetchApplicationSettings).mockResolvedValue(settings)
-  vi.mocked(api.saveApplicationSettings).mockResolvedValue({ ...settings, restart_required: [key],
-    fields: [...example.fields, { ...field, value: 100.5 * 1024 ** 2 }] })
-  renderWithProviders(<ApplicationSettings />)
-  const input = await screen.findByLabelText(`${label}（MB）`)
-  expect(input).toHaveValue(amount)
-  expect(input).toHaveAttribute('min', String(1 / 1024 ** 2))
-  expect(input).toHaveAttribute('max', '10240')
-  expect(input).toHaveAttribute('step', 'any')
-  fireEvent.change(input, { target: { value: '100.5' } })
+it('隐藏三组旧配置及网页配置并保持干净状态，后台待重启配置显示通用提示', async () => {
+  const onStateChange = vi.fn()
+  vi.mocked(api.fetchApplicationSettings).mockResolvedValue({ ...example, fields: [...example.fields, ...hiddenFields],
+    restart_required: ['credential_backend', 'max_import_bytes'] })
+  renderWithProviders(<ApplicationSettings onStateChange={onStateChange} />)
+  await screen.findByLabelText('服务端口')
+  for (const field of hiddenFields) expect(screen.queryByLabelText(field.label)).not.toBeInTheDocument()
+  for (const group of ['凭据', '导入与EPUB安全限制', '离线测试（高级）']) expect(screen.queryByText(group)).not.toBeInTheDocument()
+  expect(applicationSaveButton()).toBeDisabled()
+  expect(screen.queryByRole('button', { name: '重新读取应用配置' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '读取最新配置' })).not.toBeInTheDocument()
+  expect(screen.getByText('已保存的应用配置将在重启后生效。')).toBeVisible()
+  expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ changed: false, ready: true }))
   expect(api.saveApplicationSettings).not.toHaveBeenCalled()
-  await userEvent.click(applicationSaveButton())
-  await waitFor(() => expect(api.saveApplicationSettings).toHaveBeenCalledWith({ values: { [key]: 100.5 * 1024 ** 2 }, revision: 'missing' }))
-  expect(await screen.findByText(`当前生效：${amount} MB`)).toBeVisible()
-  expect(input).toHaveValue(100.5)
-  expect(screen.getByText(/已保存，重启后生效/)).toHaveTextContent(`${label}（MB）`)
 })
 
-it('字节旧配置精确显示，恢复容量默认及保存并重启不会二次换算', async () => {
+it.each([false, true])('恢复仅修改可见未锁定配置，保存（重启：%s）保留全部隐藏旧值', async restart => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
-  const field = { ...example.fields[0], key: 'max_import_bytes', label: '导入文件大小上限（字节）',
-    value: 1048577, current_value: 1048577, default_value: 50 * 1024 ** 2 }
-  const settings = { ...example, fields: [...example.fields, field] }
+  const settings = { ...example, fields: [
+    { ...example.fields[0], value: 8800, current_value: 8800 },
+    { ...example.fields[1], value: 'localhost', current_value: 'localhost' }, ...hiddenFields,
+  ] }
+  const hiddenBefore = structuredClone(hiddenFields)
   vi.mocked(api.fetchApplicationSettings).mockResolvedValue(settings)
-  vi.mocked(api.saveAndRestartApplication).mockResolvedValue(settings)
+  const save = restart ? api.saveAndRestartApplication : api.saveApplicationSettings
+  vi.mocked(save).mockResolvedValue({ ...settings, fields: [{ ...settings.fields[0], value: 8765 }, ...settings.fields.slice(1)],
+    restart_required: ['port', 'credential_backend'] })
   renderWithProviders(<ApplicationSettings />)
-  const input = await screen.findByLabelText('导入文件大小上限（MB）')
-  expect(input).toHaveValue(1048577 / 1024 ** 2)
-  expect(applicationSaveButton()).toBeDisabled()
+  await screen.findByLabelText('服务端口')
   await userEvent.click(screen.getByRole('button', { name: '恢复应用配置默认值' }))
-  expect(input).toHaveValue(50)
-  await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
-  await waitFor(() => expect(api.saveAndRestartApplication).toHaveBeenCalledWith({ values: { max_import_bytes: 50 * 1024 ** 2 }, revision: 'missing' }))
+  expect(screen.getByLabelText('服务端口')).toHaveValue(8765)
+  expect(screen.getByLabelText('监听地址')).toHaveValue('localhost')
+  expect(api.saveApplicationSettings).not.toHaveBeenCalled()
+  expect(api.saveAndRestartApplication).not.toHaveBeenCalled()
+  await userEvent.click(restart ? screen.getByRole('button', { name: '保存并重启' }) : applicationSaveButton())
+  await waitFor(() => expect(save).toHaveBeenCalledWith({ values: { port: 8765 }, revision: 'missing' }))
+  expect(hiddenFields).toEqual(hiddenBefore)
+  expect(screen.getByText(/已保存，重启后生效：服务端口/)).toHaveTextContent('其他应用配置也将在重启后生效。')
+})
+
+it('托管统一保存仅提交可见字段，隐藏旧值也不触发恢复后的修改状态', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  const ref = createRef<ApplicationSettingsHandle>()
+  const onStateChange = vi.fn()
+  const settings = { ...example, fields: [...example.fields, ...hiddenFields] }
+  vi.mocked(api.fetchApplicationSettings).mockResolvedValue(settings)
+  vi.mocked(api.saveApplicationSettings).mockResolvedValue({ ...settings, fields: [{ ...example.fields[0], value: 8800 }, ...settings.fields.slice(1)] })
+  renderWithProviders(<ApplicationSettings ref={ref} managed onStateChange={onStateChange} />)
+  await screen.findByLabelText('服务端口')
+  await userEvent.click(screen.getByRole('button', { name: '恢复应用配置默认值' }))
+  expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ changed: false }))
+  fireEvent.change(screen.getByLabelText('服务端口'), { target: { value: '8800' } })
+  expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ changed: true }))
+  await act(() => ref.current!.save())
+  expect(api.saveApplicationSettings).toHaveBeenCalledWith({ values: { port: 8800 }, revision: 'missing' })
 })
 
 it('编辑不自动保存，保存显示待重启状态和新端口', async () => {
@@ -104,6 +137,32 @@ it('不支持自动重启时按钮禁用并给出下一步；读取失败提供�
   expect(screen.getByRole('button', { name: '保存并重启' })).toBeDisabled()
   expect(screen.getByText('此启动方式请手动重启服务')).toBeVisible()
 })
+it('版本冲突时提供读取最新配置，确认后丢弃草稿并使用最新版本重试', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  const latest = { ...example, revision: 'latest', fields: [{ ...example.fields[0], value: 8790 }, example.fields[1], ...hiddenFields] }
+  vi.mocked(api.fetchApplicationSettings).mockResolvedValueOnce(example).mockResolvedValue(latest)
+  vi.mocked(api.saveApplicationSettings)
+    .mockRejectedValueOnce(new ApiError(409, { code: 'VERSION_CONFLICT', message: '配置已在其他页面修改，请重新读取后再保存。' }))
+    .mockResolvedValue({ ...latest, fields: [{ ...latest.fields[0], value: 8810 }, ...latest.fields.slice(1)] })
+  renderWithProviders(<ApplicationSettings />)
+  const port = await screen.findByLabelText('服务端口')
+  fireEvent.change(port, { target: { value: '8800' } })
+  await userEvent.click(applicationSaveButton())
+  const reload = await screen.findByRole('button', { name: '读取最新配置' })
+  await userEvent.click(reload)
+  expect(confirm).toHaveBeenCalledWith('读取最新配置会放弃本页未保存的应用配置修改，是否继续？')
+  expect(api.fetchApplicationSettings).toHaveBeenCalledTimes(1)
+  expect(port).toHaveValue(8800)
+  confirm.mockReturnValue(true)
+  await userEvent.click(reload)
+  await waitFor(() => expect(port).toHaveValue(8790))
+  expect(api.fetchApplicationSettings).toHaveBeenCalledTimes(2)
+  expect(applicationSaveButton()).toBeDisabled()
+  expect(screen.queryByRole('button', { name: '读取最新配置' })).not.toBeInTheDocument()
+  fireEvent.change(port, { target: { value: '8810' } })
+  await userEvent.click(applicationSaveButton())
+  await waitFor(() => expect(api.saveApplicationSettings).toHaveBeenNthCalledWith(2, { values: { port: 8810 }, revision: 'latest' }))
+})
 it('成功重启后锁定编辑并显示重新打开入口', async () => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   vi.mocked(api.saveAndRestartApplication).mockResolvedValue(example)
@@ -139,9 +198,11 @@ it('取消应用配置恢复保留草稿，全锁定时提示无法恢复', asyn
   await userEvent.click(screen.getByRole('button', { name: '恢复应用配置默认值' }))
   expect(screen.getByLabelText('服务端口')).toHaveValue(8800)
   page.unmount()
-  vi.mocked(api.fetchApplicationSettings).mockResolvedValue({ ...example, fields: example.fields.map(field => ({ ...field, locked_reason: '启动参数锁定' })) })
+  vi.mocked(api.fetchApplicationSettings).mockResolvedValue({ ...example, fields: [
+    ...example.fields.map(field => ({ ...field, locked_reason: '启动参数锁定' })), ...hiddenFields,
+  ] })
   renderWithProviders(<ApplicationSettings />)
   await screen.findByLabelText('服务端口')
   expect(screen.getByRole('button', { name: '恢复应用配置默认值' })).toBeDisabled()
-  expect(screen.getByRole('button', { name: '恢复应用配置默认值' })).toHaveAttribute('title', expect.stringContaining('全部应用配置'))
+  expect(screen.getByRole('button', { name: '恢复应用配置默认值' })).toHaveAttribute('title', '当前页面没有可恢复的未锁定配置。')
 })

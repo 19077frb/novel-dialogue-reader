@@ -15,14 +15,14 @@ def mb_to_bytes(value, name: str) -> int:
         if isinstance(value, bool):
             raise ValueError
         number = Decimal(str(value))
-        if not number.is_finite() or number <= 0 or number > 51200:
+        if not number.is_finite() or number < 0 or number > 51200:
             raise ValueError
         result = int((number * BYTES_PER_MB).to_integral_value(rounding=ROUND_HALF_UP))
-        if result < 1:
+        if number > 0 and result < 1:
             raise ValueError
         return result
     except (ValueError, InvalidOperation) as exc:
-        raise ValueError(f"{name}必须是有效的正数MB容量（最多51200 MB）。") from exc
+        raise ValueError(f"{name}必须是有效的非负MB容量（0表示不限，最多51200 MB）。") from exc
 
 
 def capacity_source(source):

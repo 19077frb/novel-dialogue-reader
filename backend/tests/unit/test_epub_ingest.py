@@ -198,6 +198,53 @@ def test_single_entry_limit_is_enforced() -> None:
     assert excinfo.value.code == "EPUB_ENTRY_TOO_LARGE"
 
 
+@pytest.mark.parametrize(
+    "key",
+    ["max_entries", "max_total_uncompressed_bytes", "max_entry_uncompressed_bytes", "max_spine_items"],
+)
+def test_negative_epub_limit_is_rejected(key: str) -> None:
+    with pytest.raises(ValueError, match=key):
+        EpubLimits(**{key: -1})
+
+
+def test_explicit_epub_limits_accept_exact_boundaries() -> None:
+    raw = build_epub(minimal_spec())
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        entries = [info for info in archive.infolist() if not info.is_dir()]
+    parsed = parse_epub(
+        raw,
+        limits=EpubLimits(
+            max_entries=len(entries),
+            max_total_uncompressed_bytes=sum(info.file_size for info in entries),
+            max_entry_uncompressed_bytes=max(info.file_size for info in entries),
+            max_spine_items=2,
+        ),
+    )
+    assert len(parsed.chapters) == 2
+
+
+def test_default_epub_limits_accept_content_beyond_previous_byte_limits() -> None:
+    buffer = io.BytesIO(build_epub(minimal_spec()))
+    # Stream an original unused asset into a tiny compressed fixture, without
+    # allocating the complete uncompressed payload or changing ZIP metadata.
+    chunk = b"a" * (1024 * 1024)
+    with (
+        zipfile.ZipFile(buffer, "a", zipfile.ZIP_DEFLATED) as archive,
+        archive.open("OEBPS/assets/large.txt", "w") as entry,
+    ):
+        for _ in range(201):
+            entry.write(chunk)
+    raw = buffer.getvalue()
+    assert len(parse_epub(raw).chapters) == 2
+    for limits, code in (
+        (EpubLimits(max_entry_uncompressed_bytes=32 * 1024**2), "EPUB_ENTRY_TOO_LARGE"),
+        (EpubLimits(max_total_uncompressed_bytes=200 * 1024**2), "EPUB_SIZE_LIMIT"),
+    ):
+        with pytest.raises(EpubError) as excinfo:
+            parse_epub(raw, limits=limits)
+        assert excinfo.value.code == code
+
+
 def test_missing_container_and_opf_are_reported() -> None:
     spec = EpubSpec(
         documents=[Document(doc_id="ch1", href="text/one.xhtml", body="<p>正文。</p>")],
@@ -303,12 +350,18 @@ def test_custom_dtd_entities_are_not_rewritten_by_compatibility() -> None:
 
 
 def test_long_collection_default_and_explicit_spine_limit() -> None:
-    documents = [Document(f"ch{i}", f"text/{i}.xhtml", "<p>正文。</p>") for i in range(544)]
-    spec = EpubSpec(documents=documents)
-    assert len(_parse(spec).chapters) == 544
+    documents = [Document(f"ch{i}", f"text/{i}.xhtml", "<p>正文。</p>") for i in range(1001)]
+    spec = EpubSpec(
+        documents=documents,
+        extras={f"extra/{index}.txt": b"original fixture" for index in range(1001)},
+    )
+    assert len(_parse(spec).chapters) == 1001
     with pytest.raises(EpubError) as excinfo:
-        _parse(spec, limits=EpubLimits(max_spine_items=500))
+        _parse(spec, limits=EpubLimits(max_spine_items=1000))
     assert excinfo.value.code == "EPUB_SPINE_LIMIT"
+    with pytest.raises(EpubError) as excinfo:
+        _parse(spec, limits=EpubLimits(max_entries=2000))
+    assert excinfo.value.code == "EPUB_ENTRY_LIMIT"
 
 
 def _illustration_spec() -> EpubSpec:
