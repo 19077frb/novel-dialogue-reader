@@ -75,7 +75,7 @@ export default function SettingsPage() {
   return <div className="ndr-page ndr-settings" data-section={selected}>
     <header className="card ndr-page-header"><div><h2>通用设置</h2><p className="hint">选择一类设置，调整后保存。</p></div></header>
     <div className="ndr-settings-layout">
-    <div className="ndr-settings-navigation" data-testid="settings-navigation">
+    <div className="ndr-page-navigation ndr-settings-navigation" data-testid="settings-navigation">
       <nav className="ndr-section-nav" aria-label="通用设置分区">
         {categories.map(category => <Link key={category.id} to={`#${category.id}`} aria-label={category.title}
           aria-current={selected === category.id ? 'page' : undefined} aria-describedby={`${category.id}-description`}

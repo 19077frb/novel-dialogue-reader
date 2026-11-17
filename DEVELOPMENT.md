@@ -20,7 +20,8 @@ Windows 免安装包由 GitHub Actions 手动构建和发布，流程与本地�
 界面以 [shadcn/ui Nova](https://ui.shadcn.com/docs/changelog/2025-12-shadcn-create) 的紧凑规格为基础，`frontend/components.json` 固定 `radix-nova` 与 Lucide。`src/components/ui/` 中的组件源码在仓库内维护，来源和许可随组件保留；升级时审查差异，不用生成器全量覆盖已有业务控件。
 
 - `global.css` 的 `--ndr-*` 是唯一颜色、圆角和阴影来源，`nova.css` 将其映射到 shadcn/Tailwind 语义令牌。保留系统暗色与原生表单统一外观；Tailwind 不加载 preflight，避免改变正文和导出预览的默认排版。
-- 书架、任务队列、模型配置与通用设置的页头分隔线到首个可见内容区域统一使用 `--ndr-page-content-gap`（16px）；通用设置通过导航上内边距保留吸顶背景，其余页面使用内容区上外边距。
+- 书架、任务队列、模型配置与通用设置的页头分隔线到首个可见内容区域统一使用 `--ndr-page-content-gap`（16px）；两个设置页使用导航上内边距，书架与任务队列使用内容区上外边距。
+- 模型配置与通用设置的视图/分类入口均放在页头下的 `.ndr-page-navigation` 中，复用 `.ndr-section-nav` 的控件规格；通用设置在该行保留吸顶和保存操作。
 - 图标从 `lucide-react` 按名称导入；Motion 从 `motion/react` 使用并遵循减少动态效果设置。不要引入第二套图标或动画库。
 - `react-resizable-panels` 负责阅读侧栏尺寸；dnd-kit 负责书架内部排序。外部 TXT/EPUB 文件拖入仍是原生文件上传，不能用内部排序传感器替代。
 - Zustand 只管理界面状态：书架排序保存于当前浏览器，阅读导航与宽度仅在当前页面会话保留。React Query 继续管理服务端缓存；设置草稿、任务 journal、执行锁及阅读位置沿用各自现有流程，不复制进全局 UI store。

@@ -266,13 +266,15 @@ export default function ModelSettingsPage() {
           <h2>模型配置</h2>
           <p className="hint">连接模型服务，管理账号与生成参数。</p>
         </div>
-        <nav className="ndr-model-views" aria-label="模型配置视图">
+      </header>
+      <div className="ndr-page-navigation">
+        <nav className="ndr-section-nav ndr-model-views" aria-label="模型配置视图">
           <button type="button" data-testid="model-view-editor" aria-pressed={view === 'editor'}
             onClick={() => setView('editor')}>{editingId ? '编辑配置' : '新建配置'}</button>
           <button type="button" data-testid="model-view-saved" aria-pressed={view === 'saved'}
             onClick={() => setView('saved')}>查看配置</button>
         </nav>
-      </header>
+      </div>
 
       {(busy || testClock.startedAt > 0 || testResult || notice || error) && (
         <section className="ndr-model-feedback" aria-label="配置操作反馈">
@@ -419,7 +421,7 @@ export default function ModelSettingsPage() {
                   <div className="ndr-model-fields">
                     <label className="ndr-field">默认思考模式
                       <select data-testid="profile-thinking-mode" value={params.thinking?.type ?? 'default'}
-                        title="处理页选择“沿用模型配置”时使用这里保存的默认值；选择“模型服务默认”由服务商决定。关闭思考会清除默认强度。"
+                        title="处理页选择“沿用模型配置”时使用这里保存的默认值；选择“模型服务默认”由服务商决定。思考功能需模型服务支持，开启后可能增加用量与等待时间；关闭思考会清除默认强度。"
                         onChange={(event) => changeThinkingDefault('mode', event.target.value)}>
                         <option value="default">模型服务默认（不指定）</option>
                         <option value="disabled">关闭</option><option value="enabled">开启</option><option value="adaptive">自适应</option>
@@ -434,7 +436,6 @@ export default function ModelSettingsPage() {
                       </select>
                     </label>
                   </div>
-                  <p className="hint ndr-model-thinking-hint">思考功能需模型服务支持，开启后可能增加用量与等待时间。</p>
                   {thinkingDisabled && <p className="hint ndr-model-thinking-hint">默认思考已关闭；先选择开启或自适应，再调整强度。</p>}
                 </fieldset>
               </div>

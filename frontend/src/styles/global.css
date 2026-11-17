@@ -1500,8 +1500,10 @@ textarea:focus-visible {
 .ndr-inline-section h3 { margin: 0; }
 .ndr-inline-section p { margin: 6px 0 0; }
 .ndr-section-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
-.ndr-section-nav a { display: inline-flex; align-items: center; min-height: 40px; padding: 8px 14px; text-decoration: none; color: var(--ndr-muted); border: 1px solid var(--ndr-border); border-radius: var(--ndr-radius-control); background: var(--ndr-card); font-size: .85rem; }
-.ndr-section-nav a:hover { color: var(--ndr-accent); border-color: var(--ndr-accent); }
+.ndr-section-nav :is(a, button) { display: inline-flex; align-items: center; min-height: 40px; padding: 8px 14px; text-decoration: none; color: var(--ndr-muted); border: 1px solid var(--ndr-border); border-radius: var(--ndr-radius-control); background: var(--ndr-card); font-size: .85rem; }
+.ndr-section-nav :is(a, button):hover { color: var(--ndr-accent); border-color: var(--ndr-accent); }
+.ndr-page-navigation { padding: var(--ndr-page-content-gap) 0 12px; background: var(--ndr-bg); border-bottom: 1px solid var(--ndr-border); }
+.ndr-page-navigation .ndr-section-nav { margin: 0; gap: 6px; }
 .ndr-settings-content { min-width: 0; }
 .ndr-shared-configuration > .ndr-collapsible-block > [aria-labelledby] > .card { border: 0; padding-inline: 0; box-shadow: var(--ndr-shadow-none); }
 .ndr-settings-save { position: sticky; bottom: 12px; z-index: 5; box-shadow: var(--ndr-shadow-sticky); border-color: var(--ndr-accent); }
@@ -1515,7 +1517,8 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--ndr-accent); }
   button, .ndr-button, .ndr-book-nav a { min-height: 44px; }
   .ndr-settings-save { position: static; }
   .ndr-page-header .ndr-book-nav { margin-left: 0; }
-  .ndr-section-nav a { min-height: 44px; }
+  .ndr-section-nav :is(a, button) { min-height: 44px; }
+  .ndr-page-navigation .ndr-section-nav :is(a, button) { padding: 8px 10px; font-size: .8rem; }
 
 }
 
