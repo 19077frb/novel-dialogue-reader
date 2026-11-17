@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { BookOpen, ArrowUpRight, Trash2 } from 'lucide-react'
 import { Button } from './ui/button'
@@ -6,6 +7,7 @@ import { Card, CardHeader, CardContent, CardFooter } from './ui/card'
 import '../styles/library.css'
 
 import type { BookOut } from '../api/types'
+import { resourceUrl } from '../api/books'
 
 function statusLabel(book: BookOut): string {
   switch (book.import_status) {
@@ -20,6 +22,17 @@ function statusLabel(book: BookOut): string {
   }
 }
 
+function BookCover({ src }: { src: string | null }) {
+  const [failed, setFailed] = useState(false)
+  const showImage = Boolean(src) && !failed
+  return <div className={`ndr-book-cover${showImage ? '' : ' ndr-book-cover-placeholder'}`}
+    data-testid="book-cover" aria-hidden="true" title={failed ? '封面加载失败' : undefined}>
+    {showImage ? <img src={src!} alt="" width={72} height={108} loading="lazy" decoding="async"
+      draggable={false} data-testid="book-cover-image" onError={() => setFailed(true)} />
+      : <BookOpen size={24} strokeWidth={1.2} />}
+  </div>
+}
+
 export function BookCard({ book, onDelete, deleting = false }: {
   book: BookOut
   onDelete?: (book: BookOut) => void
@@ -27,15 +40,20 @@ export function BookCard({ book, onDelete, deleting = false }: {
 }) {
   const version = book.active_version
   const warnings = version?.warnings ?? []
+  const coverUrl = version?.cover_resource_id
+    ? `${resourceUrl(book.id, version.cover_resource_id)}?v=${encodeURIComponent(version.id)}`
+    : null
   return (
     <Card asChild><article className="card ndr-book-card" data-testid="book-card">
-      <CardContent>
-      <div className="ndr-book-cover" aria-hidden="true"><BookOpen size={24} strokeWidth={1.2} /></div>
-      </CardContent>
       <CardHeader>
-        <h3>{book.title}</h3>
-        <Badge className={`ndr-badge ndr-badge-${book.format.toLowerCase()}`}>{book.format}</Badge>
-        <Badge>{statusLabel(book)}</Badge>
+        <BookCover key={coverUrl ?? 'placeholder'} src={coverUrl} />
+        <div className="ndr-book-heading">
+          <h3>{book.title}</h3>
+          <div className="ndr-book-badges">
+            <Badge className={`ndr-badge ndr-badge-${book.format.toLowerCase()}`}>{book.format}</Badge>
+            <Badge>{statusLabel(book)}</Badge>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
       <p className="ndr-book-position">最后读到 · {book.last_read_chapter_title ?? '尚未记录'}</p>

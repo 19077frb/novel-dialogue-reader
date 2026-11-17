@@ -43,6 +43,7 @@ def version_out(version: BookVersion) -> BookVersionOut:
         canonical_length_cp=version.canonical_length_cp,
         warnings=[str(item) for item in warnings],
         toc=json.loads(version.toc_json) if version.toc_json is not None else None,
+        cover_resource_id=version.cover_resource_id,
         created_at=version.created_at,
     )
 

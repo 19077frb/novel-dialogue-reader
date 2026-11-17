@@ -294,6 +294,19 @@ def persist_parsed(
                     canonical_text=parsed.canonical_text,
                 )
 
+        if version.cover_resource_id is None and parsed.cover_resource_id is not None:
+            cover = next((resource for resource in parsed.resources
+                          if resource.resource_id == parsed.cover_resource_id), None)
+            if cover is not None:
+                # Reimports can fill display metadata while preserving the stored
+                # version's own resource IDs, text, annotations and reading position.
+                version.cover_resource_id = session.scalar(select(Resource.resource_id).where(
+                    Resource.book_version_id == version.id,
+                    Resource.relative_path == cover.relative_path,
+                    Resource.sha256 == cover.sha256,
+                    Resource.media_type.startswith("image/"),
+                ).order_by(Resource.resource_id).limit(1))
+
         book.active_version_id = version.id
         book.import_status = ImportStatus.COMPLETED
 

@@ -4888,6 +4888,17 @@
             ],
             "title": "Toc"
           },
+          "cover_resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Resource Id"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",

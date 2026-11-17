@@ -66,6 +66,50 @@ def test_empty_database_migrates_to_head(tmp_settings: Settings) -> None:
         engine.dispose()
 
 
+def test_cover_migration_preserves_existing_version_and_adds_no_index(tmp_settings):
+    run_migrations(tmp_settings, revision="0025")
+    engine = create_db_engine(tmp_settings)
+    factory = create_session_factory(engine)
+    try:
+        with transaction(factory) as session:
+            book = Book(title="封面迁移", format=BookFormat.EPUB, source_sha256="a" * 64)
+            session.add(book)
+            session.flush()
+            session.execute(BookVersion.__table__.insert().values(
+                id="cover-old", book_id=book.id, encoding="xml", parser_version="epub-8",
+                normalization_version="test", canonical_sha256="b" * 64,
+                canonical_length_cp=100, toc_json="[]", warnings_json='["original"]',
+            ))
+        indexes = inspect(engine).get_indexes("book_versions")
+        run_migrations(tmp_settings)
+        run_migrations(tmp_settings)
+        columns = {column["name"]: column for column in inspect(engine).get_columns("book_versions")}
+        assert columns["cover_resource_id"]["nullable"] is True
+        assert inspect(engine).get_indexes("book_versions") == indexes
+        with engine.begin() as connection:
+            assert connection.execute(text(
+                "SELECT canonical_sha256, warnings_json, toc_json, cover_resource_id"
+                " FROM book_versions WHERE id='cover-old'"
+            )).one() == ("b" * 64, '["original"]', "[]", None)
+            connection.execute(text(
+                "UPDATE book_versions SET cover_resource_id='r0002' WHERE id='cover-old'"
+            ))
+        command.downgrade(build_alembic_config(tmp_settings), "0025")
+        assert "cover_resource_id" not in {
+            column["name"] for column in inspect(engine).get_columns("book_versions")
+        }
+        with engine.connect() as connection:
+            assert connection.execute(text(
+                "SELECT canonical_sha256, warnings_json, toc_json"
+                " FROM book_versions WHERE id='cover-old'"
+            )).one() == ("b" * 64, '["original"]', "[]")
+        run_migrations(tmp_settings)
+        with factory() as session:
+            assert session.get(BookVersion, "cover-old").cover_resource_id is None
+    finally:
+        engine.dispose()
+
+
 def test_call_archive_upgrade_and_downgrade_preserve_old_attempt(tmp_settings):
     run_migrations(tmp_settings, revision="0021")
     engine = create_db_engine(tmp_settings)

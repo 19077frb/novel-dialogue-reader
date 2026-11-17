@@ -38,6 +38,7 @@ class BookVersionOut(ApiModel):
     canonical_length_cp: int = Field(ge=0)
     warnings: list[str] = Field(default_factory=list)
     toc: list[TocNodeOut] | None = None
+    cover_resource_id: str | None = None
     created_at: datetime
 
 
