@@ -19,7 +19,7 @@ from ndr.ingest.epub import parse_epub
 from ndr.ingest.service import import_epub
 from ndr.portable import LibraryInUseError, LibraryLock
 from ndr.storage import toc_repair
-from ndr.storage.engine import create_db_engine
+from ndr.storage.engine import create_db_engine, head_revision
 from ndr.storage.migrate import build_alembic_config
 from ndr.storage.models import BookCharacter, Bookmark, Chapter
 
@@ -78,7 +78,7 @@ def test_preview_is_read_only_apply_upgrades_and_preserves_business_data(old_lib
     assert not (settings.data_dir / "backups").exists()
     outcome = toc_repair.repair_toc(settings, book_id)
     assert outcome["business_data_unchanged"]
-    assert _rows(settings, "SELECT version_num FROM alembic_version") == [("0025",)]
+    assert _rows(settings, "SELECT version_num FROM alembic_version") == [(head_revision(),)]
     assert _rows(settings, "SELECT id,ordinal,start_cp,end_cp,source_href FROM chapters ORDER BY ordinal") == chapters
     for table, rows in protected.items():
         assert _rows(settings, f"SELECT * FROM {table} ORDER BY id") == rows

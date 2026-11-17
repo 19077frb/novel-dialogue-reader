@@ -95,6 +95,7 @@ class ParsedBook:
     # 目录（TOC）与正文顺序分离：``toc`` 保留原始目录项，spine 顺序见 chapters。
     toc: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     metadata: dict[str, str] = field(default_factory=dict)
+    cover_resource_id: str | None = None
 
     def node_for(self, start_cp: int, end_cp: int) -> ParsedNode | None:
         for node in self.nodes:

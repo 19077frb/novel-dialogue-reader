@@ -25,12 +25,13 @@ from ..storage.models import (
     ExportSnapshot,
     IdentityRevision,
     Quote,
+    Resource,
     Scene,
     SpeakerGroup,
 )
 from .identities import IDENTITY_SNAPSHOT_VERSION, freeze_identity
 
-EXPORT_SNAPSHOT_VERSION = "export-snapshot-4"
+EXPORT_SNAPSHOT_VERSION = "export-snapshot-5"
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,14 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
                                     Chapter.book_version_id == version.id))}
     payload["warnings"] = warnings
     payload["toc"] = json.loads(version.toc_json) if version.toc_json is not None else None
+    cover = session.execute(select(Resource.resource_id, Resource.media_type).where(
+        Resource.book_version_id == version.id,
+        Resource.resource_id == version.cover_resource_id,
+    )).one_or_none() if version.cover_resource_id else None
+    payload["cover"] = (
+        {"resource_id": cover.resource_id, "media_type": cover.media_type}
+        if cover is not None and cover.media_type.startswith("image/") else None
+    )
     payload["snapshot_version"] = EXPORT_SNAPSHOT_VERSION
     payload["chapter_processing"] = {
         chapter.id: {"processed": chapter.dialogue_processed,
@@ -186,6 +195,7 @@ def freeze_snapshot(  # noqa: PLR0913 - 快照需要记录全部导出参数
             "snapshot_version": EXPORT_SNAPSHOT_VERSION,
             "book_version_id": version.id,
             "canonical_sha256": version.canonical_sha256,
+            "cover": payload["cover"],
             "annotation_versions": annotation_versions,
             "counts": counts.model_dump(mode="json"),
         }

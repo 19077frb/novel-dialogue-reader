@@ -24,7 +24,7 @@ from ..ingest.query import load_canonical_text
 from ..intervals import SpanIndex
 from ..storage.models import Book, BookVersion, Chapter, ContentNode
 
-EXPORTER_VERSION = "exporter-7"
+EXPORTER_VERSION = "exporter-8"
 
 EXPORT_PALETTE = BASE_COLORS
 

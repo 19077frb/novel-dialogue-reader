@@ -21,6 +21,7 @@ import mimetypes
 import posixpath
 import re
 import zipfile
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from html.entities import html5
@@ -754,6 +755,10 @@ def _parse_opf(data: bytes) -> tuple[dict[str, str], list[_ManifestItem], list[d
             text = (element.text or "").strip()
             if text and tag not in metadata:
                 metadata[tag] = text
+        elif tag == "meta" and element.get("name", "").lower() == "cover":
+            metadata.setdefault("cover_id", (element.get("content") or "").strip())
+        elif tag == "reference" and "cover" in element.get("type", "").lower().split():
+            metadata.setdefault("cover_href", (element.get("href") or "").strip())
         elif tag == "item":
             manifest.append(
                 _ManifestItem(
@@ -773,6 +778,73 @@ def _parse_opf(data: bytes) -> tuple[dict[str, str], list[_ManifestItem], list[d
                 }
             )
     return metadata, manifest, spine
+
+
+def _cover_resource_id(
+    archive: _Archive,
+    metadata: dict[str, str],
+    manifest: list[_ManifestItem],
+    resources: dict[str, ParsedResource],
+    opf_dir: str,
+) -> str | None:
+    """Resolve explicit cover declarations without changing resource identities."""
+
+    def image_resource(path: str) -> str | None:
+        resource = resources.get(path)
+        return (
+            resource.resource_id
+            if resource is not None and resource.media_type.startswith("image/")
+            else None
+        )
+
+    for item in manifest:
+        if "cover-image" in item.properties and (resource_id := image_resource(item.path)):
+            return resource_id
+    for item in manifest:
+        if item.item_id == metadata.get("cover_id") and (resource_id := image_resource(item.path)):
+            return resource_id
+
+    href = metadata.get("cover_href")
+    if not href:
+        return None
+    try:
+        cover_path, fragment = _resolve_href(opf_dir, href)
+    except (EpubError, ValueError):
+        return None
+    if resource_id := image_resource(cover_path):
+        return resource_id
+    if not archive.exists(cover_path):
+        return None
+    try:
+        raw = archive.read(cover_path)
+    except (zipfile.BadZipFile, NotImplementedError, zlib.error):
+        return None
+    if re.search(rb"<!ENTITY\s", raw, re.IGNORECASE):
+        return None
+    try:
+        root = ET.fromstring(_normalize_html_entities(raw))
+    except (ET.ParseError, LookupError, ValueError):
+        return None
+    if fragment:
+        root = next((element for element in root.iter()
+                     if element.get("id") == unquote(fragment)), None)
+        if root is None:
+            return None
+    for element in root.iter():
+        tag = _local(element.tag)
+        if tag not in {"img", "image"}:
+            continue
+        source = (element.get("src") if tag == "img" else
+                  element.get("href") or element.get("{http://www.w3.org/1999/xlink}href"))
+        if not source:
+            continue
+        try:
+            path, _ = _resolve_href(posixpath.dirname(cover_path), source)
+        except (EpubError, ValueError):
+            continue
+        if resource_id := image_resource(path):
+            return resource_id
+    return None
 
 
 def _parse_toc_nav(data: bytes) -> list[dict[str, Any]]:
@@ -1289,4 +1361,5 @@ def parse_epub(
         encoding_confidence=None,
         toc=tuple(toc_entries),
         metadata={"title": title or metadata.get("title", "")},
+        cover_resource_id=_cover_resource_id(archive, metadata, manifest, resources, opf_dir),
     )

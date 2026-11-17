@@ -42,7 +42,7 @@ class Book(IdMixin, TimestampMixin, VersionMixin, Base):
 
 
 class BookVersion(IdMixin, TimestampMixin, Base):
-    """原文版本：不可变。更换编码或解析器产生新版本。"""
+    """原文版本：正文不可变。封面等派生展示信息可在重复导入时补齐。"""
 
     __tablename__ = "book_versions"
     __table_args__ = (
@@ -68,6 +68,8 @@ class BookVersion(IdMixin, TimestampMixin, Base):
     canonical_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     warnings_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     toc_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 同版本 Resource.resource_id 的逻辑引用；通过已加载版本读取，无需单独索引。
+    cover_resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class Chapter(IdMixin, TimestampMixin, Base):

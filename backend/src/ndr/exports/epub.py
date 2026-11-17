@@ -147,6 +147,7 @@ def build_epub(
     identifier: str,
     generated_at: str,
     annotations: dict | None = None,
+    cover: Mapping[str, str] | None = None,
 ) -> bytes:
     """把渲染结果打包成 EPUB 3（离线可读，不依赖外部资源）。
 
@@ -179,6 +180,11 @@ def build_epub(
         if rendered.toc is not None:
             nav_items, chapter_anchors = _structured_nav(rendered)
         used_images: dict[str, str] = {}
+        cover_id = cover["resource_id"] if cover is not None else None
+        if cover is not None and cover_id in images:
+            filename = resource_filename(cover_id, cover["media_type"])
+            used_images[cover_id] = filename
+            _write(archive, f"OEBPS/images/{filename}", images[cover_id])
 
         for index, chapter in enumerate(rendered.chapters, start=1):
             body_parts: list[str] = []
@@ -189,7 +195,9 @@ def build_epub(
                 body_parts.extend(f'<span id="toc-cp-{cp}"></span>' for cp in sorted(preceding))
                 pending_anchors.difference_update(preceding)
                 if block.node_type is ContentNodeType.IMAGE and block.resource_id:
-                    filename = resource_filename(block.resource_id, block.media_type)
+                    filename = used_images.get(block.resource_id) or resource_filename(
+                        block.resource_id, block.media_type,
+                    )
                     if block.resource_id not in used_images and block.resource_id in images:
                         used_images[block.resource_id] = filename
                         _write(archive, f"OEBPS/images/{filename}", images[block.resource_id])
@@ -230,7 +238,7 @@ def build_epub(
             nav_items.append("</ol></li>")
 
         for resource_id, filename in used_images.items():
-            media_type = next(
+            media_type = cover["media_type"] if resource_id == cover_id else next(
                 (
                     block.media_type
                     for chapter in rendered.chapters
@@ -239,8 +247,10 @@ def build_epub(
                 ),
                 "application/octet-stream",
             )
+            properties = ' properties="cover-image"' if resource_id == cover_id else ""
             manifest.append(
-                f'<item id="img-{filename}" href="images/{filename}" media-type="{media_type}"/>'
+                f'<item id="img-{filename}" href="images/{filename}"'
+                f' media-type="{escape(media_type)}"{properties}/>'
             )
 
         archive.writestr(

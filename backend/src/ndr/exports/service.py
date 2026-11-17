@@ -241,12 +241,17 @@ def _generate_export(session_factory, settings, *, artifact_id, epubcheck_jar):
             style=style,
             chapter_ids=chapter_ids or None,
         )
+        # Older snapshots have no cover metadata; the live version is not a fallback.
+        cover = payload.get("cover") if artifact.format is ExportFormat.EPUB else None
+        resource_ids = rendered.referenced_resource_ids()
+        if cover is not None and cover["resource_id"] not in resource_ids:
+            resource_ids.append(cover["resource_id"])
         images = load_resource_bytes(
             session,
             settings,
             book=book,
             version=version,
-            resource_ids=rendered.referenced_resource_ids(),
+            resource_ids=resource_ids,
         )
         selected = bool(chapter_ids)
         fmt = artifact.format
@@ -296,6 +301,7 @@ def _generate_export(session_factory, settings, *, artifact_id, epubcheck_jar):
                 identifier=f"urn:ndr:{artifact_id}",
                 generated_at=generated_at,
                 annotations=annotations_manifest,
+                cover=cover,
             )
         else:
             document = render_html(rendered, images=images, generated_at=generated_at)

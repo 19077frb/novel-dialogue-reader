@@ -1481,6 +1481,8 @@ export interface components {
             warnings?: string[];
             /** Toc */
             toc?: components["schemas"]["TocNodeOut"][] | null;
+            /** Cover Resource Id */
+            cover_resource_id?: string | null;
             /**
              * Created At
              * Format: date-time
