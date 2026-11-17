@@ -10,8 +10,9 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 
 from .. import API_VERSION, __version__
 from ..domain.enums import DatabaseState
@@ -20,13 +21,36 @@ from ..storage.engine import migration_status
 router = APIRouter(tags=["health"])
 
 
+def _is_loopback_origin(origin: str) -> bool:
+    try:
+        parsed = urlsplit(origin)
+        return (
+            parsed.scheme == "http"
+            and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+            and parsed.username is None
+            and parsed.password is None
+            and not (parsed.path or parsed.query or parsed.fragment)
+            and (parsed.port is None or 1 <= parsed.port <= 65535)
+        )
+    except ValueError:
+        return False
+
+
 @router.get(
     "/health",
     summary="进程、数据库与版本状态（不调用模型）",
-    description="独立响应体；不返回任意磁盘路径，也不触发任何模型调用。",
+    description=(
+        "独立响应体；不返回任意磁盘路径，也不触发任何模型调用。"
+        "允许HTTP回环网页跨端口读取健康状态，用于确认服务重启完成。"
+    ),
 )
-def health(request: Request) -> dict[str, Any]:
+def health(request: Request, response: Response) -> dict[str, Any]:
     app = request.app
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Vary"] = "Origin"
+    origin = request.headers.get("origin", "")
+    if _is_loopback_origin(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
     database = migration_status(app.state.engine)
     return {
         "status": "degraded" if database.state is DatabaseState.ERROR else "ok",

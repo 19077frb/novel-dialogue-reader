@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * 进程、数据库与版本状态（不调用模型）
-         * @description 独立响应体；不返回任意磁盘路径，也不触发任何模型调用。
+         * @description 独立响应体；不返回任意磁盘路径，也不触发任何模型调用。允许HTTP回环网页跨端口读取健康状态，用于确认服务重启完成。
          */
         get: operations["health_api_health_get"];
         put?: never;

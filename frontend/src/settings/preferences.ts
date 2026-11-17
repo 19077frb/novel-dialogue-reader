@@ -39,6 +39,12 @@ export function updateGeneralSettings(patch: Partial<GeneralSettings>) {
   rawCache = undefined
   listeners.forEach(listener => listener())
 }
+export function generalSettingsPersisted(expected: GeneralSettings): boolean {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null')
+    return stored !== null && Object.entries(expected).every(([key, value]) => JSON.stringify(stored[key]) === JSON.stringify(value))
+  } catch { return false }
+}
 export function subscribeGeneralSettings(listener: () => void) {
   listeners.add(listener)
   const changed = (event: StorageEvent) => { if (event.key === SETTINGS_KEY || event.key === null) listener() }

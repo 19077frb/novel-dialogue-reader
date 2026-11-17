@@ -7,6 +7,12 @@ import type { ApplicationSettingsHandle } from '../src/components/ApplicationSet
 import * as api from '../src/api/applicationSettings'
 import { ApiError } from '../src/api/client'
 import { renderWithProviders } from './helpers'
+import * as restartApi from '../src/api/applicationRestart'
+
+vi.mock('../src/api/applicationRestart', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/api/applicationRestart')>(),
+  readRestartHealth: vi.fn(), waitForApplicationRestart: vi.fn(), openRestartedSettings: vi.fn(),
+}))
 
 vi.mock('../src/api/applicationSettings', () => ({
   fetchApplicationSettings: vi.fn(), saveApplicationSettings: vi.fn(), saveAndRestartApplication: vi.fn(),
@@ -24,6 +30,8 @@ function applicationSaveButton() {
 }
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.mocked(restartApi.readRestartHealth).mockResolvedValue({ started_at: 'old-instance', server_time: 'before-restart' } as never)
+  vi.mocked(restartApi.waitForApplicationRestart).mockImplementation(() => new Promise(() => {}))
   vi.mocked(api.fetchApplicationSettings).mockResolvedValue(example)
 })
 afterEach(() => vi.restoreAllMocks())
@@ -169,9 +177,58 @@ it('成功重启后锁定编辑并显示重新打开入口', async () => {
   renderWithProviders(<ApplicationSettings />)
   await screen.findByLabelText('服务端口')
   await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
-  expect(await screen.findByRole('link', { name: '重新打开设置' })).toHaveAttribute('href', 'http://127.0.0.1:8765/settings/general#application-settings')
+  expect(await screen.findByRole('link', { name: '重新打开设置' })).toHaveAttribute('href', `${window.location.origin}/settings/general#application-settings`)
   expect(screen.getByRole('link', { name: '重新打开设置' })).toHaveClass('ndr-button')
   expect(screen.getByLabelText('服务端口')).toBeDisabled()
+  expect(restartApi.readRestartHealth).toHaveBeenCalledTimes(1)
+  expect(restartApi.waitForApplicationRestart).toHaveBeenCalledWith({ startedAt: 'old-instance', serverTime: 'before-restart' }, undefined, expect.any(AbortSignal))
+})
+
+it('当前服务状态读取失败时保留草稿，重启请求尚未发出', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(restartApi.readRestartHealth).mockRejectedValue(new Error('连接超时'))
+  renderWithProviders(<ApplicationSettings />)
+  fireEvent.change(await screen.findByLabelText('服务端口'), { target: { value: '8800' } })
+  await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('设置尚未提交')
+  expect(screen.getByLabelText('服务端口')).toHaveValue(8800)
+  expect(screen.getByLabelText('服务端口')).toBeEnabled()
+  expect(api.saveAndRestartApplication).not.toHaveBeenCalled()
+  expect(restartApi.waitForApplicationRestart).not.toHaveBeenCalled()
+})
+
+it('恢复超时解除锁定，重新检测只读取健康状态并打开新地址', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(api.saveAndRestartApplication).mockResolvedValue({ ...example, fields: [
+    { ...example.fields[0], value: 8800 }, example.fields[1],
+  ] })
+  vi.mocked(restartApi.waitForApplicationRestart).mockRejectedValueOnce(new Error('设置已保存，180 秒内尚未确认服务恢复。'))
+    .mockResolvedValueOnce()
+  renderWithProviders(<ApplicationSettings />)
+  fireEvent.change(await screen.findByLabelText('服务端口'), { target: { value: '8800' } })
+  await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('180 秒')
+  expect(screen.getByLabelText('服务端口')).toBeEnabled()
+  expect(screen.getByRole('button', { name: '保存并重启' })).toBeDisabled()
+  expect(screen.getByRole('link', { name: '重新打开设置' })).toHaveAttribute('href', 'http://127.0.0.1:8800/settings/general#application-settings')
+  await userEvent.click(screen.getByRole('button', { name: '重新检测服务' }))
+  await waitFor(() => expect(restartApi.openRestartedSettings).toHaveBeenCalledWith('http://127.0.0.1:8800'))
+  expect(restartApi.waitForApplicationRestart).toHaveBeenCalledTimes(2)
+  expect(api.saveAndRestartApplication).toHaveBeenCalledTimes(1)
+})
+
+it('离开页面取消正在等待的恢复检测', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(api.saveAndRestartApplication).mockResolvedValue(example)
+  const page = renderWithProviders(<ApplicationSettings />)
+  await screen.findByLabelText('服务端口')
+  await userEvent.click(screen.getByRole('button', { name: '保存并重启' }))
+  await waitFor(() => expect(restartApi.waitForApplicationRestart).toHaveBeenCalledTimes(1))
+  const signal = vi.mocked(restartApi.waitForApplicationRestart).mock.calls[0][2]
+  expect(signal.aborted).toBe(false)
+  page.unmount()
+  expect(signal.aborted).toBe(true)
+  expect(restartApi.openRestartedSettings).not.toHaveBeenCalled()
 })
 
 it('恢复应用配置只修改未锁定草稿，不自动保存或重启', async () => {

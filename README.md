@@ -27,14 +27,12 @@
 
 克隆后在项目根目录安装依赖：
 
-```powershell
+```bat
 uv sync --project backend --all-groups
-Push-Location frontend
-npm ci
-Pop-Location
+npm --prefix frontend ci
 ```
 
-双击 `start.bat`，就绪后打开 <http://127.0.0.1:8765>。停止时双击 `stop.bat`，或在启动窗口按 `Ctrl+C`；更换端口可运行 `.\start.bat 8800`。
+双击 `start.bat`，就绪后打开 <http://127.0.0.1:8765>。两个 BAT 独立执行 CMD 启停流程；停止时双击 `stop.bat`，或在启动窗口按 `Ctrl+C`，等待服务收尾。更换端口可运行 `start.bat 8800`。
 
 ## 快速使用
 
