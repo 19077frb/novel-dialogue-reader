@@ -33,6 +33,12 @@ Windows 免安装包由 GitHub Actions 手动构建和发布，流程与本地�
 
 ## 2. 本地开发
 
+源码日常使用在项目根目录运行 `start.bat [端口]`（默认8765）与 `stop.bat`。两入口直接编排 CMD 命令，依赖和静态页面准备后使用虚拟环境 Python 运行 `python -m ndr`；精确文件时间、健康状态及 Windows 进程身份检查由 BAT 内嵌的短程序完成。设置页重启沿用后端同进程循环，正常停止使用定向控制台信号并等待资源释放。`NDR_NO_BROWSER=1` 可用于离线启动验收。
+
+运行记录位于仓库的 `data/run/serve-cmd.json`，包含进程创建时间、解释器路径和启动标识；更换书库后仍通过同一记录停止。停止等待超过 30 秒时保留记录，服务继续收尾，稍后可重试。旧 PowerShell 入口的运行记录缺少这些身份信息，请先在旧启动窗口按 `Ctrl+C` 结束，再使用新版 `start.bat`。
+
+需要前后端热更新时使用下面的开发入口：
+
 ```powershell
 uv sync --project backend --all-groups
 Push-Location frontend
