@@ -1,4 +1,4 @@
-.ndr-library-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; gap: 28px; margin-top: 28px; }
+.ndr-library-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; gap: 28px; margin-top: var(--ndr-page-content-gap); }
 .ndr-library-layout > .card { margin-top: 0; }
 .ndr-library-import h2 { display: flex; align-items: center; gap: 8px; }
 .ndr-library-import > .hint { font-size: .85rem; }

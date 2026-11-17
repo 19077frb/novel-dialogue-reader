@@ -218,7 +218,7 @@ export default function TaskQueuePage() {
   }
   return <>
     <header className="card ndr-page-header"><div><h2>任务队列</h2><p>集中查看各本书的处理进度，继续添加章节或窗口。</p></div></header>
-    <section className="card">
+    <section className="card ndr-task-queue">
       <label className="ndr-field"><span><input type="checkbox" checked={history} onChange={event => setHistory(event.target.checked)} /> 显示已结束任务</span></label>
       <p className="hint">保持应用页面打开，等待范围会继续派发；已保存的队列可在切换页面或刷新后继续查看。同一本书的处理范围依次执行，不同书籍共享并发额度。停止后已发出的模型请求仍可能计费。</p>
       {error && <p role="alert" className="status-error">{error}</p>}

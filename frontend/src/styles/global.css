@@ -4,6 +4,7 @@
 @import "./app-shell.css";
 
 :root {
+  --ndr-page-content-gap: 16px;
   --ndr-shadow-none: none;
   --ndr-shadow-nav-active: inset 3px 0 0 var(--ndr-accent);
   --ndr-shadow-sticky: 0 -4px 24px color-mix(in srgb, var(--ndr-fg) 5%, transparent);
@@ -1486,6 +1487,7 @@ textarea:focus-visible {
   box-shadow: var(--ndr-shadow-none);
 }
 .ndr-page-header > div { min-width: 0; }
+.ndr-page-header + .ndr-task-queue { margin-top: var(--ndr-page-content-gap); }
 .ndr-page-header h2 { font-size: clamp(1.4rem, 2.2vw, 1.85rem); line-height: 1.45; margin: 0; overflow-wrap: anywhere; }
 .ndr-page-header h2 svg { vertical-align: -2px; margin-right: 4px; }
 .ndr-page-header p { margin: 8px 0 0; color: var(--ndr-muted); font-size: .9rem; line-height: 1.7; }
