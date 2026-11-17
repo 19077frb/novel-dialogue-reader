@@ -124,7 +124,6 @@ export default function LibraryPage() {
             导入书籍，继续上次阅读。
           </p>
         </div>
-        <a className="ndr-button" href="#import-book"><Upload size={16} aria-hidden="true" />导入书籍</a>
       </header>
       <div className="ndr-library-layout">
       <section className="card ndr-library-books" aria-label="全部书籍">
