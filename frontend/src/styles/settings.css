@@ -6,12 +6,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px 16px;
-  padding: 12px 0;
-  background: var(--ndr-bg);
-  border-bottom: 1px solid var(--ndr-border);
   scroll-margin-top: 0;
 }
-.ndr-settings-navigation .ndr-section-nav { margin: 0; gap: 6px; }
 .ndr-settings-navigation [aria-current='page'] { color: var(--ndr-accent); border-color: var(--ndr-accent); background: var(--ndr-panel); }
 .ndr-settings-command { display: flex; align-items: flex-start; gap: 8px; }
 .ndr-settings-command button { white-space: nowrap; }
@@ -57,7 +53,6 @@
   .ndr-settings-navigation { gap: 8px; }
   .ndr-settings-command { flex-direction: column; }
   .ndr-settings-command button { padding-inline: 10px; font-size: .8rem; }
-  .ndr-settings-navigation .ndr-section-nav a { padding: 8px 10px; font-size: .8rem; }
   .ndr-settings .ndr-settings-content .card { padding: 16px; }
   .ndr-settings .ndr-settings-options, .ndr-settings .ndr-settings-fields, .ndr-settings .ndr-thinking-fields, .ndr-automatic-schedule { grid-template-columns: minmax(0, 1fr); }
 }
