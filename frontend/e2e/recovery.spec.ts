@@ -78,6 +78,7 @@ test.describe('预算与故障恢复', () => {
       .selectOption({ label: `${profileName} · fake-model` })
     await confirmChapterRoster(page)
 
+    await page.getByRole('button', { name: '展开预算与并发' }).click()
     await page.getByTestId('budget-max-input').fill('1')
     await selectAllChapterWindows(page)
     await page.getByTestId('preview-run').click()
@@ -85,13 +86,18 @@ test.describe('预算与故障恢复', () => {
       timeout: 30_000,
     })
     // 到顶后不再产生调用
+    await page.getByRole('button', { name: '展开调用明细', exact: true }).click()
+    await expect(page.getByTestId('job-calls')).toBeVisible()
     await expect(page.getByTestId('job-calls')).toHaveText('0')
     await expect(page.getByTestId('recovery-summary')).toContainText('预算')
     await expect(page.getByTestId('job-action-new_job')).toContainText('提高预算后重新处理')
     // 默认不会自动重算：这里必须由用户显式点
     await expect(page.getByTestId('recompute-entry')).toContainText('可调整预算重新处理')
 
+    await page.getByTestId('preview-step-run').click()
     await page.getByTestId('budget-max-input').fill('200000')
+    await page.getByTestId('preview-step-results').click()
+    await page.getByRole('button', { name: '展开重新处理此范围' }).click()
     await page.getByTestId('preview-recompute').click()
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()
@@ -114,6 +120,7 @@ test.describe('预算与故障恢复', () => {
       .getByTestId('preview-profile')
       .selectOption({ label: `${rosterProfileName} · fake-model` })
     await confirmChapterRoster(page)
+    await page.getByTestId('preview-step-config').click()
     await page
       .getByTestId('preview-profile')
       .selectOption({ label: `${profileName} · fake-model-no-key` })
@@ -153,6 +160,8 @@ test.describe('预算与故障恢复', () => {
     await expect(page.getByTestId('job-action-reconcile_retry')).toContainText('可能计费')
     await expect(page.getByTestId('job-action-reconcile_keep')).not.toContainText('可能计费')
     // 未知用量单独计数，不写 0
+    await page.getByRole('button', { name: '展开调用明细', exact: true }).click()
+    await expect(page.getByTestId('job-unknown-usage')).toBeVisible()
     await expect(page.getByTestId('job-unknown-usage')).toHaveText('1')
 
     await page.getByTestId('job-action-reconcile_keep').click()

@@ -1,4 +1,6 @@
 import type { JobDetailOut, UsageOut } from '../api/types'
+import { useEffect, useState } from 'react'
+import { CollapsibleBlock } from './CollapsibleBlock'
 
 /**
  * 本次任务与本书累计用量。未知用量的尝试单独计数，绝不按 0 计入 token。
@@ -6,14 +8,24 @@ import type { JobDetailOut, UsageOut } from '../api/types'
 export function UsageSummary({
   usage,
   currentJob,
+  expandDetails = false,
 }: {
   usage: UsageOut
   currentJob?: JobDetailOut | null
+  expandDetails?: boolean
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  useEffect(() => { if (expandDetails) setDetailsOpen(true) }, [expandDetails])
   const currentInput = Number(currentJob?.usage?.input_tokens ?? 0)
   const currentOutput = Number(currentJob?.usage?.output_tokens ?? 0)
 
   return (
+    <>
+    <div className="ndr-usage-overview">
+      {currentJob && <p>本次 <strong>{currentInput + currentOutput}</strong> token <span className="hint">· 用量未知 {currentJob.unknown_usage_runs} 次</span></p>}
+      <p>本书 <strong>{usage.total_tokens}</strong> token <span className="hint">· 用量未知 {usage.unknown_usage_runs} 次</span></p>
+    </div>
+    <CollapsibleBlock title="用量明细" open={detailsOpen} onOpenChange={setDetailsOpen}>
     <div className="ndr-usage" data-testid="usage-summary">
       {currentJob && (
         <>
@@ -51,5 +63,7 @@ export function UsageSummary({
         </p>
       )}
     </div>
+    </CollapsibleBlock>
+    </>
   )
 }

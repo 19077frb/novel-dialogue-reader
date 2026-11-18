@@ -12,7 +12,7 @@ import { ReadErrorNotice } from '../components/ReadErrorNotice'
 import { useAdmissions, stopAdmission, useQueueError, admissionServiceBlock, pumpQueue } from '../processing/workQueue'
 import type { QueueAdmission } from '../processing/workQueue'
 import { readJournal } from '../processing/journal'
-import { requestBatchStop } from '../components/BatchProcessor'
+import { BatchRetryControls, requestBatchStop } from '../components/BatchProcessor'
 import type { BatchProgressSnapshot, BatchExecution } from '../components/BatchProcessor'
 import type { SingleWorkflow } from '../processing/singleWorkflow'
 import type { TaskQueueItemOut } from '../api/types'
@@ -142,6 +142,10 @@ function AdmissionDetails({ item, onSelect, onSelectPlanned }: { item: QueueAdmi
   onSelectPlanned: (item: QueueAdmission, task: AdmissionTask) => void }) {
   useTaskRefresh(['queued', 'running'].includes(item.phase))
   const tasks = admissionTasks(item)
+  const batch = item.payload.type === 'batch'
+    ? readJournal<{ execution: { queueId?: string }; snapshot: BatchProgressSnapshot }>(`batch:${item.bookId}`) : null
+  const currentBatch = batch && (batch.execution.queueId === item.id
+    || item.id === `legacy:batch:${item.bookId}:${batch.snapshot.startedAt}`)
   const failed = tasks.filter(task => task.tone === 'failed').length
   return <>
     <TaskProgressSummary total={tasks.length} finished={tasks.filter(task => ['completed', 'failed', 'cancelled'].includes(task.tone)).length}
@@ -149,7 +153,10 @@ function AdmissionDetails({ item, onSelect, onSelectPlanned }: { item: QueueAdmi
     <CollapsibleBlock title="范围内任务" defaultOpen={false} summary={`共 ${tasks.length} 项；失败 ${failed} 项`}>
       <FilterableTaskProgressTable label="范围内任务" scope={item.id} rows={tasks.map(task => ({ id: task.id,
         state: task.tone, stateLabel: task.state, type: task.type, chapter: task.chapter || '未命名章节', window: task.window,
-        error: task.error, actions: <button onClick={() => task.jobId ? onSelect(task.jobId) : onSelectPlanned(item, task)}>查看任务</button> }))} />
+        error: task.error, actions: <>
+          <button onClick={() => task.jobId ? onSelect(task.jobId) : onSelectPlanned(item, task)}>查看任务</button>
+          {currentBatch && task.tone === 'failed' && <BatchRetryControls bookId={item.bookId} taskId={task.id} expectedRangeId={item.id} />}
+        </> }))} />
     </CollapsibleBlock>
   </>
 }

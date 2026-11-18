@@ -19,14 +19,10 @@ import { createTaskLimiter, mapWithConcurrency, inSharedTaskPool } from '../proc
 import { waitForJobCompletion } from '../processing/jobCompletion'
 import { getProcessingPreferences, inferenceOptions, useProcessingPreferences, rosterRepairOptions, estimateRosterTokens } from '../processing/preferences'
 import type { ProcessingPreferences } from '../processing/preferences'
-import { OperationTimer } from './OperationTimer'
 import { readJournal, writeJournal, removeJournal, withWorkflowLock, assertWorkflowOwnership } from '../processing/journal'
 import type { AnalyzeRosterInput } from '../api/characters'
 import type { CreateJobInput } from '../api/jobs'
 import { FormatRetrySetting } from './FormatRetrySetting'
-import { CollapsibleBlock } from './CollapsibleBlock'
-import { TaskProgressSummary, TaskProgressTable } from './TaskProgressTable'
-import { useListPagination } from './ListPagination'
 import { getGeneralSettings, useGeneralSettings } from '../settings/preferences'
 import { chapterFilterReason, defaultChapterFilter, normalizeChapterFilter } from '../processing/chapterFilter'
 import type { ChapterFilter } from '../processing/chapterFilter'
@@ -44,14 +40,6 @@ function batchJobError(job: JobDetailOut, fallback: string): Error {
 function isBatchAbortError(reason: unknown): reason is BatchAbortError {
   return reason instanceof BatchAbortError || reason instanceof ServiceBlockedError
 }
-const TASK_STATE_LABELS: Record<BatchTaskState, string> = {
-  queued: '排队中',
-  running: '处理中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已停止',
-}
-
 export type ChapterProcessingState =
   | 'unprocessed'
   | 'queued'
@@ -119,7 +107,7 @@ const retryPlanning = new Set<string>()
 const retryAdmissions = new Map<string, Promise<unknown>>()
 const retryStopGenerations = new Map<string, number>()
 const chapterRetryStops = new Map<string, number>()
-const batchExecutions = new Map<string, { execution: BatchExecution; spent: number; totalSpent: number; unknownRuns: number }>()
+const batchExecutions = new Map<string, { execution: BatchExecution; startedAt: number; spent: number; totalSpent: number; unknownRuns: number }>()
 const chapterStopRequests = new Map<string, Set<string>>()
 const expandableBatches = new Map<string, {
   versionId: string; automatic: boolean; append: (plans: ChapterPlan[]) => number
@@ -158,7 +146,7 @@ export async function restoreBatchProcessing(bookId: string) {
   if (!saved || saved.schema !== 1 || saved.execution.bookId !== bookId) return
   batchSnapshots.set(bookId, saved.snapshot)
   batchListeners.forEach(listener => listener())
-  batchExecutions.set(bookId, { execution: saved.execution, spent: saved.spent,
+  batchExecutions.set(bookId, { execution: saved.execution, startedAt: saved.snapshot.startedAt, spent: saved.spent,
     totalSpent: saved.totalSpent, unknownRuns: saved.unknownRuns })
   batchRequests.set(bookId, saved.requests)
   accountedJobs.set(bookId, new Set(saved.accounted))
@@ -234,7 +222,7 @@ export async function restoreBatchProcessing(bookId: string) {
           ? { ...task, state: 'cancelled' } : task)
       }
       writeJournal(`batch:${bookId}`, latest)
-      batchExecutions.set(bookId, { execution: latest.execution, spent: latest.spent,
+      batchExecutions.set(bookId, { execution: latest.execution, startedAt: latest.snapshot.startedAt, spent: latest.spent,
         totalSpent: latest.totalSpent, unknownRuns: latest.unknownRuns })
       batchRequests.set(bookId, latest.requests)
       accountedJobs.set(bookId, new Set(latest.accounted))
@@ -455,7 +443,19 @@ export function reconcileCompletedChapter(bookId: string, chapterId: string) {
   })
 }
 
-export async function retryBatchTask(bookId: string, taskId: string, wholeChapter = false) {
+export async function retryBatchTask(bookId: string, taskId: string, wholeChapter = false, expectedRangeId?: string) {
+  const assertRange = () => {
+    if (!expectedRangeId) return
+    const saved = readJournal<SavedBatch>(`batch:${bookId}`)
+    const runtime = batchExecutions.get(bookId)
+    if (!saved || (saved.execution.queueId !== expectedRangeId
+      && `legacy:batch:${bookId}:${saved.snapshot.startedAt}` !== expectedRangeId)
+      || !runtime || (runtime.execution.queueId !== expectedRangeId
+        && `legacy:batch:${bookId}:${runtime.startedAt}` !== expectedRangeId)) {
+      throw new Error('本书处理范围已更新，请重新查看任务队列后重试。')
+    }
+  }
+  assertRange()
   const task = batchSnapshots.get(bookId)?.tasks.find(item => item.id === taskId)
   if (!task) throw new Error('任务记录已清除，请重新读取。')
   const prefix = `${bookId}:${task.chapterId}:`
@@ -471,6 +471,7 @@ export async function retryBatchTask(bookId: string, taskId: string, wholeChapte
   // installs the pool synchronously; subsequent clicks reuse it and its budget.
   const admission = (retryAdmissions.get(bookId) ?? Promise.resolve()).catch(() => undefined)
     .then(() => {
+      assertRange()
       if ((retryStopGenerations.get(bookId) ?? 0) !== stopGeneration) throw new Error('已停止准备重试，未调用模型。')
       return prepareBatchRetry(bookId, taskId, wholeChapter, stopGeneration, chapterStopGeneration)
     })
@@ -580,7 +581,7 @@ async function prepareBatchRetry(bookId: string, taskId: string, wholeChapter: b
   }
 }
 
-export function BatchRetryControls({ bookId, taskId }: { bookId: string; taskId?: string }) {
+export function BatchRetryControls({ bookId, taskId, expectedRangeId }: { bookId: string; taskId?: string; expectedRangeId?: string }) {
   const progress = useBatchProgress(bookId)
   const serviceBlocks = useServiceBlocks()
   const serviceBlock = serviceBlocks.find(block => block.profileId === batchExecutions.get(bookId)?.execution.preferences.profileId)
@@ -591,7 +592,7 @@ export function BatchRetryControls({ bookId, taskId }: { bookId: string; taskId?
   return <div className="ndr-form-actions">
     {tasks.map(task => <button key={task.id} type="button" disabled={busy[task.id] || progress.stopRequested || Boolean(serviceBlock)}
       title={busy[task.id] ? '本窗口正在准备重试，请等待加入队列。' : progress.stopRequested ? '队列正在停止，请等待请求收尾后再重试。' : serviceBlock ? serviceBlockReason(serviceBlock) : '加入重试队列，有空闲并发位置时立即处理。'}
-      onClick={() => { setBusy(current => ({ ...current, [task.id]: true })); setError(null); void retryBatchTask(bookId, task.id)
+      onClick={() => { setBusy(current => ({ ...current, [task.id]: true })); setError(null); void retryBatchTask(bookId, task.id, false, expectedRangeId)
         .catch(reason => setError(reason instanceof Error ? reason.message : '重试失败'))
         .finally(() => setBusy(current => ({ ...current, [task.id]: false }))) }}>
       {busy[task.id] ? '准备重试…' : `重试${task.type === 'roster' ? '人物识别' : task.windowLabel}`}{!taskId && `（${task.chapterTitle}）`}
@@ -840,8 +841,8 @@ interface BatchProcessorProps {
   profiles: ModelProfileOut[]
   onFinished: () => void
   showConfiguration?: boolean
+  showQueueLink?: boolean
   initialChapterId?: string | null
-  progressPlacement?: 'before' | 'after'
   children?: ReactNode
 }
 
@@ -909,7 +910,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
   plans = [...plans]
   const execution: BatchExecution = { queueId, bookId, bookVersionId, requested, plans, preferences: { ...preferences },
     forceReprocess, onUsage, onProgress, onError, onTokenLimit, onFinished, expandable, chapterFilter }
-  const savedExecution = { execution, spent: initialSpent, totalSpent: initialTotalSpent, unknownRuns: initialUnknownRuns }
+  const savedExecution = { execution, startedAt: restoredSnapshot?.startedAt ?? Date.now(), spent: initialSpent, totalSpent: initialTotalSpent, unknownRuns: initialUnknownRuns }
   batchExecutions.set(bookId, savedExecution)
   const tokenLimitText = preferences.tokenLimit === null ? '' : String(preferences.tokenLimit)
   const setProgress = onProgress
@@ -993,7 +994,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
     const tasks = selectedPlans.flatMap(planTasks)
     publishBatch(bookId, {
       running: true,
-      startedAt: restoredSnapshot?.startedAt ?? Date.now(),
+      startedAt: savedExecution.startedAt,
       finishedAt: null,
       stopRequested: restoredSnapshot?.stopRequested ?? false,
       message: '准备批量处理…',
@@ -1532,7 +1533,7 @@ async function runBatchInternal({ bookId, bookVersionId, requested, plans, prefe
     }
 }
 
-export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished, showConfiguration = true, initialChapterId, progressPlacement = 'before', children }: BatchProcessorProps) {
+export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFinished, showConfiguration = true, showQueueLink = true, initialChapterId, children }: BatchProcessorProps) {
   const batchProgress = useBatchProgress(bookId)
   const notifiedFinish = useRef<number | null>(batchProgress.finishedAt)
   useEffect(() => {
@@ -1556,8 +1557,6 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
   const [forceReprocess, setForceReprocess] = useState(false)
   const [running, setRunning] = useState(false)
   const [estimating, setEstimating] = useState(false)
-  const [taskListOpen, setTaskListOpen] = useState(true)
-  const taskPagination = useListPagination(batchProgress.tasks.length, 20, `${bookId}:${batchProgress.startedAt}`)
   const [estimatedTokens, setEstimatedTokens] = useState<number | null>(null)
   const [plans, setPlans] = useState<ChapterPlan[]>([])
   const [progress, setProgress] = useState('')
@@ -1650,69 +1649,16 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     } catch (reason) { setError(reason instanceof Error ? reason.message : '添加任务失败')
     } finally { setRunning(false) }
   }
-  const taskList = (() => {
-    if (!batchProgress.running && batchProgress.tasks.length === 0) return null
-    const finishedTasks = batchProgress.tasks.filter((task) =>
-      ['completed', 'failed', 'cancelled'].includes(task.state),
-    ).length
-    const runningTasks = batchProgress.tasks.filter((task) => task.state === 'running').length
-    return (
-      <section
-        id="batch-task-list"
-        className="card ndr-step-card ndr-batch-progress"
-        data-testid={batchProgress.running ? 'batch-progress-panel' : 'batch-result-panel'}
-      >
-        <div className="ndr-step-heading">
-          <div>
-            <h3>{batchProgress.running ? '批量处理进度' : '最近一次批量任务列表'}</h3>
-            <OperationTimer startedAt={batchProgress.startedAt} finishedAt={batchProgress.finishedAt}
-              completed={batchProgress.tasks.filter(task => task.state === 'completed').length} total={batchProgress.tasks.length} />
-            <p className="hint" aria-live="polite" data-testid="batch-progress-message">
-              {batchProgress.message}
-            </p>
-          </div>
-          {batchProgress.running && <button
-            type="button"
-            className="ndr-danger"
-            disabled={batchProgress.stopRequested}
-            title={batchProgress.stopRequested ? '停止请求已提交，请等待已发出的模型请求安全收尾。' : undefined}
-            onClick={() => requestBatchStop(bookId)}
-            data-testid="batch-stop"
-          >
-            {batchProgress.stopRequested ? '正在停止…' : '停止批量处理'}
-          </button>}
-        </div>
-        <TaskProgressSummary total={batchProgress.tasks.length} finished={finishedTasks} running={runningTasks} testId="batch-task-summary" />
-        <CollapsibleBlock title="批量任务明细" open={taskListOpen} onOpenChange={setTaskListOpen}
-          summary={<span>共 {batchProgress.tasks.length} 项；失败 {batchProgress.tasks.filter(task => task.state === 'failed').length} 项</span>}>
-        <TaskProgressTable label="批量任务" pagination={taskPagination} rowTestId="batch-task-row"
-          rows={batchProgress.tasks.map(task => ({ id: task.id, state: task.state, stateLabel: TASK_STATE_LABELS[task.state],
-            type: task.type === 'roster' ? '人物识别' : '对白归属', chapter: task.chapterTitle,
-            window: task.windowLabel, windowTitle: task.windowId ?? undefined,
-            error: task.error || (task.type === 'roster' ? batchProgress.chapterStates[task.chapterId]?.error : null),
-            actions: <><BatchRetryControls bookId={bookId} taskId={task.id} />
-              {task.jobId && <Link className="ndr-button" to={`/tasks?jobId=${encodeURIComponent(task.jobId)}`}>查看任务</Link>}
-              {task.state === 'failed' && !task.retryable && <span className="hint">请先查看任务详情，确认请求已结束后再处理。</span>}</>,
-          }))} />
-        </CollapsibleBlock>
-        <p className="hint">{batchProgress.running
-          ? '停止后关闭队列派发，等待已发出的模型请求收尾。'
-          : '最近一次任务明细会保存；跨书籍任务与已添加范围可从主导航“任务队列”查看。'}</p>
-      </section>
-    )
-  })()
-
-  if (!showConfiguration) return <>{children}{taskList}</>
+  if (!showConfiguration) return <>{children}</>
 
   return (
     <>
-    {progressPlacement === 'before' && taskList}
     <section className="card ndr-step-card" data-testid="batch-processor">
       <div className="ndr-step-heading">
-        <span className="ndr-step-badge" aria-hidden="true">1</span>
+        <span className="ndr-step-badge" aria-hidden="true">2</span>
         <div>
           <h3>批量处理配置</h3>
-          <p className="hint">人物按章节顺序确认；上一章人物完成后，本章对白窗口会与下一章人物识别共享并发任务池。</p>
+          <p className="hint">按章节顺序确认人物，再处理对白。可连续添加多个范围。</p>
         </div>
       </div>
       <div className="ndr-range-grid ndr-batch-config-grid">
@@ -1728,10 +1674,14 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
             {chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.title || `第 ${chapter.ordinal + 1} 章`}</option>)}
           </select>
         </label>
+      </div>
+      <details className="ndr-batch-advanced">
+        <summary>处理选项 · 复核 {maxRecheckRounds} 次 · 并发 {concurrency} · {preferences.tokenLimit === null ? '不限 Token' : `${preferences.tokenLimit.toLocaleString()} Token 上限`}</summary>
+        <div className="ndr-range-grid ndr-batch-config-grid">
         <label>
           每个窗口最多复核次数
           <input type="number" min={0} value={maxRecheckRounds} onChange={(event) => { setMaxRecheckRounds(nonNegativeInteger(event.target.value)); resetEstimate() }} disabled={running} data-testid="batch-max-rechecks" />
-          <span className="hint">0 关闭；每轮检查原窗口全部对白（含已自动接受项），保留人工锁定结果。每轮可能拆为多个模型调用并消耗 Tokens；校验失败重试另行设置。</span>
+          <span className="hint">0 关闭。每轮复核全部对白，保留人工锁定结果，可能拆分多次模型调用。</span>
         </label>
         <FormatRetrySetting value={maxFormatRetries} disabled={running}
           onChange={value => { setPreferences({ maxFormatRetries: value }); resetEstimate() }} testId="batch-format-retries" />
@@ -1758,9 +1708,11 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       {forceReprocess && (
         <p className="hint">所选范围内的全部章节将重新识别人物和处理对白，保留人工确认或锁定的标注。</p>
       )}
-      <p className="hint">并发数同时约束人物识别和对白窗口；设为 1 即按顺序处理，建议从 2 开始。</p>
+      <p className="hint">人物识别与对白共享并发数，设为 1 时依次处理。</p>
+      </details>
       {filterSettings.chapterFilterEnabled && <p className="hint">已启用章节过滤名单，匹配的章节会自动跳过处理，强制重做也不例外。<a className="ndr-button" href="/settings/general#chapter-filter-settings">调整过滤名单</a></p>}
       <div className="ndr-form-actions">
+        {showQueueLink && <Link className="ndr-button" to="/tasks">任务队列</Link>}
         <button type="button" className="ndr-primary" title={running ? '批量处理正在运行，请等待结束或先停止任务。' : estimating ? '正在估算 Token，请等待估算完成。' : !bookVersionId ? '书籍版本尚未读取，请先重新读取书籍。' : !validRange ? '请选择有效的开始和结束章节，结束章节不能早于开始章节。' : !profileId ? '请先选择模型配置，再估算和启动批量处理。' : strategyReason ?? undefined} disabled={running || estimating || !validRange || !profileId || !bookVersionId || Boolean(strategyReason)} onClick={() => void (estimatedTokens === null ? calculateEstimate() : run())} data-testid="batch-run">
           {running ? '批量处理中…' : estimating ? '正在估算…' : estimatedTokens === null ? '预估 Token' : '确认并开始批量处理'}
         </button>
@@ -1769,7 +1721,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       {estimatedTokens !== null && (
         <p className="hint" data-testid="batch-estimate">
           整批预计约 {estimatedTokens.toLocaleString()} tokens（包含逐章人物识别预留与对白归属估算）。
-          对白输入已计入当前已知人物资料；尚未分析或确认的章节可能新增人物名册和档案，增加后续每窗用量。实际用量还受复核、重试和模型推理影响，估算不构成消耗上限。
+          人物资料新增、复核、重试和推理可能增加用量，估算不构成消耗上限。
           {forceReprocess ? ' 已包含已处理章节的重做费用估算。' : chapters.slice(startIndex, endIndex + 1).some((chapter) => chapter.dialogue_processed) ? ' 已处理章节直接复用结果。' : ''}
           {positiveIntegerOrNull(tokenLimitText) !== null && estimatedTokens > (positiveIntegerOrNull(tokenLimitText) ?? 0) ? ' 预计会超过当前上限，系统只会在剩余额度允许时派发新任务。' : ''}
         </p>
@@ -1779,11 +1731,10 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
       {!validRange && <p className="status-error">结束章节不能早于开始章节。</p>}
       {(progress || batchProgress.message) && <p className="hint" data-testid="batch-progress">{batchProgress.message || progress}</p>}
       {error && <p className="status-error" data-testid="batch-error">
-        {error} {taskList && <a className="ndr-button" href="#batch-task-list" onClick={() => setTaskListOpen(true)}>查看任务列表</a>}
+        {error} <Link className="ndr-button" to="/tasks">查看任务队列</Link>
       </p>}
     </section>
     {children}
-    {progressPlacement === 'after' && taskList}
     </>
   )
 }

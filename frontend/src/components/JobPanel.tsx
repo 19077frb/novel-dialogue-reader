@@ -12,6 +12,7 @@ import {
 } from '../api/jobs'
 import type { JobDetailOut } from '../api/types'
 import { TERMINAL_JOB_STATES } from '../processing/jobCompletion'
+import { CollapsibleBlock } from './CollapsibleBlock'
 import { OperationTimer } from './OperationTimer'
 import { ReadErrorNotice } from './ReadErrorNotice'
 import { ProposalDiagnostics } from './ProposalDiagnostics'
@@ -53,6 +54,7 @@ export function isTerminalJob(state: JobDetailOut['state']): boolean {
 
 export interface JobPanelProps {
   jobId: string
+  compact?: boolean
   /** 任务快照更新时回调（例如显示本次用量；终态时刷新累计用量）。 */
   onUpdate?: (job: JobDetailOut) => void
 }
@@ -64,7 +66,7 @@ export interface JobPanelProps {
  * - 恢复动作完全来自 `GET /api/jobs/{id}/recovery`：前端不自己推断，也不隐藏「可能计费」提示。
  * - 未知结果不会自动重发：只有用户点「确认重发」才会回到队列。
  */
-export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
+export function JobPanel({ jobId, onUpdate, compact = false }: JobPanelProps) {
   const queryClient = useQueryClient()
   const job = useQuery({
     queryKey: queryKeys.job(jobId),
@@ -110,6 +112,38 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
 
   const info = recovery.data
   const recoveryActions = info?.actions ?? []
+  const recoveryDetails = <ul className="hint">
+    {recoveryActions.map(item => <li key={item.action}>{item.detail}</li>)}
+  </ul>
+  const metrics = <>
+      {compact && state === 'COMPLETED' && recoveryActions.length === 0 && info && <p className="hint">{info.summary}</p>}
+      <dl className="ndr-job-metrics">
+        <div><dt>窗口</dt>
+        <dd>
+          <span data-testid="job-windows-done">
+            {job.data.windows_total - job.data.remaining_windows}
+          </span>
+          {' / '}
+          <span data-testid="job-windows-total">{job.data.windows_total}</span>
+        </dd></div>
+        <div><dt>真实调用次数</dt>
+        <dd data-testid="job-calls">{job.data.calls}</dd></div>
+        <div><dt>缓存命中窗口</dt>
+        <dd data-testid="job-cached-windows">{job.data.cached_windows}</dd></div>
+        <div><dt>未知用量尝试</dt>
+        <dd data-testid="job-unknown-usage">{job.data.unknown_usage_runs}</dd></div>
+      </dl>
+      {job.data.progress && (
+        <details><summary>任务诊断详情</summary><ul className="hint">
+          {Object.entries(job.data.progress).filter(([key]) => key !== 'proposal_diagnostics').map(([key, value]) => (
+            <li key={key}>
+              {key}: {String(value)}
+            </li>
+          ))}
+        </ul></details>
+      )}
+
+  </>
   return (
     <div className="ndr-job-panel" data-testid="job-panel">
       <p className="ndr-job-status" role="status" aria-live="polite">
@@ -141,33 +175,9 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
       <OperationTimer startedAt={Date.parse(job.data.created_at)}
         finishedAt={state && isTerminalJob(state) ? Date.parse(job.data.updated_at) : null}
         completed={job.data.windows_total - job.data.remaining_windows} total={job.data.windows_total} />
-      <dl className="ndr-job-metrics">
-        <div><dt>窗口</dt>
-        <dd>
-          <span data-testid="job-windows-done">
-            {job.data.windows_total - job.data.remaining_windows}
-          </span>
-          {' / '}
-          <span data-testid="job-windows-total">{job.data.windows_total}</span>
-        </dd></div>
-        <div><dt>真实调用次数</dt>
-        <dd data-testid="job-calls">{job.data.calls}</dd></div>
-        <div><dt>缓存命中窗口</dt>
-        <dd data-testid="job-cached-windows">{job.data.cached_windows}</dd></div>
-        <div><dt>未知用量尝试</dt>
-        <dd data-testid="job-unknown-usage">{job.data.unknown_usage_runs}</dd></div>
-      </dl>
-      {job.data.progress && (
-        <details><summary>任务诊断详情</summary><ul className="hint">
-          {Object.entries(job.data.progress).filter(([key]) => key !== 'proposal_diagnostics').map(([key, value]) => (
-            <li key={key}>
-              {key}: {String(value)}
-            </li>
-          ))}
-        </ul></details>
-      )}
+      {compact ? <CollapsibleBlock title="调用明细" defaultOpen={false}>{metrics}</CollapsibleBlock> : metrics}
 
-      {info && (
+      {info && (!compact || state !== 'COMPLETED' || recoveryActions.length > 0) && (
         <div className="ndr-recovery" data-testid="job-recovery">
           <p className="hint" data-testid="recovery-summary">
             {info.summary}
@@ -204,11 +214,7 @@ export function JobPanel({ jobId, onUpdate }: JobPanelProps) {
             )}
           </div>
           {recoveryActions.length > 0 && (
-            <ul className="hint">
-              {recoveryActions.map((item) => (
-                <li key={item.action}>{item.detail}</li>
-              ))}
-            </ul>
+            compact ? <details><summary>恢复操作说明</summary>{recoveryDetails}</details> : recoveryDetails
           )}
         </div>
       )}

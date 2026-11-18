@@ -55,7 +55,9 @@ async function runWholeBook(page: Page, profileName: string, model = 'fake-model
   await page.getByTestId('preview-profile').selectOption({
     label: `${profileName} · ${model}`,
   })
+  await page.getByTestId('preview-step-range').click()
   await page.getByTestId('range-chapter').selectOption('') // 整本
+  await page.getByTestId('preview-step-run').click()
   await page.getByTestId('preview-run').click()
   await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
 }

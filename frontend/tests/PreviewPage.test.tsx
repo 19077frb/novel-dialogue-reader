@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -19,6 +19,8 @@ import type {
   QuoteNormalizationOut,
   QuoteNormalizationRefreshOut,
 } from '../src/api/types'
+import { requestBatchStop, type BatchProgressSnapshot } from '../src/components/BatchProcessor'
+import { readJournal } from '../src/processing/journal'
 import PreviewPage from '../src/pages/PreviewPage'
 import PreprocessingPage from '../src/pages/PreprocessingPage'
 import { renderRoute } from './helpers'
@@ -288,6 +290,27 @@ const USAGE = {
   by_model: {},
 } as UsageOut
 
+function batchSnapshot() {
+  return readJournal<{ snapshot: BatchProgressSnapshot }>('batch:b1')!.snapshot
+}
+
+async function visiblePreviewControl(testId: string) {
+  const control = await screen.findByTestId(testId)
+  const step = control.closest<HTMLElement>('[data-preview-step]')?.dataset.previewStep
+  if (step) await userEvent.click(screen.getByTestId(`preview-step-${step}`))
+  const ancestors: HTMLElement[] = []
+  for (let node = control.parentElement; node; node = node.parentElement) ancestors.unshift(node)
+  for (const ancestor of ancestors) {
+    if (ancestor instanceof HTMLDetailsElement && !ancestor.open) await userEvent.click(ancestor.querySelector('summary')!)
+    if (ancestor.classList.contains('ndr-collapsible-block')) {
+      const toggle = ancestor.querySelector<HTMLButtonElement>('.ndr-collapse-toggle')
+      if (toggle?.getAttribute('aria-expanded') === 'false') await userEvent.click(toggle)
+    }
+  }
+  expect(control).toBeVisible()
+  return control
+}
+
 describe('PreviewPage', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -379,6 +402,56 @@ describe('PreviewPage', () => {
     ] as never)
   })
 
+  it('默认显示配置，预处理可跳过，前进与返回保留范围和人物草稿', async () => {
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    expect(await screen.findByTestId('preview-profile')).toBeVisible()
+    await waitFor(() => expect(screen.getByRole('link', { name: '打开预处理' })).toHaveAttribute('href', '/books/b1/preprocessing?chapterId=c1'))
+    expect(screen.getByTestId('range-chapter')).not.toBeVisible()
+    await userEvent.click(screen.getByTestId('preview-step-next'))
+    expect(screen.getByTestId('range-chapter')).toBeVisible()
+    expect(screen.getByTestId('preview-profile')).not.toBeVisible()
+    await userEvent.click(screen.getByTestId('window-w2'))
+    await userEvent.click(screen.getByTestId('preview-step-next'))
+    expect(screen.getByTestId('roster-name-c1')).toBeVisible()
+    await userEvent.clear(screen.getByTestId('roster-name-c1'))
+    await userEvent.type(screen.getByTestId('roster-name-c1'), '草稿人物')
+    await userEvent.click(screen.getByTestId('preview-step-back'))
+    expect(screen.getByTestId('window-w2')).not.toBeChecked()
+    await userEvent.click(screen.getByTestId('preview-step-roster'))
+    expect(screen.getByTestId('roster-name-c1')).toHaveValue('草稿人物')
+    expect(charactersApi.confirmCharacterRoster).not.toHaveBeenCalled()
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+  })
+
+  it('跳到对白步骤保留人物确认限制，批量切换后显示相应步骤且不提交任务', async () => {
+    vi.mocked(charactersApi.fetchCharacterRoster).mockResolvedValue({ ...ROSTER, status: 'DRAFT', pov_character_id: null })
+    renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await screen.findByTestId('window-picker')
+    await userEvent.click(screen.getByTestId('preview-step-run'))
+    expect(screen.getByTestId('preview-process')).toBeVisible()
+    expect(screen.getByTestId('preview-process')).toBeDisabled()
+    await userEvent.click(screen.getByTestId('preview-step-config'))
+    await userEvent.click(screen.getByTestId('processing-mode-batch'))
+    expect(screen.queryByTestId('preview-step-roster')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('preview-step-run')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('preview-step-range'))
+    expect(screen.getByTestId('batch-run')).toBeVisible()
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['processing-configuration', 'config'], ['processing-workflow', 'range'],
+    ['processing-roster', 'roster'], ['processing-run', 'run'],
+    ['processing-usage', 'results'], ['processing-document', 'results'],
+  ])('旧链接 #%s 打开对应的 %s 步骤且不提交任务', async (hash, step) => {
+    renderRoute('/books/:bookId/preview', <PreviewPage />, `/books/b1/preview#${hash}`)
+    await waitFor(() => expect(screen.getByTestId(`preview-step-${step}`)).toHaveAttribute('aria-current', 'step'))
+    expect(jobsApi.createJob).not.toHaveBeenCalled()
+    expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
+  })
+
   it('手动人物确认后重新读取与再次进入仍显示姓名说明和主人公', async () => {
     let current = ROSTER
     vi.mocked(charactersApi.fetchCharacterRoster).mockImplementation(async () => current)
@@ -398,12 +471,13 @@ describe('PreviewPage', () => {
     })
     const mounted = renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('roster-name-c1')
-    await userEvent.click(screen.getByTestId('roster-add-character'))
+    await userEvent.click(await visiblePreviewControl('roster-add-character'))
     const card = screen.getByTestId('roster-candidates').querySelectorAll('article')[1]
+    await visiblePreviewControl('roster-candidates')
     await userEvent.type(within(card as HTMLElement).getByRole('textbox', { name: '姓名' }), '手动人物')
     await userEvent.type(within(card as HTMLElement).getByRole('textbox', { name: '说明' }), '手动说明')
     await userEvent.click(within(card as HTMLElement).getByRole('radio'))
-    await userEvent.click(screen.getByTestId('roster-confirm'))
+    await userEvent.click(await visiblePreviewControl('roster-confirm'))
     await waitFor(() => expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(charactersApi.fetchCharacterRoster).toHaveBeenCalledTimes(2))
     const manualRef = current.candidates![1].temp_ref
@@ -411,6 +485,7 @@ describe('PreviewPage', () => {
     mounted.unmount()
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     const restored = (await screen.findByTestId(`roster-name-${manualRef}`)).closest('article')!
+    await visiblePreviewControl('roster-candidates')
     expect(within(restored).getByRole('textbox', { name: '说明' })).toHaveValue('手动说明')
     expect(within(restored).getByRole('radio')).toBeChecked()
     expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
@@ -422,11 +497,11 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     expect(await screen.findByTestId('profile-thinking-defaults')).toHaveTextContent('模式 关闭')
     expect(screen.getByTestId('processing-thinking-effort')).toBeDisabled()
-    await userEvent.selectOptions(screen.getByTestId('processing-thinking-mode'), 'enabled')
+    await userEvent.selectOptions(await visiblePreviewControl('processing-thinking-mode'), 'enabled')
     expect(screen.getByTestId('processing-thinking-effort')).not.toBeDisabled()
-    await userEvent.selectOptions(screen.getByTestId('processing-thinking-effort'), 'high')
+    await userEvent.selectOptions(await visiblePreviewControl('processing-thinking-effort'), 'high')
     await screen.findByTestId('window-picker')
-    await userEvent.click(screen.getByTestId('preview-run'))
+    await userEvent.click(await visiblePreviewControl('preview-run'))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalled())
     expect(jobsApi.createJob).toHaveBeenCalledWith(expect.objectContaining({ inferenceOptions: { thinking_mode: 'enabled', reasoning_effort: 'high' } }))
   })
@@ -440,15 +515,15 @@ describe('PreviewPage', () => {
     expect(within(modelSettings).getByTestId('preview-profile')).toBeInTheDocument()
     expect(within(modelSettings).getByTestId('processing-thinking-mode')).toBeInTheDocument()
     expect(modelSettings.compareDocumentPosition(screen.getByTestId('processing-mode-picker')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
-    expect(modelSettings.compareDocumentPosition(screen.getByRole('heading', { name: '选择处理范围' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    fireEvent.change(screen.getByTestId('preview-profile'), { target: { value: 'p2' } })
-    fireEvent.change(screen.getByTestId('budget-max-rechecks'), { target: { value: '7' } })
-    fireEvent.change(screen.getByTestId('budget-format-retries'), { target: { value: '2' } })
-    fireEvent.change(screen.getByTestId('preview-concurrency'), { target: { value: '4' } })
-    fireEvent.change(screen.getByTestId('budget-max-input'), { target: { value: '50000' } })
-    fireEvent.change(screen.getByTestId('processing-thinking-mode'), { target: { value: 'adaptive' } })
-    fireEvent.change(screen.getByTestId('processing-thinking-effort'), { target: { value: 'high' } })
-    await userEvent.click(screen.getByTestId('processing-mode-batch'))
+    expect(modelSettings.compareDocumentPosition(screen.getByRole('heading', { name: '选择处理范围', hidden: true })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.change(await visiblePreviewControl('preview-profile'), { target: { value: 'p2' } })
+    fireEvent.change(await visiblePreviewControl('budget-max-rechecks'), { target: { value: '7' } })
+    fireEvent.change(await visiblePreviewControl('budget-format-retries'), { target: { value: '2' } })
+    fireEvent.change(await visiblePreviewControl('preview-concurrency'), { target: { value: '4' } })
+    fireEvent.change(await visiblePreviewControl('budget-max-input'), { target: { value: '50000' } })
+    fireEvent.change(await visiblePreviewControl('processing-thinking-mode'), { target: { value: 'adaptive' } })
+    fireEvent.change(await visiblePreviewControl('processing-thinking-effort'), { target: { value: 'high' } })
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     expect(screen.getByTestId('batch-profile')).toHaveValue('p2')
     expect(screen.getAllByTestId('model-thinking-settings')).toHaveLength(1)
     expect(within(modelSettings).getByTestId('batch-profile')).toBeInTheDocument()
@@ -458,9 +533,9 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('batch-concurrency')).toHaveValue(4)
     expect(screen.getByTestId('batch-token-limit')).toHaveValue(50000)
     expect(screen.getByTestId('processing-thinking-mode')).toHaveValue('adaptive')
-    fireEvent.change(screen.getByTestId('batch-max-rechecks'), { target: { value: '3' } })
-    fireEvent.change(screen.getByTestId('batch-format-retries'), { target: { value: '4' } })
-    fireEvent.change(screen.getByTestId('batch-token-limit'), { target: { value: '' } })
+    fireEvent.change(await visiblePreviewControl('batch-max-rechecks'), { target: { value: '3' } })
+    fireEvent.change(await visiblePreviewControl('batch-format-retries'), { target: { value: '4' } })
+    fireEvent.change(await visiblePreviewControl('batch-token-limit'), { target: { value: '' } })
     mounted.unmount()
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     expect(screen.getByTestId('processing-thinking-effort')).toHaveValue('high')
@@ -505,13 +580,13 @@ describe('PreviewPage', () => {
     expect(jobsApi.estimateRange).toHaveBeenCalledWith('b1', expect.objectContaining({
       range: { chapterId: 'c2', startCp: 20, endCp: 40, dialogueStrategy: 'legacy' },
     }), expect.any(AbortSignal))
-    await userEvent.selectOptions(screen.getByTestId('range-chapter'), 'c1')
+    await userEvent.selectOptions(await visiblePreviewControl('range-chapter'), 'c1')
     expect(screen.getByTestId('range-chapter')).toHaveValue('c1')
     // 即使临时处理其它章节，“去阅读”仍回到进入处理页之前的阅读章节。
     expect(screen.getByRole('link', { name: '去阅读' })).toHaveAttribute('href', '/books/b1/read?chapterId=c2')
-    await userEvent.click(screen.getByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     expect(await screen.findByTestId('batch-start')).toHaveValue('c2')
-    await userEvent.selectOptions(screen.getByTestId('batch-start'), 'c1')
+    await userEvent.selectOptions(await visiblePreviewControl('batch-start'), 'c1')
     expect(screen.getByTestId('batch-start')).toHaveValue('c1')
     expect(jobsApi.createJob).not.toHaveBeenCalled()
     expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
@@ -521,7 +596,7 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview?chapterId=foreign-chapter')
     await screen.findByTestId('window-picker')
     expect(screen.getByTestId('range-chapter')).toHaveValue('c1')
-    await userEvent.click(screen.getByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     expect(await screen.findByTestId('batch-start')).toHaveValue('c1')
     expect(screen.getByRole('link', { name: '去阅读' })).toHaveAttribute('href', '/books/b1/read?chapterId=c1')
   })
@@ -539,9 +614,9 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('window-picker')).toHaveTextContent('窗口 1')
     expect(jobsApi.createJob).not.toHaveBeenCalled()
     expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByTestId('window-w2'))
+    await userEvent.click(await visiblePreviewControl('window-w2'))
 
-    await userEvent.click(screen.getByTestId('preview-run'))
+    await userEvent.click(await visiblePreviewControl('preview-run'))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(1))
     expect(vi.mocked(jobsApi.createJob).mock.calls[0][0]).toMatchObject({
       bookId: 'b1',
@@ -553,6 +628,7 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('job-state')).toHaveTextContent('已完成')
     expect(screen.getByTestId('job-calls')).toHaveTextContent('2')
     expect(screen.getByTestId('usage-current-total')).toHaveTextContent('40')
+    await visiblePreviewControl('usage-current-total')
     expect(screen.getByRole('heading', { name: '本次任务消耗' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '本书累计消耗' })).toBeInTheDocument()
     expect(screen.getByTestId('preview-notice')).toHaveTextContent('阅读标注')
@@ -566,6 +642,7 @@ describe('PreviewPage', () => {
     expect(screen.getByTestId('roster-analyze')).toHaveAttribute('title', expect.stringContaining('自动跳过处理'))
     expect(screen.getByTestId('preview-process')).toBeDisabled()
     expect(screen.getByTestId('preview-run')).toBeDisabled()
+    await visiblePreviewControl('roster-add-character')
     expect(screen.getByRole('button', { name: '手动添加人物' })).toBeEnabled()
     expect(charactersApi.analyzeCharacterRoster).not.toHaveBeenCalled()
     expect(jobsApi.createJob).not.toHaveBeenCalled()
@@ -575,11 +652,11 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('annotation-span')
     await screen.findByTestId('window-picker')
-    await userEvent.selectOptions(screen.getByTestId('dialogue-strategy'), 'complete')
+    await userEvent.selectOptions(await visiblePreviewControl('dialogue-strategy'), 'complete')
     await waitFor(() => expect(screen.getByTestId('preview-process')).toBeEnabled())
 
-    fireEvent.change(screen.getByTestId('preview-concurrency'), { target: { value: '2' } })
-    await userEvent.click(screen.getByTestId('preview-process'))
+    fireEvent.change(await visiblePreviewControl('preview-concurrency'), { target: { value: '2' } })
+    await userEvent.click(await visiblePreviewControl('preview-process'))
 
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
     expect(vi.mocked(jobsApi.createJob).mock.calls.every(([input]) => input.range.dialogueStrategy === 'complete')).toBe(true)
@@ -601,8 +678,8 @@ describe('PreviewPage', () => {
     vi.mocked(booksApi.fetchJob).mockImplementation(async (id) => ({ ...JOB, id, state: states[id] }))
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('window-picker')
-    fireEvent.change(screen.getByTestId('preview-concurrency'), { target: { value: '1' } })
-    await userEvent.click(screen.getByTestId('preview-process'))
+    fireEvent.change(await visiblePreviewControl('preview-concurrency'), { target: { value: '1' } })
+    await userEvent.click(await visiblePreviewControl('preview-process'))
     await waitFor(() => expect(screen.getByTestId('single-task-w1')).toHaveTextContent('排队中'))
     expect(screen.getByTestId('single-task-w2')).toHaveTextContent('等待派发')
     expect(await screen.findByTestId('job-panel')).toBeInTheDocument()
@@ -613,6 +690,7 @@ describe('PreviewPage', () => {
     const details = screen.getByTestId('single-task-details')
     const scroll = vi.fn()
     details.scrollIntoView = scroll
+    await visiblePreviewControl('single-task-w1')
     const viewFirst = within(screen.getByTestId('single-task-w1')).getByRole('button', { name: '查看任务' })
     await userEvent.click(viewFirst)
     expect(details).toHaveFocus()
@@ -651,7 +729,7 @@ describe('PreviewPage', () => {
     })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('window-picker')
-    await userEvent.click(screen.getByTestId('preview-process'))
+    await userEvent.click(await visiblePreviewControl('preview-process'))
     await waitFor(() => expect(screen.getByTestId('single-task-w1')).toHaveTextContent('提供方拒绝请求'))
     expect(screen.getByTestId('preview-process')).toBeDisabled()
     finishOther({ ...JOB, id: 'done' })
@@ -668,7 +746,7 @@ describe('PreviewPage', () => {
     await screen.findByTestId('window-picker')
     expect(screen.getByTestId('window-w1')).not.toBeChecked()
     expect(screen.getByTestId('window-w2')).toBeChecked()
-    await userEvent.click(screen.getByTestId('preview-process'))
+    await userEvent.click(await visiblePreviewControl('preview-process'))
     await waitFor(() => expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1'))
     expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
     expect(jobsApi.createJob).toHaveBeenCalledWith(expect.objectContaining({ selectedWindowIds: ['w2'] }))
@@ -678,11 +756,11 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('window-picker')
     vi.mocked(jobsApi.estimateRange).mockResolvedValue({ ...ESTIMATE, windows: ESTIMATE.windows!.map(window => ({ ...window, processing_status: 'completed' })) })
-    await userEvent.click(screen.getByTestId('preview-estimate'))
+    await userEvent.click(await visiblePreviewControl('preview-estimate'))
     await waitFor(() => expect(screen.getByTestId('window-w1')).not.toBeChecked())
     expect(screen.getByTestId('window-w2')).not.toBeChecked()
-    await userEvent.click(screen.getByTestId('windows-select-all'))
-    await userEvent.click(screen.getByTestId('preview-estimate'))
+    await userEvent.click(await visiblePreviewControl('windows-select-all'))
+    await userEvent.click(await visiblePreviewControl('preview-estimate'))
     expect(screen.getByTestId('window-w1')).toBeChecked()
     expect(screen.getByTestId('window-w2')).toBeChecked()
   })
@@ -691,6 +769,7 @@ describe('PreviewPage', () => {
     vi.mocked(booksApi.fetchChapters).mockResolvedValue(CHAPTERS.map(chapter => ({ ...chapter, dialogue_processed: false })))
     vi.mocked(jobsApi.estimateRange).mockResolvedValue({ ...ESTIMATE, windows: ESTIMATE.windows!.map(window => ({ ...window, processing_status: 'completed' })) })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(screen.getByTestId('preview-step-range'))
     await userEvent.click(await screen.findByRole('button', { name: '同步章节完成状态' }))
     await waitFor(() => expect(booksApi.completeChapterProcessing).toHaveBeenCalledWith('b1', 'c1', 'v1'))
     expect(jobsApi.createJob).not.toHaveBeenCalled()
@@ -704,10 +783,10 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     expect(await screen.findByTestId('window-picker')).toHaveTextContent('人物识别仍会读取本章全文')
     expect(screen.getByTestId('windows-selection-summary')).toHaveTextContent('已选 2/2')
-    await userEvent.click(screen.getByTestId('windows-clear'))
+    await userEvent.click(await visiblePreviewControl('windows-clear'))
     expect(screen.getByTestId('windows-selection-summary')).toHaveTextContent('已选 0/2')
     expect(screen.getByTestId('preview-process')).toBeDisabled()
-    await userEvent.click(screen.getByTestId('windows-select-all'))
+    await userEvent.click(await visiblePreviewControl('windows-select-all'))
     expect(screen.getByTestId('window-w1')).toBeChecked()
     expect(screen.getByTestId('window-w2')).toBeChecked()
     expect(jobsApi.createJob).not.toHaveBeenCalled()
@@ -723,11 +802,11 @@ describe('PreviewPage', () => {
     })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('window-w3')
-    await userEvent.click(screen.getByTestId('windows-clear'))
+    await userEvent.click(await visiblePreviewControl('windows-clear'))
     expect(screen.getByTestId('preview-process')).toBeDisabled()
-    await userEvent.click(screen.getByTestId('window-w1'))
-    await userEvent.click(screen.getByTestId('window-w3'))
-    await userEvent.click(screen.getByTestId('preview-process'))
+    await userEvent.click(await visiblePreviewControl('window-w1'))
+    await userEvent.click(await visiblePreviewControl('window-w3'))
+    await userEvent.click(await visiblePreviewControl('preview-process'))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
     expect(vi.mocked(jobsApi.createJob).mock.calls.map(([input]) => input.selectedWindowIds)).toEqual([
       ['w1'], ['w3'],
@@ -738,14 +817,14 @@ describe('PreviewPage', () => {
   it('重新预览同一窗口计划或修改预算后保留窗口勾选', async () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await screen.findByTestId('window-picker')
-    await userEvent.click(screen.getByTestId('window-w2'))
-    fireEvent.change(screen.getByTestId('range-chapter'), { target: { value: 'c1' } })
+    await userEvent.click(await visiblePreviewControl('window-w2'))
+    fireEvent.change(await visiblePreviewControl('range-chapter'), { target: { value: 'c1' } })
     expect(screen.getByTestId('window-w1')).toBeChecked()
     expect(screen.getByTestId('window-w2')).not.toBeChecked()
-    await userEvent.click(screen.getByTestId('preview-estimate'))
+    await userEvent.click(await visiblePreviewControl('preview-estimate'))
     await waitFor(() => expect(jobsApi.estimateRange).toHaveBeenCalledTimes(2))
     expect(screen.getByTestId('window-w2')).not.toBeChecked()
-    fireEvent.change(screen.getByTestId('budget-max-input'), { target: { value: '50000' } })
+    fireEvent.change(await visiblePreviewControl('budget-max-input'), { target: { value: '50000' } })
     await waitFor(() => expect(jobsApi.estimateRange).toHaveBeenCalledTimes(3))
     await screen.findByTestId('window-picker')
     expect(screen.getByTestId('window-w1')).toBeChecked()
@@ -755,6 +834,7 @@ describe('PreviewPage', () => {
   it('窗口预览失败时不允许处理，重试成功后恢复多选', async () => {
     vi.mocked(jobsApi.estimateRange).mockRejectedValueOnce(new Error('窗口规划不可用'))
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(screen.getByTestId('preview-step-range'))
     expect(await screen.findByRole('alert')).toHaveTextContent('窗口预览失败：窗口规划不可用')
     expect(screen.getByTestId('preview-process')).toBeDisabled()
     expect(jobsApi.createJob).not.toHaveBeenCalled()
@@ -777,7 +857,7 @@ describe('PreviewPage', () => {
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
     await waitFor(() => expect(jobsApi.estimateRange).toHaveBeenCalledTimes(1))
     expect(screen.getByTestId('preview-process')).toBeDisabled()
-    await userEvent.selectOptions(screen.getByTestId('range-chapter'), 'c2')
+    await userEvent.selectOptions(await visiblePreviewControl('range-chapter'), 'c2')
     await screen.findByTestId('window-chapter2')
     resolveOld(ESTIMATE)
     await waitFor(() => expect(screen.getByTestId('window-chapter2')).toBeChecked())
@@ -792,12 +872,12 @@ describe('PreviewPage', () => {
     const jobCalls = vi.mocked(jobsApi.createJob).mock.calls.length
     const annotationCalls = vi.mocked(annotationsApi.fetchAnnotations).mock.calls.length
 
-    await userEvent.click(screen.getByTestId('view-original'))
+    await userEvent.click(await visiblePreviewControl('view-original'))
     await waitFor(() => expect(screen.queryByTestId('annotation-span')).toBeNull())
     // 原文仍然完整
     expect(screen.getByTestId('document-renderer')).toHaveTextContent('「雨停了。」少女说。')
 
-    await userEvent.click(screen.getByTestId('view-annotated'))
+    await userEvent.click(await visiblePreviewControl('view-annotated'))
     await waitFor(() => expect(screen.getByTestId('annotation-span')).toBeInTheDocument())
 
     expect(vi.mocked(jobsApi.estimateRange).mock.calls.length).toBe(estimateCalls)
@@ -808,9 +888,10 @@ describe('PreviewPage', () => {
   it('开启设置后原文和标注预览都显示待确认标记并提示去队列核对', async () => {
     updateGeneralSettings({ showReviewMarkers: true })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(screen.getByTestId('preview-step-results'))
     expect(await screen.findByRole('img', { name: '对白待确认' })).toHaveAttribute('title',
       '这句对白在待确认队列中，可前往待确认队列查看并确认。')
-    await userEvent.click(screen.getByTestId('view-original'))
+    await userEvent.click(await visiblePreviewControl('view-original'))
     expect(screen.queryByTestId('annotation-span')).not.toBeInTheDocument()
     expect(screen.getByRole('img', { name: '对白待确认' })).toBeInTheDocument()
   })
@@ -834,27 +915,27 @@ describe('PreviewPage', () => {
     vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(meteredJob)
     vi.mocked(jobsApi.createJob).mockResolvedValue(meteredJob)
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
-    await userEvent.selectOptions(screen.getByTestId('dialogue-strategy'), 'complete-review')
-    if (allow) await userEvent.click(screen.getByTestId('roster-repair-enabled'))
-    fireEvent.change(screen.getByTestId('processing-thinking-mode'), { target: { value: 'enabled' } })
-    fireEvent.change(screen.getByTestId('processing-thinking-effort'), { target: { value: 'low' } })
+    await userEvent.selectOptions(await visiblePreviewControl('dialogue-strategy'), 'complete-review')
+    if (allow) await userEvent.click(await visiblePreviewControl('roster-repair-enabled'))
+    fireEvent.change(await visiblePreviewControl('processing-thinking-mode'), { target: { value: 'enabled' } })
+    fireEvent.change(await visiblePreviewControl('processing-thinking-effort'), { target: { value: 'low' } })
     expect(screen.queryByTestId('preview-profile')).not.toBeInTheDocument()
     expect(screen.getByTestId('batch-profile')).toHaveValue('p1')
 
     await userEvent.clear(screen.getByTestId('batch-max-rechecks'))
-    await userEvent.type(screen.getByTestId('batch-max-rechecks'), '2')
-    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '1' } })
+    await userEvent.type(await visiblePreviewControl('batch-max-rechecks'), '2')
+    fireEvent.change(await visiblePreviewControl('batch-concurrency'), { target: { value: '1' } })
 
-    await userEvent.type(screen.getByTestId('batch-token-limit'), '50000')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.type(await visiblePreviewControl('batch-token-limit'), '50000')
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     expect(await screen.findByTestId('batch-estimate')).toHaveTextContent(allow ? '7,320' : '3,280')
     expect(jobsApi.estimateRange).toHaveBeenCalledWith(
       'b1',
       expect.objectContaining({ budget: expect.objectContaining({ maxRecheckRounds: 2 }) }),
     )
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
 
     await waitFor(() => expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledTimes(1))
     expect(charactersApi.confirmCharacterRoster).toHaveBeenCalledWith('b1', 'c1',
@@ -895,12 +976,12 @@ describe('PreviewPage', () => {
     vi.mocked(charactersApi.analyzeCharacterRoster).mockResolvedValue(meteredJob)
     vi.mocked(jobsApi.createJob).mockResolvedValue(meteredJob)
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
 
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await screen.findByTestId('batch-estimate')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
 
     await waitFor(() => expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(4))
@@ -943,13 +1024,13 @@ describe('PreviewPage', () => {
       return new Promise<JobDetailOut>((resolve) => dialogueResolvers.push(resolve))
     })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
-    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '3' } })
+    fireEvent.change(await visiblePreviewControl('batch-concurrency'), { target: { value: '3' } })
 
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await screen.findByTestId('batch-estimate')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
 
     await waitFor(() => expect(rosterResolvers.has('c1')).toBe(true))
     expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
@@ -987,19 +1068,19 @@ describe('PreviewPage', () => {
       service_error_code: code, service_error_run_id: 'failed-roster-run',
       unknown_usage_runs: 0, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, unknown_runs: 0 } } as JobDetailOut)
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
-    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '2' } })
-    await userEvent.click(screen.getByTestId('batch-run'))
+    fireEvent.change(await visiblePreviewControl('batch-concurrency'), { target: { value: '2' } })
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await screen.findByTestId('batch-estimate')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await waitFor(() => expect(screen.getByTestId('batch-error')).toHaveTextContent('请先解决模型服务问题'))
     expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(1)
     expect(jobsApi.createJob).not.toHaveBeenCalled()
     expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
-    const rows = within(screen.getByTestId('batch-result-panel')).getAllByRole('row')
-    expect(rows.some(row => row.getAttribute('data-task-state') === 'failed')).toBe(true)
-    expect(rows.some(row => row.getAttribute('data-task-state') === 'cancelled')).toBe(true)
+    expect(batchSnapshot().tasks.some(task => task.state === 'failed')).toBe(true)
+    expect(batchSnapshot().tasks.some(task => task.state === 'cancelled')).toBe(true)
+    expect(screen.getByRole('link', { name: '查看任务队列' })).toHaveAttribute('href', '/tasks')
   })
 
   it('批量对白遇到服务余额不足保留失败并停止后续派发', async () => {
@@ -1013,18 +1094,18 @@ describe('PreviewPage', () => {
       service_error_code: 'PROVIDER_QUOTA_EXHAUSTED', service_error_run_id: 'failed-dialogue-run',
       last_error: 'PROVIDER_QUOTA_EXHAUSTED: 模型服务余额或额度不足（402）' })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
-    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '1' } })
-    await userEvent.click(screen.getByTestId('batch-run'))
+    fireEvent.change(await visiblePreviewControl('batch-concurrency'), { target: { value: '1' } })
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await screen.findByTestId('batch-estimate')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await waitFor(() => expect(screen.getByTestId('batch-error')).toHaveTextContent('请先解决模型服务问题'))
     expect(vi.mocked(charactersApi.analyzeCharacterRoster).mock.calls.length).toBeLessThan(4)
     expect(booksApi.completeChapterProcessing).not.toHaveBeenCalled()
-    const rows = within(screen.getByTestId('batch-result-panel')).getAllByRole('row')
-    expect(rows.some(row => row.getAttribute('data-task-state') === 'completed')).toBe(true)
-    expect(rows.some(row => row.getAttribute('data-task-state') === 'failed')).toBe(true)
+    expect(batchSnapshot().tasks.some(task => task.state === 'completed')).toBe(true)
+    expect(batchSnapshot().tasks.some(task => task.state === 'failed')).toBe(true)
+    expect(screen.getByRole('link', { name: '查看任务队列' })).toHaveAttribute('href', '/tasks')
   })
 
   it('单个章节失败不会把后续章节统一标为失败', async () => {
@@ -1044,39 +1125,29 @@ describe('PreviewPage', () => {
       .mockResolvedValue(meteredJob)
     vi.mocked(jobsApi.createJob).mockResolvedValue(meteredJob)
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
-    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '2' } })
+    fireEvent.change(await visiblePreviewControl('batch-concurrency'), { target: { value: '2' } })
 
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await screen.findByTestId('batch-estimate')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
 
     await waitFor(() => expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(3))
     await waitFor(() =>
       expect(screen.getByTestId('batch-progress')).toHaveTextContent('成功 2 章，失败 1 章'),
     )
     expect(screen.getByTestId('batch-error')).toHaveTextContent('成功 2 章，失败 1 章')
-    const resultPanel = screen.getByTestId('batch-result-panel')
-    expect(screen.getAllByTestId('preview-usage')).toHaveLength(1)
-    expect(screen.getByTestId('preview-usage').compareDocumentPosition(resultPanel)
-      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(resultPanel).getByText('第一章人物识别失败')).toBeInTheDocument()
-    expect(within(resultPanel).getByRole('columnheader', { name: '原因 / 错误详情' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看任务列表' })).toHaveAttribute('href', '#batch-task-list')
-    expect(screen.getByRole('link', { name: '查看任务列表' })).toHaveClass('ndr-button')
-    await userEvent.click(within(resultPanel).getByRole('button', { name: '收起批量任务明细' }))
-    expect(within(resultPanel).getByText('第一章人物识别失败')).not.toBeVisible()
-    expect(within(resultPanel).getByTestId('batch-task-summary')).toBeVisible()
-    expect(within(resultPanel).getByText(/共.*项；失败 1 项/)).toBeVisible()
-    await userEvent.click(screen.getByRole('link', { name: '查看任务列表' }))
-    expect(within(resultPanel).getByText('第一章人物识别失败')).toBeVisible()
+    expect(screen.queryByTestId('batch-result-panel')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看任务队列' })).toHaveAttribute('href', '/tasks')
+    expect(batchSnapshot().tasks.filter(task => task.state === 'failed')).toHaveLength(1)
+    expect(batchSnapshot().tasks.find(task => task.state === 'failed')?.error).toContain('第一章人物识别失败')
     expect(screen.getByTestId('batch-run')).toBeEnabled()
     expect(jobsApi.createJob).toHaveBeenCalledTimes(4)
     expect(booksApi.completeChapterProcessing).toHaveBeenCalledTimes(2)
-    await userEvent.click(screen.getByTestId('processing-mode-single'))
-    expect(screen.getByTestId('batch-result-panel')).toHaveTextContent('第一章人物识别失败')
-    expect(screen.queryByTestId('batch-processor')).not.toBeInTheDocument()
+    await userEvent.click(await visiblePreviewControl('processing-mode-single'))
+    expect(screen.queryByTestId('batch-result-panel')).not.toBeInTheDocument()
+    expect(screen.getByTestId('batch-processor')).not.toBeVisible()
   })
 
   it('已完成的无文字章节显示说明并禁止重复人物分析', async () => {
@@ -1084,6 +1155,7 @@ describe('PreviewPage', () => {
       ...ROSTER, status: 'CONFIRMED', candidates: [], confirmed_characters: [], pov_character_id: null,
     })
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
+    await userEvent.click(await screen.findByTestId('preview-step-roster'))
     expect(await screen.findByText(/本章没有正文文字，已直接标为完成/)).toBeInTheDocument()
     expect(screen.getByTestId('roster-analyze')).toBeDisabled()
     expect(screen.queryByText('已确认本章主人公；如需修改，请重新确认。')).not.toBeInTheDocument()
@@ -1099,11 +1171,11 @@ describe('PreviewPage', () => {
       chapterId === 'c1' ? { ...ROSTER, candidates: [] } : ROSTER,
     )
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await screen.findByTestId('batch-estimate')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
 
     await waitFor(() => expect(screen.getByTestId('batch-progress')).toHaveTextContent('跳过无人物章节 1 章'))
     expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalledTimes(2)
@@ -1113,7 +1185,7 @@ describe('PreviewPage', () => {
     expect(screen.queryByTestId('batch-error')).not.toBeInTheDocument()
   })
 
-  it('批量运行时切换为逐任务进度面板，停止后不再派发排队窗口', async () => {
+  it('批量运行时只提供队列入口，切换步骤保留执行且队列停止后不再派发窗口', async () => {
     const meteredJob = {
       ...JOB,
       unknown_usage_runs: 0,
@@ -1125,46 +1197,28 @@ describe('PreviewPage', () => {
       () => new Promise<JobDetailOut>((resolve) => { resolveWindow = resolve }),
     )
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
-    fireEvent.change(screen.getByTestId('batch-concurrency'), { target: { value: '1' } })
+    fireEvent.change(await visiblePreviewControl('batch-concurrency'), { target: { value: '1' } })
 
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await screen.findByTestId('batch-estimate')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
 
-    let panel = await screen.findByTestId('batch-progress-panel')
-    const usagePanel = screen.getByTestId('preview-usage')
-    expect(screen.getByTestId('batch-processor').compareDocumentPosition(usagePanel)
-      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(usagePanel.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(1))
-    expect(within(panel).getByText('人物识别')).toBeInTheDocument()
-    expect(within(panel).getAllByText('对白归属')).toHaveLength(2)
-    expect(within(panel).getByText('窗口 1 · 1 句对白')).toBeInTheDocument()
-    expect(within(panel).getByText('窗口 2 · 2 句对白')).toBeInTheDocument()
-    expect(screen.getByTestId('processing-mode-single')).toBeEnabled()
-    expect(screen.getByTestId('batch-run')).toBeInTheDocument()
-
-    await userEvent.click(screen.getByTestId('processing-mode-single'))
-    expect(screen.getAllByTestId('preview-usage')).toHaveLength(1)
-    expect(screen.getByTestId('preview-usage').compareDocumentPosition(screen.getByTestId('batch-progress-panel'))
-      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByTestId('batch-progress-panel')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /^任务队列$/ }).every(link => link.getAttribute('href') === '/tasks')).toBe(true)
+    expect(batchSnapshot().tasks.some(task => task.type === 'roster')).toBe(true)
+    expect(batchSnapshot().tasks.filter(task => task.type === 'dialogue')).toHaveLength(2)
+    await userEvent.click(await visiblePreviewControl('processing-mode-single'))
     expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
-    await userEvent.click(screen.getByTestId('processing-mode-batch'))
-    panel = screen.getByTestId('batch-progress-panel')
-
-    await userEvent.click(within(panel).getByTestId('batch-stop'))
-    expect(within(panel).getByTestId('batch-progress-message')).toHaveTextContent('正在停止')
-    expect(within(panel).getByTestId('batch-stop')).toBeDisabled()
-    expect(within(panel).getByText('已停止')).toBeInTheDocument()
-
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
+    act(() => requestBatchStop('b1'))
+    expect(batchSnapshot().stopRequested).toBe(true)
     resolveWindow(meteredJob)
-    await waitFor(() => expect(screen.queryByTestId('batch-progress-panel')).not.toBeInTheDocument())
-    expect(screen.getByTestId('batch-result-panel')).toBeInTheDocument()
-    expect(screen.queryByTestId('batch-stop')).not.toBeInTheDocument()
+    await waitFor(() => expect(batchSnapshot().running).toBe(false))
     expect(jobsApi.createJob).toHaveBeenCalledTimes(1)
-    expect(screen.getByTestId('batch-progress')).toHaveTextContent('批量处理已停止')
+    expect(batchSnapshot().message).toContain('批量处理已停止')
   })
 
   it('批量处理会跳过回导后标记为已处理的章节', async () => {
@@ -1172,12 +1226,12 @@ describe('PreviewPage', () => {
       CHAPTERS.map((chapter) => ({ ...chapter, dialogue_processed: true })),
     )
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
 
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     expect(await screen.findByTestId('batch-estimate')).toHaveTextContent('0 tokens')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
 
     await waitFor(() =>
       expect(screen.getByTestId('batch-progress')).toHaveTextContent('均已处理'),
@@ -1193,17 +1247,17 @@ describe('PreviewPage', () => {
       CHAPTERS.map((chapter) => ({ ...chapter, dialogue_processed: true })),
     )
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     expect(await screen.findByTestId('batch-estimate')).toHaveTextContent('0 tokens')
 
-    await userEvent.click(screen.getByTestId('batch-force-reprocess'))
+    await userEvent.click(await visiblePreviewControl('batch-force-reprocess'))
     expect(screen.queryByTestId('batch-estimate')).not.toBeInTheDocument()
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     expect(await screen.findByTestId('batch-estimate')).toHaveTextContent('已包含已处理章节')
     expect(jobsApi.estimateRange).toHaveBeenCalled()
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
     expect(jobsApi.createJob).toHaveBeenCalledWith(expect.objectContaining({ forceReprocess: true }))
     expect(charactersApi.analyzeCharacterRoster).toHaveBeenCalled()
@@ -1224,13 +1278,13 @@ describe('PreviewPage', () => {
     vi.mocked(jobsApi.createJob).mockResolvedValue(dialogueJob)
     const prompt = vi.spyOn(window, 'prompt').mockReturnValue('5000')
     renderRoute('/books/:bookId/preview', <PreviewPage />, '/books/b1/preview')
-    await userEvent.click(await screen.findByTestId('processing-mode-batch'))
+    await userEvent.click(await visiblePreviewControl('processing-mode-batch'))
     await screen.findByTestId('batch-processor')
 
-    await userEvent.type(screen.getByTestId('batch-token-limit'), '2500')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.type(await visiblePreviewControl('batch-token-limit'), '2500')
+    await userEvent.click(await visiblePreviewControl('batch-run'))
     await screen.findByTestId('batch-estimate')
-    await userEvent.click(screen.getByTestId('batch-run'))
+    await userEvent.click(await visiblePreviewControl('batch-run'))
 
     await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(jobsApi.createJob).toHaveBeenCalledTimes(2))
@@ -1281,7 +1335,7 @@ describe('PreviewPage', () => {
     await userEvent.click(document.querySelector('.ndr-normalization-card summary')!)
     expect(screen.getByText('“他说雨停了。”')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByTestId('quote-normalization-close-n1'), {
+    fireEvent.change(await visiblePreviewControl('quote-normalization-close-n1'), {
       target: { value: '9' },
     })
     await userEvent.click(screen.getByText('保存并重扫'))
@@ -1297,7 +1351,7 @@ describe('PreviewPage', () => {
       },
     ))
 
-    await userEvent.click(screen.getByTestId('quote-normalization-refresh'))
+    await userEvent.click(await visiblePreviewControl('quote-normalization-refresh'))
     await waitFor(() => expect(booksApi.refreshQuoteNormalizations).toHaveBeenCalledWith('b1'))
   })
 
