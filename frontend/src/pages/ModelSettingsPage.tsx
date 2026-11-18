@@ -90,11 +90,11 @@ export default function ModelSettingsPage() {
 
   const selectedProtocol = protocols.data?.find((item) => item.protocol === form.protocol)
   const protocolHelp = form.protocol === 'chat-completions-compatible'
-    ? '适用于使用 OpenAI 接口格式的云端模型和本地服务。服务地址填写 API 根地址，系统会追加 /chat/completions；模型名称按服务商提供的信息填写。云端服务通常需要 API 密钥，在凭据中选择保存方式并填写密钥。明确无需认证的本地服务可选择“无需密钥（No API Key）”。'
+    ? '适用于使用 OpenAI 接口格式的云端模型和本地服务。服务地址填写 API 根地址，系统会追加 /chat/completions；模型名称按服务商提供的信息填写。云端服务通常需要 API 密钥，在凭据中选择保存方式并填写密钥。明确无需认证的本地服务可选择“无需密钥（None）”。'
     : form.protocol === 'anthropic-messages'
       ? '适用于 Anthropic Messages 接口。官方服务地址可填 https://api.anthropic.com/v1，系统会追加 /messages；兼容服务按服务商说明填写 API 根地址和模型名称。官方服务需要 API 密钥。思考模式按模型支持情况选择；开启思考时随机性与采样使用服务默认值。手动思考要求最大输出 Token 大于 1024，自适应使用所选思考强度。'
       : form.protocol === 'fake-provider'
-        ? '用于本地模拟界面流程，返回测试数据。凭据选择“无需密钥（No API Key）”。'
+        ? '用于本地模拟界面流程，返回测试数据。凭据选择“无需密钥（None）”。'
         : `${selectedProtocol?.notes ?? ''} 服务地址、模型名称和是否需要 API 密钥，请按服务商提供的接入说明填写。`
   const baseUrlHelp = form.protocol === 'anthropic-messages'
     ? '填写 API 根地址，例如 https://api.anthropic.com/v1；系统会追加 /messages。'

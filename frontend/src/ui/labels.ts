@@ -23,13 +23,13 @@ export const gapDecisionLabel = (value: string): string => ({
 } as Record<string, string>)[value] ?? '场景待确认'
 
 export const protocolLabel = (value: string): string => ({
-  'chat-completions-compatible': 'OpenAI 协议（Chat Completions）',
-  'anthropic-messages': 'Anthropic 协议（Messages）',
+  'chat-completions-compatible': 'OpenAI Chat Completions',
+  'anthropic-messages': 'Anthropic Messages',
   'fake-provider': '模拟服务（仅测试，不调用模型）',
 } as Record<string, string>)[value] ?? value
 
 export const credentialLabel = (value: string): string => ({
-  session: '仅本次会话（Session）', system: '系统凭据库（Keyring）', none: '无需密钥（No API Key）',
+  session: '会话（Session）', system: '系统凭据库（Keyring）', none: '无需密钥（None）',
 } as Record<string, string>)[value] ?? value
 
 export const annotationStatusLabel = (value: string): string => ({
