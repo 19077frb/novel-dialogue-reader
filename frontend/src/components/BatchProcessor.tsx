@@ -1655,7 +1655,7 @@ export function BatchProcessor({ bookId, bookVersionId, chapters, profiles, onFi
     <>
     <section className="card ndr-step-card" data-testid="batch-processor">
       <div className="ndr-step-heading">
-        <span className="ndr-step-badge" aria-hidden="true">1</span>
+        <span className="ndr-step-badge" aria-hidden="true">2</span>
         <div>
           <h3>批量处理配置</h3>
           <p className="hint">按章节顺序确认人物，再处理对白。可连续添加多个范围。</p>

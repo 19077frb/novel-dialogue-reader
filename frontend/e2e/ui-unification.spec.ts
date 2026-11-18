@@ -103,7 +103,7 @@ for (const layout of [
       if (item.name === 'batch') {
         await page.getByTestId('processing-mode-batch').check()
         await page.getByTestId('preview-step-range').click()
-        await expect(page.getByTestId('batch-processor').locator('.ndr-step-badge')).toHaveText('1')
+        await expect(page.getByTestId('batch-processor').locator('.ndr-step-badge')).toHaveText('2')
         const grid = page.locator('.ndr-batch-config-grid').first()
         await expect(grid).toBeVisible()
         const fields = await grid.locator(':scope > label').evaluateAll(labels => labels.map(label => {
