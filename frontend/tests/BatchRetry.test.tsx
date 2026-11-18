@@ -70,6 +70,31 @@ it('does not recount old failed receipts across consecutive window retries', asy
   expect(readJournal<{ totalSpent: number }>('batch:b1')!.totalSpent).toBe(50)
 })
 
+it.each(['before', 'after'])('rejects a range replacement %s a queue retry click without sending model requests', async replacementTime => {
+  await start()
+  const saved = readJournal<{ execution: { queueId?: string }; snapshot: { startedAt: number } }>('batch:b1')!
+  const oldRangeId = `legacy:batch:b1:${saved.snapshot.startedAt}`
+  vi.mocked(jobs.createJob).mockClear()
+  vi.mocked(characters.analyzeCharacterRoster).mockClear()
+  const pending = replacementTime === 'after' ? retryBatchTask('b1', 'dialogue:c1:w1', false, oldRangeId) : null
+  saved.execution.queueId = 'replacement-range'
+  saved.snapshot.startedAt += 1
+  writeJournal('batch:b1', saved)
+  await expect(pending ?? retryBatchTask('b1', 'dialogue:c1:w1', false, oldRangeId)).rejects.toThrow('处理范围已更新')
+  expect(jobs.createJob).not.toHaveBeenCalled()
+  expect(characters.analyzeCharacterRoster).not.toHaveBeenCalled()
+})
+
+it('keeps the original budget when retrying a legacy range through its queue identity', async () => {
+  await start()
+  const saved = readJournal<{ snapshot: { startedAt: number }; totalSpent: number }>('batch:b1')!
+  const oldRangeId = `legacy:batch:b1:${saved.snapshot.startedAt}`
+  vi.mocked(jobs.createJob).mockImplementation(async () => job('COMPLETED'))
+  await retryBatchTask('b1', 'dialogue:c1:w1', false, oldRangeId)
+  expect(readJournal<{ totalSpent: number }>('batch:b1')!.totalSpent).toBe(saved.totalSpent + 10)
+  expect(jobs.createJob).toHaveBeenLastCalledWith(expect.objectContaining({ profileId: 'p1', selectedWindowIds: ['w1'] }))
+})
+
 it('rechecks a reconciled partial result before chapter retry and repairs only unfinished windows', async () => {
   const uncertain = job('NEEDS_RECONCILIATION')
   vi.mocked(jobs.createJob).mockImplementation(async input => input.selectedWindowIds?.[0] === 'w1' ? uncertain : job('COMPLETED'))

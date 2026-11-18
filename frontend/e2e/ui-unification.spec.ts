@@ -56,7 +56,8 @@ for (const layout of [
       if (item.name !== 'reader') await expect(header.locator('h2')).toContainText(item.title)
       if (item.route.startsWith('/books/')) await expect(header.locator('h2')).toContainText('sample-utf8')
       await expect(header.locator('.hint')).not.toBeEmpty()
-      if (['reader', 'single', 'batch'].includes(item.name)) {
+      if (item.name === 'single') await page.getByTestId('preview-step-results').click()
+      if (['reader', 'single'].includes(item.name)) {
         await expect(page.getByTestId('document-renderer')).toBeVisible()
       }
       if (item.name === 'characters') {
@@ -94,26 +95,30 @@ for (const layout of [
         expect(readStyle).toEqual(deleteStyle)
       }
       if (item.name === 'single') {
+        await page.getByTestId('preview-step-run').click()
         await expect(page.getByTestId('preview-process')).toHaveClass('ndr-primary')
         await expect(page.getByTestId('preview-run')).not.toHaveClass(/ndr-primary/)
         await expect(page.getByTestId('preview-estimate')).not.toHaveClass(/ndr-primary/)
       }
       if (item.name === 'batch') {
         await page.getByTestId('processing-mode-batch').check()
+        await page.getByTestId('preview-step-range').click()
         await expect(page.getByTestId('batch-processor').locator('.ndr-step-badge')).toHaveText('1')
-        const grid = page.locator('.ndr-batch-config-grid')
+        const grid = page.locator('.ndr-batch-config-grid').first()
         await expect(grid).toBeVisible()
         const fields = await grid.locator(':scope > label').evaluateAll(labels => labels.map(label => {
           const bounds = label.getBoundingClientRect()
           return { top: bounds.top, left: bounds.left, width: bounds.width }
         }))
-        const columns = layout.width > 900 ? 3 : layout.width > 600 ? 2 : 1
-        expect(fields).toHaveLength(6)
+        const columns = layout.width > 600 ? 2 : 1
+        expect(fields).toHaveLength(2)
         for (let index = 1; index < columns; index += 1) {
           expect(Math.abs(fields[index].top - fields[0].top)).toBeLessThanOrEqual(1)
         }
-        expect(Math.abs(fields[columns].left - fields[0].left)).toBeLessThanOrEqual(1)
-        expect(fields[columns].top).toBeGreaterThan(fields[0].top)
+        if (columns < fields.length) {
+          expect(Math.abs(fields[columns].left - fields[0].left)).toBeLessThanOrEqual(1)
+          expect(fields[columns].top).toBeGreaterThan(fields[0].top)
+        }
       }
       if (item.nav.length) {
         const actual = await header.locator('.ndr-book-nav a, .ndr-book-nav button').allTextContents()

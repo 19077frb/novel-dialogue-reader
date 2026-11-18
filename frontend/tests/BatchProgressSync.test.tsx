@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { BatchProcessor, clearBatchProgress, useBatchAnnotationRevisions, useBatchCatalogRevision, useBatchChapterProgress } from '../src/components/BatchProcessor'
 
@@ -25,27 +25,28 @@ function send(raw: string | null) {
 }
 afterEach(() => { cleanup(); clearBatchProgress(bookId); localStorage.clear(); vi.restoreAllMocks() })
 
-it('bounds batch rows without hiding summary or stop, and receives hidden-page progress', () => {
+it('keeps completion subscription without rendering the removed task list', () => {
   const data = JSON.parse(record())
   data.snapshot.message = '处理中'
-  data.snapshot.tasks = Array.from({ length: 23 }, (_, i) => ({ id: `task-${i}`, type: 'dialogue', chapterId: 'c1',
-    chapterTitle: `章节 ${i}`, windowLabel: `窗口 ${i}`, windowId: `w${i}`, state: 'queued', error: null }))
+  data.snapshot.tasks = [{ id: 'task-1', type: 'dialogue', chapterId: 'c1',
+    chapterTitle: '第一章', windowLabel: '窗口 1', windowId: 'w1', state: 'queued', error: null }]
   localStorage.setItem(key, JSON.stringify(data))
-  render(<BatchProcessor bookId={bookId} bookVersionId="v1" chapters={[]} profiles={[]} onFinished={() => {}} showConfiguration={false} />)
-  expect(screen.getAllByRole('row')).toHaveLength(21)
-  const nav = screen.getByRole('navigation', { name: '批量任务分页' })
-  fireEvent.click(within(nav).getByRole('button', { name: '下一页' }))
-  expect(screen.getAllByRole('row')).toHaveLength(4)
-  expect(screen.getByTestId('batch-stop')).toBeVisible()
-  expect(screen.getByTestId('batch-task-summary')).toHaveTextContent('/23 项')
+  const onFinished = vi.fn()
+  render(<BatchProcessor bookId={bookId} bookVersionId="v1" chapters={[]} profiles={[]} onFinished={onFinished} showConfiguration={false}>
+    <p>处理配置内容</p>
+  </BatchProcessor>)
+  expect(screen.getByText('处理配置内容')).toBeVisible()
+  expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('batch-progress-panel')).not.toBeInTheDocument()
   data.snapshot.revision = 2
-  data.snapshot.tasks[0].state = 'failed'
-  data.snapshot.tasks[0].error = '隐藏页任务失败'
+  data.snapshot.running = false
+  data.snapshot.finishedAt = 200
+  data.snapshot.tasks[0].state = 'completed'
   send(JSON.stringify(data))
-  expect(screen.getByText('共 23 项；失败 1 项')).toBeVisible()
-  expect(screen.getByText('隐藏页任务失败')).not.toBeVisible()
-  fireEvent.click(within(nav).getByRole('button', { name: '上一页' }))
-  expect(screen.getByText('隐藏页任务失败')).toBeVisible()
+  expect(onFinished).toHaveBeenCalledTimes(1)
+  expect(screen.queryByTestId('batch-result-panel')).not.toBeInTheDocument()
+  send(JSON.stringify(data))
+  expect(onFinished).toHaveBeenCalledTimes(1)
 })
 
 it('receives another tab progress and completion without writes or execution', () => {

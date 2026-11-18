@@ -50,8 +50,10 @@ test.describe('预览与按章处理', () => {
     await openPreview(page, 'sample-utf8')
 
     // 阅读跳转会继承书签章节；本用例显式选择第一章以隔离其他用例的阅读进度。
+    await page.getByTestId('preview-step-range').click()
     await page.getByTestId('range-chapter').selectOption({ index: 1 })
     await expect(page.getByTestId('range-summary')).toContainText('本次范围：0 – ')
+    await page.getByTestId('preview-step-config').click()
     await page
       .getByTestId('preview-profile')
       .selectOption({ label: `${profileName} · fake-model` })
@@ -71,13 +73,14 @@ test.describe('预览与按章处理', () => {
     await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30_000 })
     expect(Number(await page.getByTestId('job-calls').innerText())).toBeGreaterThan(0)
     await expect(page.getByTestId('preview-notice')).toContainText('阅读标注')
+    await page.getByRole('button', { name: '展开单章任务明细' }).click()
     const firstTask = page.getByTestId('single-task-progress').locator('tbody tr').first()
     const details = page.getByTestId('single-task-details')
     const windowLabel = await firstTask.locator('td').first().innerText()
     await firstTask.getByRole('button', { name: '查看任务' }).click()
     await expect(details).toBeFocused()
     await expect(details).toBeInViewport()
-    await expect(details.getByRole('heading')).toHaveText(`${windowLabel} 任务详情`)
+    await expect(details.locator('#single-task-details-heading')).toHaveText(`${windowLabel} 任务详情`)
     const selectedJobId = await details.getAttribute('data-job-id')
     await firstTask.getByRole('button', { name: '查看任务' }).click()
     await expect(details).toBeFocused()
@@ -93,6 +96,7 @@ test.describe('预览与按章处理', () => {
     expect(color).not.toBe('')
 
     // 原文/标注切换：只改显示，原文不变，也不产生任何模型调用
+    await page.getByTestId('preview-step-results').click()
     await page.getByTestId('view-original').check()
     await expect(page.getByTestId('annotation-span')).toHaveCount(0)
     await expect(page.getByTestId('preview-document')).toContainText('「雨停了。」')
@@ -101,7 +105,7 @@ test.describe('预览与按章处理', () => {
 
     // 正式处理：同范围同输入 → 命中缓存，不再发送任何调用
     // 保存后默认排除已完成窗口；此处明确全选以验证缓存重用。
-    await page.getByTestId('windows-select-all').click()
+    await selectAllChapterWindows(page)
     await page.getByTestId('preview-process').click()
     await expect(page.getByTestId('job-calls')).toHaveText('0', { timeout: 30_000 })
     await expect(page.getByTestId('job-state')).toHaveText('已完成')
@@ -116,6 +120,7 @@ test.describe('预览与按章处理', () => {
     await importFile(page, 'original-sample.epub')
     await expect(page.getByTestId('import-result')).toContainText('导入完成：EPUB')
     await openPreview(page, '原创 ruby/插图样例')
+    await page.getByTestId('preview-step-config').click()
     await page
       .getByTestId('preview-profile')
       .selectOption({ label: `${profileName} · fake-model` })
@@ -137,16 +142,19 @@ test.describe('预览与按章处理', () => {
     await importFile(page, 'sample-gb18030.txt')
     await expect(page.getByTestId('import-result')).toContainText('导入完成：TXT')
     await openPreview(page, 'sample-gb18030')
+    await page.getByTestId('preview-step-config').click()
     await page
       .getByTestId('preview-profile')
       .selectOption({ label: `${profileName} · fake-model` })
 
     // 核对范围：切到第二章，范围随之变化（来自目录的真实起止码点）
+    await page.getByTestId('preview-step-range').click()
     const chapterOption = page.getByTestId('range-chapter').locator('option').nth(2)
     const chapterLabel = (await chapterOption.innerText()).trim()
     const match = chapterLabel.match(/（(\d+) – (\d+)）/)
     expect(match).not.toBeNull()
     const [, startCp, endCp] = match as RegExpMatchArray
+    await page.getByTestId('preview-step-range').click()
     await page.getByTestId('range-chapter').selectOption({ index: 2 })
     await expect(page.getByTestId('range-summary')).toContainText(`${startCp} – ${endCp}`)
 
@@ -158,4 +166,50 @@ test.describe('预览与按章处理', () => {
     await expect(page.getByTestId('annotation-span').first()).toBeAttached()
     await expect(page.getByTestId('annotation-label').first()).toHaveText('〔确定性测试说话人〕')
   })
+})
+
+
+test('1920×1080逐步处理及批量正常页面均在单屏内，返回保留窗口选择', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await createFakeProfile(page, '单屏流程离线模型')
+  await importFile(page, 'sample-utf8.txt')
+  await expect(page.getByTestId('import-result')).toBeVisible()
+  await openPreview(page, 'sample-utf8')
+  await page.getByTestId('preview-profile').selectOption({ label: '单屏流程离线模型 · fake-model' })
+  const fitsScreen = async (step: string, action: string) => {
+    await page.getByTestId(`preview-step-${step}`).click()
+    await expect(page.getByTestId(action)).toBeInViewport()
+    const size = await page.evaluate(() => ({ height: document.documentElement.scrollHeight, viewport: innerHeight }))
+    await page.screenshot({ path: testInfo.outputPath(`${step}-${action}.png`), fullPage: true })
+    expect(size.height, `${step} should fit the viewport`).toBeLessThanOrEqual(size.viewport + 1)
+  }
+  await fitsScreen('config', 'preview-profile')
+  await expect(page.getByRole('link', { name: '打开预处理' })).toBeVisible()
+  await page.getByTestId('preview-step-next').click()
+  await expect(page.getByTestId('range-chapter')).toBeVisible()
+  await page.getByTestId('range-chapter').selectOption({ index: 1 })
+  await expect(page.getByTestId('window-picker')).toBeVisible()
+  await fitsScreen('range', 'windows-select-all')
+  await page.getByTestId('windows-clear').click()
+  await page.getByTestId('preview-step-next').click()
+  await expect(page.getByTestId('character-roster-panel')).toBeVisible()
+  await confirmChapterRoster(page)
+  await fitsScreen('roster', 'roster-confirm')
+  await page.getByTestId('preview-step-back').click()
+  await expect(page.getByTestId('windows-selection-summary')).toContainText('已选 0/')
+  await selectAllChapterWindows(page)
+  await fitsScreen('run', 'preview-process')
+  await page.getByTestId('preview-run').click()
+  await expect(page.getByTestId('job-state')).toHaveText('已完成', { timeout: 30000 })
+  await fitsScreen('results', 'document-renderer')
+  await expect(page.getByTestId('annotation-span').first()).toBeAttached()
+  await page.getByTestId('preview-step-config').click()
+  await page.getByTestId('processing-mode-batch').check()
+  await fitsScreen('config', 'batch-profile')
+  await fitsScreen('range', 'batch-run')
+  await page.reload()
+  await expect(page.getByTestId('batch-run')).toBeVisible()
+  await expect(page.getByTestId('processing-mode-batch')).toBeChecked()
+  await expect(page.getByRole('link', { name: '任务队列', exact: true })).toHaveCount(2)
+  await expect(page.getByTestId('batch-result-panel')).toHaveCount(0)
 })

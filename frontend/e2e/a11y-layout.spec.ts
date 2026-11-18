@@ -253,6 +253,7 @@ test('真实人物表单在360px及1280px明暗主题均适配容器', async ({ 
   await importFile(page, 'sample-full-flow.txt')
   const bookId = await bookIdOf(page, 'sample-full-flow')
   await page.goto(`/books/${bookId}/preview`)
+  await page.getByTestId('preview-step-roster').click()
   await page.getByTestId('roster-add-character').click()
   const card = page.getByTestId('roster-candidates').locator('.ndr-character-card').first()
   await expect(card).toBeVisible()

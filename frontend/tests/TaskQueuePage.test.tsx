@@ -8,6 +8,7 @@ import { writeJournal } from '../src/processing/journal'
 import { saveBatchHistory } from '../src/processing/batchHistory'
 import { getServiceBlock, observeServiceJob } from '../src/processing/serviceGate'
 import { fetchProfiles } from '../src/api/profiles'
+import * as batch from '../src/components/BatchProcessor'
 
 vi.mock('../src/api/jobs', () => ({ fetchTaskQueue: vi.fn(), fetchRecentJobs: vi.fn() }))
 vi.mock('../src/api/profiles', () => ({ fetchProfiles: vi.fn(), profileKeys: { profiles: () => ['model-profiles'] } }))
@@ -18,6 +19,39 @@ vi.mock('../src/components/JobPanel', async (importOriginal) => ({
   JobPanel: ({ jobId }: { jobId: string }) => <p>详情 {jobId}</p>,
 }))
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks() })
+
+it.each([true, false])('keeps current batch retry reachable in the queue with an admission record (%s)', async hasAdmission => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  const retry = vi.spyOn(batch, 'BatchRetryControls').mockImplementation(({ expectedRangeId }) => <button>重试 {expectedRangeId}</button>)
+  try {
+    if (hasAdmission) writeJournal('admissions', [{ ...oldAdmission(), phase: 'failed' }])
+    writeJournal('batch:b1', { execution: { bookId: 'b1', bookVersionId: 'v1', queueId: 'old-range' }, snapshot: {
+      startedAt: 100, running: false, tasks: [{ id: 'dialogue:c1:w1', type: 'dialogue', chapterId: 'c1', chapterTitle: '第一章',
+        windowId: 'w1', windowLabel: '窗口 1', state: 'failed', error: '处理失败' }] } })
+    renderWithProviders(<TaskQueuePage />)
+    await userEvent.click(screen.getByLabelText('显示已结束任务'))
+    await userEvent.click(screen.getByRole('button', { name: '展开范围内任务' }))
+    const rangeId = hasAdmission ? 'old-range' : 'legacy:batch:b1:100'
+    expect(screen.getByRole('button', { name: `重试 ${rangeId}` })).toBeVisible()
+    expect(retry).toHaveBeenCalledWith(expect.objectContaining({ bookId: 'b1', taskId: 'dialogue:c1:w1', expectedRangeId: rangeId }), expect.anything())
+  } finally { retry.mockRestore() }
+})
+
+it('keeps an archived failed range readable without retrying the replacement range', async () => {
+  vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })
+  const retry = vi.spyOn(batch, 'BatchRetryControls').mockImplementation(() => <button>错误的重试入口</button>)
+  try {
+    writeJournal('admissions', [{ ...oldAdmission(), phase: 'failed' }])
+    writeJournal('batch:b1', { execution: { queueId: 'replacement-range' }, snapshot: { startedAt: 200, running: false, tasks: [] } })
+    saveBatchHistory('old-range', [{ id: 'dialogue:c1:w1', type: 'dialogue', chapterId: 'c1', chapterTitle: '第一章', windowId: 'w1',
+      windowLabel: '窗口 1', state: 'failed', error: '旧范围错误' }])
+    renderWithProviders(<TaskQueuePage />)
+    await userEvent.click(screen.getByLabelText('显示已结束任务'))
+    await userEvent.click(within(screen.getByText('旧批次').closest('article')!).getByRole('button', { name: '展开范围内任务' }))
+    expect(screen.getByRole('table', { name: '范围内任务' })).toHaveTextContent('旧范围错误')
+    expect(retry).not.toHaveBeenCalled()
+  } finally { retry.mockRestore() }
+})
 
 it('shows persistent service blocks with a configuration name outside hidden task history and clears only on explicit action', async () => {
   vi.mocked(fetchTaskQueue).mockResolvedValue({ items: [], next_cursor: null })

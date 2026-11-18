@@ -2,9 +2,11 @@ import { expect, type Page } from '@playwright/test'
 
 /** Explicitly include completed windows when a scenario reuses an imported book. */
 export async function selectAllChapterWindows(page: Page) {
+  await page.getByTestId('preview-step-range').click()
   const selectAll = page.getByTestId('windows-select-all')
   await expect(selectAll).toBeEnabled()
   await selectAll.click()
+  await page.getByTestId('preview-step-run').click()
   await expect(page.getByTestId('preview-run')).toBeEnabled()
 }
 
@@ -16,10 +18,12 @@ export async function selectAllChapterWindows(page: Page) {
  * 已经确认过的章节直接复用，避免同一次运行里重复创建人物分析任务。
  */
 export async function confirmChapterRoster(page: Page) {
+  await page.getByTestId('preview-step-roster').click()
   await expect(page.getByTestId('character-roster-panel')).toBeVisible()
   // 等人物名单读取结束，避免把已确认的名单误判成未分析。
   await expect(page.getByTestId('roster-loading')).toHaveCount(0)
   if (await page.getByTestId('roster-confirmed').isVisible()) {
+    await page.getByTestId('preview-step-run').click()
     return
   }
 
@@ -34,4 +38,5 @@ export async function confirmChapterRoster(page: Page) {
 
   await page.getByTestId('roster-confirm').click()
   await expect(page.getByTestId('roster-confirmed')).toBeVisible({ timeout: 30_000 })
+  await page.getByTestId('preview-step-run').click()
 }

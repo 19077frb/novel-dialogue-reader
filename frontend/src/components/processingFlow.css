@@ -1,0 +1,148 @@
+.ndr-processing-flow nav ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 0 0 12px;
+  list-style: none;
+}
+
+.ndr-processing-flow nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ndr-processing-flow nav button[aria-current="step"] .ndr-step-badge {
+  color: inherit;
+  background: transparent;
+}
+
+.ndr-processing-panel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ndr-processing-panel:focus {
+  outline: 2px solid var(--ndr-accent);
+  outline-offset: 4px;
+}
+
+.ndr-processing-tasks { display: grid; gap: 12px; }
+.ndr-processing-result-sidebar { display: grid; gap: 12px; min-width: 0; }
+
+@media (min-width: 1280px) and (min-height: 800px) {
+  .ndr-preview { gap: 12px; }
+  .ndr-preview > .ndr-page-header { padding-bottom: 12px; }
+  .ndr-preview .card { padding: 16px; }
+  .ndr-preview :is(h2, h3, h4) { margin-top: 0; margin-bottom: 8px; }
+  .ndr-preview .hint { margin-top: 6px; margin-bottom: 6px; }
+  .ndr-processing-flow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .ndr-processing-flow nav ol { margin: 0; }
+  .ndr-processing-flow .ndr-form-actions { margin: 0; flex-shrink: 0; }
+
+  .ndr-preview [data-preview-step="config"] {
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    align-items: start;
+  }
+  .ndr-preview [data-testid="processing-mode-picker"] { grid-column: 1; grid-row: 1; }
+  .ndr-processing-optional { grid-column: 2; grid-row: 1; }
+  .ndr-preview .ndr-shared-configuration {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(340px, 2fr);
+    align-items: start;
+    gap: 20px;
+  }
+  .ndr-preview [data-testid="model-thinking-settings"] { border: 0; box-shadow: none; padding: 0; }
+  .ndr-preview .ndr-thinking-fields { grid-template-columns: 2fr 1fr 1fr; }
+  .ndr-preview .ndr-shared-configuration > .ndr-collapsible-block > [aria-labelledby] {
+    max-height: 400px;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+
+  .ndr-preview [data-preview-step="range"] > .ndr-preview-controls {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr);
+    align-items: start;
+    gap: 12px 24px;
+  }
+  .ndr-preview [data-preview-step="range"] > .ndr-preview-controls > .ndr-step-heading { grid-column: 1 / -1; }
+  .ndr-processing-windows {
+    max-height: min(560px, calc(100vh - 380px));
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+  .ndr-preview [data-testid="roster-candidates"] {
+    max-height: min(430px, calc(100vh - 540px));
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+  .ndr-preview [data-testid="roster-candidates"] .ndr-character-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .ndr-preview [data-preview-step="roster"] .ndr-character-card { margin: 0; }
+  .ndr-preview [data-preview-step="roster"] .ndr-preview-viewbar { display: flex; flex-wrap: wrap; align-items: center; }
+  .ndr-preview [data-preview-step="roster"] .ndr-preview-viewbar > .ndr-form-actions { margin-left: auto; }
+  .ndr-processing-budget { display: grid; grid-template-columns: 3fr 1fr; gap: 16px; }
+  .ndr-processing-budget [data-testid="budget-form"] { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; }
+  .ndr-preview [data-preview-step="run"] > .ndr-collapsible-block > [aria-labelledby] {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .ndr-preview [data-preview-step="run"] .ndr-estimate dl {
+    display: grid;
+    grid-template-columns: repeat(5, auto minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .ndr-preview [data-preview-step="results"] {
+    grid-template-columns: minmax(280px, 1fr) minmax(0, 3fr);
+    align-items: start;
+    gap: 12px;
+  }
+  .ndr-preview [data-preview-step="results"] > [data-testid="preview-result-notice"] { grid-column: 1 / -1; }
+  .ndr-preview #processing-usage { grid-column: 1; }
+  .ndr-processing-result-sidebar { grid-column: 1; }
+  .ndr-processing-result-sidebar > .card,
+  .ndr-processing-tasks > .card { margin: 0; }
+  .ndr-processing-tasks .ndr-job-panel { margin: 0; padding: 0; border: 0; border-radius: 0; }
+  .ndr-processing-tasks .ndr-collapsible-heading { margin: 4px 0; }
+  .ndr-processing-tasks .ndr-recovery { margin-top: 8px; padding-top: 8px; }
+  .ndr-preview #processing-document { grid-column: 2; grid-row: 1; }
+  .ndr-preview [data-preview-step="results"]:has(> [data-testid="preview-result-notice"]) #processing-document { grid-row: 2; }
+  .ndr-preview [data-preview-step="results"] .ndr-usage dl { margin: 8px 0; }
+  .ndr-preview #processing-document > .ndr-preview-side {
+    max-height: 112px;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+  .ndr-preview #processing-document .ndr-preview-document {
+    max-height: min(450px, calc(100vh - 570px));
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    padding-right: 12px;
+  }
+  .ndr-processing-tasks .ndr-table-wrap { max-height: 150px; overflow-y: auto; }
+  .ndr-processing-tasks .ndr-collapsible-block > [aria-labelledby] { max-height: 190px; overflow-y: auto; }
+  .ndr-preview [data-preview-step="results"] .ndr-usage {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 12px;
+  }
+  .ndr-preview .ndr-usage > h3 { grid-column: 1; grid-row: 1; font-size: .85rem; }
+  .ndr-preview .ndr-usage > dl { grid-column: 1; grid-row: 2; font-size: .8rem; gap: 6px; }
+  .ndr-preview .ndr-usage:has([data-testid="usage-current"]) > h3:nth-of-type(2) { grid-column: 2; }
+  .ndr-preview .ndr-usage:has([data-testid="usage-current"]) > [data-testid="usage-cumulative"] { grid-column: 2; }
+  .ndr-preview .ndr-usage > .hint { grid-column: 1 / -1; }
+  .ndr-preview #processing-usage .ndr-collapsible-heading { margin: 4px 0; }
+  .ndr-preview #processing-usage .ndr-collapsible-block > [aria-labelledby] { max-height: 220px; overflow-y: auto; }
+  .ndr-preview .ndr-usage-overview p { margin: 6px 0; }
+  .ndr-preview [data-testid="batch-processor"] > .ndr-batch-config-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ndr-preview .ndr-batch-advanced > .ndr-batch-config-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ndr-preview .ndr-batch-advanced[open] { max-height: 350px; overflow-y: auto; }
+}

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { ProcessingFlow, type ProcessingStep } from '../components/ProcessingFlow'
 import { CollapsibleBlock } from '../components/CollapsibleBlock'
 import { ListPagination, useListPagination } from '../components/ListPagination'
 
@@ -78,11 +79,21 @@ export default function PreviewPage() {
   const [searchParams] = useSearchParams()
   const requestedChapterId = searchParams.get('chapterId')
   const queryClient = useQueryClient()
+  const location = useLocation()
+  const navigate = useNavigate()
   const documentRef = useRef<HTMLDivElement>(null)
   const initializedRef = useRef<string | null>(null)
+  const locatedHashRef = useRef<string | null>(null)
 
   const [range, setRange] = useState<RangeValue>({ chapterId: null, startCp: 0, endCp: null })
-  const [processingMode, setProcessingMode] = useState<'single' | 'batch'>('single')
+  const processingMode = searchParams.get('processingMode') === 'batch'
+    || location.hash.startsWith('#processing-batch') ? 'batch' : 'single'
+  const selectProcessingMode = (mode: 'single' | 'batch') => {
+    const nextParams = new URLSearchParams(location.search)
+    if (mode === 'batch') nextParams.set('processingMode', 'batch')
+    else nextParams.delete('processingMode')
+    navigate({ pathname: location.pathname, search: nextParams.toString(), hash: '#processing-configuration' })
+  }
   const [preferences, setPreferences] = useProcessingPreferences()
   const [settings] = useGeneralSettings()
   const { concurrency, profileId } = preferences
@@ -110,6 +121,7 @@ export default function PreviewPage() {
   const showTaskDetails = (id: string) => {
     manuallySelectedJobRef.current = id
     setJobId(id)
+    goToStep('results')
     setDetailRequest(current => current + 1)
   }
   useEffect(() => {
@@ -123,7 +135,7 @@ export default function PreviewPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
-  const [rosterConfirmed, setRosterConfirmed] = useState(false)
+  const [confirmedRoster, setConfirmedRoster] = useState<{ key: string; confirmed: boolean } | null>(null)
   const batchProgress = useBatchProgress(bookId)
   const singleProgress = useSingleWorkflow(bookId)
   const admissions = useAdmissions()
@@ -148,6 +160,49 @@ export default function PreviewPage() {
     : filter.chapterFilterEnabled && filter.chapterFilterTerms.some(term => term.trim())
       ? '已启用章节过滤名单，请先选择一个章节再处理。' : null
   const filterReason = filterReasonFor()
+  const rosterContext = JSON.stringify([bookId, book.data?.active_version_id, range.chapterId])
+  const rosterConfirmed = confirmedRoster?.key === rosterContext && confirmedRoster.confirmed
+  const stepAnchors: Record<ProcessingStep, string> = {
+    config: 'processing-configuration', range: processingMode === 'batch' ? 'processing-batch' : 'processing-workflow',
+    roster: 'processing-roster', run: 'processing-run',
+    results: processingMode === 'batch' ? 'processing-batch-results' : 'processing-results',
+  }
+  const steps: { id: ProcessingStep; label: string }[] = [
+    { id: 'config', label: '处理配置' },
+    { id: 'range', label: processingMode === 'batch' ? '批量范围与执行' : '处理范围' },
+    ...(processingMode === 'single' ? [
+      ...(range.chapterId ? [{ id: 'roster' as const, label: '确认人物' }] : []),
+      { id: 'run' as const, label: '对白处理' },
+    ] : []),
+    { id: 'results', label: '查看结果' },
+  ]
+  const hash = location.hash.slice(1)
+  const requestedStep = (Object.keys(stepAnchors) as ProcessingStep[]).find(step => stepAnchors[step] === hash)
+    ?? (['processing-results', 'processing-usage', 'processing-document', 'single-task-details'].includes(hash) ? 'results'
+      : hash === 'processing-workflow' ? 'range' : 'config')
+  const currentStep = steps.some(step => step.id === requestedStep) ? requestedStep
+    : processingMode === 'batch' ? 'range' : 'run'
+  const goToStep = (step: ProcessingStep) => {
+    const nextParams = new URLSearchParams(location.search)
+    if (processingMode === 'batch') nextParams.set('processingMode', 'batch')
+    navigate({ pathname: location.pathname, search: nextParams.toString(), hash: `#${stepAnchors[step]}` })
+  }
+  useEffect(() => {
+    if (hash === 'batch-task-list') {
+      navigate('/tasks', { replace: true })
+      return
+    }
+    if (!['processing-usage', 'processing-document', 'single-task-details'].includes(hash)) {
+      locatedHashRef.current = null
+      return
+    }
+    if (locatedHashRef.current === hash) return
+    const target = document.getElementById(hash)
+    if (!target) return
+    locatedHashRef.current = hash
+    target?.scrollIntoView?.({ block: 'nearest', behavior: 'auto' })
+    target?.focus({ preventScroll: true })
+  }, [location.hash, jobId, navigate])
   const recentJobs = useQuery({ queryKey: ['recent-single-jobs', bookId, book.data?.active_version_id, range.chapterId],
     queryFn: ({ signal }) => fetchRecentJobs({ bookId: bookId!, versionId: book.data!.active_version_id!,
       chapterId: range.chapterId ?? undefined, kind: 'INFERENCE' }, signal),
@@ -346,6 +401,7 @@ export default function PreviewPage() {
     onSuccess: () => {
       setError(null)
       setNotice('已添加到任务队列，可继续选择其他章节或窗口。')
+      goToStep('results')
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : '创建任务失败'),
   })
@@ -389,8 +445,8 @@ export default function PreviewPage() {
   }, [])
 
   const handleRosterConfirmedChange = useCallback((confirmed: boolean) => {
-    setRosterConfirmed(confirmed)
-  }, [])
+    setConfirmedRoster({ key: rosterContext, confirmed })
+  }, [rosterContext])
 
   // 本章人物是逐句归属的前置：只有选中单一章节时才要求先确认名单与主人公；
   // 整本或自定义码点范围没有“本章”，后端也不会注入章节人物名单。
@@ -407,8 +463,8 @@ export default function PreviewPage() {
   if (!singleProgress && recentJobs.isPending) runBlockers.push('正在读取已有任务')
   if (recentJobs.isError) runBlockers.push('已有任务读取失败，请重新读取后再处理')
   if (!rangeValid) runBlockers.push('处理范围无效')
-  if (profileId === '') runBlockers.push('未选择模型配置（见上方模型配置与本次思考设置）')
-  if (rosterRequired && !rosterConfirmed) runBlockers.push('尚未确认本章人物（见第二步）')
+  if (profileId === '') runBlockers.push('请在处理配置中选择模型配置')
+  if (rosterRequired && !rosterConfirmed) runBlockers.push('请先在确认人物步骤保存本章名单')
   if (range.chapterId && (!estimate || estimateQuery.isFetching || estimateQuery.isError)) {
     runBlockers.push(estimateQuery.isError ? '窗口预览失败，请重新读取' : '正在读取窗口预览')
   }
@@ -417,13 +473,12 @@ export default function PreviewPage() {
   }
   const runDisabled = runBlockers.length > 0 || jobMutation.isPending
   const selectedTask = singleTasks.find(task => task.job?.id === jobId)
-  const showBatchProcessor = processingMode === 'batch' || batchProgress.running || batchProgress.tasks.length > 0
   const usagePanel = (
-    <section className="card ndr-preview-usage" id="processing-usage" data-testid="preview-usage">
+    <section className="card ndr-preview-usage" id="processing-usage" tabIndex={-1} data-testid="preview-usage">
       <h2>用量</h2>
       {usage.isPending && <p className="hint">正在读取用量…</p>}
       {usage.isError && <p className="status-error">用量读取失败。</p>}
-      {usage.data && <UsageSummary usage={usage.data} currentJob={currentJob} />}
+      {usage.data && <UsageSummary usage={usage.data} currentJob={currentJob} expandDetails={hash === 'processing-usage'} />}
     </section>
   )
 
@@ -435,7 +490,7 @@ export default function PreviewPage() {
         <div>
           <h2>预览与按章处理：{book.data?.title ?? '载入中…'}</h2>
           <p className="hint">
-            选择处理范围，确认人物，让每句对白找到说话人。
+            选择范围、确认人物，再处理对白。
           </p>
         </div>
         <nav className="ndr-book-nav" aria-label="本书导航">
@@ -466,27 +521,24 @@ export default function PreviewPage() {
         />
       )}
 
-      <nav className="ndr-section-nav" aria-label="处理页分区">
-        <a href="#processing-configuration">处理配置</a>
-        <a href="#processing-workflow">处理范围</a>
-        <a href="#processing-usage">用量</a>
-        <a href="#processing-document">原文与标注</a>
-      </nav>
+      <ProcessingFlow steps={steps} current={currentStep} onChange={goToStep}
+        running={Boolean(singleProgress?.running || batchProgress.running)} />
 
-      <section className="card ndr-inline-section">
+      <div className="ndr-processing-panel" hidden={currentStep !== 'config'} data-preview-step="config">
+      <section className="card ndr-inline-section ndr-processing-optional">
         <div>
           <h3>书籍预处理</h3>
-          <p className="hint">导入时已检查章节与引号，可继续查看结果、调整或重试。</p>
+          <p className="hint">导入时已检查章节与引号，可跳过此项。</p>
         </div>
         <Link className="ndr-button" to={`/books/${bookId}/preprocessing${returnChapterId ? `?chapterId=${encodeURIComponent(returnChapterId)}` : ''}`}>打开预处理</Link>
       </section>
 
-      <section className="card ndr-step-card" id="processing-configuration" data-testid="processing-mode-picker">
+      <section className="card ndr-step-card" id="processing-configuration" tabIndex={-1} data-testid="processing-mode-picker">
         <div className="ndr-step-heading">
           <div>
             <h3>选择处理方式</h3>
-            <p className="hint">单章可挑选窗口试运行；批量会自动识别人物并按章节流水线处理。</p>
-            <p className="hint">模型、复核数、并发数和额度自动保存，单章与批量共用，重新打开后仍保留。</p>
+            <p className="hint">单章可选择窗口；批量按章节自动处理。</p>
+            <p className="hint">模型与处理偏好自动记忆，单章与批量共用。</p>
           </div>
         </div>
         <div className="ndr-radio-row">
@@ -496,7 +548,7 @@ export default function PreviewPage() {
               name="processing-mode"
               checked={processingMode === 'single'}
               disabled={jobMutation.isPending}
-              onChange={() => setProcessingMode('single')}
+              onChange={() => selectProcessingMode('single')}
               data-testid="processing-mode-single"
             />
             单章处理
@@ -507,7 +559,7 @@ export default function PreviewPage() {
               name="processing-mode"
               checked={processingMode === 'batch'}
               disabled={jobMutation.isPending}
-              onChange={() => setProcessingMode('batch')}
+              onChange={() => selectProcessingMode('batch')}
               data-testid="processing-mode-batch"
             />
             批量处理
@@ -516,11 +568,11 @@ export default function PreviewPage() {
       </section>
 
       <section className="card ndr-shared-configuration">
-      <CollapsibleBlock title="模型与处理偏好" summary="单章与批量共用，调整后自动记忆。">
-      <ThinkingSettings disabled={jobMutation.isPending} profiles={profiles.data ?? []}
+      <ThinkingSettings compact disabled={jobMutation.isPending} profiles={profiles.data ?? []}
         disabledReason="正在保存本次任务，请稍后调整下一次处理的配置。"
         profileId={profileId} onProfileChange={setProfileId}
         profileTestId={processingMode === 'batch' ? 'batch-profile' : 'preview-profile'} />
+      <CollapsibleBlock title="对白策略与人物修复" defaultOpen={false}>
       <DialogueStrategySettings value={preferences.dialogueStrategy} rounds={preferences.maxRecheckRounds}
         disabled={jobMutation.isPending}
         onChange={dialogueStrategy => setPreferences({ dialogueStrategy })} />
@@ -529,17 +581,17 @@ export default function PreviewPage() {
       </CollapsibleBlock>
       </section>
 
-      <div id="processing-workflow" className="ndr-section-anchor" />
+      </div>
 
-      {processingMode === 'single' && (
-        <>
+      <div hidden={processingMode !== 'single'} className="ndr-processing-panel">
+      <div hidden={currentStep !== 'range'} data-preview-step="range" className="ndr-processing-panel" id={processingMode === 'single' ? 'processing-workflow' : undefined} tabIndex={-1}>
 
       <section className="card ndr-preview-controls ndr-step-card">
         <div className="ndr-step-heading">
-          <span className="ndr-step-badge" aria-hidden="true">1</span>
+          <span className="ndr-step-badge" aria-hidden="true">2</span>
           <div>
             <h3>选择处理范围</h3>
-            <p className="hint">选择章节和对白窗口；模型配置使用上方的共用设置。</p>
+            <p className="hint">选择章节和对白窗口；模型配置可返回处理配置调整。</p>
           </div>
         </div>
         <RangePicker
@@ -556,6 +608,7 @@ export default function PreviewPage() {
             setNotice(null)
           }}
         />
+        <div className="ndr-processing-windows">
         {range.chapterId && (
           <>
             {estimateQuery.isFetching && <p className="hint" role="status">正在生成窗口预览…</p>}
@@ -578,11 +631,14 @@ export default function PreviewPage() {
             )}
           </>
         )}
+        </div>
       </section>
 
+      </div>
+      <div hidden={currentStep !== 'roster'} data-preview-step="roster" id="processing-roster" tabIndex={-1}>
       <CharacterRosterPanel
         skipReason={filterReason}
-        step={2}
+        step={3}
         bookId={bookId}
         bookVersionId={book.data?.active_version_id ?? null}
         chapterId={range.chapterId}
@@ -590,17 +646,20 @@ export default function PreviewPage() {
         inferenceOptions={options}
         onConfirmedChange={handleRosterConfirmedChange}
       />
+      </div>
 
-      <section className="card ndr-preview-controls ndr-step-card">
+      <section hidden={currentStep !== 'run'} data-preview-step="run" id="processing-run" tabIndex={-1} className="card ndr-preview-controls ndr-step-card">
         <div className="ndr-step-heading">
-          <span className="ndr-step-badge" aria-hidden="true">3</span>
+          <span className="ndr-step-badge" aria-hidden="true">{range.chapterId ? 4 : 3}</span>
           <div>
-            <h3>对白归属（试运行与正式处理）</h3>
+            <h3>对白处理（试运行与正式处理）</h3>
             <p className="hint">
-              人物确认后才能开始逐句归属；建议先小范围试运行确认效果，再按范围正式处理。
+              {range.chapterId ? '先确认本章人物，再提交对白处理。' : '整本或自定义范围可直接提交对白处理。'}试运行与正式处理都会保存标注。
             </p>
           </div>
         </div>
+        <CollapsibleBlock title="预算与并发" summary="留空额度表示不限，按当前设置提交任务。" defaultOpen={false}>
+        <div className="ndr-processing-budget">
         <BudgetForm value={budget} onChange={setBudget} />
         <fieldset className="ndr-budget-form">
           <legend>并发限制</legend>
@@ -617,6 +676,8 @@ export default function PreviewPage() {
           </label>
           <p className="hint">只影响所选对白窗口；人物识别仍会先读取本章全文。</p>
         </fieldset>
+        </div>
+        </CollapsibleBlock>
         <div className="ndr-form-actions">
           <button
             type="button"
@@ -670,11 +731,35 @@ export default function PreviewPage() {
         {estimate && <EstimateSummary estimate={estimate} />}
       </section>
 
+      </div>
+
+      <div hidden={processingMode !== 'batch' || currentStep !== 'range'} data-preview-step="range" className="ndr-processing-panel"
+        id="processing-batch" tabIndex={-1}>
+        <BatchProcessor
+          bookId={bookId}
+          initialChapterId={requestedChapterId}
+          bookVersionId={book.data?.active_version_id}
+          chapters={chapters.data ?? []}
+          profiles={profiles.data ?? []}
+          showConfiguration
+          showQueueLink={false}
+          onFinished={() => {
+            void queryClient.invalidateQueries({ queryKey: ['window-preview', bookId] })
+            void queryClient.invalidateQueries({ queryKey: ['annotations'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })
+            void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId) })
+          }}
+        />
+      </div>
+
+      <div hidden={currentStep !== 'results'} data-preview-step="results" className="ndr-processing-panel" id={stepAnchors.results} tabIndex={-1}>
+      {notice && processingMode === 'single' && <p className="hint" data-testid="preview-result-notice">{notice}</p>}
+      <aside className="ndr-processing-result-sidebar">
+      {usagePanel}
+      <div hidden={processingMode !== 'single'} className="ndr-processing-tasks">
       {singleTasks.length > 0 && (
         <section className="card" data-testid="single-task-progress">
-          <h2>单章窗口任务进度</h2>
-          <p className="hint">可继续添加其他章节或窗口；同一窗口已有任务时会提示。跨书籍进度可在上方“任务队列”查看。</p>
-          <CollapsibleBlock title="单章任务明细" summary={`共 ${singleTasks.length} 个窗口；失败 ${singleTasks.filter(task => task.error || task.job?.state === 'FAILED').length} 个`}>
+          <CollapsibleBlock title="单章任务明细" defaultOpen={false} summary={`共 ${singleTasks.length} 个窗口；失败 ${singleTasks.filter(task => task.error || task.job?.state === 'FAILED').length} 个`}>
           <div className="ndr-table-wrap"><table>
             <thead><tr><th>窗口</th><th>状态</th><th>详情</th></tr></thead>
             <tbody>{singleTasks.map((task, index) => (
@@ -697,9 +782,9 @@ export default function PreviewPage() {
       {jobId && (
         <section className="card" id="single-task-details" ref={taskDetailRef} tabIndex={-1}
           aria-labelledby="single-task-details-heading" data-testid="single-task-details" data-job-id={jobId}>
-          <h2 id="single-task-details-heading">{selectedTask ? `窗口 ${selectedTask.ordinal} 任务详情` : '任务详情'}</h2>
-          <p className="hint">查看所选窗口的状态、耗时、调用次数与失败原因；点击其他窗口的“查看任务”可切换详情。</p>
-          <JobPanel key={jobId} jobId={jobId} onUpdate={handleJobUpdate} />
+          <h3 id="single-task-details-heading">{selectedTask ? `窗口 ${selectedTask.ordinal} 任务详情` : '任务详情'}</h3>
+          <JobPanel key={jobId} jobId={jobId} onUpdate={handleJobUpdate} compact />
+          <CollapsibleBlock title="重新处理此范围" defaultOpen={false}>
           <div className="ndr-recompute-entry" data-testid="recompute-entry">
             <p className="hint">
               暂停、限流、额度用尽或失败后，可调整预算重新处理。
@@ -715,32 +800,13 @@ export default function PreviewPage() {
               用当前预算重新处理此范围（可能计费）
             </button>
           </div>
+          </CollapsibleBlock>
         </section>
       )}
-        </>
-      )}
+      </div>
+      </aside>
 
-      {showBatchProcessor ? (
-        <BatchProcessor
-          bookId={bookId}
-          initialChapterId={requestedChapterId}
-          bookVersionId={book.data?.active_version_id}
-          chapters={chapters.data ?? []}
-          profiles={profiles.data ?? []}
-          showConfiguration={processingMode === 'batch'}
-          progressPlacement="after"
-          onFinished={() => {
-            void queryClient.invalidateQueries({ queryKey: ['window-preview', bookId] })
-            void queryClient.invalidateQueries({ queryKey: ['annotations'] })
-            void queryClient.invalidateQueries({ queryKey: queryKeys.chapters(bookId) })
-            void queryClient.invalidateQueries({ queryKey: jobKeys.usage(bookId) })
-          }}
-        >
-          {usagePanel}
-        </BatchProcessor>
-      ) : usagePanel}
-
-      <section className="card ndr-preview-reading" id="processing-document">
+      <section className="card ndr-preview-reading" id="processing-document" tabIndex={-1}>
         <h2>原文与标注</h2>
         <div className="ndr-preview-viewbar">
           <div className="ndr-radio-row">
@@ -816,6 +882,7 @@ export default function PreviewPage() {
           )}
         </div>
       </section>
+      </div>
       <ExportDialog
         bookId={bookId}
         open={exportOpen}

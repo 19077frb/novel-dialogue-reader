@@ -73,6 +73,7 @@ test.describe('待确认队列与确认抽屉', () => {
     await importSample(page)
     await openReader(page)
     await processFirstChapter(page, `${profileName} · fake-model`)
+    await page.getByTestId('preview-step-config').click()
     await page.getByTestId('processing-thinking-mode').selectOption('enabled')
     await page.getByTestId('processing-thinking-effort').selectOption('high')
     await page.getByRole('link', { name: '去阅读' }).click()
