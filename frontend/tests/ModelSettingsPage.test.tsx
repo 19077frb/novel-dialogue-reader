@@ -125,10 +125,10 @@ describe('ModelSettingsPage', () => {
     await screen.findByTestId('profile-card')
     const checkLabels = () => {
       expect(screen.getByText('* 为必填项')).toBeVisible()
-      expect(screen.getByLabelText('* 名称')).toBeRequired()
-      expect(screen.getByLabelText('* 协议')).toHaveValue('chat-completions-compatible')
+      expect(screen.getByLabelText('* 配置名称（Profile Name）')).toBeRequired()
+      expect(screen.getByLabelText('* 协议（API Protocol）')).toHaveValue('chat-completions-compatible')
       expect(screen.getByLabelText('* 服务地址（Base URL）')).toBeRequired()
-      expect(screen.getByLabelText('* 模型名')).toBeRequired()
+      expect(screen.getByLabelText('* 模型名（Model ID）')).toBeRequired()
       expect(screen.getByTestId('profile-max_tokens')).not.toBeRequired()
     }
     checkLabels()
@@ -181,7 +181,7 @@ describe('ModelSettingsPage', () => {
 
   it('新建表单所有常用字段及思考选项常显，并提供悬停说明', async () => {
     renderWithProviders(<ModelSettingsPage />)
-    await screen.findByRole('option', { name: 'OpenAI 协议' })
+    await screen.findByRole('option', { name: 'OpenAI Chat Completions' })
     for (const id of [
       'profile-name', 'profile-protocol', 'profile-base-url', 'profile-model',
       'profile-max_tokens', 'profile-temperature', 'profile-top_p', 'profile-timeout_seconds',
@@ -246,8 +246,8 @@ describe('ModelSettingsPage', () => {
     renderWithProviders(<ModelSettingsPage />)
     await showSavedProfiles()
     const card = await screen.findByTestId('profile-card')
-    expect(card).toHaveTextContent('OpenAI 协议')
-    expect(card).toHaveTextContent('仅本次会话')
+    expect(card).toHaveTextContent('OpenAI Chat Completions')
+    expect(card).toHaveTextContent('会话（Session）')
     expect(card).not.toHaveTextContent('chat-completions-compatible')
     expect(card).toHaveTextContent('https://api.example.com/v1')
     await showEditor()
@@ -259,7 +259,7 @@ describe('ModelSettingsPage', () => {
   it('offers Anthropic with matching help and saves its original protocol identifier', async () => {
     vi.mocked(profilesApi.createProfile).mockResolvedValue(profile({ protocol: 'anthropic-messages' }))
     renderWithProviders(<ModelSettingsPage />)
-    await screen.findByRole('option', { name: 'Anthropic 协议' })
+    await screen.findByRole('option', { name: 'Anthropic Messages' })
     await userEvent.selectOptions(screen.getByTestId('profile-protocol'), 'anthropic-messages')
     const help = screen.getByTestId('profile-protocol').title
     expect(help).toContain('https://api.anthropic.com/v1')
@@ -579,7 +579,7 @@ describe('ModelSettingsPage / 连接测试', () => {
     expect(result).toHaveTextContent('连接成功')
     expect(result).toHaveTextContent('123 ms')
     expect(result).toHaveTextContent('合计 20')
-    expect(result).toHaveTextContent('协议 / 模型：OpenAI 协议 / example-chat-model')
+    expect(result).toHaveTextContent('协议 / 模型：OpenAI Chat Completions / example-chat-model')
     expect(result).not.toHaveTextContent('chat-completions-compatible')
     expect(result).toHaveTextContent('未评估小说标注效果')
     expect(profilesApi.testConnection).toHaveBeenCalledWith({ profile_id: 'p1' })

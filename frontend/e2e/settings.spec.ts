@@ -548,7 +548,7 @@ test.describe('模型配置', () => {
 
     const card = await revealProfile(page, name)
     await expect(card).toContainText('已保存密钥')
-    await expect(card).toContainText('仅本次会话')
+    await expect(card).toContainText('会话（Session）')
     // 密钥绝不回显在页面上
     await expect(page.locator('body')).not.toContainText(SECRET)
 

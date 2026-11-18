@@ -90,11 +90,11 @@ export default function ModelSettingsPage() {
 
   const selectedProtocol = protocols.data?.find((item) => item.protocol === form.protocol)
   const protocolHelp = form.protocol === 'chat-completions-compatible'
-    ? '适用于使用 OpenAI 接口格式的云端模型和本地服务。服务地址填写 API 根地址，系统会追加 /chat/completions；模型名称按服务商提供的信息填写。云端服务通常需要 API 密钥，在凭据中选择保存方式并填写密钥。明确无需认证的本地服务可选择“不需要密钥（本地服务）”。'
+    ? '适用于使用 OpenAI 接口格式的云端模型和本地服务。服务地址填写 API 根地址，系统会追加 /chat/completions；模型名称按服务商提供的信息填写。云端服务通常需要 API 密钥，在凭据中选择保存方式并填写密钥。明确无需认证的本地服务可选择“无需密钥（None）”。'
     : form.protocol === 'anthropic-messages'
       ? '适用于 Anthropic Messages 接口。官方服务地址可填 https://api.anthropic.com/v1，系统会追加 /messages；兼容服务按服务商说明填写 API 根地址和模型名称。官方服务需要 API 密钥。思考模式按模型支持情况选择；开启思考时随机性与采样使用服务默认值。手动思考要求最大输出 Token 大于 1024，自适应使用所选思考强度。'
       : form.protocol === 'fake-provider'
-        ? '用于本地模拟界面流程，返回测试数据。凭据选择“不需要密钥（本地服务）”。'
+        ? '用于本地模拟界面流程，返回测试数据。凭据选择“无需密钥（None）”。'
         : `${selectedProtocol?.notes ?? ''} 服务地址、模型名称和是否需要 API 密钥，请按服务商提供的接入说明填写。`
   const baseUrlHelp = form.protocol === 'anthropic-messages'
     ? '填写 API 根地址，例如 https://api.anthropic.com/v1；系统会追加 /messages。'
@@ -331,12 +331,12 @@ export default function ModelSettingsPage() {
                 <fieldset className="ndr-model-group">
                   <legend>接口信息 <span className="hint">* 为必填项</span></legend>
                   <div className="ndr-model-fields">
-                    <label className="ndr-field">* 名称
+                    <label className="ndr-field">* 配置名称（Profile Name）
                       <input type="text" value={form.name} required data-testid="profile-name"
                         title="为这组模型服务配置填写便于识别的名称。"
                         onChange={(event) => setForm({ ...form, name: event.target.value })} />
                     </label>
-                    <label className="ndr-field">* 协议
+                    <label className="ndr-field">* 协议（API Protocol）
                       <select value={form.protocol} data-testid="profile-protocol" title={protocolHelp}
                         onChange={(event) => setForm({ ...form, protocol: event.target.value })}>
                         {(protocols.data ?? []).map((item) => (
@@ -350,7 +350,7 @@ export default function ModelSettingsPage() {
                         data-testid="profile-base-url" title={baseUrlHelp}
                         onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} />
                     </label>
-                    <label className="ndr-field">* 模型名
+                    <label className="ndr-field">* 模型名（Model ID）
                       <input type="text" value={form.model} required placeholder="example-chat-model"
                         data-testid="profile-model" title="填写服务商提供的模型标识，大小写及版本后缀按接入说明填写。"
                         onChange={(event) => setForm({ ...form, model: event.target.value })} />
@@ -375,15 +375,15 @@ export default function ModelSettingsPage() {
                     <>
                       <div className="ndr-radio-row ndr-model-credentials" role="group" aria-label="密钥保存方式">
                         {([
-                          ['session', '仅本会话', '密钥用于当前运行会话，重新启动后可再次填写。'],
-                          ['system', '系统凭据库', '密钥交由系统凭据库保存，配置列表会显示保存结果。'],
-                          ['none', '不需要密钥（本地服务）', '适用于明确允许无需认证访问的本地模型服务。'],
-                        ] as const).map(([value, label, help]) => (
+                          ['session', '密钥用于当前运行会话，重新启动后可再次填写。'],
+                          ['system', '密钥交由系统凭据库保存，配置列表会显示保存结果。'],
+                          ['none', '适用于明确允许无需认证访问的本地模型服务。'],
+                        ] as const).map(([value, help]) => (
                           <label key={value} title={help}>
                             <input type="radio" name="credential-mode" value={value}
                               checked={form.credentialMode === value} onChange={() => setForm({ ...form, credentialMode: value })}
                               data-testid={'credential-mode-' + value} title={help} />
-                            {label}
+                            {credentialLabel(value)}
                           </label>
                         ))}
                       </div>
@@ -402,10 +402,10 @@ export default function ModelSettingsPage() {
                   <legend>生成参数</legend>
                   <div className="ndr-model-fields">
                     {([
-                      ['max_tokens', '每次调用最大输出 Token', 1, undefined, 1, '限制每次模型调用的输出 Token 数；任务总额度在处理页设置。'],
-                      ['temperature', '随机性', 0, 2, 0.1, '取值 0 至 2，数值越低，输出通常越稳定。Anthropic 开启思考时使用服务默认值。'],
-                      ['top_p', '采样范围', 0, 1, 0.05, '取值 0 至 1，用于控制候选内容的采样范围。'],
-                      ['timeout_seconds', '请求超时（秒）', 1, undefined, 1, '单次模型请求的等待时限，填写大于或等于 1 的整数秒。'],
+                      ['max_tokens', '输出上限（Max Tokens）', 1, undefined, 1, '限制每次模型调用的输出 Token 数；任务总额度在处理页设置。'],
+                      ['temperature', '随机性（Temperature）', 0, 2, 0.1, '取值 0 至 2，数值越低，输出通常越稳定。Anthropic 开启思考时使用服务默认值。'],
+                      ['top_p', '采样范围（Top P）', 0, 1, 0.05, '取值 0 至 1，用于控制候选内容的采样范围。'],
+                      ['timeout_seconds', '请求超时（Timeout，秒）', 1, undefined, 1, '单次模型请求的等待时限，填写大于或等于 1 的整数秒。'],
                     ] as const).map(([key, label, min, max, step, help]) => (
                       <label className="ndr-field" key={key}>{label}
                         <input type="number" data-testid={'profile-' + key} min={min} max={max} step={step}
@@ -419,20 +419,20 @@ export default function ModelSettingsPage() {
                 <fieldset className="ndr-model-group">
                   <legend>默认思考设置</legend>
                   <div className="ndr-model-fields">
-                    <label className="ndr-field">默认思考模式
+                    <label className="ndr-field">思考模式（Thinking Mode）
                       <select data-testid="profile-thinking-mode" value={params.thinking?.type ?? 'default'}
                         title="处理页选择“沿用模型配置”时使用这里保存的默认值；选择“模型服务默认”由服务商决定。思考功能需模型服务支持，开启后可能增加用量与等待时间；关闭思考会清除默认强度。"
                         onChange={(event) => changeThinkingDefault('mode', event.target.value)}>
-                        <option value="default">模型服务默认（不指定）</option>
-                        <option value="disabled">关闭</option><option value="enabled">开启</option><option value="adaptive">自适应</option>
+                        <option value="default">模型服务默认（Default）</option>
+                        <option value="disabled">关闭（Disabled）</option><option value="enabled">开启（Enabled）</option><option value="adaptive">自适应（Adaptive）</option>
                       </select>
                     </label>
-                    <label className="ndr-field">默认思考强度
+                    <label className="ndr-field">思考强度（Reasoning Effort）
                       <select data-testid="profile-thinking-effort" value={params.reasoning_effort ?? 'default'} disabled={thinkingDisabled}
                         title={thinkingDisabled ? '默认思考已关闭，请先选择开启或自适应，再设置默认强度。' : '模型服务支持思考强度时使用所选值；处理页可按任务覆盖。'}
                         onChange={(event) => changeThinkingDefault('effort', event.target.value)}>
-                        <option value="default">模型服务默认（不指定）</option>
-                        <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
+                        <option value="default">模型服务默认（Default）</option>
+                        <option value="low">低（Low）</option><option value="medium">中（Medium）</option><option value="high">高（High）</option>
                       </select>
                     </label>
                   </div>
@@ -495,10 +495,10 @@ export default function ModelSettingsPage() {
                   </span>
                 </header>
                 <dl>
-                  <dt>协议</dt><dd title={profile.protocol}>{protocolLabel(profile.protocol)}</dd>
-                  <dt>服务地址</dt><dd>{profile.base_url}</dd>
-                  <dt>模型</dt><dd>{profile.model}</dd>
-                  <dt>凭据</dt><dd>{credentialLabel(profile.credential_mode)}</dd>
+                  <dt>协议（API Protocol）</dt><dd title={profile.protocol}>{protocolLabel(profile.protocol)}</dd>
+                  <dt>服务地址（Base URL）</dt><dd>{profile.base_url}</dd>
+                  <dt>模型名（Model ID）</dt><dd>{profile.model}</dd>
+                  <dt>凭据（Credentials）</dt><dd>{credentialLabel(profile.credential_mode)}</dd>
                   <dt>版本</dt><dd>{profile.version}</dd>
                 </dl>
                 <div className="ndr-form-actions">

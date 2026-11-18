@@ -25,6 +25,11 @@
 .ndr-model-feedback .hint { font-size: .85rem; }
 .ndr-model-list-hint { margin: 0 0 12px; font-size: .85rem; }
 .ndr-model-settings .ndr-profile-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
+.ndr-model-settings .ndr-profile-card { container-type: inline-size; }
+@container (max-width: 350px) {
+  .ndr-model-settings .ndr-profile-card dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .ndr-model-settings .ndr-profile-card dd + dt { margin-top: 6px; }
+}
 @media (max-width: 800px) {
   .ndr-model-columns { grid-template-columns: minmax(0, 1fr); gap: 24px; }
 }
