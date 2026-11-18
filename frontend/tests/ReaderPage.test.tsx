@@ -306,6 +306,28 @@ describe('ReaderPage', () => {
     expect(screen.getByRole('link', { name: '预览与处理' })).toHaveAttribute('href', '/books/b1/preview?chapterId=c2')
   })
 
+  it('布局调整跳过正文与窗口滚动，解锁后继续保存真实阅读位置', async () => {
+    vi.mocked(booksApi.saveReadingProgress).mockResolvedValue({ book_id: 'b1', book_version_id: 'v1', read_position_cp: 21, reading_mode: 'initial', version: 4 })
+    renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read?chapterId=c2')
+    await screen.findByText(/第二章的正文/)
+    const section = document.querySelector<HTMLElement>('.ndr-reader-content')!
+    vi.spyOn(section, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 500 } as DOMRect)
+    for (const node of section.querySelectorAll<HTMLElement>('[data-node-id]')) {
+      vi.spyOn(node, 'getBoundingClientRect').mockReturnValue({ top: 110, bottom: 160 } as DOMRect)
+    }
+    vi.useFakeTimers()
+    try {
+      section.dataset.layoutAdjusting = 'true'
+      fireEvent.scroll(section); fireEvent.scroll(window)
+      await act(() => vi.advanceTimersByTimeAsync(650))
+      expect(booksApi.saveReadingProgress).not.toHaveBeenCalled()
+      delete section.dataset.layoutAdjusting
+      fireEvent.scroll(section)
+      await act(() => vi.advanceTimersByTimeAsync(650))
+      expect(booksApi.saveReadingProgress).toHaveBeenCalledWith('b1', expect.objectContaining({ readPositionCp: 21 }))
+    } finally { vi.useRealTimers() }
+  })
+
   it('无章节时禁用章节切换，不请求正文或保存位置', async () => {
     vi.mocked(booksApi.fetchChapters).mockResolvedValue([])
     renderRoute('/books/:bookId/read', <ReaderPage />, '/books/b1/read')

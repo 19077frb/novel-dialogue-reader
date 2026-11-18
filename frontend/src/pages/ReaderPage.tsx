@@ -271,7 +271,7 @@ export default function ReaderPage() {
 
   const handleScroll = useCallback(() => {
     const container = documentRef.current
-    if (!container) return
+    if (!container || container.dataset.layoutAdjusting === 'true') return
     const bounds = container.getBoundingClientRect()
     if (bounds.top >= window.innerHeight || bounds.bottom < 0) return
     const elements = Array.from(
